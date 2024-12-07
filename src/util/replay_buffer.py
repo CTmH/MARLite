@@ -22,22 +22,11 @@ class ReplayBuffer:
         for i in range(episode['episode_length']-1):
             self.buffer.append((episode_id, i))
         return self
-    '''
-    def gen_traj(self, episode, episode_id):
-        episode_length = len(episode)
-        
-        for i in range(episode_length):
-            if i < self.traj_len - 1:
-                # Not enough preceding elements to form a trajectory of length traj_len
-                continue
-            
-            indices = tuple(range(i - (self.traj_len - 1), i + 1))
-            self.buffer.append((episode_id, indices))
 
-        return self
-    '''
     def sample(self, sample_size):
         idx = random.sample(self.buffer, min(sample_size, len(self.buffer)))
+        if len(idx) == 0:
+            assert False, "Replay Buffer is empty"
         samples = TrajectoryDataset(sample_id_list=idx, episode_buffer=self.episode_buffer, traj_len=self.traj_len)
         return samples
 

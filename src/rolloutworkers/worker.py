@@ -50,7 +50,7 @@ class RolloutWorker:
 
                 episode_reward += np.sum(np.array([rewards[agent] for agent in rewards.keys()]))
 
-                # Need to add win tag logic here
+                # TODO Need to add win tag logic here
                 if True in terminations.values():
                     # Append last state and action before termination
                     episode['observations'].append(observations)

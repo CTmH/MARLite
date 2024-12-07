@@ -33,7 +33,7 @@ class TestQMIXAgentGroup(unittest.TestCase):
         self.avail_actions = self.env.action_space
         self.env.close()
 
-        # Mock model configuration
+        # Model configuration
         self.model_layers = {
             "input_shape": self.obs_shape,
             "rnn_hidden_dim": 128,
