@@ -49,15 +49,34 @@ class TestReplayBuffer(unittest.TestCase):
         self.buffer = ReplayBuffer(capacity=self.capacity, traj_len=self.traj_len)
         episode = self.worker.generate_episode(episode_limit=1, epsilon=0.5)
         self.buffer.add_episode(episode)
-        self.assertEqual(len(self.buffer.episode_buffer), 0)
+        self.assertEqual(self.buffer.tail, -1)
+        self.assertEqual(len(self.buffer.buffer), 0)
+
+    def test_remove_episode(self):
+        self.buffer = ReplayBuffer(capacity=self.capacity, traj_len=self.traj_len)
+        episode = self.worker.generate_episode(episode_limit=self.traj_len, epsilon=0.5)
+        self.buffer.add_episode(episode)
+        self.buffer.remove_episode(self.buffer.tail)
+        self.assertEqual(self.buffer.tail, 0)
         self.assertEqual(len(self.buffer.buffer), 0)
 
     def test_add_episode_normal(self):
         self.buffer = ReplayBuffer(capacity=self.capacity, traj_len=self.traj_len)
         episode = self.worker.generate_episode(episode_limit=self.traj_len, epsilon=0.5)
         self.buffer.add_episode(episode)
-        self.assertEqual(len(self.buffer.episode_buffer), 1)
-        self.assertEqual(len(self.buffer.buffer), 4)
+        self.assertTrue(self.buffer.episode_buffer[0] != None)
+        self.assertEqual(self.buffer.tail, 0)
+        self.assertEqual(len(self.buffer.buffer), self.traj_len - 1)
+
+    def test_add_episode_full_buffer(self):
+        capacity = 3
+        self.buffer = ReplayBuffer(capacity=3, traj_len=self.traj_len)
+        for i in range(capacity+1):
+            episode = self.worker.generate_episode(episode_limit=self.traj_len, epsilon=0.5)
+            self.buffer.add_episode(episode)
+
+        self.assertEqual(len(self.buffer.episode_buffer), capacity)
+        self.assertEqual(len(self.buffer.buffer), capacity * (self.traj_len - 1))
 
     def test_sample_with_data(self):
         self.buffer = ReplayBuffer(capacity=self.capacity, traj_len=self.traj_len)

@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+from torch.optim import Optimizer as TorchOptimizer
 from copy import deepcopy
 from typing import Dict
 from ..model.model_config import ModelConfig
@@ -12,11 +13,13 @@ class AgentGroup:
     '''
     def __init__(self, 
                 agents: Dict[str, str], 
-                model_configs: Dict[str, ModelConfig], 
+                model_configs: Dict[str, ModelConfig],
+                optim: TorchOptimizer = torch.optim.Adam,
                 device: str = 'cpu') -> None:
         self.device = device
         self.agents = agents
         self.models = {model_name: config.get_model().to(device=self.device) for model_name, config in model_configs.items()}
+        self.optimizers = {model_name: optim(model.parameters()) for model_name, model in self.models.items()}
 
         # Initialize model_to_agent dictionary and model_to_agent_indices dictionary
         self.model_to_agents = {model_name:[] for model_name in model_configs.keys()}
@@ -51,3 +54,10 @@ class AgentGroup:
     def get_model_params(self):
         params = {agent_name:deepcopy(model.state_dict()) for agent_name, model in self.models.items()}
         return params
+    
+    def optimize(self):
+        for _, opt in self.optimizers.items():
+            # Assuming loss is computed in Learner
+            # loss.backward() should be called before this function to compute gradients.
+            opt.zero_grad()
+            opt.step()
