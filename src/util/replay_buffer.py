@@ -26,13 +26,12 @@ class ReplayBuffer:
         
         self.episode_buffer[episode_id] = episode
         # Add new trajectory position to the replay buffer.
-        # Not included the last record because only the last state is used for training, the last action is not used.
-        for i in range(episode['episode_length']-1):
+        for i in range(episode['episode_length']):
             self.buffer.add((episode_id, i))
         return self
     
     def remove_episode(self, episode_id):
-        for i in range(self.episode_buffer[episode_id]['episode_length']-1):
+        for i in range(self.episode_buffer[episode_id]['episode_length']):
             self.buffer.remove((episode_id, i))
         self.episode_buffer[episode_id] = None  # Remove the episode from the episode buffer
         return self

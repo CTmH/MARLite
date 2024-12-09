@@ -6,8 +6,8 @@ import numpy as np
 from unittest.mock import MagicMock
 from pettingzoo.mpe import simple_spread_v3
 
-from src.module.agents import QMIXAgentGroup
-from src.module.model import ModelConfig
+from src.algorithm.agents import QMIXAgentGroup
+from src.algorithm.model import ModelConfig
 
 class TestQMIXAgentGroup(unittest.TestCase):
 

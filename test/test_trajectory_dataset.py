@@ -5,9 +5,9 @@ from torch.utils.data import DataLoader
 
 from src.util.replay_buffer import ReplayBuffer
 from src.util.trajectory_dataset import TrajectoryDataset
-from src.module.agents import QMIXAgentGroup
-from src.module.model import ModelConfig
-from src.rolloutworkers.worker import RolloutWorker
+from src.algorithm.agents import QMIXAgentGroup
+from src.algorithm.model import ModelConfig
+from src.rolloutWorker.episode_collector import RolloutWorker
 from src.environment.mpe_env_config import MPEEnvConfig
 
 class TestTrajectoryDataset(unittest.TestCase):

@@ -4,9 +4,9 @@ from pettingzoo.mpe import simple_spread_v3
 
 from src.util.replay_buffer import ReplayBuffer
 from src.util.trajectory_dataset import TrajectoryDataset
-from src.module.agents import QMIXAgentGroup
-from src.module.model import ModelConfig
-from src.rolloutworkers.worker import RolloutWorker
+from src.algorithm.agents import QMIXAgentGroup
+from src.algorithm.model import ModelConfig
+from src.rolloutWorker.episode_collector import RolloutWorker
 from src.environment.mpe_env_config import MPEEnvConfig
 
 class TestReplayBuffer(unittest.TestCase):
@@ -66,7 +66,7 @@ class TestReplayBuffer(unittest.TestCase):
         self.buffer.add_episode(episode)
         self.assertTrue(self.buffer.episode_buffer[0] != None)
         self.assertEqual(self.buffer.tail, 0)
-        self.assertEqual(len(self.buffer.buffer), self.traj_len - 1)
+        self.assertEqual(len(self.buffer.buffer), self.traj_len)
 
     def test_add_episode_full_buffer(self):
         capacity = 3
@@ -76,7 +76,7 @@ class TestReplayBuffer(unittest.TestCase):
             self.buffer.add_episode(episode)
 
         self.assertEqual(len(self.buffer.episode_buffer), capacity)
-        self.assertEqual(len(self.buffer.buffer), capacity * (self.traj_len - 1))
+        self.assertEqual(len(self.buffer.buffer), capacity * self.traj_len)
 
     def test_sample_with_data(self):
         self.buffer = ReplayBuffer(capacity=self.capacity, traj_len=self.traj_len)

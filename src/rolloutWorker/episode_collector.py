@@ -2,15 +2,15 @@ import numpy as np
 import torch
 from pettingzoo import ParallelEnv
 from ..environment.env_config import EnvConfig
-from ..module.agents import AgentGroup
-from ..module.model import RNNModel
+from ..algorithm.agents import AgentGroup
+from ..algorithm.model import RNNModel
 
-class RolloutWorker:
+class RolloutWorker():
     def __init__(self, env_config: EnvConfig, agent_group: AgentGroup, rnn_traj_len=5):
+        super(RolloutWorker, self).__init__()
         self.env_config = env_config
         self.agent_group = agent_group
         self.rnn_traj_len = rnn_traj_len
-
         self.env = self.env_config.create_env()
 
     def generate_episode(self, episode_limit=None, epsilon=0.5):
@@ -18,11 +18,13 @@ class RolloutWorker:
         # Initialize the episode dictionary
         episode = {
             'observations':[],
-            'state': [],
+            'states': [],
             'actions': [],
             'rewards': [],
             'avail_actions': [],
             'truncated': [],
+            'terminations': [],
+            'next_states': [],
             'episode_reward': 0,
             'win_tag': False,
             'episode_length': 0, 
@@ -39,7 +41,7 @@ class RolloutWorker:
                 observations, infos = self.env.reset()
             else:
                 episode['observations'].append(observations)
-                episode['state'].append(self.env.state())
+                episode['states'].append(self.env.state())
                 episode['actions'].append(actions)
                 episode['avail_actions'].append(avail_actions)
 
@@ -47,14 +49,17 @@ class RolloutWorker:
                 
                 episode['rewards'].append(rewards)
                 episode['truncated'].append(truncations)
+                episode['terminations'].append(terminations)
+                episode['next_states'].append(self.env.state()) # TODO: Check if this is correct
 
                 episode_reward += np.sum(np.array([rewards[agent] for agent in rewards.keys()]))
 
                 # TODO Need to add win tag logic here
+                # TODO Need to add logic for lost units
                 if True in terminations.values():
                     # Append last state and action before termination
                     episode['observations'].append(observations)
-                    episode['state'].append(self.env.state())
+                    episode['states'].append(self.env.state())
                     # Padding actions and avail_actions with None to match the trajectory length
                     episode['actions'].append(None)
                     episode['rewards'].append(None)

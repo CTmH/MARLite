@@ -6,7 +6,7 @@ class TrajectoryDataset(Dataset):
         self.sample_id_list = sample_id_list
         self.episode_buffer = episode_buffer
         self.traj_len = traj_len
-        self.attr = ['observations', 'state', 'actions', 'rewards']
+        self.attr = ['observations', 'states', 'actions', 'rewards']
 
     def __len__(self):
         return len(self.sample_id_list)
