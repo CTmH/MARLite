@@ -45,6 +45,7 @@ class QMIXAgentGroup(AgentGroup):
                 qv = qv[:,-1,:] # get last output (N, D * H_{out})
                 hs = hs.permute(1, 0, 2) # (N, D * \text{num\_layers}, H_{out})
             else:
+                # TODO: Add code for handling other types of models (e.g., CNNs)
                 qv = model(obs)
                 hs = [None for _ in range(len(idx))]
 
@@ -69,7 +70,7 @@ class QMIXAgentGroup(AgentGroup):
         Returns:
             numpy array: Selected actions for each agent.
         """
-        
+        self.init_hidden_states()
         q_values = self.get_q_values(observations, eval_mode)
         q_values = q_values.detach().to('cpu')
         random_choices = bernoulli(epsilon * ones(len(self.agents)))

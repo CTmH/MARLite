@@ -1,6 +1,8 @@
 from .learner import Learner
 import torch
 
+from ..algorithm.model import RNNModel
+
 class QMixLearner(Learner):
     def __init__(self, 
                  agents, 
@@ -19,21 +21,37 @@ class QMixLearner(Learner):
         # Get a batch of data from the replay buffer
         dataloader = self.replay_buffer.get_dataloader(batch_size=batch_size)
         for batch in dataloader:
-            # Extract necessary components from the trajectory
-            observations = [traj['observations'] for traj in batch]
-            states = [traj['states'] for traj in batch]
-            actions = [traj['actions'] for traj in batch]
-            rewards = [traj['rewards'] for traj in batch]
-            next_state = [traj['next_states'][-1] for traj in batch] # Only need the next state from the last step of each trajectory
-            terminations = [traj['terminations'] for traj in batch]
+            observations, states, actions, rewards, next_state, next_observations, terminations = self.__extract_batch(batch)
+            q_val = [None for _ in range(len(self.agents))]
+            for model_name, model in self.target_agent_group.models.items():
+                selected_agents = self.target_agent_group.model_to_agents[model_name]
+                idx = self.target_agent_group.model_to_agent_indices[model_name]
+                # observation shape: (Batch Size, Time Step, Agent Number, Feature Dimensions) (B, T, N, F)
+                obs = observations[:,:,idx]
+                # (B, N, T, F) -> (B*N, T, F)
+                obs = obs.reshape(obs.shape[0] * obs.shape[1], obs.shape[2], obs.shape[3])
+                obs = torch.Tensor(obs).to(self.device)  # Convert to tensor and move to device
+                model.train().to(self.device)
+                if isinstance(model, RNNModel):
+                    h = [model.init_hidden() for _ in range(obs.shape[0])]
+                    h = torch.stack(h).to(self.device)
+                    q_selected = model(obs, h)
+                # TODO: Add code for handling other types of models (e.g., CNNs)
+                for i, q in zip(idx, q_selected):
+                    q_val[i] = q
 
+
+                next_obs = next_observations[:,:,idx]
+                act = actions[:,:,idx]
+                r = rewards[:,:,idx]
+
+                # Reshape observations and actions to match the model's input shape
+                obs = torch.Tensor(obs).to(self.device)
+                obs = obs.reshape()
+                q = model(obs)
+                
             
-            # Convert to tensors and move to device
-            state = torch.tensor(state).to(self.device)
-            action = torch.tensor(action).to(self.device)
-            reward = torch.tensor(reward).to(self.device)
-            next_state = torch.tensor(next_state).to(self.device)
-            terminations = torch.tensor(terminations).to(self.device)
+                # Convert to tensors and move to device
 
             # Compute the target Q-values using the critic network
             with torch.no_grad():

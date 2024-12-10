@@ -1,3 +1,4 @@
+import numpy as np
 from typing import Dict
 from copy import deepcopy
 from multiprocessing import Process, Queue, Pool
@@ -5,7 +6,7 @@ from multiprocessing import Process, Queue, Pool
 from ..algorithm.agents import AgentGroup
 from ..environment.env_config import EnvConfig
 from ..algorithm.model import ModelConfig
-from ..rolloutWorker.episode_collector import RolloutWorker
+from ..rolloutworker.rolloutworker import RolloutWorker
 from ..util.replay_buffer import ReplayBuffer
 
 class Learner():
@@ -56,3 +57,39 @@ class Learner():
             self.replay_buffer.add_episode(episode)
         
         return self
+    
+    def __extract_batch(self, batch):
+        # Extract necessary components from the trajectory
+        observations = [traj['observations'] for traj in batch]
+        states = [traj['states'] for traj in batch]
+        actions = [traj['actions'] for traj in batch]
+        rewards = [traj['rewards'] for traj in batch]
+        next_state = [traj['next_states'][-1] for traj in batch] # Only need the next state from the last step of each trajectory
+        next_observations = [traj['next_observations'][-1] for traj in batch] # Only need the next observation from the last step of each trajectory
+        terminations = [traj['terminations'] for traj in batch]
+
+        # Format Data
+
+        # Observations
+        # Nested list convert to numpy array (Batch Size, Time Step, Agent Number, Feature Dimensions) (B, T, N, F) -> (B, N, T, F)
+        observations = [[[value for _, value in dict.items()] for dict in traj] for traj in observations]
+        observations = np.array(observations)
+        obs = obs.transpose(0,2,1,3)
+        
+        # Actions, Rewards, Terminations
+        # Nested list convert to numpy array (Batch Size, Time Step, Agent Number) (B, T, N) -> (B, N, T)
+        actions = [[[value for _, value in dict.items()] for dict in traj] for traj in actions]
+        rewards = [[[value for _, value in dict.items()] for dict in traj] for traj in rewards]
+        terminations = [[[value for _, value in dict.items()] for dict in traj] for traj in terminations]
+        actions, rewards, terminations = np.array(actions), np.array(rewards), np.array(terminations)
+        actions, rewards, terminations = actions.transpose(0,2,1), rewards.transpose(0,2,1), terminations.transpose(0,2,1)
+
+        # States (Batch Size, Time Step, Feature Dimensions) (B, T, F)
+        states = np.array(states)
+        # Next State (Batch Size, Feature Dimensions) (B, F)
+        next_state = np.array(next_state)
+        # Next Observations (Batch Size, Agent Number, Feature Dimensions) (B, N, F)
+        next_observations = [[value for _, value in dict.items()] for dict in next_observations]
+        next_observations = np.array(next_observations)
+        
+        return observations, states, actions, rewards, next_state, next_observations, terminations

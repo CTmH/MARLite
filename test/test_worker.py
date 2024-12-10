@@ -5,7 +5,7 @@ import numpy as np
 from pettingzoo.mpe import simple_spread_v3
 
 from src.algorithm.agents import QMIXAgentGroup
-from src.rolloutWorker.episode_collector import RolloutWorker
+from src.rolloutworker.rolloutworker import RolloutWorker
 from src.algorithm.model import ModelConfig
 from src.environment.mpe_env_config import MPEEnvConfig
 

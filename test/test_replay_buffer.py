@@ -6,7 +6,7 @@ from src.util.replay_buffer import ReplayBuffer
 from src.util.trajectory_dataset import TrajectoryDataset
 from src.algorithm.agents import QMIXAgentGroup
 from src.algorithm.model import ModelConfig
-from src.rolloutWorker.episode_collector import RolloutWorker
+from src.rolloutworker.rolloutworker import RolloutWorker
 from src.environment.mpe_env_config import MPEEnvConfig
 
 class TestReplayBuffer(unittest.TestCase):

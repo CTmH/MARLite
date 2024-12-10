@@ -6,7 +6,13 @@ class TrajectoryDataset(Dataset):
         self.sample_id_list = sample_id_list
         self.episode_buffer = episode_buffer
         self.traj_len = traj_len
-        self.attr = ['observations', 'states', 'actions', 'rewards']
+        self.attr = ['observations',
+                     'states',
+                     'next_states',
+                     'next_observations',
+                     'actions',
+                     'rewards',
+                     'terminations']
 
     def __len__(self):
         return len(self.sample_id_list)
@@ -15,7 +21,8 @@ class TrajectoryDataset(Dataset):
         episode_id, pos = self.sample_id_list[idx]
         sample = {key: [] for key in self.attr}
         start = pos - self.traj_len + 1
-        # Padding with the first element of the episode if there is not enough elements in the episode before the start position
+        # Padding with the first element of the episode
+        # if there is not enough elements in the episode before the start position
         while start < 0:
             for key in self.attr:
                 sample[key].append(self.episode_buffer[episode_id][key][0])

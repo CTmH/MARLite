@@ -25,6 +25,7 @@ class RolloutWorker():
             'truncated': [],
             'terminations': [],
             'next_states': [],
+            'next_observations': [],
             'episode_reward': 0,
             'win_tag': False,
             'episode_length': 0, 
@@ -51,20 +52,14 @@ class RolloutWorker():
                 episode['truncated'].append(truncations)
                 episode['terminations'].append(terminations)
                 episode['next_states'].append(self.env.state()) # TODO: Check if this is correct
+                episode['next_observations'].append(observations) # TODO: Check if this is correct
 
                 episode_reward += np.sum(np.array([rewards[agent] for agent in rewards.keys()]))
 
-                # TODO Need to add win tag logic here
-                # TODO Need to add logic for lost units
+                # TODO win tag logic here
+                # TODO logic for lost units
+                # TODO reward of the last state and the second last state
                 if True in terminations.values():
-                    # Append last state and action before termination
-                    episode['observations'].append(observations)
-                    episode['states'].append(self.env.state())
-                    # Padding actions and avail_actions with None to match the trajectory length
-                    episode['actions'].append(None)
-                    episode['rewards'].append(None)
-                    episode['avail_actions'].append(None)
-                    episode['truncated'].append(None)
                     break
 
             avail_actions = {agent: self.env.action_space(agent) for agent in self.env.agents}
