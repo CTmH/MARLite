@@ -32,6 +32,9 @@ class Learner():
         # Set the same parameters for evaluation agents as target agents.
         self.target_models_params = self.target_agent_group.get_model_params()
         self.eval_agent_group = deepcopy(self.target_agent_group)  # Deep copy the target agent group to create evaluation agents.
+        # Critic
+        self.target_critic = None
+        self.eval_critic = None
         self.epsilon = 0.9
         self.n_episodes = 30
 
