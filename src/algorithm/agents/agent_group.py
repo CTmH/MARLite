@@ -55,9 +55,13 @@ class AgentGroup:
         params = {agent_name:deepcopy(model.state_dict()) for agent_name, model in self.models.items()}
         return params
     
-    def optimize(self):
+    def zero_grad(self):
+        for _, opt in self.optimizers.items():
+            opt.zero_grad()
+        return self
+    
+    def step(self):
         for _, opt in self.optimizers.items():
             # Assuming loss is computed in Learner
             # loss.backward() should be called before this function to compute gradients.
-            opt.zero_grad()
             opt.step()
