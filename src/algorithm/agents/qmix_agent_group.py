@@ -8,7 +8,7 @@ class QMIXAgentGroup(AgentGroup):
     def __init__(self, agents, model_configs, device) -> None:
         super().__init__(agents=agents, model_configs=model_configs, device=device)
 
-    def get_q_values(self, observations, eval_mode=False):
+    def get_q_values(self, observations, eval_mode=True):
         """
         Get the Q-values for the given observations.
 
@@ -38,11 +38,12 @@ class QMIXAgentGroup(AgentGroup):
             obs = stack(obs).to(device=self.device)
             
             if isinstance(model, RNNModel):
-                selected_hidden_states = stack(selected_hidden_states).to(device=self.device)
+                selected_hidden_states = stack(selected_hidden_states).to(device=self.device)  # N, (D * \text{num\_layers}, H_{out})
+                selected_hidden_states = selected_hidden_states.permute(1, 0, 2) # (D * \text{num\_layers}, N, H_{out})
                 qv, hs = model(obs, selected_hidden_states)
                 # qv shape: torch.Size([2, 1, 5]) (N：batch size, L: seq length, D * H_{out})
                 # hs shape: torch.Size([1, 2, 128]) (D * \text{num\_layers}, N, H_{out})
-                qv = qv[:,-1,:] # get last output (N, D * H_{out})
+                qv = qv[:,-1,:] # get the last output (N, D * H_{out})
                 hs = hs.permute(1, 0, 2) # (N, D * \text{num\_layers}, H_{out})
             else:
                 # TODO: Add code for handling other types of models (e.g., CNNs)
@@ -57,7 +58,7 @@ class QMIXAgentGroup(AgentGroup):
 
         return q_values
 
-    def act(self, observations, avail_actions, epsilon, eval_mode=False):
+    def act(self, observations, avail_actions, epsilon, eval_mode=True):
         """
         Select actions based on Q-values and exploration.
 

@@ -59,11 +59,11 @@ class RolloutWorker():
                 # TODO win tag logic here
                 # TODO logic for lost units
                 # TODO reward of the last state and the second last state
-                if True in terminations.values():
+                if True in terminations.values() or True in truncations.values():
                     break
 
             avail_actions = {agent: self.env.action_space(agent) for agent in self.env.agents}
-            processed_obs = self._obs_preprocess([observations], self.agent_group)
+            processed_obs = self._obs_preprocess(episode['observations']+[observations])
             actions = self.agent_group.act(processed_obs, avail_actions, epsilon)
             
         episode['episode_length'] = len(episode['observations'])
@@ -75,7 +75,7 @@ class RolloutWorker():
 
         return episode
     
-    def _obs_preprocess(self, observations: list, agent_group: AgentGroup):
+    def _obs_preprocess(self, observations: list):
         agents = self.agent_group.agents
         models = self.agent_group.models
         processed_obs = {agent_id : [] for agent_id in agents.keys()}
