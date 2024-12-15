@@ -49,7 +49,7 @@ class TestQMixLearner(unittest.TestCase):
 
         self.critic_config = {
             'state_shape': self.state_shape,
-            'n_agents': self.n_agents,
+            'input_dim': self.n_agents * self.action_space_shape,
             'qmix_hidden_dim': 128,
             'hyper_hidden_dim': 64
         }

@@ -2,16 +2,16 @@ import torch.nn as nn
 import torch
 import torch.nn.functional as F
 
-
+# TODO: add hidden layer configuration for the critic network. 
 class QMIXCritic(nn.Module):
-    def __init__(self, state_shape, n_agents, qmix_hidden_dim, hyper_hidden_dim):
+    def __init__(self, state_shape, input_dim, qmix_hidden_dim, hyper_hidden_dim):
         super(QMIXCritic, self).__init__()
         self.state_shape = state_shape
-        self.n_agents = n_agents
+        self.input_dim = input_dim
         self.qmix_hidden_dim = qmix_hidden_dim
         self.hyper_hidden_dim = hyper_hidden_dim
 
-        self.hyper_w1 = nn.Linear(state_shape, n_agents * qmix_hidden_dim)
+        self.hyper_w1 = nn.Linear(state_shape, input_dim * qmix_hidden_dim)
         self.hyper_w2 = nn.Linear(state_shape, qmix_hidden_dim * 1)
 
         self.hyper_b1 = nn.Linear(state_shape, qmix_hidden_dim)
@@ -20,18 +20,17 @@ class QMIXCritic(nn.Module):
                                      nn.Linear(qmix_hidden_dim, 1))
 
     # Need to check if algorithm is correct
-    def forward(self, q_values, states):
-        episode_num = q_values.size(0)
-        q_values = q_values.view(-1, 1, self.n_agents)
-        states = states.reshape(-1, self.state_shape)
+    def forward(self, q_val: torch.Tensor, states: torch.Tensor):
+        bs = q_val.size(0)
+        q_val = q_val.reshape(bs, 1, self.input_dim) # (B, N, Action Space) -> (B, 1, N * Action Space)
 
         w1 = torch.abs(self.hyper_w1(states))
         b1 = self.hyper_b1(states)
 
-        w1 = w1.view(-1, self.n_agents, self.qmix_hidden_dim)
-        b1 = b1.view(-1, 1, self.qmix_hidden_dim)
+        w1 = w1.view(bs, self.input_dim, self.qmix_hidden_dim)
+        b1 = b1.view(bs, 1, self.qmix_hidden_dim)
 
-        hidden = F.elu(torch.bmm(q_values, w1) + b1)
+        hidden = F.elu(torch.bmm(q_val, w1) + b1)
 
         w2 = torch.abs(self.hyper_w2(states))
         b2 = self.hyper_b2(states)
@@ -39,9 +38,9 @@ class QMIXCritic(nn.Module):
         w2 = w2.view(-1, self.qmix_hidden_dim, 1)
         b2 = b2.view(-1, 1, 1)
 
-        q_total = torch.bmm(hidden, w2) + b2
-        q_total = q_total.view(episode_num, -1, 1)
-        return q_total
+        q_tot = torch.bmm(hidden, w2) + b2
+        q_tot = q_tot.view(bs)
+        return q_tot
     
 
 class QMixer2HyperLayer(QMIXCritic):
