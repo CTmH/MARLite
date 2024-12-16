@@ -25,9 +25,10 @@ class QMIXLearner(Learner):
         self.target_critic = QMIXCritic(critic_config['state_shape'], critic_config['input_dim'], critic_config['qmix_hidden_dim'], critic_config['hyper_hidden_dim'])
         self.eval_critic = deepcopy(self.target_critic)
         self.optimizer = torch.optim.Adam(self.target_critic.parameters(), lr=0.001)
+        self.critic_params = deepcopy(self.target_critic.state_dict())
 
-    def learn(self, sample_size, batch_size: int, epochs: int):
-        for epoch in range(epochs):
+    def learn(self, sample_size, batch_size: int, times: int = 1):
+        for t in range(times):
             # Implement the learning logic for QMix
             # Get a batch of data from the replay buffer
             dataset = self.replay_buffer.sample(sample_size)

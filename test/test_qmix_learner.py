@@ -78,8 +78,8 @@ class TestQMixLearner(unittest.TestCase):
         origin_agent_params = deepcopy(self.learner.target_agent_group.get_model_params())
         origin_critic_params = deepcopy(self.learner.target_critic.state_dict())
         self.learner.collect_experience(n_episodes=n_episodes)
-        self.learner.learn(sample_size=320, batch_size=32, epochs=10)
-        self.learner.update_eval_models()
+        self.learner.learn(sample_size=320, batch_size=32, times=10)
+        self.learner.update_params()
         agent_params = self.learner.target_agent_group.get_model_params()
         critic_params = self.learner.target_critic.state_dict()
 
