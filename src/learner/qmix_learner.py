@@ -6,6 +6,7 @@ from .learner import Learner
 from ..algorithm.model import RNNModel
 from ..algorithm.agents import QMIXAgentGroup
 from ..algorithm.critic.qmix_critic import QMIXCritic
+from ..util.trajectory_dataset import TrajectoryDataLoader
 
 class QMIXLearner(Learner):
     def __init__(self, 
@@ -30,9 +31,10 @@ class QMIXLearner(Learner):
             # Implement the learning logic for QMix
             # Get a batch of data from the replay buffer
             dataset = self.replay_buffer.sample(sample_size)
-            dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+            dataloader = TrajectoryDataLoader(dataset, batch_size=batch_size, shuffle=True)
             for batch in dataloader:
-                observations, states, actions, rewards, next_state, next_observations, terminations = self.extract_batch(batch)
+                #observations, states, actions, rewards, next_state, next_observations, terminations = self.extract_batch(batch)
+                observations, states, actions, rewards, next_state, next_observations, terminations = batch
                 # Compute the Q-tot
                 q_val = [None for _ in range(len(self.agents))]
                 for model_name, model in self.target_agent_group.models.items():
@@ -67,16 +69,16 @@ class QMIXLearner(Learner):
 
                 # Compute TD targets
                 q_val = [None for _ in range(len(self.agents))]
-                for model_name, model in self.target_agent_group.models.items():
-                    selected_agents = self.target_agent_group.model_to_agents[model_name]
-                    idx = self.target_agent_group.model_to_agent_indices[model_name]
+                for model_name, model in self.eval_agent_group.models.items():
+                    selected_agents = self.eval_agent_group.model_to_agents[model_name]
+                    idx = self.eval_agent_group.model_to_agent_indices[model_name]
                     # observation shape: (Batch Size, Agent Number, Time Step, Feature Dimensions) (B, N, T, F)
                     obs = next_observations[:,idx]
                     obs = torch.Tensor(obs)
                     # (B, N, T, F) -> (B*N, T, F)
                     obs = obs.reshape(obs.shape[0] * obs.shape[1], obs.shape[2], obs.shape[3])
                     obs = obs.to(self.device)  # Convert to tensor and move to device
-                    model.train().to(self.device)
+                    model.eval().to(self.device)
                     if isinstance(model, RNNModel):
                         h = [model.init_hidden() for _ in range(obs.shape[0])]
                         h = torch.stack(h).to(self.device)
@@ -112,7 +114,7 @@ class QMIXLearner(Learner):
                 self.target_agent_group.zero_grad()
                 self.target_critic.zero_grad()
                 critic_loss.backward()
-                self.target_agent_group.step()
                 self.optimizer.step()
+                self.target_agent_group.step()
             
         return self

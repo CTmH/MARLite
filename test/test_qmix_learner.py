@@ -1,5 +1,6 @@
 import unittest
 from unittest.mock import MagicMock
+from copy import deepcopy
 
 import torch
 
@@ -74,8 +75,20 @@ class TestQMixLearner(unittest.TestCase):
 
     def test_learn(self):
         n_episodes = 20
+        origin_agent_params = deepcopy(self.learner.target_agent_group.get_model_params())
+        origin_critic_params = deepcopy(self.learner.target_critic.state_dict())
         self.learner.collect_experience(n_episodes=n_episodes)
         self.learner.learn(sample_size=320, batch_size=32, epochs=10)
+        self.learner.update_eval_models()
+        agent_params = self.learner.target_agent_group.get_model_params()
+        critic_params = self.learner.target_critic.state_dict()
+
+        for w1, w2 in zip(critic_params.values(), origin_critic_params.values()):
+            self.assertFalse(torch.equal(w1, w2))
+
+        for model1, model2 in zip(agent_params.values(), origin_agent_params.values()):
+            for w1, w2 in zip(model1.values(), model2.values()):
+                self.assertFalse(torch.equal(w1, w2))
 
         
 if __name__ == '__main__':

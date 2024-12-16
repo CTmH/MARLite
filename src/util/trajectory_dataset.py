@@ -1,4 +1,5 @@
 from torch.utils.data import Dataset, DataLoader
+import numpy as np
 
 class TrajectoryDataset(Dataset):
 
@@ -43,67 +44,38 @@ class TrajectoryDataLoader(DataLoader):
             num_workers=num_workers,
             collate_fn=self.collate_fn
         )
-    
-    def collate_fn(batch):
-        return batch
-
 
     @staticmethod
     def collate_fn(batch):
-        # Assuming each item in the batch is a dictionary with lists as values
-        result = {}
-        for key in batch[0].keys():
-            result[key] = [item[key] for item in batch]
-        return result
+        # Extract necessary components from the trajectory
+        observations = [traj['observations'] for traj in batch]
+        states = [traj['states'] for traj in batch]
+        actions = [traj['actions'] for traj in batch]
+        rewards = [traj['rewards'] for traj in batch]
+        next_state = [traj['next_states'] for traj in batch]
+        next_observations = [traj['next_observations'] for traj in batch]
+        terminations = [traj['terminations'] for traj in batch]
 
-# TODO Costomize DataloaderIter 
-'''
-# 自定义DataLoader的迭代器
-class TrajectoryDataLoaderIter:
-    def __init__(self, loader):
-        self.loader = loader
-        self.dataset = loader.dataset
-        self.batch_size = loader.batch_size
-        self.num_workers = loader.num_workers
-        self.sampler = loader.sampler
-        self.batch_sampler = loader.batch_sampler
-        self.sample_iter = iter(self.sampler)
-        self.reset()
+        # Format Data
 
-    def reset(self):
-        self.sample_iter = iter(self.sampler)
+        # Observations
+        # Nested list convert to numpy array (Batch Size, Time Step, Agent Number, Feature Dimensions) (B, T, N, F) -> (B, N, T, F)
+        observations = [[[value for _, value in dict.items()] for dict in traj] for traj in observations]
+        next_observations = [[[value for _, value in dict.items()] for dict in traj] for traj in next_observations]
+        observations, next_observations = np.array(observations), np.array(next_observations)
+        observations, next_observations = observations.transpose(0,2,1,3), next_observations.transpose(0,2,1,3)
+        
+        # Actions, Rewards, Terminations
+        # Nested list convert to numpy array (Batch Size, Time Step, Agent Number) (B, T, N) -> (B, N, T)
+        actions = [[[value for _, value in dict.items()] for dict in traj] for traj in actions]
+        rewards = [[[value for _, value in dict.items()] for dict in traj] for traj in rewards]
+        terminations = [[[value for _, value in dict.items()] for dict in traj] for traj in terminations]
+        actions, rewards, terminations = np.array(actions), np.array(rewards), np.array(terminations)
+        actions, rewards, terminations = actions.transpose(0,2,1), rewards.transpose(0,2,1), terminations.transpose(0,2,1)
+        terminations = terminations.astype(int)  # Convert to int type for termination flags
 
-    def __next__(self):
-        if self.num_workers > 0:
-            r = self._process_data()
-        else:
-            r = self._process_data_serial()
-        if r is None:
-            raise StopIteration
-        return r
+        # States (Batch Size, Time Step, Feature Dimensions) (B, T, F)
+        states = np.array(states)
+        next_state = np.array(next_state)
 
-    def _process_data(self):
-        # 自定义的数据处理逻辑
-        try:
-            indices = next(self.sample_iter)
-        except StopIteration:
-            self.reset()
-            raise StopIteration
-
-        batch = []
-        for idx in indices:
-            sample = self.dataset[idx]
-            batch.append(sample)
-
-        return batch
-
-    def _process_data_serial(self):
-        try:
-            idx = next(self.sample_iter)
-        except StopIteration:
-            self.reset()
-            raise StopIteration
-
-        sample = self.dataset[idx]
-        return sample
-'''
+        return observations, states, actions, rewards, next_state, next_observations, terminations

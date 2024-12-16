@@ -85,38 +85,6 @@ class Learner():
         
         return self
     '''
-    def extract_batch(self, batch):
-        # Extract necessary components from the trajectory
-        observations = batch['observations']
-        states = batch['states']
-        actions = batch['actions']
-        rewards = batch['rewards']
-        next_state = batch['next_states']
-        next_observations = batch['next_observations']
-        terminations = batch['terminations']
-        # Format Data
-
-        # Observations
-        # Nested list convert to numpy array (Time Step, Agent Number, Batch Size, Feature Dimensions) (T, N, B, F) -> (B, N, T, F)
-        observations = [[value for _, value in agent.items()] for agent in observations]
-        next_observations = [[value for _, value in agent.items()] for agent in next_observations]
-        observations, next_observations = np.array(observations), np.array(next_observations)
-        observations, next_observations = observations.transpose(2,1,0,3), next_observations.transpose(2,1,0,3)
-        
-        # Actions, Rewards, Terminations
-        # Nested list convert to numpy array (Time Step, Agent Number, Batch Size) (T, N, B) -> (B, N, T)
-        actions = [[value for _, value in agent.items()] for agent in actions]
-        rewards = [[value for _, value in agent.items()] for agent in rewards]
-        terminations = [[value for _, value in agent.items()] for agent in terminations]
-        actions, rewards, terminations = np.array(actions), np.array(rewards), np.array(terminations)
-        actions, rewards, terminations = actions.transpose(2,1,0), rewards.transpose(2,1,0), terminations.transpose(2,1,0)
-        terminations = terminations.astype(int)  # Convert to int type for termination flags
-
-        # States (Time Step, Batch Size, Feature Dimensions) (T, B, F) -> (B, T, F)
-        states, next_state = np.array(states),np.array(next_state)
-        states, next_state = states.transpose(1,0,2), next_state.transpose(1,0,2)
-
-        return observations, states, actions, rewards, next_state, next_observations, terminations
     
     def update_eval_models(self):
         # Update the evaluation models with the latest weights from the training models
