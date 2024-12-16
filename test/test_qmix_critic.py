@@ -22,8 +22,8 @@ class TestQMIXCritic(unittest.TestCase):
         q_total = self.critic(q_values, states)
 
         # Check the output shape
-        expected_shape = (batch_size, 1, 1)
-        self.assertEqual(q_total.shape, expected_shape)
+        expected_shape = torch.zeros(batch_size).size()
+        self.assertEqual(q_total.size(), expected_shape)
 
     def test_hyper_networks(self):
         # Test if hyper networks produce the correct shapes

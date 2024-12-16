@@ -3,6 +3,9 @@ import torch
 from typing import Dict
 from copy import deepcopy
 from multiprocessing import Process, Queue, Pool
+import logging
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 from ..algorithm.agents import AgentGroup
 from ..environment.env_config import EnvConfig
@@ -23,6 +26,7 @@ class Learner():
                  n_workers: int, 
                  buffer_capacity: int = 50000,
                  episode_limit: int = 500,
+                 n_episodes: int = 1000,
                  device: str = 'cpu'):
         
         self.env_config = env_config
@@ -44,7 +48,7 @@ class Learner():
         self.optimizer = None
         self.epsilon = 0.9
         self.gamma = 0.9
-        self.n_episodes = self.replay_buffer.capacity // 100
+        self.n_episodes = n_episodes
 
     def learn(self, sample_size, batch_size: int, times: int):
         raise NotImplementedError
@@ -65,62 +69,69 @@ class Learner():
             episode_limit = self.episode_limit
         if not epsilon:
             epsilon = self.epsilon
+        
         job = RolloutWorker(env_config=self.env_config,
                                  agent_group=self.eval_agent_group,
                                  rnn_traj_len=self.traj_len)
+        
+        logging.info(f"Collecting {n_episodes} episodes with limit {episode_limit} and epsilon {epsilon}")
         episodes = [job.generate_episode(episode_limit, epsilon) for _ in range(n_episodes)]
 
         for episode in episodes:
             self.replay_buffer.add_episode(episode)
         
         return self
-    # TODO: parallelize the experience collection process.
-    '''
-    def collect_experience(self, n_episodes=10):
-        """
-        Collect experiences using multiple rollout workers.
-        """
-        rworker = RolloutWorker(env_config=self.env_config,
-                                 agent_group=deepcopy(self.eval_agent_group),
-                                 rnn_traj_len=self.traj_len)
-        job = [[deepcopy(rworker), self.episode_limit, self.epsilon] for _ in range(n_episodes)]
 
-        with Pool(self.n_workers) as pool:
-            episodes = pool.starmap(get_episode, job)
-
-        for episode in episodes:
-            self.replay_buffer.add_episode(episode)
-        
-        return self
-    '''
-    
     def update_params(self):
         # Update the evaluation models with the latest weights from the training models
         self.target_models_params = self.target_agent_group.get_model_params()
         self.eval_agent_group.set_model_params(self.target_models_params)
-        self.critic_params = deepcopy(self.target_critic.state_dict()) # Update critic parameters
+        self.critic_params = deepcopy(self.target_critic.state_dict())  # Update critic parameters
         self.eval_critic.load_state_dict(self.critic_params)
 
-    def evaluate(self, times = 100):
+    def evaluate(self, times=100):
         job = RolloutWorker(env_config=self.env_config,
                                  agent_group=self.eval_agent_group,
                                  rnn_traj_len=self.traj_len)
+        
+        logging.info(f"Evaluating for {times} episodes")
         episodes = [job.generate_episode(self.episode_limit, self.epsilon) for _ in range(times)]
         rewards = np.array([episode['episode_reward'] for episode in episodes])
-        return np.mean(rewards), np.std(rewards)
+        
+        mean_reward = np.mean(rewards)
+        std_reward = np.std(rewards)
+        logging.info(f"Evaluation results: Mean reward {mean_reward}, Std reward {std_reward}")
+        
+        return mean_reward, std_reward
     
-    def train(self, target_reward, epoch_limit=10000, eval_interval=500, batch_size=64):
+    def train(self, target_reward, epochs=10000, eval_interval=500, batch_size=64, learning_times_per_epoch=1):
         best_mean_reward = -np.inf
+        best_reward_std = np.inf
         n_episodes = self.n_episodes
         sample_ratio = 0.5
+
         # Training loop
-        for epoch in range(epoch_limit):
+        for epoch in range(epochs):
+
+            logging.info(f"Epoch {epoch}: Collecting experiences")
+            self.collect_experience(n_episodes=n_episodes)
+
             sample_size = len(self.replay_buffer.buffer) * sample_ratio
             sample_size = round(sample_size)
-            self.collect_experience(n_episodes=n_episodes)
-            self.learn(sample_size=sample_size, batch_size=batch_size, times=1)
-            mean_reward = self.evaluate()
+            
+            logging.info(f"Epoch {epoch}: Learning with batch size {batch_size} and times {learning_times_per_epoch}")
+            self.learn(sample_size=sample_size, batch_size=batch_size, times=learning_times_per_epoch)
+            
+            mean_reward, reward_std = self.evaluate()
+            
             if mean_reward > best_mean_reward:
                 best_mean_reward = mean_reward
+                best_reward_std = reward_std
+                logging.info(f"Epoch {epoch}: New best mean reward {best_mean_reward}")
                 self.update_params()
-        return best_mean_reward
+
+            if mean_reward >= target_reward:
+                logging.info(f"Target reward reached: {mean_reward} >= {target_reward}")
+                break
+        
+        return best_mean_reward, best_reward_std

@@ -15,6 +15,7 @@ class TestQMixLearner(unittest.TestCase):
     def setUp(self):
         self.capacity = 10
         self.traj_len = 5
+        self.n_episodes= 8
 
         # Environment setup and model configuration
         self.env_config = MPEEnvConfig(env_config_dic={})
@@ -44,8 +45,8 @@ class TestQMixLearner(unittest.TestCase):
 
         self.traj_len = 10
         self.num_workers = 4
-        self.buffer_capacity = 50000
-        self.episode_limit = 100
+        self.buffer_capacity = 500
+        self.episode_limit = 200
         self.device = 'cpu'
 
         self.critic_config = {
@@ -65,6 +66,7 @@ class TestQMixLearner(unittest.TestCase):
             self.num_workers,
             self.buffer_capacity,
             self.episode_limit,
+            self.n_episodes,
             self.device
         )
 
@@ -89,6 +91,11 @@ class TestQMixLearner(unittest.TestCase):
         for model1, model2 in zip(agent_params.values(), origin_agent_params.values()):
             for w1, w2 in zip(model1.values(), model2.values()):
                 self.assertFalse(torch.equal(w1, w2))
+
+    def test_train(self):
+        reward, _ = self.learner.evaluate()
+        best_reward, _ = self.learner.train(epochs=5, target_reward=5)
+        self.assertGreaterEqual(best_reward, reward)
 
         
 if __name__ == '__main__':

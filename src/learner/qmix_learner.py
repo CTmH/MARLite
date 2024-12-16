@@ -18,8 +18,9 @@ class QMIXLearner(Learner):
                  num_workers: int, 
                  buffer_capacity: int = 50000,
                  episode_limit: int = 500,
+                 n_episodes: int = 1000,
                  device: str = 'cpu'):
-        super().__init__(agents, env_config, model_configs, critic_config, traj_len, num_workers, buffer_capacity, episode_limit, device)
+        super().__init__(agents, env_config, model_configs, critic_config, traj_len, num_workers, buffer_capacity, episode_limit, n_episodes, device)
         self.target_agent_group = QMIXAgentGroup(agents=self.agents, model_configs=self.model_configs, device=self.device)
         self.eval_agent_group = deepcopy(self.target_agent_group)
         self.target_critic = QMIXCritic(critic_config['state_shape'], critic_config['input_dim'], critic_config['qmix_hidden_dim'], critic_config['hyper_hidden_dim'])
@@ -36,6 +37,7 @@ class QMIXLearner(Learner):
             for batch in dataloader:
                 #observations, states, actions, rewards, next_state, next_observations, terminations = self.extract_batch(batch)
                 observations, states, actions, rewards, next_state, next_observations, terminations = batch
+                bs = states.shape[0]  # Actual batch size
                 # Compute the Q-tot
                 q_val = [None for _ in range(len(self.agents))]
                 for model_name, model in self.target_agent_group.models.items():
@@ -56,7 +58,7 @@ class QMIXLearner(Learner):
                         q_selected, _ = model(obs, h)
                         q_selected = q_selected[:,-1,:] # get the last output 
                     # TODO: Add code for handling other types of models (e.g., CNNs)
-                    q_selected = q_selected.reshape(batch_size, len(selected_agents), -1) # (B, N, Action Space)
+                    q_selected = q_selected.reshape(bs, len(selected_agents), -1) # (B, N, Action Space)
                     q_selected = q_selected.permute(1, 0, 2)  # (N, B, Action Space)
                     for i, q in zip(idx, q_selected):
                         q_val[i] = q
@@ -88,7 +90,7 @@ class QMIXLearner(Learner):
                         q_selected, _ = model(obs, h)
                         q_selected = q_selected[:,-1,:] # get the last output 
                     # TODO: Add code for handling other types of models (e.g., CNNs)
-                    q_selected = q_selected.reshape(batch_size, len(selected_agents), -1) # (B, N, Action Space)
+                    q_selected = q_selected.reshape(bs, len(selected_agents), -1) # (B, N, Action Space)
                     q_selected = q_selected.permute(1, 0, 2)  # (N, B, Action Space)
                     for i, q in zip(idx, q_selected):
                         q_val[i] = q
