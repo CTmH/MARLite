@@ -19,8 +19,9 @@ class QMIXLearner(Learner):
                  buffer_capacity: int = 50000,
                  episode_limit: int = 500,
                  n_episodes: int = 1000,
+                 workdir: str = "",
                  device: str = 'cpu'):
-        super().__init__(agents, env_config, model_configs, critic_config, traj_len, num_workers, buffer_capacity, episode_limit, n_episodes, device)
+        super().__init__(agents, env_config, model_configs, critic_config, traj_len, num_workers, buffer_capacity, episode_limit, n_episodes, workdir, device)
         self.target_agent_group = QMIXAgentGroup(agents=self.agents, model_configs=self.model_configs, device=self.device)
         self.eval_agent_group = deepcopy(self.target_agent_group)
         self.target_critic = QMIXCritic(critic_config['state_shape'], critic_config['input_dim'], critic_config['qmix_hidden_dim'], critic_config['hyper_hidden_dim'])

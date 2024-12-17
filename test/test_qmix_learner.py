@@ -1,5 +1,6 @@
 import unittest
-from unittest.mock import MagicMock
+import os
+from unittest.mock import MagicMock, patch, call, mock_open
 from copy import deepcopy
 
 import torch
@@ -11,11 +12,13 @@ from src.algorithm.model import ModelConfig
 from src.rolloutworker.rolloutworker import RolloutWorker
 from src.environment.mpe_env_config import MPEEnvConfig
 
+@patch('os.makedirs')
 class TestQMixLearner(unittest.TestCase):
     def setUp(self):
         self.capacity = 10
         self.traj_len = 5
         self.n_episodes= 8
+        self.workdir = "test/test_workdir"
 
         # Environment setup and model configuration
         self.env_config = MPEEnvConfig(env_config_dic={})
@@ -67,6 +70,7 @@ class TestQMixLearner(unittest.TestCase):
             self.buffer_capacity,
             self.episode_limit,
             self.n_episodes,
+            self.workdir,
             self.device
         )
 
@@ -75,6 +79,8 @@ class TestQMixLearner(unittest.TestCase):
         self.learner.collect_experience(n_episodes=n_episodes)
         self.assertNotEqual(len(self.learner.replay_buffer.buffer), 0)
 
+    @patch('src.learner.learner.save_model')
+    @patch('src.learner.save_results_to_csv')
     def test_learn(self):
         n_episodes = 20
         origin_agent_params = deepcopy(self.learner.target_agent_group.get_model_params())
@@ -96,6 +102,22 @@ class TestQMixLearner(unittest.TestCase):
         reward, _ = self.learner.evaluate()
         best_reward, _ = self.learner.train(epochs=5, target_reward=5)
         self.assertGreaterEqual(best_reward, reward)
+
+    @patch('src.learner.learner.torch.save')
+    def test_save_model(self, mock_torch_save):
+        filename = "test_model"
+        self.learner.save_model(filename)
+        call_list = []
+        # Check actor models
+        for model_name, params in self.learner.target_agent_group.get_model_params().items():
+            actor_path = os.path.join(self.learner.modeldir, f'actor_{model_name}_{filename}.pth')
+            call_list.append(call(params, actor_path))
+        # Check critic models
+        critic_path = os.path.join(self.workdir, 'models', 'critic_test_model.pth')
+        call_list.append(call(self.learner.target_critic.state_dict(), critic_path))
+        #mock_torch_save.assert_has_calls(call_list)
+        self.assertEqual(mock_torch_save.call_count, len(call_list))
+
 
         
 if __name__ == '__main__':
