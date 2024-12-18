@@ -13,6 +13,7 @@ from ..environment.env_config import EnvConfig
 from ..algorithm.model import ModelConfig
 from ..rolloutworker.rolloutworker import RolloutWorker
 from ..util.replay_buffer import ReplayBuffer
+from ..util.scheduler import Scheduler
 
 def get_episode(worker, episode_limit, epsilon):
     return worker.generate_episode(episode_limit, epsilon)
@@ -21,13 +22,19 @@ class Learner():
     def __init__(self, 
                  agents: Dict[str, str], 
                  env_config: EnvConfig, 
-                 model_configs: ModelConfig, 
+                 model_configs: ModelConfig,
+                 epsilon_scheduler: Scheduler,
+                 sample_ratio_scheduler: Scheduler,
                  critic_config: Dict[str, any],
                  traj_len: int, 
                  n_workers: int, 
+                 epochs = 10000,
                  buffer_capacity: int = 50000,
                  episode_limit: int = 500,
                  n_episodes: int = 1000,
+                 gamma: float = 0.9,
+                 critic_lr: float = 0.01,
+                 critic_optimizer = torch.optim.Adam,
                  workdir: str = "",
                  device: str = 'cpu'):
         
@@ -36,6 +43,8 @@ class Learner():
         self.traj_len = traj_len
         self.n_workers = n_workers
         self.episode_limit = episode_limit
+        self.epochs = epochs
+        self.sample_ratio = sample_ratio_scheduler
         self.device = device
         self.replay_buffer = ReplayBuffer(capacity=buffer_capacity, traj_len=self.traj_len)
         self.agents = agents
@@ -48,8 +57,8 @@ class Learner():
         self.eval_critic = torch.nn.Module()
         self.critic_params = deepcopy(self.target_critic.state_dict())
         self.optimizer = None
-        self.epsilon = 0.9
-        self.gamma = 0.9
+        self.epsilon = epsilon_scheduler
+        self.gamma = gamma
         self.n_episodes = n_episodes
         # Work directory
         self.workdir = workdir
@@ -96,17 +105,10 @@ class Learner():
         self.eval_critic.load_state_dict(torch.load(critic_path))
         logging.info(f"Critic model loaded from {critic_path}")
 
-    def collect_experience(self, n_episodes=None, episode_limit=None, epsilon=None):
+    def collect_experience(self, n_episodes: int, episode_limit: int, epsilon: int):
         """
         Collect experiences using multiple rollout workers.
         """
-        if not n_episodes:
-            n_episodes = self.n_episodes
-        if not episode_limit:
-            episode_limit = self.episode_limit
-        if not epsilon:
-            epsilon = self.epsilon
-        
         job = RolloutWorker(env_config=self.env_config,
                             agent_group=self.eval_agent_group,
                             rnn_traj_len=self.traj_len)
@@ -132,7 +134,7 @@ class Learner():
                                  rnn_traj_len=self.traj_len)
         
         logging.info(f"Evaluating for {times} episodes")
-        episodes = [job.generate_episode(self.episode_limit, self.epsilon) for _ in range(times)]
+        episodes = [job.generate_episode(self.episode_limit, epsilon=0.0) for _ in range(times)]
         rewards = np.array([episode['episode_reward'] for episode in episodes])
         
         mean_reward = np.mean(rewards)
@@ -141,18 +143,19 @@ class Learner():
         
         return mean_reward, std_reward
     
-    def train(self, target_reward, epochs=10000, eval_interval=500, batch_size=64, learning_times_per_epoch=1):
+    def train(self, target_reward, eval_interval=500, batch_size=64, learning_times_per_epoch=1):
         best_mean_reward = -np.inf
         best_reward_std = np.inf
         n_episodes = self.n_episodes
-        sample_ratio = 0.5
 
         # Training loop
-        for epoch in range(epochs):
+        for epoch in range(self.epochs):
 
             logging.info(f"Epoch {epoch}: Collecting experiences")
-            self.collect_experience(n_episodes=n_episodes)
-
+            self.collect_experience(n_episodes=n_episodes,
+                                    episode_limit=self.episode_limit,
+                                    epsilon=self.epsilon.get_value(epoch))
+            sample_ratio = self.sample_ratio.get_value(epoch)
             sample_size = len(self.replay_buffer.buffer) * sample_ratio
             sample_size = round(sample_size)
             

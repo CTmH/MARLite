@@ -7,26 +7,54 @@ from ..algorithm.model import RNNModel
 from ..algorithm.agents import QMIXAgentGroup
 from ..algorithm.critic.qmix_critic import QMIXCritic
 from ..util.trajectory_dataset import TrajectoryDataLoader
+from ..util.scheduler import Scheduler
 
 class QMIXLearner(Learner):
     def __init__(self, 
                  agents, 
                  env_config, 
                  model_configs,
+                 epsilon_scheduler,
+                 sample_ratio_scheduler,
                  critic_config,
                  traj_len: int, 
-                 num_workers: int, 
-                 buffer_capacity: int = 50000,
-                 episode_limit: int = 500,
-                 n_episodes: int = 1000,
-                 workdir: str = "",
-                 device: str = 'cpu'):
-        super().__init__(agents, env_config, model_configs, critic_config, traj_len, num_workers, buffer_capacity, episode_limit, n_episodes, workdir, device)
-        self.target_agent_group = QMIXAgentGroup(agents=self.agents, model_configs=self.model_configs, device=self.device)
+                 n_workers: int, 
+                 epochs,
+                 buffer_capacity,
+                 episode_limit,
+                 n_episodes,
+                 gamma,
+                 critic_lr,
+                 critic_optimizer,
+                 workdir,
+                 device):
+        super().__init__(agents, 
+                         env_config, 
+                         model_configs,
+                         epsilon_scheduler,
+                         sample_ratio_scheduler,
+                         critic_config,
+                         traj_len, 
+                         n_workers, 
+                         epochs,
+                         buffer_capacity,
+                         episode_limit,
+                         n_episodes,
+                         gamma,
+                         critic_lr,
+                         critic_optimizer,
+                         workdir,
+                         device)
+        self.target_agent_group = QMIXAgentGroup(agents=self.agents,
+                                                 model_configs=self.model_configs,
+                                                 device=self.device)
         self.eval_agent_group = deepcopy(self.target_agent_group)
-        self.target_critic = QMIXCritic(critic_config['state_shape'], critic_config['input_dim'], critic_config['qmix_hidden_dim'], critic_config['hyper_hidden_dim'])
+        self.target_critic = QMIXCritic(critic_config['state_shape'],
+                                        critic_config['input_dim'],
+                                        critic_config['qmix_hidden_dim'],
+                                        critic_config['hyper_hidden_dim'])
         self.eval_critic = deepcopy(self.target_critic)
-        self.optimizer = torch.optim.Adam(self.target_critic.parameters(), lr=0.001)
+        self.optimizer = critic_optimizer(self.target_critic.parameters(), lr=critic_lr)
         self.critic_params = deepcopy(self.target_critic.state_dict())
 
     def learn(self, sample_size, batch_size: int, times: int = 1):

@@ -11,14 +11,20 @@ from src.algorithm.agents import QMIXAgentGroup
 from src.algorithm.model import ModelConfig
 from src.rolloutworker.rolloutworker import RolloutWorker
 from src.environment.mpe_env_config import MPEEnvConfig
+from src.util.scheduler import Scheduler
 
-@patch('os.makedirs')
 class TestQMixLearner(unittest.TestCase):
     def setUp(self):
         self.capacity = 10
         self.traj_len = 5
         self.n_episodes= 8
-        self.workdir = "test/test_workdir"
+        self.workdir = "test_workdir"
+        self.gamma = 0.95
+        self.epochs = 5
+        self.epsilon_scheduler = Scheduler(start_value=1.0, end_value=0.05, epochs=self.epochs, adjustment_type="linear")
+        self.sample_ratio_scheduler = Scheduler(start_value=1.0, end_value=0.3, epochs=self.epochs, adjustment_type="linear")
+        self.critic_lr = 0.01
+        self.critic_optimizer = torch.optim.Adam
 
         # Environment setup and model configuration
         self.env_config = MPEEnvConfig(env_config_dic={})
@@ -64,28 +70,33 @@ class TestQMixLearner(unittest.TestCase):
             self.agents,
             self.env_config,
             self.model_configs,
+            self.epsilon_scheduler,
+            self.sample_ratio_scheduler,
             self.critic_config,
             self.traj_len,
             self.num_workers,
+            self.epochs,
             self.buffer_capacity,
             self.episode_limit,
             self.n_episodes,
+            self.gamma,
+            self.critic_lr,
+            self.critic_optimizer,
             self.workdir,
             self.device
         )
 
+
     def test_collect_experience(self):
         n_episodes = 4
-        self.learner.collect_experience(n_episodes=n_episodes)
+        self.learner.collect_experience(n_episodes, self.episode_limit, 0.9)
         self.assertNotEqual(len(self.learner.replay_buffer.buffer), 0)
 
-    @patch('src.learner.learner.save_model')
-    @patch('src.learner.save_results_to_csv')
     def test_learn(self):
         n_episodes = 20
         origin_agent_params = deepcopy(self.learner.target_agent_group.get_model_params())
         origin_critic_params = deepcopy(self.learner.target_critic.state_dict())
-        self.learner.collect_experience(n_episodes=n_episodes)
+        self.learner.collect_experience(n_episodes, self.episode_limit, 0.9)
         self.learner.learn(sample_size=320, batch_size=32, times=10)
         self.learner.update_params()
         agent_params = self.learner.target_agent_group.get_model_params()
@@ -100,7 +111,7 @@ class TestQMixLearner(unittest.TestCase):
 
     def test_train(self):
         reward, _ = self.learner.evaluate()
-        best_reward, _ = self.learner.train(epochs=5, target_reward=5)
+        best_reward, _ = self.learner.train(target_reward=5)
         self.assertGreaterEqual(best_reward, reward)
 
     @patch('src.learner.learner.torch.save')
@@ -113,12 +124,10 @@ class TestQMixLearner(unittest.TestCase):
             actor_path = os.path.join(self.learner.modeldir, f'actor_{model_name}_{filename}.pth')
             call_list.append(call(params, actor_path))
         # Check critic models
-        critic_path = os.path.join(self.workdir, 'models', 'critic_test_model.pth')
+        critic_path = os.path.join(self.learner.modeldir, f'critic_{filename}.pth')
         call_list.append(call(self.learner.target_critic.state_dict(), critic_path))
         #mock_torch_save.assert_has_calls(call_list)
         self.assertEqual(mock_torch_save.call_count, len(call_list))
 
-
-        
 if __name__ == '__main__':
     unittest.main()
