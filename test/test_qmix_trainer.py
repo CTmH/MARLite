@@ -5,15 +5,12 @@ from copy import deepcopy
 
 import torch
 
-from src.learner.qmix_learner import QMIXLearner
-from src.algorithm.model import RNNModel
-from src.algorithm.agents import QMIXAgentGroup
+from src.trainer.qmix_trainer import QMIXTrainer
 from src.algorithm.model import ModelConfig
-from src.rolloutworker.rolloutworker import RolloutWorker
 from src.environment.mpe_env_config import MPEEnvConfig
 from src.util.scheduler import Scheduler
 
-class TestQMixLearner(unittest.TestCase):
+class TestQMixTrainer(unittest.TestCase):
     def setUp(self):
         self.capacity = 10
         self.traj_len = 5
@@ -21,8 +18,8 @@ class TestQMixLearner(unittest.TestCase):
         self.workdir = "test_workdir"
         self.gamma = 0.95
         self.epochs = 5
-        self.epsilon_scheduler = Scheduler(start_value=1.0, end_value=0.05, epochs=self.epochs, adjustment_type="linear")
-        self.sample_ratio_scheduler = Scheduler(start_value=1.0, end_value=0.3, epochs=self.epochs, adjustment_type="linear")
+        self.epsilon_scheduler = Scheduler(start_value=1.0, end_value=0.05, decay_steps=self.epochs, type="linear")
+        self.sample_ratio_scheduler = Scheduler(start_value=1.0, end_value=0.3, decay_steps=self.epochs, type="linear")
         self.critic_lr = 0.01
         self.critic_optimizer = torch.optim.Adam
 
@@ -65,8 +62,8 @@ class TestQMixLearner(unittest.TestCase):
             'hyper_hidden_dim': 64
         }
 
-        # Initialize the QMixLearner with mocks
-        self.learner = QMIXLearner(
+        # Initialize the QMixTrainer
+        self.trainer = QMIXTrainer(
             self.agents,
             self.env_config,
             self.model_configs,
@@ -89,18 +86,18 @@ class TestQMixLearner(unittest.TestCase):
 
     def test_collect_experience(self):
         n_episodes = 4
-        self.learner.collect_experience(n_episodes, self.episode_limit, 0.9)
-        self.assertNotEqual(len(self.learner.replay_buffer.buffer), 0)
+        self.trainer.collect_experience(n_episodes, self.episode_limit, 0.9)
+        self.assertNotEqual(len(self.trainer.replay_buffer.buffer), 0)
 
     def test_learn(self):
         n_episodes = 20
-        origin_agent_params = deepcopy(self.learner.target_agent_group.get_model_params())
-        origin_critic_params = deepcopy(self.learner.target_critic.state_dict())
-        self.learner.collect_experience(n_episodes, self.episode_limit, 0.9)
-        self.learner.learn(sample_size=320, batch_size=32, times=10)
-        self.learner.update_params()
-        agent_params = self.learner.target_agent_group.get_model_params()
-        critic_params = self.learner.target_critic.state_dict()
+        origin_agent_params = deepcopy(self.trainer.target_agent_group.get_model_params())
+        origin_critic_params = deepcopy(self.trainer.target_critic.state_dict())
+        self.trainer.collect_experience(n_episodes, self.episode_limit, 0.9)
+        self.trainer.learn(sample_size=320, batch_size=32, times=10)
+        self.trainer.update_params()
+        agent_params = self.trainer.target_agent_group.get_model_params()
+        critic_params = self.trainer.target_critic.state_dict()
 
         for w1, w2 in zip(critic_params.values(), origin_critic_params.values()):
             self.assertFalse(torch.equal(w1, w2))
@@ -110,22 +107,22 @@ class TestQMixLearner(unittest.TestCase):
                 self.assertFalse(torch.equal(w1, w2))
 
     def test_train(self):
-        reward, _ = self.learner.evaluate()
-        best_reward, _ = self.learner.train(target_reward=5)
+        reward, _ = self.trainer.evaluate()
+        best_reward, _ = self.trainer.train(target_reward=5)
         self.assertGreaterEqual(best_reward, reward)
 
-    @patch('src.learner.learner.torch.save')
+    @patch('src.trainer.trainer.torch.save')
     def test_save_model(self, mock_torch_save):
         filename = "test_model"
-        self.learner.save_model(filename)
+        self.trainer.save_model(filename)
         call_list = []
         # Check actor models
-        for model_name, params in self.learner.target_agent_group.get_model_params().items():
-            actor_path = os.path.join(self.learner.modeldir, f'actor_{model_name}_{filename}.pth')
+        for model_name, params in self.trainer.target_agent_group.get_model_params().items():
+            actor_path = os.path.join(self.trainer.modeldir, f'actor_{model_name}_{filename}.pth')
             call_list.append(call(params, actor_path))
         # Check critic models
-        critic_path = os.path.join(self.learner.modeldir, f'critic_{filename}.pth')
-        call_list.append(call(self.learner.target_critic.state_dict(), critic_path))
+        critic_path = os.path.join(self.trainer.modeldir, f'critic_{filename}.pth')
+        call_list.append(call(self.trainer.target_critic.state_dict(), critic_path))
         #mock_torch_save.assert_has_calls(call_list)
         self.assertEqual(mock_torch_save.call_count, len(call_list))
 

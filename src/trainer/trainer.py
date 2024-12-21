@@ -18,7 +18,7 @@ from ..util.scheduler import Scheduler
 def get_episode(worker, episode_limit, epsilon):
     return worker.generate_episode(episode_limit, epsilon)
 
-class Learner():
+class Trainer():
     def __init__(self, 
                  agents: Dict[str, str], 
                  env_config: EnvConfig, 

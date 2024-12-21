@@ -2,14 +2,14 @@ import torch
 from copy import deepcopy
 from torch.utils.data import DataLoader
 
-from .learner import Learner
+from .trainer import Trainer
 from ..algorithm.model import RNNModel
 from ..algorithm.agents import QMIXAgentGroup
 from ..algorithm.critic.qmix_critic import QMIXCritic
 from ..util.trajectory_dataset import TrajectoryDataLoader
 from ..util.scheduler import Scheduler
 
-class QMIXLearner(Learner):
+class QMIXTrainer(Trainer):
     def __init__(self, 
                  agents, 
                  env_config, 

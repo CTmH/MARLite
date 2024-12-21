@@ -1,0 +1,52 @@
+agent_list:
+  - model1
+  - model1
+  - model2
+
+env_config:
+  env_name: "CartPole-v0"
+
+model_configs:
+  model1:
+    model_type: "RNN"
+    rnn_hidden_dim: 128
+  model2:
+    model_type: "RNN"
+    rnn_hidden_dim: 128
+
+epsilon_scheduler:
+  type: "linear"
+  start_value: 1.0
+  end_value: 0.05
+
+sample_ratio_scheduler:
+  type: "linear"
+  start_value: 1.0
+  end_value: 0.3
+
+critic_config:
+  qmix_hidden_dim: 128
+  hyper_hidden_dim: 64
+
+rolloutworker_config:
+  traj_len: 5
+  n_workers: 4
+  episode_limit: 500
+  n_episodes: 1000
+
+buffer_config:
+  capacity: 50000
+
+
+trainer_config:
+  gamma: 0.99
+  critic_lr: 0.0005
+  critic_optimizer: "Adam"
+  algorithm: "QMIX"
+  epochs: 100
+  workdir: "./results"
+  device: "cpu"
+  target_reward: 100
+  eval_interval: 1
+  batch_size: 32
+  learning_times_per_epoch: 1
