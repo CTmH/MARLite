@@ -14,12 +14,17 @@ class AgentGroup:
     def __init__(self, 
                 agents: Dict[str, str], 
                 model_configs: Dict[str, ModelConfig],
+                feature_extractors: Dict[str, ModelConfig],
                 optim: TorchOptimizer = torch.optim.Adam,
+                lr: float = 1e-3,
                 device: str = 'cpu') -> None:
         self.device = device
         self.agents = agents
         self.models = {model_name: config.get_model().to(device=self.device) for model_name, config in model_configs.items()}
-        self.optimizers = {model_name: optim(model.parameters()) for model_name, model in self.models.items()}
+        self.feature_extractors = {model_name: config.get_model().to(device=self.device) for model_name, config in feature_extractors.items()}
+        params_to_optimize = [{'params': model.parameters()} for model in self.models.values()]
+        params_to_optimize += [{'params': extractor.parameters()} for extractor in self.feature_extractors.values()]
+        self.optimizer = optim(params_to_optimize, lr=lr)
 
         # Initialize model_to_agent dictionary and model_to_agent_indices dictionary
         self.model_to_agents = {model_name:[] for model_name in model_configs.keys()}
@@ -34,7 +39,7 @@ class AgentGroup:
         self.init_hidden_states()
         
 
-    def get_q_values(self, observations: Dict[str, np.ndarray], eval_mode=False) -> torch.Tensor:
+    def get_q_values(self, observations: Dict[str, np.ndarray], eval_mode=True) -> torch.Tensor:
         raise NotImplementedError
 
     def act(observations: Dict[str, np.ndarray], avail_actions: Dict, epsilon: int) -> np.ndarray:
@@ -46,22 +51,21 @@ class AgentGroup:
                         for agent_name, model_name in self.agents.items()}
         return self
 
-    def set_model_params(self, params: Dict[str, dict]):
-        for ag_name, model in self.models.items():
-            model.load_state_dict(params[ag_name])
+    def set_model_params(self, model_params: Dict[str, dict], feature_extractor_params: Dict[str, dict]):
+        for (model_name, model), (_, fe) in zip(self.models.items(), self.feature_extractors.items()):
+            model.load_state_dict(model_params[model_name])
+            fe.load_state_dict(feature_extractor_params[model_name])
         return self
     
     def get_model_params(self):
-        params = {agent_name:deepcopy(model.state_dict()) for agent_name, model in self.models.items()}
-        return params
+        model_params = {model_name:deepcopy(model.state_dict()) for model_name, model in self.models.items()}
+        feature_extractor_params = {model_name:deepcopy(fe.state_dict()) for model_name, fe in self.feature_extractors.items()}
+        return model_params, feature_extractor_params
     
     def zero_grad(self):
-        for _, opt in self.optimizers.items():
-            opt.zero_grad()
+        self.optimizer.zero_grad()
         return self
     
     def step(self):
-        for _, opt in self.optimizers.items():
-            # Assuming loss is computed in Learner
-            # loss.backward() should be called before this function to compute gradients.
-            opt.step()
+        self.optimizer.step()
+        return self

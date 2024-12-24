@@ -1,8 +1,8 @@
 import yaml
 import torch
+import numpy as np
 from ..algorithm.model.model_config import ModelConfig
 from ..environment.env_config import EnvConfig
-from ..environment.mpe_env_config import MPEEnvConfig
 from ..util.scheduler import Scheduler
 from .trainer import Trainer
 from .qmix_trainer import QMIXTrainer
@@ -12,7 +12,7 @@ class TrainerConfig:
         self.algorithm, self.config, self.train_params = load_config_from_yaml(config_path)
         self.trainer = None
 
-    def create_learner(self):
+    def create_trainer(self):
         if self.algorithm == 'QMIX':
             learner = QMIXTrainer(**self.config)
         else:
@@ -32,27 +32,25 @@ def load_config_from_yaml(config_path):
 
     # Environment configuration
     # TODO: Implement Other environment configurations
-    env_config = MPEEnvConfig(config['env_config'])
+    env_config = EnvConfig(**config['env_config'])
     env = env_config.create_env()
     env.reset()
     agent_list = env.agents
     key = env.agents[0]
-    obs_shape = env.observation_space(key).shape[0]
-    state_shape = env.state().shape[0]
+    # TODO: Add CNN for observation and state
+    obs_shape = np.prod(env.observation_space(key).shape)
+    state_shape = env.state().shape
     n_agents = len(env.agents) # Number of agents in the environment
-    action_space_shape = env.action_space(key).n
+    action_space_shape = env.action_space(key).n.item()
     env.close()
     
     # agents
     agent_list = {agent_id: model_id for agent_id, model_id in zip(agent_list, config['agent_list'])}
     model_configs = {}
+    feature_extractor_configs = {}
     for model in config['model_configs']:
-        model_layers = {
-            "input_shape": obs_shape,
-            "rnn_hidden_dim": 128,
-            "output_shape": action_space_shape
-        }
-        model_configs[model] = ModelConfig(model_type=config['model_configs'][model]['model_type'], layers=model_layers)
+        model_configs[model] = ModelConfig(**config['model_configs'][model])
+        feature_extractor_configs[model] = ModelConfig(**config['model_configs'][model]['feature_extractor'])
     
     # Critic configuration
     critic_config = config['critic_config']

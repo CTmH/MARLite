@@ -55,7 +55,7 @@ class Trainer():
         # Critic
         self.target_critic = torch.nn.Module()
         self.eval_critic = torch.nn.Module()
-        self.critic_params = deepcopy(self.target_critic.state_dict())
+        self.target_critic_params = deepcopy(self.target_critic.state_dict())
         self.optimizer = None
         self.epsilon = epsilon_scheduler
         self.gamma = gamma
@@ -125,8 +125,8 @@ class Trainer():
         # Update the evaluation models with the latest weights from the training models
         self.target_models_params = self.target_agent_group.get_model_params()
         self.eval_agent_group.set_model_params(self.target_models_params)
-        self.critic_params = deepcopy(self.target_critic.state_dict())  # Update critic parameters
-        self.eval_critic.load_state_dict(self.critic_params)
+        self.target_critic_params = deepcopy(self.target_critic.state_dict())  # Update critic parameters
+        self.eval_critic.load_state_dict(self.target_critic_params)
 
     def evaluate(self, times=100):
         job = RolloutWorker(env_config=self.env_config,
@@ -151,6 +151,9 @@ class Trainer():
         # Training loop
         for epoch in range(self.epochs):
 
+            self.target_agent_group.set_model_params(self.target_models_params)
+            self.target_critic.load_state_dict(self.target_critic_params)
+
             logging.info(f"Epoch {epoch}: Collecting experiences")
             self.collect_experience(n_episodes=n_episodes,
                                     episode_limit=self.episode_limit,
@@ -159,7 +162,7 @@ class Trainer():
             sample_size = len(self.replay_buffer.buffer) * sample_ratio
             sample_size = round(sample_size)
             
-            logging.info(f"Epoch {epoch}: Learning with batch size {batch_size} and times {learning_times_per_epoch}")
+            logging.info(f"Epoch {epoch}: Learning with batch size {batch_size} and learning {learning_times_per_epoch} times per epoch")
             self.learn(sample_size=sample_size, batch_size=batch_size, times=learning_times_per_epoch)
             
             mean_reward, reward_std = self.evaluate()

@@ -35,18 +35,28 @@ class TestQMIXAgentGroup(unittest.TestCase):
 
         # Model configuration
         self.model_layers = {
+            "model_type": "RNN",
             "input_shape": self.obs_shape,
             "rnn_hidden_dim": 128,
             "output_shape": self.action_space_shape
         }
 
         self.model_configs = {
-            "RNN0": ModelConfig(model_type="RNN",layers=self.model_layers),
-            "RNN1": ModelConfig(model_type="RNN",layers=self.model_layers)
+            "RNN0": ModelConfig(**self.model_layers),
+            "RNN1": ModelConfig(**self.model_layers)
+        }
+        self.feature_extractor_configs = {
+            "RNN0": ModelConfig(model_type="Identity"),
+            "RNN1": ModelConfig(model_type="Identity"),
         }
         
         # Initialize QMIXAgents
-        self.agent_group = QMIXAgentGroup(agents=self.agents, model_configs=self.model_configs, device='cpu')
+        self.agent_group = QMIXAgentGroup(agents=self.agents,
+                                          model_configs=self.model_configs,
+                                          feature_extractors=self.feature_extractor_configs,
+                                          optim=torch.optim.Adam,
+                                          lr=1e-4,
+                                          device='cpu')
         
         # Mock observations and avail_actions
         #self.observations = [torch.tensor([0.1, 0.2, 0.3]), torch.tensor([0.4, 0.5, 0.6])]

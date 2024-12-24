@@ -1,12 +1,12 @@
 from typing import Dict
 from pettingzoo import ParallelEnv
-from pettingzoo.mpe import simple_spread_v3
+from pettingzoo.butterfly import knights_archers_zombies_v10
 from .env_config import EnvConfig
 
-class MPEEnvConfig(EnvConfig):
+class KAZEnvConfig(EnvConfig):
     def __init__(self, env_config_dic: Dict) -> None:
         super().__init__(env_config_dic)
 
     def create_env(self) -> ParallelEnv:
-        env = simple_spread_v3.parallel_env()
+        env = knights_archers_zombies_v10.parallel_env()
         return env

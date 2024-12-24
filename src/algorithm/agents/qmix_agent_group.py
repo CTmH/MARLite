@@ -5,8 +5,14 @@ from .agent_group import AgentGroup
 from ..model import RNNModel
 
 class QMIXAgentGroup(AgentGroup):
-    def __init__(self, agents, model_configs, device) -> None:
-        super().__init__(agents=agents, model_configs=model_configs, device=device)
+    def __init__(self, 
+                agents, 
+                model_configs,
+                feature_extractors,
+                optim,
+                lr: float = 1e-3,
+                device: str = 'cpu') -> None:
+        super().__init__(agents, model_configs, feature_extractors, optim, lr, device)
 
     def get_q_values(self, observations, eval_mode=True):
         """
@@ -29,7 +35,7 @@ class QMIXAgentGroup(AgentGroup):
 
         q_values = [None for _ in range(len(self.agents))]
 
-        for model_name, model in self.models.items():
+        for (model_name, model), (_, fe) in zip(self.models.items(), self.feature_extractors.items()):
             #idx = [i for i, agent in enumerate(self.agents) if agent[1] == model_name]
             selected_agents = self.model_to_agents[model_name]
             idx = self.model_to_agent_indices[model_name]
@@ -40,7 +46,13 @@ class QMIXAgentGroup(AgentGroup):
             if isinstance(model, RNNModel):
                 selected_hidden_states = stack(selected_hidden_states).to(device=self.device)  # N, (D * \text{num\_layers}, H_{out})
                 selected_hidden_states = selected_hidden_states.permute(1, 0, 2) # (D * \text{num\_layers}, N, H_{out})
-                qv, hs = model(obs, selected_hidden_states)
+                bs = obs.shape[0]
+                ts = obs.shape[1]
+                obs_shape = obs.shape[2:]
+                obs = obs.reshape(bs*ts, *obs_shape)
+                feature = fe(obs)
+                feature = feature.reshape(bs, ts, -1)
+                qv, hs = model(feature, selected_hidden_states)
                 # qv shape: torch.Size([2, 1, 5]) (N：batch size, L: seq length, D * H_{out})
                 # hs shape: torch.Size([1, 2, 128]) (D * \text{num\_layers}, N, H_{out})
                 qv = qv[:,-1,:] # get the last output (N, D * H_{out})

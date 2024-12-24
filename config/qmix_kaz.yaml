@@ -1,20 +1,31 @@
 agent_list:
   - model1
   - model1
-  - model1
+  - model2
+  - model2
 
 env_config:
-  module_name: "pettingzoo.mpe"
-  env_name: "simple_spread_v3"
+  module_name: "pettingzoo.butterfly"
+  env_name: "knights_archers_zombies_v10"
 
 model_configs:
   model1:
     model_type: "RNN"
-    input_shape: 
     rnn_hidden_dim: 128
-    output_shape: 
     feature_extractor:
-      model_type: "Identity"
+      type: "custom"
+      layers:
+      - type: Conv2d
+          in_channels: 
+          out_features: 256
+      - type: ReLU
+      - type: Linear
+          in_features: 256
+          out_features: 10
+      - type: Softmax
+  model2:
+    model_type: "RNN"
+    rnn_hidden_dim: 128
 
 epsilon_scheduler:
   type: "logarithmic"
@@ -27,18 +38,17 @@ sample_ratio_scheduler:
   end_value: 0.3
 
 critic_config:
-  qmix_hidden_dim: 128
-  hyper_hidden_dim: 64
+  qmix_hidden_dim: 256
+  hyper_hidden_dim: 128
 
 rolloutworker_config:
   traj_len: 5
   n_workers: 4
-  episode_limit: 500
+  episode_limit: 5000
   n_episodes: 1000
 
 buffer_config:
   capacity: 50000
-
 
 trainer_config:
   gamma: 0.99
@@ -46,9 +56,9 @@ trainer_config:
   critic_optimizer: "Adam"
   algorithm: "QMIX"
   epochs: 100
-  workdir: "./results/qmix_default"
+  workdir: "./results/qmix_kaz"
   device: "cpu"
   target_reward: 100
   eval_interval: 1
-  batch_size: 128
+  batch_size: 256
   learning_times_per_epoch: 1

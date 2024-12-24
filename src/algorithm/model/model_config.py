@@ -1,26 +1,35 @@
 from .rnn import RNNModel
+from .custom_model import CustomModel
+import torch.nn as nn
 
 REGISTERED_MODELS = {
     "RNN": RNNModel,
+    "Identity": nn.Identity,
+    "Custom": CustomModel,
 }
 
 class ModelConfig:
-    def __init__(self, model_type: str = "RNN", layers: dict = None, num_layers: int = 6,
-                 hidden_size: int = 512, num_heads: int = 8,
-                 dropout_rate: float = 0.1):
-        self.model_type = model_type
-        self.layers = layers or {}  # Dictionary to hold specific layer configurations if needed.
-        self.num_layers = num_layers
-        self.hidden_size = hidden_size
-        self.num_heads = num_heads
-        self.dropout_rate = dropout_rate
+    def __init__(self, **kwargs):
+        self.model_type = kwargs.get("model_type")
+        if self.model_type not in REGISTERED_MODELS:
+            raise ValueError(f"Model type {self.model_type} not registered.")
+        if self.model_type == "RNN":
+            self.input_shape = kwargs.get("input_shape")
+            self.output_shape = kwargs.get("output_shape")
+            self.rnn_hidden_dim = kwargs.get("rnn_hidden_dim")
+            self.rnn_layers = kwargs.get("rnn_layers", 1) # Default to 1 layer if not specified
 
     def __str__(self):
-        return f"ModelConfig(model_type={self.model_type}, num_layers={self.num_layers}, " \
-               f"hidden_size={self.hidden_size}, num_heads={self.num_heads}, dropout_rate={self.dropout_rate})"
+        discr = "{\n"
+        for key, value in self.__dict__.items():
+            discr += f"{key}: {value}, \n"
+        return discr + "}"
     
     def get_model(self):
-        model = REGISTERED_MODELS.get(self.model_type)
-        if model is None:
+        if self.model_type == "RNN":
+            model = RNNModel(self.input_shape, self.output_shape, self.rnn_hidden_dim, self.rnn_layers)
+        elif self.model_type == "Identity":
+            model = nn.Identity()
+        else:
             raise ValueError(f"Model type {self.model_type} not registered.")
-        return model(self.layers)
+        return model
