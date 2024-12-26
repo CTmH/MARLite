@@ -70,7 +70,7 @@ class QMIXAgentGroup(AgentGroup):
 
         return q_values
 
-    def act(self, observations, avail_actions, epsilon, eval_mode=True):
+    def act(self, observations, avail_actions, epsilon=0.0, eval_mode=True):
         """
         Select actions based on Q-values and exploration.
 

@@ -1,0 +1,48 @@
+from magent2.environments import adversarial_pursuit_v4
+from collections import deque
+from .parallel_env_wrapper import ParallelEnvWrapper
+
+class AdversarialPursuitPredator(ParallelEnvWrapper):
+    def __init__(self, **kwargs):
+        self.opponent_agent_group = kwargs.pop('opponent_agent_group', None)
+        self.opp_obs_queue_len = kwargs.pop('opp_obs_queue_len')
+        self.env = adversarial_pursuit_v4.parallel_env(**kwargs)
+
+        self.agents = [f'predator_{i}' for i in range(25)]
+        self.possible_agents = self.agents[:]
+        self.num_agents = len(self.agents)
+        self.max_num_agents = self.num_agents
+        self.observation_spaces = {agent: self.env.observation_space(agent) for agent in self.agents}
+        self.action_spaces = {agent: self.env.action_space(agent) for agent in self.agents}
+
+        self.opponent_observations = None
+        self.opponent_actions = None
+        self.opponent_agents = [f'prey_{i}' for i in range(50)]
+        self.opponent_observation_history = deque(maxlen=self.opp_obs_queue_len)  # Queue to store opponent's observationss
+
+    def step(self, actions):
+        opponent_avail_actions = {agent: self.env.action_spaces[agent] for agent in self.opponent_agents}
+        opp_obs = list(self.opponent_observation_history)
+        self.opponent_actions = self.opponent_agent_group.act(opp_obs, opponent_avail_actions, epsilon=0.0)
+        actions = {**actions, **self.opponent_actions}  # Combine actions with opponent's actions
+        observations, rewards, terminations, truncations, infos = self.env.step(actions)
+
+        self.opponent_observations = {agent: observations[agent] for agent in self.opponent_agents}
+        self.opponent_observation_history.append(self.opponent_observations)
+
+        agent_observations = {agent: observations[agent] for agent in self.agents}
+        agent_rewards = {agent: rewards[agent] for agent in self.agents}
+        agent_terminations = {agent: terminations[agent] for agent in self.agents}
+        agent_truncations = {agent: truncations[agent] for agent in self.agents}
+        agent_infos = {agent: infos[agent] for agent in self.agents}
+
+        return agent_observations, agent_rewards, agent_terminations, agent_truncations, agent_infos
+
+    def reset(self):
+        observations, info = self.env.reset()
+        self.opponent_observations = {agent: observations[agent] for agent in self.opponent_agents}
+        self.opponent_observation_history.clear()
+        self.opponent_observation_history.append(self.opponent_observations)
+        agent_observations = {agent: observations[agent] for agent in self.agents}
+        agent_info = {agent: info[agent] for agent in self.agents}
+        return agent_observations, agent_info

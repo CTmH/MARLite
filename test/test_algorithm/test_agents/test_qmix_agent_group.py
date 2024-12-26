@@ -58,11 +58,6 @@ class TestQMIXAgentGroup(unittest.TestCase):
                                           lr=1e-4,
                                           device='cpu')
         
-        # Mock observations and avail_actions
-        #self.observations = [torch.tensor([0.1, 0.2, 0.3]), torch.tensor([0.4, 0.5, 0.6])]
-        #self.avail_actions = [torch.tensor([1, 0, 1]), torch.tensor([1, 1, 0])]
-
-        
     def test_get_q_values(self):
         # Test get_q_values method in evaluation mode
         q_values = self.agent_group.get_q_values(observations=self.observations, eval_mode=True)
