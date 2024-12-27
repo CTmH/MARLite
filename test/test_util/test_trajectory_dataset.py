@@ -2,6 +2,7 @@ import unittest
 import numpy as np
 from pettingzoo.mpe import simple_spread_v3
 from torch.utils.data import DataLoader
+import torch
 
 from src.util.replay_buffer import ReplayBuffer
 from src.util.trajectory_dataset import TrajectoryDataset, TrajectoryDataLoader
@@ -31,18 +32,28 @@ class TestTrajectoryDataset(unittest.TestCase):
 
         # Model configuration
         self.model_layers = {
+            "model_type": "RNN",
             "input_shape": self.obs_shape,
             "rnn_hidden_dim": 128,
             "output_shape": self.action_space_shape
         }
 
         self.model_configs = {
-            "RNN0": ModelConfig(model_type="RNN",layers=self.model_layers),
-            "RNN1": ModelConfig(model_type="RNN",layers=self.model_layers)
+            "RNN0": ModelConfig(**self.model_layers),
+            "RNN1": ModelConfig(**self.model_layers)
+        }
+        self.feature_extractor_configs = {
+            "RNN0": ModelConfig(model_type="Identity"),
+            "RNN1": ModelConfig(model_type="Identity"),
         }
         
         # Initialize QMIXAgents
-        self.agent_group = QMIXAgentGroup(agents=self.agents, model_configs=self.model_configs, device='cpu')
+        self.agent_group = QMIXAgentGroup(agents=self.agents,
+                                          model_configs=self.model_configs,
+                                          feature_extractors=self.feature_extractor_configs,
+                                          optim=torch.optim.Adam,
+                                          lr=1e-4,
+                                          device='cpu')
         self.worker = RolloutWorker(env_config=self.env_config, agent_group=self.agent_group, rnn_traj_len=self.traj_len)
         self.buffer = ReplayBuffer(capacity=self.capacity, traj_len=self.traj_len)
         episode = self.worker.generate_episode(episode_limit=10, epsilon=0.5)
@@ -81,18 +92,28 @@ class TestTrajectoryDataloader(unittest.TestCase):
 
         # Model configuration
         self.model_layers = {
+            "model_type": "RNN",
             "input_shape": self.obs_shape,
             "rnn_hidden_dim": 128,
             "output_shape": self.action_space_shape
         }
 
         self.model_configs = {
-            "RNN0": ModelConfig(model_type="RNN",layers=self.model_layers),
-            "RNN1": ModelConfig(model_type="RNN",layers=self.model_layers)
+            "RNN0": ModelConfig(**self.model_layers),
+            "RNN1": ModelConfig(**self.model_layers)
         }
-        
+        self.feature_extractor_configs = {
+            "RNN0": ModelConfig(model_type="Identity"),
+            "RNN1": ModelConfig(model_type="Identity"),
+        }
+
         # Initialize QMIXAgents
-        self.agent_group = QMIXAgentGroup(agents=self.agents, model_configs=self.model_configs, device='cpu')
+        self.agent_group = QMIXAgentGroup(agents=self.agents,
+                                          model_configs=self.model_configs,
+                                          feature_extractors=self.feature_extractor_configs,
+                                          optim=torch.optim.Adam,
+                                          lr=1e-4,
+                                          device='cpu')
         self.worker = RolloutWorker(env_config=self.env_config, agent_group=self.agent_group, rnn_traj_len=self.traj_len)
         self.buffer = ReplayBuffer(capacity=self.capacity, traj_len=self.traj_len)
         episode = self.worker.generate_episode(episode_limit=10, epsilon=0.5)

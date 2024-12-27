@@ -26,28 +26,35 @@ class TestQMixTrainer(unittest.TestCase):
         # Environment setup and model configuration
         self.env_config = MPEEnvConfig(env_config_dic={})
         self.env = self.env_config.create_env()
-        self.env.reset()
+        obs, _ = self.env.reset()
         key = self.env.agents[0]
         self.obs_shape = self.env.observation_space(key).shape
         self.obs_shape = self.obs_shape[0]
-        self.state_shape = self.env.state().shape[0] # Assuming state is a single vector for simplicity
-        self.n_agents = len(self.env.agents) # Number of agents in the environment
         self.action_space_shape = self.env.action_space(key).n
         self.model_names = ["RNN0", "RNN0", "RNN1"]
         self.agents = {self.env.agents[i]: self.model_names[i] for i in range(len(self.env.agents))}
+        self.state_shape = self.env.state().shape
+        self.state_shape = self.state_shape[0]
+        self.n_agents = self.env.num_agents
         self.env.close()
 
         # Model configuration
         self.model_layers = {
+            "model_type": "RNN",
             "input_shape": self.obs_shape,
             "rnn_hidden_dim": 128,
             "output_shape": self.action_space_shape
         }
 
         self.model_configs = {
-            "RNN0": ModelConfig(model_type="RNN",layers=self.model_layers),
-            "RNN1": ModelConfig(model_type="RNN",layers=self.model_layers)
+            "RNN0": ModelConfig(**self.model_layers),
+            "RNN1": ModelConfig(**self.model_layers)
         }
+        self.feature_extractor_configs = {
+            "RNN0": ModelConfig(model_type="Identity"),
+            "RNN1": ModelConfig(model_type="Identity"),
+        }
+        self.critic_feature_extractors = ModelConfig(model_type="Identity")
 
         self.traj_len = 10
         self.num_workers = 4
@@ -67,6 +74,8 @@ class TestQMixTrainer(unittest.TestCase):
             self.agents,
             self.env_config,
             self.model_configs,
+            self.feature_extractor_configs,
+            self.critic_feature_extractors,
             self.epsilon_scheduler,
             self.sample_ratio_scheduler,
             self.critic_config,
@@ -91,18 +100,21 @@ class TestQMixTrainer(unittest.TestCase):
 
     def test_learn(self):
         n_episodes = 20
-        origin_agent_params = deepcopy(self.trainer.target_agent_group.get_model_params())
+        origin_agent_params, origin_agent_fe_params = deepcopy(self.trainer.target_agent_group.get_model_params())
         origin_critic_params = deepcopy(self.trainer.target_critic.state_dict())
         self.trainer.collect_experience(n_episodes, self.episode_limit, 0.9)
         self.trainer.learn(sample_size=320, batch_size=32, times=10)
         self.trainer.update_params()
-        agent_params = self.trainer.target_agent_group.get_model_params()
+        agent_params, agent_fe_params = self.trainer.target_agent_group.get_model_params()
         critic_params = self.trainer.target_critic.state_dict()
 
         for w1, w2 in zip(critic_params.values(), origin_critic_params.values()):
             self.assertFalse(torch.equal(w1, w2))
 
         for model1, model2 in zip(agent_params.values(), origin_agent_params.values()):
+            for w1, w2 in zip(model1.values(), model2.values()):
+                self.assertFalse(torch.equal(w1, w2))
+        for model1, model2 in zip(agent_fe_params.values(), origin_agent_fe_params.values()):
             for w1, w2 in zip(model1.values(), model2.values()):
                 self.assertFalse(torch.equal(w1, w2))
 
@@ -113,15 +125,21 @@ class TestQMixTrainer(unittest.TestCase):
 
     @patch('src.trainer.trainer.torch.save')
     def test_save_model(self, mock_torch_save):
-        filename = "test_model"
-        self.trainer.save_model(filename)
+        checkpoint = "test_model"
+        self.trainer.save_model(checkpoint)
         call_list = []
         # Check actor models
-        for model_name, params in self.trainer.target_agent_group.get_model_params().items():
-            actor_path = os.path.join(self.trainer.modeldir, f'actor_{model_name}_{filename}.pth')
+        agent_params, agent_fe_params = self.trainer.target_agent_group.get_model_params()
+        for model_name, params in agent_params.items():
+            actor_path = os.path.join(self.trainer.agentsdir, model_name, 'model',f'{checkpoint}.pth')
+            call_list.append(call(params, actor_path))
+        for model_name, params in agent_fe_params.items():
+            actor_path = os.path.join(self.trainer.agentsdir, model_name, 'feature_extractor',f'{checkpoint}.pth')
             call_list.append(call(params, actor_path))
         # Check critic models
-        critic_path = os.path.join(self.trainer.modeldir, f'critic_{filename}.pth')
+        critic_path = os.path.join(self.trainer.criticdir, 'model', f'{checkpoint}.pth')
+        call_list.append(call(self.trainer.target_critic.state_dict(), critic_path))
+        critic_path = os.path.join(self.trainer.criticdir, 'feature_extractor', f'{checkpoint}.pth')
         call_list.append(call(self.trainer.target_critic.state_dict(), critic_path))
         #mock_torch_save.assert_has_calls(call_list)
         self.assertEqual(mock_torch_save.call_count, len(call_list))

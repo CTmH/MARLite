@@ -23,6 +23,8 @@ class Trainer():
                  agents: Dict[str, str], 
                  env_config: EnvConfig, 
                  model_configs: ModelConfig,
+                 agent_feature_extractors: Dict[str, ModelConfig],
+                 critic_feature_extractors: ModelConfig,
                  epsilon_scheduler: Scheduler,
                  sample_ratio_scheduler: Scheduler,
                  critic_config: Dict[str, any],
@@ -40,6 +42,8 @@ class Trainer():
         
         self.env_config = env_config
         self.model_configs = model_configs
+        self.agent_feature_extractors = agent_feature_extractors
+        self.critic_config = critic_config
         self.traj_len = traj_len
         self.n_workers = n_workers
         self.episode_limit = episode_limit
@@ -48,14 +52,15 @@ class Trainer():
         self.device = device
         self.replay_buffer = ReplayBuffer(capacity=buffer_capacity, traj_len=self.traj_len)
         self.agents = agents
-        self.target_agent_group = AgentGroup(agents=self.agents, model_configs=self.model_configs, device=self.device)
-        # Set the same parameters for evaluation agents as target agents.
-        self.target_models_params = self.target_agent_group.get_model_params()
-        self.eval_agent_group = deepcopy(self.target_agent_group)  # Deep copy the target agent group to create evaluation agents.
+        self.target_agent_group = None
+        self.eval_agent_group = None
         # Critic
         self.target_critic = torch.nn.Module()
         self.eval_critic = torch.nn.Module()
         self.target_critic_params = deepcopy(self.target_critic.state_dict())
+        self.target_critic_feature_extractors = critic_feature_extractors.get_model()
+        self.eval_critic_feature_extractors = deepcopy(self.target_critic_feature_extractors)
+        self.critic_feature_extractors_params = deepcopy(self.target_critic_feature_extractors.state_dict())
         self.optimizer = None
         self.epsilon = epsilon_scheduler
         self.gamma = gamma
@@ -65,6 +70,8 @@ class Trainer():
         os.makedirs(self.workdir, exist_ok=True)
         self.logdir = os.path.join(workdir, 'logs')
         self.modeldir = os.path.join(workdir, 'models')
+        self.agentsdir = os.path.join(self.modeldir, 'agents')
+        self.criticdir = os.path.join(self.modeldir, 'critic')
         self.results = {}  # Dictionary to save intermediate results
         os.makedirs(self.logdir, exist_ok=True)
         os.makedirs(self.modeldir, exist_ok=True)
@@ -78,32 +85,65 @@ class Trainer():
     def learn(self, sample_size, batch_size: int, times: int):
         raise NotImplementedError
     
-    def save_model(self, filename: str):
-        for model_name, params in self.target_agent_group.get_model_params().items():
-            actor_path = os.path.join(self.modeldir, f'actor_{model_name}_{filename}.pth')
-            torch.save(params, actor_path)
-            logging.info(f"Actor model {model_name} saved to {actor_path}")
+    def save_model(self, checkpoint: str):
+        agent_model_params, agent_feature_extractor_params = self.target_agent_group.get_model_params()
+        for model_name, params in agent_model_params.items():
+            model_path = os.path.join(self.agentsdir, model_name, 'model',f'{checkpoint}.pth')
+            torch.save(params, model_path)
+            logging.info(f"Actor {model_name} saved to {model_path}")
 
-        critic_path = os.path.join(self.modeldir, f'critic_{filename}.pth')
+        for model_name, params in agent_feature_extractor_params.items():
+            model_path = os.path.join(self.agentsdir, model_name, 'feature_extractor',f'{checkpoint}.pth')
+            torch.save(params, model_path)
+            logging.info(f"{model_name}'s feature extractor saved to {model_path}")
+
+        critic_path = os.path.join(self.criticdir, 'model', f'{checkpoint}.pth')
         torch.save(self.target_critic.state_dict(), critic_path)
         logging.info(f"Critic model saved to {critic_path}")
-    
-    def load_model(self, filename: str):
-        actor_params = {}
-        for model_name in self.target_agent_group.models.keys():
-            actor_path = os.path.join(self.modeldir, f'actor_{model_name}_{filename}.pth')
-            params = torch.load(actor_path)
-            actor_params[model_name] = params
-            logging.info(f"Actor model {model_name} loaded from {actor_path}")
-        
-        self.target_agent_group.set_model_params(actor_params)
-        self.eval_agent_group.set_model_params(actor_params)
-        logging.info(f"All actor model set")
 
-        critic_path = os.path.join(self.modeldir, f'critic_{filename}.pth')
-        self.target_critic.load_state_dict(torch.load(critic_path))
-        self.eval_critic.load_state_dict(torch.load(critic_path))
-        logging.info(f"Critic model loaded from {critic_path}")
+        critic_fe_path = os.path.join(self.criticdir, 'feature_extractor', f'{checkpoint}.pth')
+        torch.save(self.target_critic_feature_extractors.state_dict(), critic_fe_path)
+        logging.info(f"Critic's feature extractor saved to {critic_path}")
+
+    def load_model(self, checkpoint: str):
+        agent_model_params = {}
+        agent_feature_extractor_params = {}
+        for model_name in self.target_agent_group.models.keys():
+            model_path = os.path.join(self.agentsdir, model_name, 'model', f'{checkpoint}.pth')
+            if os.path.exists(model_path):
+                params = torch.load(model_path)
+                agent_model_params[model_name] = params
+                logging.info(f"Actor {model_name} loaded from {model_path}")
+            else:
+                logging.warning(f"Model path for actor {model_name} does not exist: {model_path}")
+
+            fe_path = os.path.join(self.agentsdir, model_name, 'feature_extractor', f'{checkpoint}.pth')
+            if os.path.exists(fe_path):
+                params = torch.load(fe_path)
+                agent_feature_extractor_params[model_name] = params
+                logging.info(f"{model_name}'s feature extractor loaded from {fe_path}")
+            else:
+                logging.warning(f"Feature extractor path for actor {model_name} does not exist: {fe_path}")
+        self.target_agent_group.set_model_params(agent_model_params, agent_feature_extractor_params)
+        logging.info("All actor models and feature extractors loaded successfully.")
+
+        critic_path = os.path.join(self.criticdir, 'model', f'{checkpoint}.pth')
+        if os.path.exists(critic_path):
+            self.target_critic.load_state_dict(torch.load(critic_path))
+            logging.info(f"Critic model loaded from {critic_path}")
+        else:
+            logging.warning(f"Critic model path does not exist: {critic_path}")
+
+        critic_fe_path = os.path.join(self.criticdir, 'feature_extractor', f'{checkpoint}.pth')
+        if os.path.exists(critic_fe_path):
+            self.target_critic_feature_extractors.load_state_dict(torch.load(critic_fe_path))
+            logging.info(f"Critic's feature extractor loaded from {critic_fe_path}")
+        else:
+            logging.warning(f"Critic's feature extractor path does not exist: {critic_fe_path}")
+
+        self.update_params()
+
+        return self
 
     def collect_experience(self, n_episodes: int, episode_limit: int, epsilon: int):
         """
@@ -123,14 +163,14 @@ class Trainer():
 
     def update_params(self):
         # Update the evaluation models with the latest weights from the training models
-        self.target_models_params = self.target_agent_group.get_model_params()
-        self.eval_agent_group.set_model_params(self.target_models_params)
+        self.target_agent_model_params, self.target_agent_fe_params = self.target_agent_group.get_model_params()
+        self.eval_agent_group.set_model_params(self.target_agent_model_params, self.target_agent_fe_params)
         self.target_critic_params = deepcopy(self.target_critic.state_dict())  # Update critic parameters
         self.eval_critic.load_state_dict(self.target_critic_params)
 
     def evaluate(self, times=100):
         job = RolloutWorker(env_config=self.env_config,
-                                 agent_group=self.eval_agent_group,
+                                 agent_group=self.target_agent_group,
                                  rnn_traj_len=self.traj_len)
         
         logging.info(f"Evaluating for {times} episodes")
@@ -151,7 +191,7 @@ class Trainer():
         # Training loop
         for epoch in range(self.epochs):
 
-            self.target_agent_group.set_model_params(self.target_models_params)
+            self.target_agent_group.set_model_params(self.target_agent_model_params, self.target_agent_fe_params)
             self.target_critic.load_state_dict(self.target_critic_params)
 
             logging.info(f"Epoch {epoch}: Collecting experiences")

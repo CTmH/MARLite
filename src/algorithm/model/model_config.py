@@ -1,23 +1,21 @@
 from .rnn import RNNModel
 from .custom_model import CustomModel
+from .flatten import Flatten
 import torch.nn as nn
 
 REGISTERED_MODELS = {
     "RNN": RNNModel,
     "Identity": nn.Identity,
+    "Flatten": Flatten,
     "Custom": CustomModel,
 }
 
 class ModelConfig:
     def __init__(self, **kwargs):
-        self.model_type = kwargs.get("model_type")
+        self.model_type = kwargs.pop("model_type")
+        self.model_config = kwargs
         if self.model_type not in REGISTERED_MODELS:
             raise ValueError(f"Model type {self.model_type} not registered.")
-        if self.model_type == "RNN":
-            self.input_shape = kwargs.get("input_shape")
-            self.output_shape = kwargs.get("output_shape")
-            self.rnn_hidden_dim = kwargs.get("rnn_hidden_dim")
-            self.rnn_layers = kwargs.get("rnn_layers", 1) # Default to 1 layer if not specified
 
     def __str__(self):
         discr = "{\n"
@@ -27,9 +25,11 @@ class ModelConfig:
     
     def get_model(self):
         if self.model_type == "RNN":
-            model = RNNModel(self.input_shape, self.output_shape, self.rnn_hidden_dim, self.rnn_layers)
+            model = RNNModel(**self.model_config)
         elif self.model_type == "Identity":
             model = nn.Identity()
+        elif self.model_type == "Flatten":
+            model = Flatten()
         else:
             raise ValueError(f"Model type {self.model_type} not registered.")
         return model

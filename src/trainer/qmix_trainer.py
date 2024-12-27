@@ -14,6 +14,8 @@ class QMIXTrainer(Trainer):
                  agents, 
                  env_config, 
                  model_configs,
+                 agent_feature_extractors,
+                 critic_feature_extractors,
                  epsilon_scheduler,
                  sample_ratio_scheduler,
                  critic_config,
@@ -31,6 +33,8 @@ class QMIXTrainer(Trainer):
         super().__init__(agents, 
                          env_config, 
                          model_configs,
+                         agent_feature_extractors,
+                         critic_feature_extractors,
                          epsilon_scheduler,
                          sample_ratio_scheduler,
                          critic_config,
@@ -45,18 +49,20 @@ class QMIXTrainer(Trainer):
                          critic_optimizer,
                          workdir,
                          device)
+        # TODO: make target agent group optimizer configurable
         self.target_agent_group = QMIXAgentGroup(agents=self.agents,
                                                  model_configs=self.model_configs,
+                                                 feature_extractors=self.agent_feature_extractors,
+                                                 optim=torch.optim.Adam,
                                                  device=self.device)
         self.eval_agent_group = deepcopy(self.target_agent_group)
-        self.target_models_params = self.target_agent_group.get_model_params()
-        self.target_critic = QMIXCritic(critic_config['state_shape'],
-                                        critic_config['input_dim'],
-                                        critic_config['qmix_hidden_dim'],
-                                        critic_config['hyper_hidden_dim'])
+        self.target_agent_model_params, self.target_agent_fe_params = self.target_agent_group.get_model_params() # Tuple(model_params, feature_extractor_params)
+        self.target_critic = QMIXCritic(**self.critic_config)
         self.eval_critic = deepcopy(self.target_critic)
-        self.optimizer = critic_optimizer(self.target_critic.parameters(), lr=critic_lr)
         self.target_critic_params = deepcopy(self.target_critic.state_dict())
+        optim_params = [{'params': self.target_critic.parameters()},
+                        {'params': self.target_critic_feature_extractors.parameters()}]
+        self.optimizer = critic_optimizer(optim_params, lr=critic_lr)
 
     def learn(self, sample_size, batch_size: int, times: int = 1):
         for t in range(times):
@@ -66,7 +72,7 @@ class QMIXTrainer(Trainer):
             dataloader = TrajectoryDataLoader(dataset, batch_size=batch_size, shuffle=True)
             for batch in dataloader:
                 #observations, states, actions, rewards, next_state, next_observations, terminations = self.extract_batch(batch)
-                observations, states, actions, rewards, next_state, next_observations, terminations = batch
+                observations, states, actions, rewards, next_states, next_observations, terminations = batch
                 bs = states.shape[0]  # Actual batch size
                 # Compute the Q-tot
                 q_val = [None for _ in range(len(self.agents))]
@@ -97,8 +103,10 @@ class QMIXTrainer(Trainer):
                 q_val = q_val.permute(1, 0, 2)  # (B, N, Action Space)
 
                 states = torch.Tensor(states[:,-1,:]) # (B, T, F) -> (B, F) Take only the last state in the sequence
+                self.target_critic_feature_extractors.train().to(self.device)
                 self.target_critic.train().to(self.device)
-                q_tot = self.target_critic(q_val, states)
+                state_features = self.target_critic_feature_extractors(states)
+                q_tot = self.target_critic(q_val, state_features)
 
                 # Compute TD targets
                 q_val = [None for _ in range(len(self.agents))]
@@ -128,9 +136,11 @@ class QMIXTrainer(Trainer):
                 q_val = torch.stack(q_val) # (N, B, Action Space)
                 q_val = q_val.permute(1, 0, 2)  # (B, N, Action Space)
 
-                next_state = torch.Tensor(next_state[:,-1,:]) # (B, T, F) -> (B, F) Take only the last state in the sequence
+                next_states = torch.Tensor(next_states[:,-1,:]) # (B, T, F) -> (B, F) Take only the last state in the sequence
+                self.eval_critic_feature_extractors.eval().to(self.device)
                 self.eval_critic.eval().to(self.device)
-                q_tot_next = self.eval_critic(q_val, next_state)
+                next_state_features = self.eval_critic_feature_extractors(next_states)
+                q_tot_next = self.eval_critic(q_val, next_state_features)
 
                 # Compute the TD target
                 rewards = torch.Tensor(rewards[:,:,-1]) # (B, N, T) -> (B, N)

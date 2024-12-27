@@ -20,7 +20,7 @@ class TestReplayBuffer(unittest.TestCase):
         # Environment setup and model configuration
         self.env_config = MPEEnvConfig(env_config_dic={})
         # Environment setup and model configuration
-        self.env = simple_spread_v3.parallel_env(render_mode="human")
+        self.env = simple_spread_v3.parallel_env(render_mode="rgb_array")
         obs, _ = self.env.reset()
         key = self.env.agents[0]
         self.obs_shape = self.env.observation_space(key).shape

@@ -12,6 +12,7 @@ model_configs:
     model_type: "RNN"
     input_shape: 
     rnn_hidden_dim: 128
+    rnn_layers: 1
     output_shape: 
     feature_extractor:
       model_type: "Identity"
@@ -27,8 +28,13 @@ sample_ratio_scheduler:
   end_value: 0.3
 
 critic_config:
+  critic_type: "QMIX"
+  state_shape:
+  input_dim:
   qmix_hidden_dim: 128
   hyper_hidden_dim: 64
+  feature_extractor:
+    model_type: "Identity"
 
 rolloutworker_config:
   traj_len: 5
@@ -38,7 +44,6 @@ rolloutworker_config:
 
 buffer_config:
   capacity: 50000
-
 
 trainer_config:
   gamma: 0.99

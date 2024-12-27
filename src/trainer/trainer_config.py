@@ -1,7 +1,9 @@
 import yaml
 import torch
 import numpy as np
+from copy import deepcopy
 from ..algorithm.model.model_config import ModelConfig
+from ..algorithm.critic.critic_config import CriticConfig
 from ..environment.env_config import EnvConfig
 from ..util.scheduler import Scheduler
 from .trainer import Trainer
@@ -38,7 +40,6 @@ def load_config_from_yaml(config_path):
     agent_list = env.agents
     key = env.agents[0]
     # TODO: Add CNN for observation and state
-    obs_shape = np.prod(env.observation_space(key).shape)
     state_shape = env.state().shape
     n_agents = len(env.agents) # Number of agents in the environment
     action_space_shape = env.action_space(key).n.item()
@@ -49,14 +50,25 @@ def load_config_from_yaml(config_path):
     model_configs = {}
     feature_extractor_configs = {}
     for model in config['model_configs']:
-        model_configs[model] = ModelConfig(**config['model_configs'][model])
-        feature_extractor_configs[model] = ModelConfig(**config['model_configs'][model]['feature_extractor'])
+        conf = deepcopy(config['model_configs'][model])
+        if 'feature_extractor' in conf:  # Check if feature extractor is defined in the model configuration. If not, use Identity as default.
+            fe_conf = conf.pop('feature_extractor')
+        else:
+            fe_conf = {'model_type': 'Identity'}
+        model_configs[model] = ModelConfig(**conf)
+        feature_extractor_configs[model] = ModelConfig(**fe_conf)
     
     # Critic configuration
-    critic_config = config['critic_config']
-    critic_config['state_shape'] = state_shape
-    critic_config['input_dim'] = n_agents * action_space_shape
-    
+    critic_config = deepcopy(config['critic_config'])
+    if 'feature_extractor' in critic_config:  # Check if feature extractor is defined in the critic configuration. If not, use Identity as default.
+        fe_conf = critic_config.pop('feature_extractor')
+    else:
+        fe_conf = {'model_type': 'Identity'}
+    critic = CriticConfig(**critic_config)
+    critic = critic.get_critic()
+    critic_feature_extractor = ModelConfig(**fe_conf)
+    critic_feature_extractor = critic_feature_extractor.get_model()
+
     # Scheduler
     scheduler_config = config['epsilon_scheduler']
     scheduler_config['decay_steps'] = config['trainer_config']['epochs']

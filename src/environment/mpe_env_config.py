@@ -8,5 +8,5 @@ class MPEEnvConfig(EnvConfig):
         super().__init__(env_config_dic)
 
     def create_env(self) -> ParallelEnv:
-        env = simple_spread_v3.parallel_env()
+        env = simple_spread_v3.parallel_env(render_mode="rgb_array")
         return env
