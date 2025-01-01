@@ -14,57 +14,60 @@ from ..algorithm.model import ModelConfig
 from ..rolloutworker.rolloutworker import RolloutWorker
 from ..util.replay_buffer import ReplayBuffer
 from ..util.scheduler import Scheduler
+from ..algorithm.agents.agent_group_config import AgentGroupConfig
+from ..algorithm.critic.critic_config import CriticConfig
+from ..util.optimizer_config import OptimizerConfig
 
 def get_episode(worker, episode_limit, epsilon):
     return worker.generate_episode(episode_limit, epsilon)
 
 class Trainer():
     def __init__(self, 
-                 agents: Dict[str, str], 
                  env_config: EnvConfig, 
-                 model_configs: ModelConfig,
-                 agent_feature_extractors: Dict[str, ModelConfig],
-                 critic_feature_extractors: ModelConfig,
+                 agent_group_config: AgentGroupConfig,
+                 critic_config: CriticConfig,
                  epsilon_scheduler: Scheduler,
                  sample_ratio_scheduler: Scheduler,
-                 critic_config: Dict[str, any],
-                 traj_len: int, 
-                 n_workers: int, 
+                 critic_optimizer_config: OptimizerConfig, 
+                 traj_len: int,
+                 n_workers: int,
                  epochs = 10000,
                  buffer_capacity: int = 50000,
                  episode_limit: int = 500,
                  n_episodes: int = 1000,
                  gamma: float = 0.9,
-                 critic_lr: float = 0.01,
-                 critic_optimizer = torch.optim.Adam,
                  workdir: str = "",
-                 device: str = 'cpu'):
+                 train_device: str = 'cpu',
+                 eval_device: str = 'cpu'):
         
         self.env_config = env_config
-        self.model_configs = model_configs
-        self.agent_feature_extractors = agent_feature_extractors
         self.critic_config = critic_config
         self.traj_len = traj_len
         self.n_workers = n_workers
         self.episode_limit = episode_limit
         self.epochs = epochs
         self.sample_ratio = sample_ratio_scheduler
-        self.device = device
+        self.train_device = train_device
+        self.eval_device = eval_device
         self.replay_buffer = ReplayBuffer(capacity=buffer_capacity, traj_len=self.traj_len)
-        self.agents = agents
-        self.target_agent_group = None
-        self.eval_agent_group = None
-        # Critic
-        self.target_critic = torch.nn.Module()
-        self.eval_critic = torch.nn.Module()
-        self.target_critic_params = deepcopy(self.target_critic.state_dict())
-        self.target_critic_feature_extractors = critic_feature_extractors.get_model()
-        self.eval_critic_feature_extractors = deepcopy(self.target_critic_feature_extractors)
-        self.critic_feature_extractors_params = deepcopy(self.target_critic_feature_extractors.state_dict())
-        self.optimizer = None
         self.epsilon = epsilon_scheduler
         self.gamma = gamma
         self.n_episodes = n_episodes
+
+        # Agent group
+        self.target_agent_group = agent_group_config.get_agent_group()
+        self.eval_agent_group = agent_group_config.get_agent_group()
+        self.target_agent_model_params, self.target_agent_fe_params = self.target_agent_group.get_model_params()
+        self.eval_agent_group.set_model_params(model_params=self.target_agent_model_params, fe_params=self.target_agent_fe_params)  # Load the model parameters to eval agent group
+        self.agents = self.target_agent_group.agents
+        
+        # Critic
+        self.target_critic = critic_config.get_critic()
+        self.eval_critic = critic_config.get_critic()
+        self.target_critic_params = deepcopy(self.target_critic.state_dict())
+        self.eval_critic.load_state_dict(self.target_critic_params)
+        self.optimizer = critic_optimizer_config.get_optimizer(self.target_critic.parameters())
+
         # Work directory
         self.workdir = workdir
         os.makedirs(self.workdir, exist_ok=True)
@@ -101,10 +104,6 @@ class Trainer():
         torch.save(self.target_critic.state_dict(), critic_path)
         logging.info(f"Critic model saved to {critic_path}")
 
-        critic_fe_path = os.path.join(self.criticdir, 'feature_extractor', f'{checkpoint}.pth')
-        torch.save(self.target_critic_feature_extractors.state_dict(), critic_fe_path)
-        logging.info(f"Critic's feature extractor saved to {critic_path}")
-
     def load_model(self, checkpoint: str):
         agent_model_params = {}
         agent_feature_extractor_params = {}
@@ -134,13 +133,6 @@ class Trainer():
         else:
             logging.warning(f"Critic model path does not exist: {critic_path}")
 
-        critic_fe_path = os.path.join(self.criticdir, 'feature_extractor', f'{checkpoint}.pth')
-        if os.path.exists(critic_fe_path):
-            self.target_critic_feature_extractors.load_state_dict(torch.load(critic_fe_path))
-            logging.info(f"Critic's feature extractor loaded from {critic_fe_path}")
-        else:
-            logging.warning(f"Critic's feature extractor path does not exist: {critic_fe_path}")
-
         self.update_params()
 
         return self
@@ -151,7 +143,8 @@ class Trainer():
         """
         job = RolloutWorker(env_config=self.env_config,
                             agent_group=self.eval_agent_group,
-                            rnn_traj_len=self.traj_len)
+                            rnn_traj_len=self.traj_len,
+                            device=self.eval_device)
         
         logging.info(f"Collecting {n_episodes} episodes with limit {episode_limit} and epsilon {epsilon}")
         episodes = [job.generate_episode(episode_limit, epsilon) for _ in range(n_episodes)]
@@ -170,8 +163,9 @@ class Trainer():
 
     def evaluate(self, times=100):
         job = RolloutWorker(env_config=self.env_config,
-                                 agent_group=self.target_agent_group,
-                                 rnn_traj_len=self.traj_len)
+                            agent_group=self.eval_agent_group,
+                            rnn_traj_len=self.traj_len,
+                            device=self.eval_device)
         
         logging.info(f"Evaluating for {times} episodes")
         episodes = [job.generate_episode(self.episode_limit, epsilon=0.0) for _ in range(times)]

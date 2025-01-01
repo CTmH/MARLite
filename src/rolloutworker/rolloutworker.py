@@ -6,14 +6,17 @@ from ..algorithm.agents import AgentGroup
 from ..algorithm.model import RNNModel
 
 class RolloutWorker():
-    def __init__(self, env_config: EnvConfig, agent_group: AgentGroup, rnn_traj_len=5):
+    def __init__(self, env_config: EnvConfig, agent_group: AgentGroup, rnn_traj_len=5, device='cpu'):
         super(RolloutWorker, self).__init__()
         self.env_config = env_config
         self.agent_group = agent_group
         self.rnn_traj_len = rnn_traj_len
         self.env = self.env_config.create_env()
+        self.device = device
 
     def generate_episode(self, episode_limit=None, epsilon=0.5):
+
+        self.agent_group.eval().to(self.device)
 
         # Initialize the episode dictionary
         episode = {

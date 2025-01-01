@@ -53,7 +53,7 @@ class TestQMIXAgentGroup(unittest.TestCase):
         # Initialize QMIXAgents
         self.agent_group = QMIXAgentGroup(agents=self.agents,
                                           model_configs=self.model_configs,
-                                          feature_extractors=self.feature_extractor_configs,
+                                          feature_extractors_configs=self.feature_extractor_configs,
                                           optim=torch.optim.Adam,
                                           lr=1e-4,
                                           device='cpu')

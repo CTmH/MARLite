@@ -5,7 +5,7 @@ from torch.utils.data import DataLoader
 from .trainer import Trainer
 from ..algorithm.model import RNNModel
 from ..algorithm.agents import QMIXAgentGroup
-from ..algorithm.critic.qmix_critic import QMIXCritic
+from ..algorithm.critic.qmix_critic_model import QMIXCriticModel
 from ..util.trajectory_dataset import TrajectoryDataLoader
 from ..util.scheduler import Scheduler
 
@@ -15,10 +15,10 @@ class QMIXTrainer(Trainer):
                  env_config, 
                  model_configs,
                  agent_feature_extractors,
-                 critic_feature_extractors,
+                 critic_config,
+                 critic_feature_extractor,
                  epsilon_scheduler,
                  sample_ratio_scheduler,
-                 critic_config,
                  traj_len: int, 
                  n_workers: int, 
                  epochs,
@@ -29,15 +29,16 @@ class QMIXTrainer(Trainer):
                  critic_lr,
                  critic_optimizer,
                  workdir,
-                 device):
+                 train_device,
+                 eval_device):
         super().__init__(agents, 
                          env_config, 
                          model_configs,
                          agent_feature_extractors,
-                         critic_feature_extractors,
+                         critic_config,
+                         critic_feature_extractor,
                          epsilon_scheduler,
                          sample_ratio_scheduler,
-                         critic_config,
                          traj_len, 
                          n_workers, 
                          epochs,
@@ -48,21 +49,8 @@ class QMIXTrainer(Trainer):
                          critic_lr,
                          critic_optimizer,
                          workdir,
-                         device)
-        # TODO: make target agent group optimizer configurable
-        self.target_agent_group = QMIXAgentGroup(agents=self.agents,
-                                                 model_configs=self.model_configs,
-                                                 feature_extractors=self.agent_feature_extractors,
-                                                 optim=torch.optim.Adam,
-                                                 device=self.device)
-        self.eval_agent_group = deepcopy(self.target_agent_group)
-        self.target_agent_model_params, self.target_agent_fe_params = self.target_agent_group.get_model_params() # Tuple(model_params, feature_extractor_params)
-        self.target_critic = QMIXCritic(**self.critic_config)
-        self.eval_critic = deepcopy(self.target_critic)
-        self.target_critic_params = deepcopy(self.target_critic.state_dict())
-        optim_params = [{'params': self.target_critic.parameters()},
-                        {'params': self.target_critic_feature_extractors.parameters()}]
-        self.optimizer = critic_optimizer(optim_params, lr=critic_lr)
+                         train_device,
+                         eval_device)
 
     def learn(self, sample_size, batch_size: int, times: int = 1):
         for t in range(times):
@@ -71,12 +59,14 @@ class QMIXTrainer(Trainer):
             dataset = self.replay_buffer.sample(sample_size)
             dataloader = TrajectoryDataLoader(dataset, batch_size=batch_size, shuffle=True)
             for batch in dataloader:
-                #observations, states, actions, rewards, next_state, next_observations, terminations = self.extract_batch(batch)
+                # Extract batch data
                 observations, states, actions, rewards, next_states, next_observations, terminations = batch
                 bs = states.shape[0]  # Actual batch size
                 # Compute the Q-tot
                 q_val = [None for _ in range(len(self.agents))]
-                for model_name, model in self.target_agent_group.models.items():
+                self.target_agent_group.train().to(self.train_device)
+                for (model_name, model), (_, fe) in zip(self.target_agent_group.models.items(), 
+                                                        self.target_agent_group.feature_extractors.items()):
                     selected_agents = self.target_agent_group.model_to_agents[model_name]
                     idx = self.target_agent_group.model_to_agent_indices[model_name]
                     # observation shape: (Batch Size, Agent Number, Time Step, Feature Dimensions) (B, N, T, F)
@@ -84,14 +74,13 @@ class QMIXTrainer(Trainer):
                     obs = torch.Tensor(obs)
                     # (B, N, T, F) -> (B*N, T, F)
                     obs = obs.reshape(obs.shape[0] * obs.shape[1], obs.shape[2], obs.shape[3])
-                    obs = obs.to(self.device)  # Convert to tensor and move to device
-                    model.train().to(self.device)
+                    obs = obs.to(self.train_device)  # Convert to tensor and move to device
                     if isinstance(model, RNNModel):
                         h = [model.init_hidden() for _ in range(obs.shape[0])]
-                        h = torch.stack(h).to(self.device)
+                        h = torch.stack(h).to(self.train_device)
                         h = h.permute(1, 0, 2)
-                        model.train().to(self.device)
-                        q_selected, _ = model(obs, h)
+                        obs_vectorized = fe(obs)
+                        q_selected, _ = model(obs_vectorized, h)
                         q_selected = q_selected[:,-1,:] # get the last output 
                     # TODO: Add code for handling other types of models (e.g., CNNs)
                     q_selected = q_selected.reshape(bs, len(selected_agents), -1) # (B, N, Action Space)
@@ -99,18 +88,18 @@ class QMIXTrainer(Trainer):
                     for i, q in zip(idx, q_selected):
                         q_val[i] = q
                 
-                q_val = torch.stack(q_val) # (N, B, Action Space)
+                q_val = torch.stack(q_val).to(self.train_device) # (N, B, Action Space)
                 q_val = q_val.permute(1, 0, 2)  # (B, N, Action Space)
 
-                states = torch.Tensor(states[:,-1,:]) # (B, T, F) -> (B, F) Take only the last state in the sequence
-                self.target_critic_feature_extractors.train().to(self.device)
-                self.target_critic.train().to(self.device)
-                state_features = self.target_critic_feature_extractors(states)
-                q_tot = self.target_critic(q_val, state_features)
+                states = torch.Tensor(states[:,-1,:]).to(self.train_device) # (B, T, F) -> (B, F) Take only the last state in the sequence
+                self.target_critic.train().to(self.train_device)
+                q_tot = self.target_critic(q_val, states)
 
                 # Compute TD targets
                 q_val = [None for _ in range(len(self.agents))]
-                for model_name, model in self.eval_agent_group.models.items():
+                self.eval_agent_group.eval().to(self.train_device)
+                for (model_name, model), (_, fe) in zip(self.eval_agent_group.models.items(), 
+                                                        self.eval_agent_group.feature_extractors.items()):
                     selected_agents = self.eval_agent_group.model_to_agents[model_name]
                     idx = self.eval_agent_group.model_to_agent_indices[model_name]
                     # observation shape: (Batch Size, Agent Number, Time Step, Feature Dimensions) (B, N, T, F)
@@ -118,14 +107,13 @@ class QMIXTrainer(Trainer):
                     obs = torch.Tensor(obs)
                     # (B, N, T, F) -> (B*N, T, F)
                     obs = obs.reshape(obs.shape[0] * obs.shape[1], obs.shape[2], obs.shape[3])
-                    obs = obs.to(self.device)  # Convert to tensor and move to device
-                    model.eval().to(self.device)
+                    obs = obs.to(self.train_device)  # Convert to tensor and move to device
                     if isinstance(model, RNNModel):
                         h = [model.init_hidden() for _ in range(obs.shape[0])]
-                        h = torch.stack(h).to(self.device)
+                        h = torch.stack(h).to(self.train_device)
                         h = h.permute(1, 0, 2)
-                        model.eval().to(self.device)
-                        q_selected, _ = model(obs, h)
+                        obs_vectorized = fe(obs)
+                        q_selected, _ = model(obs_vectorized, h)
                         q_selected = q_selected[:,-1,:] # get the last output 
                     # TODO: Add code for handling other types of models (e.g., CNNs)
                     q_selected = q_selected.reshape(bs, len(selected_agents), -1) # (B, N, Action Space)
@@ -133,19 +121,17 @@ class QMIXTrainer(Trainer):
                     for i, q in zip(idx, q_selected):
                         q_val[i] = q
 
-                q_val = torch.stack(q_val) # (N, B, Action Space)
+                q_val = torch.stack(q_val).to(self.train_device) # (N, B, Action Space)
                 q_val = q_val.permute(1, 0, 2)  # (B, N, Action Space)
 
-                next_states = torch.Tensor(next_states[:,-1,:]) # (B, T, F) -> (B, F) Take only the last state in the sequence
-                self.eval_critic_feature_extractors.eval().to(self.device)
-                self.eval_critic.eval().to(self.device)
-                next_state_features = self.eval_critic_feature_extractors(next_states)
-                q_tot_next = self.eval_critic(q_val, next_state_features)
+                next_states = torch.Tensor(next_states[:,-1,:]).to(self.train_device) # (B, T, F) -> (B, F) Take only the last state in the sequence
+                self.eval_critic.eval().to(self.train_device)
+                q_tot_next = self.eval_critic(q_val, next_states)
 
                 # Compute the TD target
-                rewards = torch.Tensor(rewards[:,:,-1]) # (B, N, T) -> (B, N)
+                rewards = torch.Tensor(rewards[:,:,-1]).to(self.train_device) # (B, N, T) -> (B, N)
                 rewards = rewards.sum(dim=1) # (B, N) -> (B) Sum over all agents rewards
-                terminations = torch.Tensor(terminations[:,:,-1]) # (B, N, T) -> (B, N)
+                terminations = torch.Tensor(terminations[:,:,-1]).to(self.train_device) # (B, N, T) -> (B, N)
                 terminations = terminations.prod(dim=1) # (B, N) -> (B) if all agents are terminated then game over
 
                 q_tot_next = rewards + (1 - terminations) * self.gamma * q_tot_next

@@ -1,20 +1,45 @@
+import numpy as np
+import torch
+from torch.optim import Optimizer
+from copy import deepcopy
+from typing import Dict
 from torch import Tensor
 from torch import bernoulli, ones, argmax, stack
-
+from ..model.model_config import ModelConfig
+from ..model import RNNModel
 from .agent_group import AgentGroup
 from ..model import RNNModel
+from src.util.optimizer_config import OptimizerConfig
 
 class QMIXAgentGroup(AgentGroup):
     def __init__(self, 
-                agents, 
-                model_configs,
-                feature_extractors,
-                optim,
-                lr: float = 1e-3,
-                device: str = 'cpu') -> None:
-        super().__init__(agents, model_configs, feature_extractors, optim, lr, device)
+                agents: Dict[str, str], 
+                model_configs: Dict[str, ModelConfig],
+                feature_extractors_configs: Dict[str, ModelConfig],
+                optimizer_config: OptimizerConfig,
+                device = 'cpu') -> None:
+        super().__init__()
+        self.device = device
+        self.agents = agents
+        self.models = {model_name: config.get_model() for model_name, config in model_configs.items()}
+        self.feature_extractors = {model_name: config.get_model() for model_name, config in feature_extractors_configs.items()}
+        params_to_optimize = [{'params': model.parameters()} for model in self.models.values()]
+        params_to_optimize += [{'params': extractor.parameters()} for extractor in self.feature_extractors.values()]
+        self.optimizer = optimizer_config.get_optimizer(params_to_optimize)
 
-    def get_q_values(self, observations, eval_mode=True):
+        # Initialize model_to_agent dictionary and model_to_agent_indices dictionary
+        self.model_to_agents = {model_name:[] for model_name in model_configs.keys()}
+        self.model_to_agent_indices = {model_name:[] for model_name in model_configs.keys()}
+        for i, (agent_name, model_name) in enumerate(self.agents.items()):
+            assert model_name in self.model_to_agents.keys(), f"Model {model_name} not found in model_configs"
+            self.model_to_agents[model_name].append(agent_name)
+            self.model_to_agent_indices[model_name].append(i)
+
+        # Initialize hidden states if the models are RNNModels
+        self.hidden_states = {}
+        self.init_hidden_states()
+
+    def get_q_values(self, observations):
         """
         Get the Q-values for the given observations.
 
@@ -25,13 +50,6 @@ class QMIXAgentGroup(AgentGroup):
         Returns:
             Tensor: Concatenated Q-value tensor across all agents.
         """
-
-        if eval_mode:
-            for model in self.models.values():
-                model.eval()
-        else:
-            for model in self.models.values():
-                model.train()
 
         q_values = [None for _ in range(len(self.agents))]
 
@@ -66,7 +84,7 @@ class QMIXAgentGroup(AgentGroup):
                 self.hidden_states[ag] = h
                 q_values[i] = q
 
-        q_values = stack(q_values).to(device=self.device)
+        q_values = stack(q_values)
 
         return q_values
 
@@ -83,8 +101,12 @@ class QMIXAgentGroup(AgentGroup):
         Returns:
             numpy array: Selected actions for each agent.
         """
+        if eval_mode:
+            self.eval()  # Set models to evaluation mode
+        else:
+            self.train()  # Set models to training mode
         self.init_hidden_states()
-        q_values = self.get_q_values(observations, eval_mode)
+        q_values = self.get_q_values(observations)
         q_values = q_values.detach().to('cpu')
         random_choices = bernoulli(epsilon * ones(len(self.agents)))
 
@@ -99,3 +121,47 @@ class QMIXAgentGroup(AgentGroup):
         actions = {agent_id: action for agent_id, action in zip(self.agents.keys(), actions)}
         
         return actions
+
+    def init_hidden_states(self):
+        self.hidden_states = {agent_name:
+                        self.models[model_name].init_hidden() if isinstance(self.models[model_name], RNNModel) else None \
+                        for agent_name, model_name in self.agents.items()}
+        return self
+
+    def set_model_params(self, model_params: Dict[str, dict], feature_extractor_params: Dict[str, dict]):
+        for (model_name, model), (_, fe) in zip(self.models.items(), self.feature_extractors.items()):
+            model.load_state_dict(model_params[model_name])
+            fe.load_state_dict(feature_extractor_params[model_name])
+        return self
+    
+    def get_model_params(self):
+        model_params = {model_name:deepcopy(model.state_dict()) for model_name, model in self.models.items()}
+        feature_extractor_params = {model_name:deepcopy(fe.state_dict()) for model_name, fe in self.feature_extractors.items()}
+        return model_params, feature_extractor_params
+    
+    def zero_grad(self):
+        self.optimizer.zero_grad()
+        return self
+    
+    def step(self):
+        self.optimizer.step()
+        return self
+    
+    def to(self, device: str):
+        for (_, model), (_, fe) in zip(self.models.items(), self.feature_extractors.items()):
+            model.to(device)
+            fe.to(device)
+        self.device = device
+        return self
+    
+    def eval(self):
+        for (_, model), (_, fe) in zip(self.models.items(), self.feature_extractors.items()):
+            model.eval()
+            fe.eval()
+        return self
+    
+    def train(self):
+        for (_, model), (_, fe) in zip(self.models.items(), self.feature_extractors.items()):
+            model.train()
+            fe.train()
+        return self

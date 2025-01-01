@@ -1,21 +1,26 @@
-agent_list:
-  - model1
-  - model1
-  - model1
+agent_group_config:
+  type: "QMIX"
+  agent_list:
+    agent_0: model1
+    agent_1: model1
+    agent_2: model1
+  model_configs:
+    model1:
+      model_type: "RNN"
+      input_shape: 18
+      rnn_hidden_dim: 128
+      rnn_layers: 1
+      output_shape: 5
+      feature_extractor:
+        model_type: "Identity"
+  optimizer:
+    type: "Adam"
+    learning_rate: 0.0005
+    weight_decay: 0.0001
 
 env_config:
   module_name: "pettingzoo.mpe"
   env_name: "simple_spread_v3"
-
-model_configs:
-  model1:
-    model_type: "RNN"
-    input_shape: 
-    rnn_hidden_dim: 128
-    rnn_layers: 1
-    output_shape: 
-    feature_extractor:
-      model_type: "Identity"
 
 epsilon_scheduler:
   type: "logarithmic"
@@ -28,32 +33,36 @@ sample_ratio_scheduler:
   end_value: 0.3
 
 critic_config:
-  critic_type: "QMIX"
-  state_shape:
-  input_dim:
+  type: "QMIX"
+  state_shape: 54
+  input_dim: 15
   qmix_hidden_dim: 128
   hyper_hidden_dim: 64
   feature_extractor:
     model_type: "Identity"
+  optimizer:
+    type: "Adam"
+    learning_rate: 0.0005
+    weight_decay: 0.0001
 
 rolloutworker_config:
   traj_len: 5
   n_workers: 4
   episode_limit: 500
   n_episodes: 1000
+  device: "cpu"
 
 buffer_config:
   capacity: 50000
 
 trainer_config:
   gamma: 0.99
-  critic_lr: 0.0005
-  critic_optimizer: "Adam"
   algorithm: "QMIX"
   epochs: 100
   workdir: "./results/qmix_default"
   device: "cpu"
-  target_reward: 100
-  eval_interval: 1
-  batch_size: 128
-  learning_times_per_epoch: 1
+  train_args:
+    target_reward: 100
+    eval_interval: 1
+    batch_size: 128
+    learning_times_per_epoch: 1

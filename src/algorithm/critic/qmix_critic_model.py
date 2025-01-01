@@ -3,9 +3,9 @@ import torch
 import torch.nn.functional as F
 
 # TODO: add hidden layer configuration for the critic network. 
-class QMIXCritic(nn.Module):
+class QMIXCriticModel(nn.Module):
     def __init__(self, state_shape, input_dim, qmix_hidden_dim, hyper_hidden_dim):
-        super(QMIXCritic, self).__init__()
+        super(QMIXCriticModel, self).__init__()
         self.state_shape = state_shape
         self.input_dim = input_dim
         self.qmix_hidden_dim = qmix_hidden_dim
@@ -43,9 +43,9 @@ class QMIXCritic(nn.Module):
         return q_tot
     
 
-class QMixer2HyperLayer(QMIXCritic):
+class QMixer2HyperLayerModel(QMIXCriticModel):
     def __init__(self, state_shape, n_agents, qmix_hidden_dim, hyper_hidden_dim):
-        super(QMIXCritic, self).__init__(state_shape, n_agents, qmix_hidden_dim, hyper_hidden_dim)
+        super(QMIXCriticModel, self).__init__(state_shape, n_agents, qmix_hidden_dim, hyper_hidden_dim)
 
         self.hyper_w1 = nn.Sequential(nn.Linear(state_shape, hyper_hidden_dim),
                                           nn.ReLU(),

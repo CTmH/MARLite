@@ -1,7 +1,7 @@
 import unittest
 import torch
 import torch.nn.functional as F
-from src.algorithm.critic.qmix_critic import QMIXCritic
+from src.algorithm.critic.qmix_critic_model import QMIXCriticModel
 
 class TestQMIXCritic(unittest.TestCase):
     def setUp(self):
@@ -10,7 +10,7 @@ class TestQMIXCritic(unittest.TestCase):
         input_dim = 5
         qmix_hidden_dim = 128
         hyper_hidden_dim = 64
-        self.critic = QMIXCritic(state_shape, input_dim, qmix_hidden_dim, hyper_hidden_dim)
+        self.critic = QMIXCriticModel(state_shape, input_dim, qmix_hidden_dim, hyper_hidden_dim)
 
     def test_forward_pass(self):
         # Create dummy input data
