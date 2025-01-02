@@ -8,11 +8,14 @@ from src.algorithm.agents.random_agent_group import RandomAgentGroup
 class TestAdversarialPursuitPredator(unittest.TestCase):
     
     def setUp(self):
-        opponent_agents = [f'prey_{i}' for i in range(50)]
+        opponent_agents = {f'prey_{i}':'random' for i in range(50)}
         self.opponent_agents_with_model = {agent: 'model1' for agent in opponent_agents}
-        self.opponent_agent_group = RandomAgentGroup(agents=self.opponent_agents_with_model)
+        self.opponent_agent_group_config = {
+            "type": "Random",
+            "agent_list": opponent_agents,
+        }
         kwargs = {
-            'opponent_agent_group': self.opponent_agent_group,
+            'opponent_agent_group_config': self.opponent_agent_group_config,
             'opp_obs_queue_len': 5
         }
         self.wrapper = AdversarialPursuitPredator(**kwargs)

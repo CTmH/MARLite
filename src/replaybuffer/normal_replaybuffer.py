@@ -1,9 +1,9 @@
 import heapq
 import random
+from .replaybuffer import ReplayBuffer
+from ..util.trajectory_dataset import TrajectoryDataset
 
-from .trajectory_dataset import TrajectoryDataset
-
-class ReplayBuffer:
+class NormalReplayBuffer(ReplayBuffer):
 
     def __init__(self, capacity, traj_len):
         self.traj_len = traj_len

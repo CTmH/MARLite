@@ -1,26 +1,27 @@
 import unittest
 import torch
 import numpy as np
-from pettingzoo.mpe import simple_spread_v3
 
-from src.util.replay_buffer import ReplayBuffer
+from src.replaybuffer.normal_replaybuffer import NormalReplayBuffer
 from src.util.trajectory_dataset import TrajectoryDataset
 from src.algorithm.agents import QMIXAgentGroup
+from src.algorithm.agents.agent_group_config import AgentGroupConfig
 from src.algorithm.model import ModelConfig
 from src.rolloutworker.rolloutworker import RolloutWorker
-from src.environment.mpe_env_config import MPEEnvConfig
+from src.environment.env_config import EnvConfig
+from src.util.optimizer_config import OptimizerConfig
 
-class TestReplayBuffer(unittest.TestCase):
+class TestNormalReplayBuffer(unittest.TestCase):
 
     def setUp(self):
         self.capacity = 10
         self.traj_len = 5
-        self.buffer = ReplayBuffer(capacity=self.capacity, traj_len=self.traj_len)
+        self.buffer = NormalReplayBuffer(capacity=self.capacity, traj_len=self.traj_len)
 
         # Environment setup and model configuration
-        self.env_config = MPEEnvConfig(env_config_dic={})
-        # Environment setup and model configuration
-        self.env = simple_spread_v3.parallel_env(render_mode="rgb_array")
+        self.env_config = {"module_name": "pettingzoo.mpe", "env_name": "simple_spread_v3"}
+        self.env_config = EnvConfig(**self.env_config)
+        self.env = self.env_config.create_env()
         obs, _ = self.env.reset()
         key = self.env.agents[0]
         self.obs_shape = self.env.observation_space(key).shape
@@ -57,25 +58,27 @@ class TestReplayBuffer(unittest.TestCase):
             "RNN1": ModelConfig(model_type="Identity"),
         }
         
+        self.optimizer_config = OptimizerConfig(type="Adam", lr=0.001)
+        
         # Initialize QMIXAgents
         self.agent_group = QMIXAgentGroup(agents=self.agents,
                                           model_configs=self.model_configs,
                                           feature_extractors_configs=self.feature_extractor_configs,
-                                          optim=torch.optim.Adam,
-                                          lr=1e-4,
+                                          optimizer_config=self.optimizer_config,
                                           device='cpu')
+        
         self.worker = RolloutWorker(env_config=self.env_config, agent_group=self.agent_group, rnn_traj_len=self.traj_len)
 
 
     def test_add_episode_too_short(self):
-        self.buffer = ReplayBuffer(capacity=self.capacity, traj_len=self.traj_len)
+        self.buffer = NormalReplayBuffer(capacity=self.capacity, traj_len=self.traj_len)
         episode = self.worker.generate_episode(episode_limit=1, epsilon=0.5)
         self.buffer.add_episode(episode)
         self.assertEqual(self.buffer.tail, -1)
         self.assertEqual(len(self.buffer.buffer), 0)
 
     def test_remove_episode(self):
-        self.buffer = ReplayBuffer(capacity=self.capacity, traj_len=self.traj_len)
+        self.buffer = NormalReplayBuffer(capacity=self.capacity, traj_len=self.traj_len)
         episode = self.worker.generate_episode(episode_limit=self.traj_len, epsilon=0.5)
         self.buffer.add_episode(episode)
         self.buffer.remove_episode(self.buffer.tail)
@@ -83,7 +86,7 @@ class TestReplayBuffer(unittest.TestCase):
         self.assertEqual(len(self.buffer.buffer), 0)
 
     def test_add_episode_normal(self):
-        self.buffer = ReplayBuffer(capacity=self.capacity, traj_len=self.traj_len)
+        self.buffer = NormalReplayBuffer(capacity=self.capacity, traj_len=self.traj_len)
         episode = self.worker.generate_episode(episode_limit=self.traj_len, epsilon=0.5)
         self.buffer.add_episode(episode)
         self.assertTrue(self.buffer.episode_buffer[0] != None)
@@ -92,7 +95,7 @@ class TestReplayBuffer(unittest.TestCase):
 
     def test_add_episode_full_buffer(self):
         capacity = 3
-        self.buffer = ReplayBuffer(capacity=3, traj_len=self.traj_len)
+        self.buffer = NormalReplayBuffer(capacity=3, traj_len=self.traj_len)
         for i in range(capacity+1):
             episode = self.worker.generate_episode(episode_limit=self.traj_len, epsilon=0.5)
             self.buffer.add_episode(episode)
@@ -101,7 +104,7 @@ class TestReplayBuffer(unittest.TestCase):
         self.assertEqual(len(self.buffer.buffer), capacity * self.traj_len)
 
     def test_sample_with_data(self):
-        self.buffer = ReplayBuffer(capacity=self.capacity, traj_len=self.traj_len)
+        self.buffer = NormalReplayBuffer(capacity=self.capacity, traj_len=self.traj_len)
         episode = self.worker.generate_episode(episode_limit=self.traj_len, epsilon=0.5)
         self.buffer.add_episode(episode)
         samples = self.buffer.sample(2)
@@ -109,7 +112,7 @@ class TestReplayBuffer(unittest.TestCase):
         self.assertEqual(len(samples), 2)
 
     def test_sample_more_than_available(self):
-        self.buffer = ReplayBuffer(capacity=self.capacity, traj_len=self.traj_len)
+        self.buffer = NormalReplayBuffer(capacity=self.capacity, traj_len=self.traj_len)
         episode = self.worker.generate_episode(episode_limit=self.traj_len, epsilon=0.5)
         self.buffer.add_episode(episode)
         samples = self.buffer.sample(10)

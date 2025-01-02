@@ -11,8 +11,9 @@ import csv
 from ..algorithm.agents import AgentGroup
 from ..environment.env_config import EnvConfig
 from ..algorithm.model import ModelConfig
+from ..rolloutworker.rolloutworker_config import RolloutWorkerConfig
 from ..rolloutworker.rolloutworker import RolloutWorker
-from ..util.replay_buffer import ReplayBuffer
+from ..replaybuffer.normal_replaybuffer import NormalReplayBuffer
 from ..util.scheduler import Scheduler
 from ..algorithm.agents.agent_group_config import AgentGroupConfig
 from ..algorithm.critic.critic_config import CriticConfig
@@ -49,7 +50,7 @@ class Trainer():
         self.sample_ratio = sample_ratio_scheduler
         self.train_device = train_device
         self.eval_device = eval_device
-        self.replay_buffer = ReplayBuffer(capacity=buffer_capacity, traj_len=self.traj_len)
+        self.replay_buffer = NormalReplayBuffer(capacity=buffer_capacity, traj_len=self.traj_len)
         self.epsilon = epsilon_scheduler
         self.gamma = gamma
         self.n_episodes = n_episodes

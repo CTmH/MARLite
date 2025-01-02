@@ -4,22 +4,24 @@ from pettingzoo.mpe import simple_spread_v3
 from torch.utils.data import DataLoader
 import torch
 
-from src.util.replay_buffer import ReplayBuffer
+from src.replaybuffer.normal_replaybuffer import NormalReplayBuffer
 from src.util.trajectory_dataset import TrajectoryDataset, TrajectoryDataLoader
 from src.algorithm.agents import QMIXAgentGroup
 from src.algorithm.model import ModelConfig
 from src.rolloutworker.rolloutworker import RolloutWorker
-from src.environment.mpe_env_config import MPEEnvConfig
+from src.environment.env_config import EnvConfig
+from src.util.optimizer_config import OptimizerConfig
 
 class TestTrajectoryDataset(unittest.TestCase):
 
     def setUp(self):
         self.capacity = 10
         self.traj_len = 5
-        self.buffer = ReplayBuffer(capacity=self.capacity, traj_len=self.traj_len)
+        self.buffer = NormalReplayBuffer(capacity=self.capacity, traj_len=self.traj_len)
 
         # Environment setup and model configuration
-        self.env_config = MPEEnvConfig(env_config_dic={})
+        self.env_config = {"module_name": "pettingzoo.mpe", "env_name": "simple_spread_v3"}
+        self.env_config = EnvConfig(**self.env_config)
         self.env = self.env_config.create_env()
         obs, _ = self.env.reset()
         key = self.env.agents[0]
@@ -28,6 +30,16 @@ class TestTrajectoryDataset(unittest.TestCase):
         self.action_space_shape = self.env.action_space(key).n
         self.model_names = ["RNN0", "RNN0", "RNN1"]
         self.agents = {self.env.agents[i]: self.model_names[i] for i in range(len(self.env.agents))}
+        observations = {agent: [] for agent in self.env.agents}
+        seq_length = 5
+        for i in range(seq_length):
+            actions = {agent: self.env.action_space(agent).sample() for agent in self.env.agents}
+            obs, rewards, terminations, truncations, infos = self.env.step(actions)
+            for agent in self.env.agents:
+                observations[agent].append(obs[agent])
+        self.observations = {key: np.array(value) for key, value in observations.items()}
+
+        self.avail_actions = self.env.action_space
         self.env.close()
 
         # Model configuration
@@ -47,15 +59,17 @@ class TestTrajectoryDataset(unittest.TestCase):
             "RNN1": ModelConfig(model_type="Identity"),
         }
         
+        self.optimizer_config = OptimizerConfig(type="Adam", lr=0.001)
+        
         # Initialize QMIXAgents
         self.agent_group = QMIXAgentGroup(agents=self.agents,
                                           model_configs=self.model_configs,
                                           feature_extractors_configs=self.feature_extractor_configs,
-                                          optim=torch.optim.Adam,
-                                          lr=1e-4,
+                                          optimizer_config=self.optimizer_config,
                                           device='cpu')
+        
         self.worker = RolloutWorker(env_config=self.env_config, agent_group=self.agent_group, rnn_traj_len=self.traj_len)
-        self.buffer = ReplayBuffer(capacity=self.capacity, traj_len=self.traj_len)
+        self.buffer = NormalReplayBuffer(capacity=self.capacity, traj_len=self.traj_len)
         episode = self.worker.generate_episode(episode_limit=10, epsilon=0.5)
         self.buffer.add_episode(episode)
         self.dataset = self.buffer.sample(10)
@@ -76,10 +90,11 @@ class TestTrajectoryDataloader(unittest.TestCase):
     def setUp(self):
         self.capacity = 10
         self.traj_len = 5
-        self.buffer = ReplayBuffer(capacity=self.capacity, traj_len=self.traj_len)
+        self.buffer = NormalReplayBuffer(capacity=self.capacity, traj_len=self.traj_len)
 
         # Environment setup and model configuration
-        self.env_config = MPEEnvConfig(env_config_dic={})
+        self.env_config = {"module_name": "pettingzoo.mpe", "env_name": "simple_spread_v3"}
+        self.env_config = EnvConfig(**self.env_config)
         self.env = self.env_config.create_env()
         obs, _ = self.env.reset()
         key = self.env.agents[0]
@@ -88,6 +103,16 @@ class TestTrajectoryDataloader(unittest.TestCase):
         self.action_space_shape = self.env.action_space(key).n
         self.model_names = ["RNN0", "RNN0", "RNN1"]
         self.agents = {self.env.agents[i]: self.model_names[i] for i in range(len(self.env.agents))}
+        observations = {agent: [] for agent in self.env.agents}
+        seq_length = 5
+        for i in range(seq_length):
+            actions = {agent: self.env.action_space(agent).sample() for agent in self.env.agents}
+            obs, rewards, terminations, truncations, infos = self.env.step(actions)
+            for agent in self.env.agents:
+                observations[agent].append(obs[agent])
+        self.observations = {key: np.array(value) for key, value in observations.items()}
+
+        self.avail_actions = self.env.action_space
         self.env.close()
 
         # Model configuration
@@ -106,16 +131,18 @@ class TestTrajectoryDataloader(unittest.TestCase):
             "RNN0": ModelConfig(model_type="Identity"),
             "RNN1": ModelConfig(model_type="Identity"),
         }
-
+        
+        self.optimizer_config = OptimizerConfig(type="Adam", lr=0.001)
+        
         # Initialize QMIXAgents
         self.agent_group = QMIXAgentGroup(agents=self.agents,
                                           model_configs=self.model_configs,
                                           feature_extractors_configs=self.feature_extractor_configs,
-                                          optim=torch.optim.Adam,
-                                          lr=1e-4,
+                                          optimizer_config=self.optimizer_config,
                                           device='cpu')
+
         self.worker = RolloutWorker(env_config=self.env_config, agent_group=self.agent_group, rnn_traj_len=self.traj_len)
-        self.buffer = ReplayBuffer(capacity=self.capacity, traj_len=self.traj_len)
+        self.buffer = NormalReplayBuffer(capacity=self.capacity, traj_len=self.traj_len)
         episode = self.worker.generate_episode(episode_limit=10, epsilon=0.5)
         self.buffer.add_episode(episode)
         self.dataset = self.buffer.sample(10)

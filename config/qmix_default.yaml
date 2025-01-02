@@ -15,7 +15,7 @@ agent_group_config:
         model_type: "Identity"
   optimizer:
     type: "Adam"
-    learning_rate: 0.0005
+    lr: 0.0005
     weight_decay: 0.0001
 
 env_config:
@@ -42,7 +42,7 @@ critic_config:
     model_type: "Identity"
   optimizer:
     type: "Adam"
-    learning_rate: 0.0005
+    lr: 0.0005
     weight_decay: 0.0001
 
 rolloutworker_config:
@@ -52,8 +52,10 @@ rolloutworker_config:
   n_episodes: 1000
   device: "cpu"
 
-buffer_config:
+replaybuffer_config:
+  type: "Normal"
   capacity: 50000
+  traj_len: 5
 
 trainer_config:
   gamma: 0.99

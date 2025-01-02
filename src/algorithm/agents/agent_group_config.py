@@ -3,7 +3,7 @@ from copy import deepcopy
 from .qmix_agent_group import QMIXAgentGroup
 from .random_agent_group import RandomAgentGroup
 from ..model import ModelConfig
-from util.optimizer_config import OptimizerConfig
+from ...util.optimizer_config import OptimizerConfig
 
 def get_qmix_agent_group(agent_group_config):
     agents = agent_group_config["agent_list"]

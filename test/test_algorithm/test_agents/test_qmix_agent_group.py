@@ -7,7 +7,10 @@ from unittest.mock import MagicMock
 from pettingzoo.mpe import simple_spread_v3
 
 from src.algorithm.agents import QMIXAgentGroup
+from src.algorithm.agents.agent_group_config import AgentGroupConfig
 from src.algorithm.model import ModelConfig
+from src.util.optimizer_config import OptimizerConfig
+
 
 class TestQMIXAgentGroup(unittest.TestCase):
 
@@ -49,22 +52,23 @@ class TestQMIXAgentGroup(unittest.TestCase):
             "RNN0": ModelConfig(model_type="Identity"),
             "RNN1": ModelConfig(model_type="Identity"),
         }
+
+        self.optimizer_config = OptimizerConfig(type="Adam", lr=0.001)
         
         # Initialize QMIXAgents
         self.agent_group = QMIXAgentGroup(agents=self.agents,
                                           model_configs=self.model_configs,
                                           feature_extractors_configs=self.feature_extractor_configs,
-                                          optim=torch.optim.Adam,
-                                          lr=1e-4,
+                                          optimizer_config=self.optimizer_config,
                                           device='cpu')
         
     def test_get_q_values(self):
         # Test get_q_values method in evaluation mode
-        q_values = self.agent_group.get_q_values(observations=self.observations, eval_mode=True)
+        q_values = self.agent_group.get_q_values(observations=self.observations)
         self.assertEqual(q_values.shape, (len(self.env.agents), self.action_space_shape))
         
         # Test get_q_values method in training mode
-        q_values = self.agent_group.get_q_values(observations=self.observations, eval_mode=False)
+        q_values = self.agent_group.get_q_values(observations=self.observations)
         self.assertEqual(q_values.shape, (len(self.env.agents), self.action_space_shape))
 
     def test_act(self):
@@ -80,5 +84,19 @@ class TestQMIXAgentGroup(unittest.TestCase):
         actions = self.agent_group.act(self.observations, self.env.action_spaces, epsilon=0.5)
         self.assertEqual(len(actions), len(self.env.agents))
 
+    def test_eval(self):
+        self.agent_group.eval()
+        # Check if the agent group is in evaluation mode
+        for (model_name, model), (_, fe) in zip(self.agent_group.models.items(), self.agent_group.feature_extractors.items()):
+            self.assertFalse(model.training)
+            self.assertFalse(fe.training)
+
+    def test_train(self):
+        self.agent_group.train()
+        # Check if the agent group is in training mode
+        for (model_name, model), (_, fe) in zip(self.agent_group.models.items(), self.agent_group.feature_extractors.items()):
+            self.assertTrue(model.training)
+            self.assertTrue(fe.training)
+        
 if __name__ == '__main__':
     unittest.main()

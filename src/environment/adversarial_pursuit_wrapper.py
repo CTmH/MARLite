@@ -1,10 +1,13 @@
 from magent2.environments import adversarial_pursuit_v4
 from collections import deque
 from .parallel_env_wrapper import ParallelEnvWrapper
+from ..algorithm.agents.agent_group_config import AgentGroupConfig
 
 class AdversarialPursuitPredator(ParallelEnvWrapper):
     def __init__(self, **kwargs):
-        self.opponent_agent_group = kwargs.pop('opponent_agent_group', None)
+        self.opponent_agent_group_config = kwargs.pop('opponent_agent_group_config', None)
+        self.opponent_agent_group_config = AgentGroupConfig(**self.opponent_agent_group_config)
+        self.opponent_agent_group = self.opponent_agent_group_config.get_agent_group()
         self.opp_obs_queue_len = kwargs.pop('opp_obs_queue_len')
         self.env = adversarial_pursuit_v4.parallel_env(**kwargs)
 
@@ -39,10 +42,10 @@ class AdversarialPursuitPredator(ParallelEnvWrapper):
         return agent_observations, agent_rewards, agent_terminations, agent_truncations, agent_infos
 
     def reset(self):
-        observations, info = self.env.reset()
+        observations = self.env.reset() # Magent2 environment reset does not return info
         self.opponent_observations = {agent: observations[agent] for agent in self.opponent_agents}
         self.opponent_observation_history.clear()
         self.opponent_observation_history.append(self.opponent_observations)
         agent_observations = {agent: observations[agent] for agent in self.agents}
-        agent_info = {agent: info[agent] for agent in self.agents}
+        agent_info = {agent: None for agent in self.agents} # For compatibility with other environments
         return agent_observations, agent_info

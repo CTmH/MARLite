@@ -10,7 +10,7 @@ from ..util.scheduler import Scheduler
 from ..util.optimizer_config import OptimizerConfig
 from .trainer import Trainer
 from .qmix_trainer import QMIXTrainer
-from util.optimizer_config import OptimizerConfig
+from ..util.optimizer_config import OptimizerConfig
 
 class TrainerConfig:
     def __init__(self, config_path):
