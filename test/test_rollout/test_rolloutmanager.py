@@ -76,11 +76,7 @@ class TestRolloutManager(unittest.TestCase):
                                                   device='cpu')
 
     def test_generate_episodes(self):
-        self.manager.start()
-        self.manager.join()
-        episodes = []
-        while not self.manager.episode_queue.empty():
-            episodes.append(self.manager.episode_queue.get())
+        episodes = self.manager.generate_episodes()
         self.manager.cleanup()
         self.assertEqual(len(episodes), self.n_episodes)
         for episode in episodes:

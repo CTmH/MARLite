@@ -12,7 +12,7 @@ custom_envs = {
 
 class EnvConfig():
 
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, **kwargs) -> None:
         self.module_name = kwargs.pop('module_name')
         self.env_name = kwargs.pop('env_name')
         self.env_config = kwargs

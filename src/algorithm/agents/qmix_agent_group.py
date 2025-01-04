@@ -39,13 +39,9 @@ class QMIXAgentGroup(AgentGroup):
         self.hidden_states = {}
         self.init_hidden_states()
 
-    def get_q_values(self, observations):
+    def get_q_values(self, observations) -> Tensor:
         """
         Get the Q-values for the given observations.
-
-        Args:
-            observations (list of Tensor): List of observation tensors.
-            eval_mode (bool): Whether to set models to evaluation mode.
 
         Returns:
             Tensor: Concatenated Q-value tensor across all agents.

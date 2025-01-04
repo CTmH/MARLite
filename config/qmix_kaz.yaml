@@ -1,64 +1,87 @@
-agent_list:
-  - model1
-  - model1
-  - model2
-  - model2
+agent_group_config:
+  type: "QMIX"
+  agent_list:
+    archer_0: model1
+    archer_1: model1
+    knight_0: model2
+    knight_1: model2
+  model_configs:
+    model1:
+      model_type: "RNN"
+      input_shape: 135
+      rnn_hidden_dim: 128
+      rnn_layers: 1
+      output_shape: 6
+      feature_extractor:
+        model_type: "Flatten"
+    model2:
+      model_type: "RNN"
+      input_shape: 135
+      rnn_hidden_dim: 128
+      rnn_layers: 1
+      output_shape: 6
+      feature_extractor:
+        model_type: "Flatten"
+  optimizer:
+    type: "Adam"
+    lr: 0.0005
+    weight_decay: 0.0001
 
 env_config:
   module_name: "pettingzoo.butterfly"
   env_name: "knights_archers_zombies_v10"
 
-model_configs:
-  model1:
-    model_type: "RNN"
-    rnn_hidden_dim: 128
-    feature_extractor:
-      type: "custom"
-      layers:
-      - type: Conv2d
-          in_channels: 
-          out_features: 256
-      - type: ReLU
-      - type: Linear
-          in_features: 256
-          out_features: 10
-      - type: Softmax
-  model2:
-    model_type: "RNN"
-    rnn_hidden_dim: 128
-
 epsilon_scheduler:
   type: "logarithmic"
   start_value: 1.0
   end_value: 0.05
+  decay_steps: 100
 
 sample_ratio_scheduler:
   type: "linear"
   start_value: 1.0
   end_value: 0.3
+  decay_steps: 100
 
 critic_config:
-  qmix_hidden_dim: 256
-  hyper_hidden_dim: 128
+  type: "QMIX"
+  state_shape: 104
+  input_dim: 24
+  qmix_hidden_dim: 128
+  hyper_hidden_dim: 64
+  feature_extractor:
+    model_type: "Flatten"
+  optimizer:
+    type: "Adam"
+    lr: 0.0005
+    weight_decay: 0.0001
 
-rolloutworker_config:
-  traj_len: 5
+rollout_config:
+  manager_type: "multi-thread"
+  worker_type: "multi-thread"
   n_workers: 4
-  episode_limit: 5000
   n_episodes: 1000
+  n_eval_episodes: 100
+  traj_len: 5
+  episode_limit: 500
+  device: "cpu"
 
-buffer_config:
+replaybuffer_config:
+  type: "Normal"
   capacity: 50000
+  traj_len: 5
 
 trainer_config:
-  gamma: 0.99
-  critic_lr: 0.0005
-  critic_optimizer: "Adam"
-  algorithm: "QMIX"
-  epochs: 100
-  workdir: "./results/qmix_kaz"
-  device: "cpu"
-  target_reward: 100
-  eval_interval: 1
-  batch_size: 256
-  learning_times_per_epoch: 1
+  type: "QMIX"
+  gamma: 0.95
+  eval_epsilon: 0.01
+  workdir: "./results/qmix_default"
+  train_device: "cpu"
+  eval_device: "cpu"
+  
+  train_args:
+    epochs: 100
+    target_reward: 100
+    eval_interval: 1
+    batch_size: 128
+    learning_times_per_epoch: 1

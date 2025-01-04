@@ -10,47 +10,8 @@ from ..util.trajectory_dataset import TrajectoryDataLoader
 from ..util.scheduler import Scheduler
 
 class QMIXTrainer(Trainer):
-    def __init__(self, 
-                 agents, 
-                 env_config, 
-                 model_configs,
-                 agent_feature_extractors,
-                 critic_config,
-                 critic_feature_extractor,
-                 epsilon_scheduler,
-                 sample_ratio_scheduler,
-                 traj_len: int, 
-                 n_workers: int, 
-                 epochs,
-                 buffer_capacity,
-                 episode_limit,
-                 n_episodes,
-                 gamma,
-                 critic_lr,
-                 critic_optimizer,
-                 workdir,
-                 train_device,
-                 eval_device):
-        super().__init__(agents, 
-                         env_config, 
-                         model_configs,
-                         agent_feature_extractors,
-                         critic_config,
-                         critic_feature_extractor,
-                         epsilon_scheduler,
-                         sample_ratio_scheduler,
-                         traj_len, 
-                         n_workers, 
-                         epochs,
-                         buffer_capacity,
-                         episode_limit,
-                         n_episodes,
-                         gamma,
-                         critic_lr,
-                         critic_optimizer,
-                         workdir,
-                         train_device,
-                         eval_device)
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
 
     def learn(self, sample_size, batch_size: int, times: int = 1):
         for t in range(times):
@@ -72,18 +33,23 @@ class QMIXTrainer(Trainer):
                     # observation shape: (Batch Size, Agent Number, Time Step, Feature Dimensions) (B, N, T, F)
                     obs = observations[:,idx]
                     obs = torch.Tensor(obs)
-                    # (B, N, T, F) -> (B*N, T, F)
-                    obs = obs.reshape(obs.shape[0] * obs.shape[1], obs.shape[2], obs.shape[3])
+                    # (B, N, T, (obs_shape)) -> (B*N*T, (obs_shape))
+                    bs = obs.shape[0]
+                    n_agents = len(selected_agents)
+                    ts = obs.shape[2]
+                    obs_shape = list(obs.shape[3:])
+                    obs = obs.reshape(bs*n_agents*ts, *obs_shape)
                     obs = obs.to(self.train_device)  # Convert to tensor and move to device
+                    obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
+                    obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B*N*T, F) -> (B*N, T, F)
                     if isinstance(model, RNNModel):
-                        h = [model.init_hidden() for _ in range(obs.shape[0])]
+                        h = [model.init_hidden() for _ in range(obs_vectorized.shape[0])]
                         h = torch.stack(h).to(self.train_device)
                         h = h.permute(1, 0, 2)
-                        obs_vectorized = fe(obs)
                         q_selected, _ = model(obs_vectorized, h)
                         q_selected = q_selected[:,-1,:] # get the last output 
                     # TODO: Add code for handling other types of models (e.g., CNNs)
-                    q_selected = q_selected.reshape(bs, len(selected_agents), -1) # (B, N, Action Space)
+                    q_selected = q_selected.reshape(bs, n_agents, -1) # (B, N, Action Space)
                     q_selected = q_selected.permute(1, 0, 2)  # (N, B, Action Space)
                     for i, q in zip(idx, q_selected):
                         q_val[i] = q
@@ -105,14 +71,19 @@ class QMIXTrainer(Trainer):
                     # observation shape: (Batch Size, Agent Number, Time Step, Feature Dimensions) (B, N, T, F)
                     obs = next_observations[:,idx]
                     obs = torch.Tensor(obs)
-                    # (B, N, T, F) -> (B*N, T, F)
-                    obs = obs.reshape(obs.shape[0] * obs.shape[1], obs.shape[2], obs.shape[3])
+                    # (B, N, T, (obs_shape)) -> (B*N*T, (obs_shape))
+                    bs = obs.shape[0]
+                    n_agents = len(selected_agents)
+                    ts = obs.shape[2]
+                    obs_shape = list(obs.shape[3:])
+                    obs = obs.reshape(bs*n_agents*ts, *obs_shape)
                     obs = obs.to(self.train_device)  # Convert to tensor and move to device
+                    obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
+                    obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B*N*T, F) -> (B*N, T, F)
                     if isinstance(model, RNNModel):
-                        h = [model.init_hidden() for _ in range(obs.shape[0])]
+                        h = [model.init_hidden() for _ in range(obs_vectorized.shape[0])]
                         h = torch.stack(h).to(self.train_device)
                         h = h.permute(1, 0, 2)
-                        obs_vectorized = fe(obs)
                         q_selected, _ = model(obs_vectorized, h)
                         q_selected = q_selected[:,-1,:] # get the last output 
                     # TODO: Add code for handling other types of models (e.g., CNNs)
@@ -146,4 +117,4 @@ class QMIXTrainer(Trainer):
                 self.optimizer.step()
                 self.target_agent_group.step()
             
-        return self
+        return critic_loss

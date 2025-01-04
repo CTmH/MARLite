@@ -63,7 +63,10 @@ class TrajectoryDataLoader(DataLoader):
         observations = [[[value for _, value in dict.items()] for dict in traj] for traj in observations]
         next_observations = [[[value for _, value in dict.items()] for dict in traj] for traj in next_observations]
         observations, next_observations = np.array(observations), np.array(next_observations)
-        observations, next_observations = observations.transpose(0,2,1,3), next_observations.transpose(0,2,1,3)
+        obs_shape = observations.shape
+        n_dim_obs = len(obs_shape)
+        transpose_arg = [0, 2, 1] + list(range(3, n_dim_obs))
+        observations, next_observations = observations.transpose(transpose_arg), next_observations.transpose(transpose_arg)
         
         # Actions, Rewards, Terminations
         # Nested list convert to numpy array (Batch Size, Time Step, Agent Number) (B, T, N) -> (B, N, T)

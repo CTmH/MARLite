@@ -56,11 +56,13 @@ class MultiThreadRolloutManager:
             thread = threading.Thread(target=worker.run)  # 假设 worker 有 run 方法
             self.workers.append(thread)
             thread.start()
+        return self
 
     def join(self):
         """等待所有工作线程完成"""
         for worker in self.workers:
             worker.join()
+        return self
 
     def generate_episodes(self) -> List[Any]:
         """生成并返回所有 episode 数据"""
@@ -85,3 +87,4 @@ class MultiThreadRolloutManager:
                 # 线程没有 terminate 方法，只能通过标志位或其他方式停止
                 pass
             worker.join()
+        return self

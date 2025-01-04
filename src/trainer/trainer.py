@@ -19,9 +19,7 @@ from ..util.scheduler import Scheduler
 from ..algorithm.agents.agent_group_config import AgentGroupConfig
 from ..algorithm.critic.critic_config import CriticConfig
 from ..util.optimizer_config import OptimizerConfig
-
-def get_episode(worker, episode_limit, epsilon):
-    return worker.generate_episode(episode_limit, epsilon)
+from ..rollout.rolloutmanager_config import RolloutManagerConfig
 
 class Trainer():
     def __init__(self, 
@@ -31,40 +29,31 @@ class Trainer():
                  epsilon_scheduler: Scheduler,
                  sample_ratio_scheduler: Scheduler,
                  critic_optimizer_config: OptimizerConfig,
-                 rolloutworker_config: RolloutManagerConfig,
+                 rolloutmanager_config: RolloutManagerConfig,
                  replaybuffer_config: ReplayBufferConfig,
-                 traj_len: int,
-                 n_workers: int,
-                 epochs = 10000,
-                 buffer_capacity: int = 50000,
-                 episode_limit: int = 500,
-                 n_episodes: int = 1000,
                  gamma: float = 0.9,
+                 eval_epsilon: float = 0.01,
                  workdir: str = "",
                  train_device: str = 'cpu',
                  eval_device: str = 'cpu'):
         
         self.env_config = env_config
         self.critic_config = critic_config
-        self.traj_len = traj_len
-        self.n_workers = n_workers
-        self.episode_limit = episode_limit
-        self.epochs = epochs
         self.sample_ratio = sample_ratio_scheduler
         self.train_device = train_device
         self.eval_device = eval_device
         self.epsilon = epsilon_scheduler
+        self.eval_epsilon = eval_epsilon
         self.gamma = gamma
-        self.n_episodes = n_episodes
 
         self.replaybuffer = replaybuffer_config.create_replaybuffer()
-        self.rollout
+        self.rolloutmanager_config = rolloutmanager_config
 
         # Agent group
         self.target_agent_group = agent_group_config.get_agent_group()
         self.eval_agent_group = agent_group_config.get_agent_group()
         self.target_agent_model_params, self.target_agent_fe_params = self.target_agent_group.get_model_params()
-        self.eval_agent_group.set_model_params(model_params=self.target_agent_model_params, fe_params=self.target_agent_fe_params)  # Load the model parameters to eval agent group
+        self.eval_agent_group.set_model_params(self.target_agent_model_params, self.target_agent_fe_params)  # Load the model parameters to eval agent group
         self.agents = self.target_agent_group.agents
         
         # Critic
@@ -143,17 +132,16 @@ class Trainer():
 
         return self
 
-    def collect_experience(self, n_episodes: int, episode_limit: int, epsilon: int):
+    def collect_experience(self, epsilon: float):
         """
         Collect experiences using multiple rollout workers.
         """
-        job = MultiProcessRolloutWorker(env_config=self.env_config,
-                            agent_group=self.eval_agent_group,
-                            rnn_traj_len=self.traj_len,
-                            device=self.eval_device)
-        
-        logging.info(f"Collecting {n_episodes} episodes with limit {episode_limit} and epsilon {epsilon}")
-        episodes = [job.rollout(episode_limit, epsilon) for _ in range(n_episodes)]
+        self.eval_agent_group.to(self.eval_device)
+        manager = self.rolloutmanager_config.create_manager(self.eval_agent_group,
+                                                           self.env_config,
+                                                           epsilon)
+        episodes = manager.generate_episodes()
+        manager.cleanup()
 
         for episode in episodes:
             self.replaybuffer.add_episode(episode)
@@ -166,15 +154,22 @@ class Trainer():
         self.eval_agent_group.set_model_params(self.target_agent_model_params, self.target_agent_fe_params)
         self.target_critic_params = deepcopy(self.target_critic.state_dict())  # Update critic parameters
         self.eval_critic.load_state_dict(self.target_critic_params)
+        return self
+
+    def reload_params(self):
+        self.target_agent_group.set_model_params(self.target_agent_model_params, self.target_agent_fe_params)
+        self.target_critic.load_state_dict(self.target_critic_params)
+        return self
 
     def evaluate(self, times=100):
-        job = MultiProcessRolloutWorker(env_config=self.env_config,
-                            agent_group=self.eval_agent_group,
-                            rnn_traj_len=self.traj_len,
-                            device=self.eval_device)
+        self.target_agent_group.to(self.eval_device)
+        manager = self.rolloutmanager_config.create_manager(self.target_agent_group,
+                                                           self.env_config,
+                                                           self.eval_epsilon)
         
         logging.info(f"Evaluating for {times} episodes")
-        episodes = [job.rollout(self.episode_limit, epsilon=0.0) for _ in range(times)]
+        episodes = manager.generate_episodes()
+        manager.cleanup()
         rewards = np.array([episode['episode_reward'] for episode in episodes])
         
         mean_reward = np.mean(rewards)
@@ -183,52 +178,57 @@ class Trainer():
         
         return mean_reward, std_reward
     
-    def train(self, target_reward, eval_interval=500, batch_size=64, learning_times_per_epoch=1):
+    def train(self, epochs, target_reward, eval_interval=1, batch_size=64, learning_times_per_epoch=1):
         best_mean_reward = -np.inf
         best_reward_std = np.inf
-        n_episodes = self.n_episodes
+        best_loss = 0
 
         # Training loop
-        for epoch in range(self.epochs):
+        for epoch in range(epochs):
 
             self.target_agent_group.set_model_params(self.target_agent_model_params, self.target_agent_fe_params)
             self.target_critic.load_state_dict(self.target_critic_params)
 
             logging.info(f"Epoch {epoch}: Collecting experiences")
-            self.collect_experience(n_episodes=n_episodes,
-                                    episode_limit=self.episode_limit,
-                                    epsilon=self.epsilon.get_value(epoch))
+            self.collect_experience(epsilon=self.epsilon.get_value(epoch))
             sample_ratio = self.sample_ratio.get_value(epoch)
             sample_size = len(self.replaybuffer.buffer) * sample_ratio
             sample_size = round(sample_size)
             
             logging.info(f"Epoch {epoch}: Learning with batch size {batch_size} and learning {learning_times_per_epoch} times per epoch")
-            self.learn(sample_size=sample_size, batch_size=batch_size, times=learning_times_per_epoch)
-            
-            mean_reward, reward_std = self.evaluate()
+            loss = self.learn(sample_size=sample_size, batch_size=batch_size, times=learning_times_per_epoch)
+            logging.info(f"Epoch {epoch}: Loss {loss}")
 
-            self.save_intermediate_results(epoch, mean_reward, reward_std)
+            if epoch % eval_interval == 0:
             
-            if mean_reward > best_mean_reward:
-                best_mean_reward = mean_reward
-                best_reward_std = reward_std
-                logging.info(f"Epoch {epoch}: New best mean reward {best_mean_reward}")
-                self.update_params()
+                mean_reward, reward_std = self.evaluate()
 
-            if mean_reward >= target_reward:
-                logging.info(f"Target reward reached: {mean_reward} >= {target_reward}")
-                break
+                self.save_intermediate_results(epoch, loss, mean_reward, reward_std)
+                
+                if mean_reward > best_mean_reward:
+                    best_mean_reward = mean_reward
+                    best_reward_std = reward_std
+                    best_loss = loss
+                    logging.info(f"Epoch {epoch}: New best mean reward {best_mean_reward}")
+                    self.update_params()
+                else:
+                    self.reload_params()
+
+                if mean_reward >= target_reward:
+                    logging.info(f"Target reward reached: {mean_reward} >= {target_reward}")
+                    break
         
-        self.save_intermediate_results('best', best_mean_reward, best_reward_std)
+        self.save_intermediate_results('best', best_loss, best_mean_reward, best_reward_std)
         self.save_results_to_csv()
         return best_mean_reward, best_reward_std
     
-    def save_intermediate_results(self, epoch, mean_reward, reward_std):
+    def save_intermediate_results(self, epoch, loss, mean_reward, reward_std):
         self.results[epoch] = {
+            'loss': loss,
             'mean_reward': mean_reward,
             'reward_std': reward_std
         }
-        logging.info(f"Intermediate results saved for epoch {epoch}: Mean reward {mean_reward}, Std reward {reward_std}")
+        logging.info(f"Intermediate results saved for epoch {epoch}: Loss {loss}, Mean reward {mean_reward}, Std reward {reward_std}")
 
     def save_results_to_csv(self):
         csv_path = os.path.join(self.logdir, 'results.csv')

@@ -1,4 +1,3 @@
-import yaml
 import torch
 import numpy as np
 from copy import deepcopy
@@ -11,82 +10,54 @@ from ..util.optimizer_config import OptimizerConfig
 from .trainer import Trainer
 from .qmix_trainer import QMIXTrainer
 from ..util.optimizer_config import OptimizerConfig
+from ..rollout.rolloutmanager_config import RolloutManagerConfig
+from ..replaybuffer.replaybuffer_config import ReplayBufferConfig
 
 class TrainerConfig:
-    def __init__(self, config_path):
-        self.algorithm, self.config, self.train_args = load_config_from_yaml(config_path)
+    def __init__(self, config_dict: dict):
+        self.config = deepcopy(config_dict)
+        self.agent_group_config = AgentGroupConfig(**self.config['agent_group_config'])
+        self.env_config = EnvConfig(**self.config['env_config'])
+        critic_conf = self.config['critic_config']
+        critic_optimizer_conf = critic_conf.pop('optimizer')
+        self.critic_config = CriticConfig(**critic_conf)
+        self.critic_optimizer_config = OptimizerConfig(**critic_optimizer_conf)
+        self.rolloutmanager_config = RolloutManagerConfig(**self.config['rollout_config'])
+        self.replaybuffer_config = ReplayBufferConfig(**self.config['replaybuffer_config'])
+
+        self.epsilon_scheduler = Scheduler(**self.config['epsilon_scheduler'])
+        self.sample_ratio_scheduler = Scheduler(**self.config['sample_ratio_scheduler'])
+
+        self.trainer_config = self.config['trainer_config']
+        self.trainer_type = self.trainer_config.pop('type')
+        self.train_args = self.trainer_config.pop('train_args')
         self.trainer = None
 
-    def create_trainer(self):
-        if self.algorithm == 'QMIX':
-            learner = QMIXTrainer(**self.config)
+        self.registered_trainers = {
+            'QMIX': QMIXTrainer,
+        }
+
+    def create_trainer(self) -> Trainer:
+        if self.trainer_type not in self.registered_trainers:
+            raise ValueError(f"Unsupported algorithm: {self.trainer_type}")
         else:
-            raise ValueError(f"Unsupported algorithm: {self.algorithm}")
-        self.trainer = learner
-        return self
+            trainer_class = self.registered_trainers[self.trainer_type]
+            self.trainer = trainer_class(
+                env_config=self.env_config,
+                agent_group_config = self.agent_group_config,
+                critic_config = self.critic_config,
+                epsilon_scheduler = self.epsilon_scheduler,
+                sample_ratio_scheduler = self.sample_ratio_scheduler,
+                critic_optimizer_config = self.critic_optimizer_config,
+                rolloutmanager_config = self.rolloutmanager_config,
+                replaybuffer_config = self.replaybuffer_config,
+                **self.trainer_config
+            )
+        return self.trainer
     
     def run(self):
+        self.create_trainer()
         if self.trainer:
             return self.trainer.train(**self.train_args)
         else:
             raise ValueError("Trainer not created. Please call create_learner() first.")
-
-def load_config_from_yaml(config_path):
-    with open(config_path, 'r') as file:
-        config = yaml.safe_load(file)
-
-    # Environment configuration
-    # TODO: Implement Other environment configurations
-    env_config = EnvConfig(**config['env_config'])
-    env = env_config.create_env()
-    env.reset()
-    agent_list = env.agents
-    key = env.agents[0]
-    state_shape = env.state().shape
-    n_agents = len(env.agents) # Number of agents in the environment
-    action_space_shape = env.action_space(key).n.item()
-    env.close()
-    
-    # Agent Group Configuration
-    agent_group_config = deepcopy(config['agent_group_config'])
-    agent_group_config = AgentGroupConfig(**agent_group_config)
-    
-    # Critic configuration
-    critic_config = deepcopy(config['critic_config'])
-    critic_optimizer_config = critic_config.pop('optimizer')
-    critic_config = CriticConfig(**critic_config)
-    critic_optimizer_config = OptimizerConfig(**critic_optimizer_config)
-
-    # Scheduler
-    scheduler_config = config['epsilon_scheduler']
-    scheduler_config['decay_steps'] = config['trainer_config']['epochs']
-    epsilon_scheduler = Scheduler(**scheduler_config)
-    scheduler_config = config['sample_ratio_scheduler']
-    scheduler_config['decay_steps'] = config['trainer_config']['epochs']
-    sample_ratio_scheduler = Scheduler(**scheduler_config)
-
-    return config['trainer_config']['algorithm'], {
-        'env_config': env_config,
-        'agent_group_config': agent_group_config,
-        'critic_config': critic_config,
-        'critic_optimizer_config': critic_optimizer_config,
-        'epsilon_scheduler': epsilon_scheduler,
-        'sample_ratio_scheduler': sample_ratio_scheduler,
-        'traj_len': config['rolloutworker_config']['traj_len'],
-        'n_workers': config['rolloutworker_config']['n_workers'],
-        'buffer_capacity': config['buffer_config']['capacity'],
-        'episode_limit': config['rolloutworker_config']['episode_limit'],
-        'n_episodes': config['rolloutworker_config']['n_episodes'],
-        'gamma': config['trainer_config']['gamma'],
-        'epochs': config['trainer_config']['epochs'],
-        'workdir': config['trainer_config']['workdir'],
-        'device': config['trainer_config']['device']
-    }, config['trainer_config']['train_args']
-
-def get_optimizer(opt_name: str):
-    if opt_name == "Adam":
-        return torch.optim.Adam
-    elif opt_name == "SGD":
-        return torch.optim.SGD
-    else:
-        raise ValueError(f"Unknown optimizer name {opt_name}")

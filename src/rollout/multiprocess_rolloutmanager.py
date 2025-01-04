@@ -55,11 +55,13 @@ class MultiProcessRolloutManager(RolloutManager):
             )
             self.workers.append(worker)
             worker.start()
+        return self
 
     def join(self):
         """等待所有工作进程完成"""
         for worker in self.workers:
             worker.join()
+        return self
 
     def generate_episodes(self) -> List[Any]:
         """生成并返回所有 episode 数据"""
@@ -83,3 +85,4 @@ class MultiProcessRolloutManager(RolloutManager):
             if worker.is_alive():
                 worker.terminate()
             worker.join()
+        return self
