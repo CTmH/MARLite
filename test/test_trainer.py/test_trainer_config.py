@@ -20,7 +20,7 @@ class TestTrainerConfig(unittest.TestCase):
         reward, _ = self.trainer_config.trainer.evaluate()
         self.trainer_config.trainer.epochs = 5
         self.trainer_config.trainer.n_episodes = 20
-        self.trainer_config.trainer.replay_buffer.capacity = 200
+        self.trainer_config.trainer.replaybuffer.capacity = 200
         best_reward, _ = self.trainer_config.run()
         self.assertGreaterEqual(best_reward, reward)
 
@@ -38,6 +38,6 @@ class TestTrainerConfigWithKAZConfig(unittest.TestCase):
         reward, _ = self.trainer_config.trainer.evaluate()
         self.trainer_config.trainer.epochs = 5
         self.trainer_config.trainer.n_episodes = 20
-        self.trainer_config.trainer.replay_buffer.capacity = 200
+        self.trainer_config.trainer.replaybuffer.capacity = 200
         best_reward, _ = self.trainer_config.run()
         self.assertGreaterEqual(best_reward, reward)

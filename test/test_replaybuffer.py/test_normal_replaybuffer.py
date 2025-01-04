@@ -1,13 +1,14 @@
 import unittest
 import torch
 import numpy as np
+from queue import Queue
 
 from src.replaybuffer.normal_replaybuffer import NormalReplayBuffer
 from src.util.trajectory_dataset import TrajectoryDataset
 from src.algorithm.agents import QMIXAgentGroup
 from src.algorithm.agents.agent_group_config import AgentGroupConfig
 from src.algorithm.model import ModelConfig
-from src.rolloutworker.rolloutworker import RolloutWorker
+from src.rollout.multithread_rolloutworker import MultiThreadRolloutWorker
 from src.environment.env_config import EnvConfig
 from src.util.optimizer_config import OptimizerConfig
 
@@ -67,19 +68,38 @@ class TestNormalReplayBuffer(unittest.TestCase):
                                           optimizer_config=self.optimizer_config,
                                           device='cpu')
         
-        self.worker = RolloutWorker(env_config=self.env_config, agent_group=self.agent_group, rnn_traj_len=self.traj_len)
+        self.traj_len = 5
+        self.n_episodes = 2
+        self.episode_limit = 10
+        self.episode_queue = Queue()
+        self.worker = MultiThreadRolloutWorker(env_config=self.env_config,
+                                    agent_group=self.agent_group,
+                                    episode_queue=self.episode_queue,
+                                    n_episodes=self.n_episodes,
+                                    rnn_traj_len=self.traj_len,
+                                    episode_limit=self.episode_limit,
+                                    epsilon=0.9,
+                                    device='cpu')
 
 
     def test_add_episode_too_short(self):
+        self.worker = MultiThreadRolloutWorker(env_config=self.env_config,
+                                    agent_group=self.agent_group,
+                                    episode_queue=self.episode_queue,
+                                    n_episodes=self.n_episodes,
+                                    rnn_traj_len=self.traj_len,
+                                    episode_limit=1,
+                                    epsilon=0.9,
+                                    device='cpu')
         self.buffer = NormalReplayBuffer(capacity=self.capacity, traj_len=self.traj_len)
-        episode = self.worker.generate_episode(episode_limit=1, epsilon=0.5)
+        episode = self.worker.rollout()
         self.buffer.add_episode(episode)
         self.assertEqual(self.buffer.tail, -1)
         self.assertEqual(len(self.buffer.buffer), 0)
 
     def test_remove_episode(self):
         self.buffer = NormalReplayBuffer(capacity=self.capacity, traj_len=self.traj_len)
-        episode = self.worker.generate_episode(episode_limit=self.traj_len, epsilon=0.5)
+        episode = self.worker.rollout()
         self.buffer.add_episode(episode)
         self.buffer.remove_episode(self.buffer.tail)
         self.assertEqual(self.buffer.tail, 0)
@@ -87,25 +107,25 @@ class TestNormalReplayBuffer(unittest.TestCase):
 
     def test_add_episode_normal(self):
         self.buffer = NormalReplayBuffer(capacity=self.capacity, traj_len=self.traj_len)
-        episode = self.worker.generate_episode(episode_limit=self.traj_len, epsilon=0.5)
+        episode = self.worker.rollout()
         self.buffer.add_episode(episode)
         self.assertTrue(self.buffer.episode_buffer[0] != None)
         self.assertEqual(self.buffer.tail, 0)
-        self.assertEqual(len(self.buffer.buffer), self.traj_len)
+        self.assertEqual(len(self.buffer.buffer), self.traj_len * self.n_episodes)
 
     def test_add_episode_full_buffer(self):
         capacity = 3
         self.buffer = NormalReplayBuffer(capacity=3, traj_len=self.traj_len)
         for i in range(capacity+1):
-            episode = self.worker.generate_episode(episode_limit=self.traj_len, epsilon=0.5)
+            episode = self.worker.rollout()
             self.buffer.add_episode(episode)
 
         self.assertEqual(len(self.buffer.episode_buffer), capacity)
-        self.assertEqual(len(self.buffer.buffer), capacity * self.traj_len)
+        self.assertEqual(len(self.buffer.buffer), capacity * self.traj_len * self.n_episodes)
 
     def test_sample_with_data(self):
         self.buffer = NormalReplayBuffer(capacity=self.capacity, traj_len=self.traj_len)
-        episode = self.worker.generate_episode(episode_limit=self.traj_len, epsilon=0.5)
+        episode = self.worker.rollout()
         self.buffer.add_episode(episode)
         samples = self.buffer.sample(2)
         self.assertIsInstance(samples, TrajectoryDataset)
@@ -113,7 +133,7 @@ class TestNormalReplayBuffer(unittest.TestCase):
 
     def test_sample_more_than_available(self):
         self.buffer = NormalReplayBuffer(capacity=self.capacity, traj_len=self.traj_len)
-        episode = self.worker.generate_episode(episode_limit=self.traj_len, epsilon=0.5)
+        episode = self.worker.rollout()
         self.buffer.add_episode(episode)
         samples = self.buffer.sample(10)
         self.assertIsInstance(samples, TrajectoryDataset)

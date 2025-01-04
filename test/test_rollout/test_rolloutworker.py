@@ -1,11 +1,10 @@
-import sys
 import unittest
 import torch
 import numpy as np
-from pettingzoo.mpe import simple_spread_v3
+import multiprocessing as mp
 
 from src.algorithm.agents import QMIXAgentGroup
-from src.rolloutworker.rolloutworker import RolloutWorker
+from src.rollout.multiprocess_rolloutworker import MultiProcessRolloutWorker
 from src.algorithm.model import ModelConfig
 from src.environment.env_config import EnvConfig
 from src.util.optimizer_config import OptimizerConfig
@@ -13,7 +12,6 @@ from src.util.optimizer_config import OptimizerConfig
 class TestRolloutWorker(unittest.TestCase):
 
     def setUp(self):
-        self.traj_len = 5
         # Environment setup and model configuration
         self.env_config = {"module_name": "pettingzoo.mpe", "env_name": "simple_spread_v3"}
         self.env_config = EnvConfig(**self.env_config)
@@ -63,13 +61,35 @@ class TestRolloutWorker(unittest.TestCase):
                                           optimizer_config=self.optimizer_config,
                                           device='cpu')
 
-        self.worker = RolloutWorker(env_config=self.env_config, agent_group=self.agent_group, rnn_traj_len=self.traj_len)
+        self.traj_len = 5
+        self.n_episodes = 2
+        self.episode_limit = 10
+        self.episode_queue = mp.Queue()
+        self.worker = MultiProcessRolloutWorker(env_config=self.env_config,
+                                    agent_group=self.agent_group,
+                                    episode_queue=self.episode_queue,
+                                    n_episodes=self.n_episodes,
+                                    rnn_traj_len=self.traj_len,
+                                    episode_limit=self.episode_limit,
+                                    epsilon=0.9,
+                                    device='cpu')
 
-    def test_generate_episode(self):
+    def test_rollout(self):
         # Test act method with epsilon = 0 (greedy policy)
-        episode = self.worker.generate_episode(episode_limit=10)
+        episode = self.worker.rollout()
         self.assertFalse(not isinstance(episode, dict))
-        self.assertEqual(len(episode["rewards"]), 10)
-        
+        self.assertEqual(len(episode["rewards"]), self.episode_limit)
+
+    def test_run(self):
+        self.worker.run()
+        episodes = []
+        while not self.episode_queue.empty():
+            episode = self.episode_queue.get()
+            self.assertFalse(not isinstance(episode, dict))
+            self.assertEqual(len(episode["rewards"]), self.episode_limit)
+            episodes.append(episode)
+
+        self.assertEqual(len(episodes), self.n_episodes)
+
 if __name__ == '__main__':
     unittest.main()

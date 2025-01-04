@@ -11,8 +11,9 @@ import csv
 from ..algorithm.agents import AgentGroup
 from ..environment.env_config import EnvConfig
 from ..algorithm.model import ModelConfig
-from ..rolloutworker.rolloutworker_config import RolloutWorkerConfig
-from ..rolloutworker.rolloutworker import RolloutWorker
+from ..rollout.rolloutmanager_config import RolloutManagerConfig
+from ..rollout.multiprocess_rolloutworker import MultiProcessRolloutWorker
+from ..replaybuffer.replaybuffer_config import ReplayBufferConfig
 from ..replaybuffer.normal_replaybuffer import NormalReplayBuffer
 from ..util.scheduler import Scheduler
 from ..algorithm.agents.agent_group_config import AgentGroupConfig
@@ -29,7 +30,9 @@ class Trainer():
                  critic_config: CriticConfig,
                  epsilon_scheduler: Scheduler,
                  sample_ratio_scheduler: Scheduler,
-                 critic_optimizer_config: OptimizerConfig, 
+                 critic_optimizer_config: OptimizerConfig,
+                 rolloutworker_config: RolloutManagerConfig,
+                 replaybuffer_config: ReplayBufferConfig,
                  traj_len: int,
                  n_workers: int,
                  epochs = 10000,
@@ -50,10 +53,12 @@ class Trainer():
         self.sample_ratio = sample_ratio_scheduler
         self.train_device = train_device
         self.eval_device = eval_device
-        self.replay_buffer = NormalReplayBuffer(capacity=buffer_capacity, traj_len=self.traj_len)
         self.epsilon = epsilon_scheduler
         self.gamma = gamma
         self.n_episodes = n_episodes
+
+        self.replaybuffer = replaybuffer_config.create_replaybuffer()
+        self.rollout
 
         # Agent group
         self.target_agent_group = agent_group_config.get_agent_group()
@@ -142,16 +147,16 @@ class Trainer():
         """
         Collect experiences using multiple rollout workers.
         """
-        job = RolloutWorker(env_config=self.env_config,
+        job = MultiProcessRolloutWorker(env_config=self.env_config,
                             agent_group=self.eval_agent_group,
                             rnn_traj_len=self.traj_len,
                             device=self.eval_device)
         
         logging.info(f"Collecting {n_episodes} episodes with limit {episode_limit} and epsilon {epsilon}")
-        episodes = [job.generate_episode(episode_limit, epsilon) for _ in range(n_episodes)]
+        episodes = [job.rollout(episode_limit, epsilon) for _ in range(n_episodes)]
 
         for episode in episodes:
-            self.replay_buffer.add_episode(episode)
+            self.replaybuffer.add_episode(episode)
         
         return self
 
@@ -163,13 +168,13 @@ class Trainer():
         self.eval_critic.load_state_dict(self.target_critic_params)
 
     def evaluate(self, times=100):
-        job = RolloutWorker(env_config=self.env_config,
+        job = MultiProcessRolloutWorker(env_config=self.env_config,
                             agent_group=self.eval_agent_group,
                             rnn_traj_len=self.traj_len,
                             device=self.eval_device)
         
         logging.info(f"Evaluating for {times} episodes")
-        episodes = [job.generate_episode(self.episode_limit, epsilon=0.0) for _ in range(times)]
+        episodes = [job.rollout(self.episode_limit, epsilon=0.0) for _ in range(times)]
         rewards = np.array([episode['episode_reward'] for episode in episodes])
         
         mean_reward = np.mean(rewards)
@@ -194,7 +199,7 @@ class Trainer():
                                     episode_limit=self.episode_limit,
                                     epsilon=self.epsilon.get_value(epoch))
             sample_ratio = self.sample_ratio.get_value(epoch)
-            sample_size = len(self.replay_buffer.buffer) * sample_ratio
+            sample_size = len(self.replaybuffer.buffer) * sample_ratio
             sample_size = round(sample_size)
             
             logging.info(f"Epoch {epoch}: Learning with batch size {batch_size} and learning {learning_times_per_epoch} times per epoch")

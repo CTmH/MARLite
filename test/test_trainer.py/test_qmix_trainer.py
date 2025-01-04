@@ -96,7 +96,7 @@ class TestQMixTrainer(unittest.TestCase):
     def test_collect_experience(self):
         n_episodes = 4
         self.trainer.collect_experience(n_episodes, self.episode_limit, 0.9)
-        self.assertNotEqual(len(self.trainer.replay_buffer.buffer), 0)
+        self.assertNotEqual(len(self.trainer.replaybuffer.buffer), 0)
 
     def test_learn(self):
         n_episodes = 20

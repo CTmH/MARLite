@@ -45,7 +45,9 @@ critic_config:
     lr: 0.0005
     weight_decay: 0.0001
 
-rolloutworker_config:
+rollout_config:
+  worker_type: "Normal"
+  manager_type: "Normal"
   traj_len: 5
   n_workers: 4
   episode_limit: 500

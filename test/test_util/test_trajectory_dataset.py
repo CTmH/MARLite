@@ -1,14 +1,12 @@
 import unittest
 import numpy as np
-from pettingzoo.mpe import simple_spread_v3
-from torch.utils.data import DataLoader
-import torch
+import multiprocessing as mp
 
 from src.replaybuffer.normal_replaybuffer import NormalReplayBuffer
 from src.util.trajectory_dataset import TrajectoryDataset, TrajectoryDataLoader
 from src.algorithm.agents import QMIXAgentGroup
 from src.algorithm.model import ModelConfig
-from src.rolloutworker.rolloutworker import RolloutWorker
+from src.rollout.multiprocess_rolloutworker import MultiProcessRolloutWorker
 from src.environment.env_config import EnvConfig
 from src.util.optimizer_config import OptimizerConfig
 
@@ -67,10 +65,20 @@ class TestTrajectoryDataset(unittest.TestCase):
                                           feature_extractors_configs=self.feature_extractor_configs,
                                           optimizer_config=self.optimizer_config,
                                           device='cpu')
-        
-        self.worker = RolloutWorker(env_config=self.env_config, agent_group=self.agent_group, rnn_traj_len=self.traj_len)
+        self.episode_limit=10
+        self.epsilon=0.5
+        self.n_episodes = 5
+        self.episode_queue = mp.Queue()
+        self.worker = MultiProcessRolloutWorker(env_config=self.env_config,
+                                    agent_group=self.agent_group,
+                                    episode_queue=self.episode_queue,
+                                    n_episodes=self.n_episodes,
+                                    rnn_traj_len=self.traj_len,
+                                    episode_limit=self.episode_limit,
+                                    epsilon=0.9,
+                                    device='cpu')
         self.buffer = NormalReplayBuffer(capacity=self.capacity, traj_len=self.traj_len)
-        episode = self.worker.generate_episode(episode_limit=10, epsilon=0.5)
+        episode = self.worker.rollout()
         self.buffer.add_episode(episode)
         self.dataset = self.buffer.sample(10)
 
@@ -141,9 +149,20 @@ class TestTrajectoryDataloader(unittest.TestCase):
                                           optimizer_config=self.optimizer_config,
                                           device='cpu')
 
-        self.worker = RolloutWorker(env_config=self.env_config, agent_group=self.agent_group, rnn_traj_len=self.traj_len)
+        self.episode_limit=10
+        self.epsilon=0.5
+        self.n_episodes = 5
+        self.episode_queue = mp.Queue()
+        self.worker = MultiProcessRolloutWorker(env_config=self.env_config,
+                                    agent_group=self.agent_group,
+                                    episode_queue=self.episode_queue,
+                                    n_episodes=self.n_episodes,
+                                    rnn_traj_len=self.traj_len,
+                                    episode_limit=self.episode_limit,
+                                    epsilon=0.9,
+                                    device='cpu')
         self.buffer = NormalReplayBuffer(capacity=self.capacity, traj_len=self.traj_len)
-        episode = self.worker.generate_episode(episode_limit=10, epsilon=0.5)
+        episode = self.worker.rollout()
         self.buffer.add_episode(episode)
         self.dataset = self.buffer.sample(10)
         self.dataloader = TrajectoryDataLoader(dataset=self.dataset, batch_size=3, shuffle=True)

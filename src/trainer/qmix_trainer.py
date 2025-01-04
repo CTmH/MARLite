@@ -56,7 +56,7 @@ class QMIXTrainer(Trainer):
         for t in range(times):
             # Implement the learning logic for QMix
             # Get a batch of data from the replay buffer
-            dataset = self.replay_buffer.sample(sample_size)
+            dataset = self.replaybuffer.sample(sample_size)
             dataloader = TrajectoryDataLoader(dataset, batch_size=batch_size, shuffle=True)
             for batch in dataloader:
                 # Extract batch data
