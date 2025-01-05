@@ -4,10 +4,11 @@ from typing import Dict
 import importlib
 
 from .parallel_env_wrapper import ParallelEnvWrapper
-from .adversarial_pursuit_wrapper import AdversarialPursuitPredator
+from .adversarial_pursuit_wrapper import AdversarialPursuitPredator, AdversarialPursuitPrey
 
 custom_envs = {
-    'adversarial_pursuit_predator': AdversarialPursuitPredator
+    'adversarial_pursuit_predator': AdversarialPursuitPredator,
+    'adversarial_pursuit_prey': AdversarialPursuitPrey,
 }
 
 class EnvConfig():

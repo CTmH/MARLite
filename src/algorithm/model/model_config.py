@@ -24,12 +24,9 @@ class ModelConfig:
         return discr + "}"
     
     def get_model(self):
-        if self.model_type == "RNN":
-            model = RNNModel(**self.model_config)
-        elif self.model_type == "Identity":
-            model = nn.Identity()
-        elif self.model_type == "Flatten":
-            model = Flatten()
+        if self.model_type in REGISTERED_MODELS:
+            model_class = REGISTERED_MODELS[self.model_type]
+            model = model_class(**self.model_config)
         else:
             raise ValueError(f"Model type {self.model_type} not registered.")
         return model
