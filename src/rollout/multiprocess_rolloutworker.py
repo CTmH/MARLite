@@ -1,3 +1,6 @@
+import multiprocessing
+import os
+import logging
 import numpy as np
 import multiprocessing as mp
 from copy import deepcopy
@@ -26,9 +29,13 @@ class MultiProcessRolloutWorker(mp.Process):
         self.env = self.env_config.create_env()
         self.device = device
 
+        self.process_name = multiprocessing.current_process().name
+        self.process_id = os.getpid()
+
     def run(self):
-        for _ in range(self.n_episodes):
+        for i in range(self.n_episodes):
             self.episode_queue.put(self.rollout())
+            logging.info(f"Process - {self.process_id}:\t{self.process_name}\tfinished job {i+1} / {self.n_episodes}")
         return self
 
     def rollout(self):

@@ -1,6 +1,7 @@
 import numpy as np
 import threading
 import queue
+import logging
 from copy import deepcopy
 from ..environment.env_config import EnvConfig
 from ..algorithm.agents import AgentGroup
@@ -27,9 +28,13 @@ class MultiThreadRolloutWorker(threading.Thread):
         self.env = self.env_config.create_env()
         self.device = device
 
+        self.thread_name = threading.current_thread().name
+        self.thread_id = threading.current_thread().ident
+
     def run(self):
-        for _ in range(self.n_episodes):
+        for i in range(self.n_episodes):
             self.episode_queue.put(self.rollout())
+            logging.info(f"Thread - {self.thread_id}:\t{self.thread_name}\tfinished job {i+1} / {self.n_episodes}")
         return self
 
     def rollout(self):

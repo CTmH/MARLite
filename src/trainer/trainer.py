@@ -4,7 +4,7 @@ import torch
 from typing import Dict
 from copy import deepcopy
 from multiprocessing import Process, Queue, Pool
-import time
+import datetime
 import logging
 import csv
 
@@ -86,16 +86,22 @@ class Trainer():
     def save_model(self, checkpoint: str):
         agent_model_params, agent_feature_extractor_params = self.target_agent_group.get_model_params()
         for model_name, params in agent_model_params.items():
-            model_path = os.path.join(self.agentsdir, model_name, 'model',f'{checkpoint}.pth')
+            path = os.path.join(self.agentsdir, model_name, 'model')
+            os.makedirs(path, exist_ok=True)
+            model_path = os.path.join(path, f'{checkpoint}.pth')
             torch.save(params, model_path)
             logging.info(f"Actor {model_name} saved to {model_path}")
 
         for model_name, params in agent_feature_extractor_params.items():
-            model_path = os.path.join(self.agentsdir, model_name, 'feature_extractor',f'{checkpoint}.pth')
+            path = os.path.join(self.agentsdir, model_name, 'feature_extractor')
+            os.makedirs(path, exist_ok=True)
+            model_path = os.path.join(path, f'{checkpoint}.pth')
             torch.save(params, model_path)
             logging.info(f"{model_name}'s feature extractor saved to {model_path}")
 
-        critic_path = os.path.join(self.criticdir, 'model', f'{checkpoint}.pth')
+        path = os.path.join(self.criticdir, 'model')
+        os.makedirs(path, exist_ok=True)
+        critic_path = os.path.join(path, f'{checkpoint}.pth')
         torch.save(self.target_critic.state_dict(), critic_path)
         logging.info(f"Critic model saved to {critic_path}")
 
@@ -217,9 +223,16 @@ class Trainer():
                 if mean_reward >= target_reward:
                     logging.info(f"Target reward reached: {mean_reward} >= {target_reward}")
                     break
+
+            # Save checkpoint at the end of each epoch
+            checkpoint_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            checkpoint_name = f"checkpoint_{epoch}_{checkpoint_time}"
+            self.save_model(checkpoint_name)
+            logging.info(f"Checkpoint saved at {checkpoint_name}")
         
         self.save_intermediate_results('best', best_loss, best_mean_reward, best_reward_std)
         self.save_results_to_csv()
+        self.save_model("best_model")
         return best_mean_reward, best_reward_std
     
     def save_intermediate_results(self, epoch, loss, mean_reward, reward_std):
