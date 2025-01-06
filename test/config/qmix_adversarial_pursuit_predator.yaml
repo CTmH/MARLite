@@ -1,0 +1,236 @@
+agent_group_config:
+  type: "QMIX"
+  agent_list:
+    predator_0: model1
+    predator_1: model1
+    predator_2: model1
+    predator_3: model1
+    predator_4: model1
+    predator_5: model1
+    predator_6: model1
+    predator_7: model1
+    predator_8: model1
+    predator_9: model1
+    predator_10: model1
+    predator_11: model1
+    predator_12: model1
+    predator_13: model1
+    predator_14: model1
+    predator_15: model1
+    predator_16: model1
+    predator_17: model1
+    predator_18: model1
+    predator_19: model1
+    predator_20: model1
+    predator_21: model1
+    predator_22: model1
+    predator_23: model1
+    predator_24: model1
+  model_configs:
+    model1:
+      model_type: "RNN"
+      input_shape: 64
+      rnn_hidden_dim: 128
+      rnn_layers: 1
+      output_shape: 13
+      feature_extractor:
+        model_type: "Custom"
+        layers:
+        - type: Permute
+          dims: [0, 3, 1, 2]
+        - type: Conv2d
+          in_channels: 5
+          out_channels: 16
+          kernel_size: 3
+          stride: 1
+          padding: 1
+        - type: ReLU
+        - type: MaxPool2d
+          kernel_size: 2
+          stride: 2
+        - type: Conv2d
+          in_channels: 16
+          out_channels: 32
+          kernel_size: 3
+          stride: 1
+          padding: 1
+        - type: ReLU
+        - type: MaxPool2d
+          kernel_size: 2
+          stride: 2
+        - type: Conv2d
+          in_channels: 32
+          out_channels: 64
+          kernel_size: 3
+          stride: 1
+          padding: 1
+        - type: ReLU
+        - type: AdaptiveAvgPool2d
+          output_size: [1, 1]
+        - type: Flatten
+        - type: Linear
+          in_features: 64
+          out_features: 64
+  optimizer:
+    type: "Adam"
+    lr: 0.0005
+    weight_decay: 0.0001
+
+env_config:
+  module_name: "custom"
+  env_name: "adversarial_pursuit_predator"
+  opponent_agent_group_config:
+    type: "Random"
+    agent_list:
+      prey_0: random1
+      prey_1: random1
+      prey_2: random1
+      prey_3: random1
+      prey_4: random1
+      prey_5: random1
+      prey_6: random1
+      prey_7: random1
+      prey_8: random1
+      prey_9: random1
+      prey_10: random1
+      prey_11: random1
+      prey_12: random1
+      prey_13: random1
+      prey_14: random1
+      prey_15: random1
+      prey_16: random1
+      prey_17: random1
+      prey_18: random1
+      prey_19: random1
+      prey_20: random1
+      prey_21: random1
+      prey_22: random1
+      prey_23: random1
+      prey_24: random1
+      prey_25: random1
+      prey_26: random1
+      prey_27: random1
+      prey_28: random1
+      prey_29: random1
+      prey_30: random1
+      prey_31: random1
+      prey_32: random1
+      prey_33: random1
+      prey_34: random1
+      prey_35: random1
+      prey_36: random1
+      prey_37: random1
+      prey_38: random1
+      prey_39: random1
+      prey_40: random1
+      prey_41: random1
+      prey_42: random1
+      prey_43: random1
+      prey_44: random1
+      prey_45: random1
+      prey_46: random1
+      prey_47: random1
+      prey_48: random1
+      prey_49: random1
+  opp_obs_queue_len: 5
+
+epsilon_scheduler:
+  type: "logarithmic"
+  start_value: 1.0
+  end_value: 0.05
+  decay_steps: 100
+
+sample_ratio_scheduler:
+  type: "linear"
+  start_value: 1.0
+  end_value: 0.3
+  decay_steps: 100
+
+critic_config:
+  type: "QMIX"
+  state_shape: 256
+  input_dim: 325
+  qmix_hidden_dim: 1024
+  hyper_hidden_dim: 256
+  feature_extractor:
+    model_type: "Custom"
+    layers:
+      - type: Permute
+        dims: [0, 3, 1, 2]
+      - type: Conv2d
+        in_channels: 5
+        out_channels: 16
+        kernel_size: 3
+        stride: 1
+        padding: 1
+      - type: ReLU
+      - type: MaxPool2d
+        kernel_size: 2
+        stride: 2
+        padding: 0
+      - type: Conv2d
+        in_channels: 16
+        out_channels: 32
+        kernel_size: 3
+        stride: 1
+        padding: 1
+      - type: ReLU
+      - type: MaxPool2d
+        kernel_size: 2
+        stride: 2
+        padding: 0
+      - type: Conv2d
+        in_channels: 32
+        out_channels: 64
+        kernel_size: 3
+        stride: 1
+        padding: 1
+      - type: ReLU
+      - type: MaxPool2d
+        kernel_size: 2
+        stride: 2
+        padding: 0
+      - type: Flatten
+      - type: Linear
+        in_features: 1600 # 64 * 5 * 5  # 经过三次池化后，特征图大小为 5x5
+        out_features: 256
+      - type: ReLU
+      - type: Dropout
+        p: 0.5
+      - type: Linear
+        in_features: 256
+        out_features: 256
+  optimizer:
+    type: "Adam"
+    lr: 0.0005
+    weight_decay: 0.0001
+
+rollout_config:
+  manager_type: "multi-thread"
+  worker_type: "multi-thread"
+  n_workers: 4
+  n_episodes: 1000
+  n_eval_episodes: 100
+  traj_len: 5
+  episode_limit: 500
+  device: "cpu"
+
+replaybuffer_config:
+  type: "Normal"
+  capacity: 50000
+  traj_len: 5
+
+trainer_config:
+  type: "QMIX"
+  gamma: 0.95
+  eval_epsilon: 0.01
+  workdir: "./test/results/qmix_default"
+  train_device: "cpu"
+  eval_device: "cpu"
+  
+  train_args:
+    epochs: 100
+    target_reward: 100
+    eval_interval: 1
+    batch_size: 128
+    learning_times_per_epoch: 1

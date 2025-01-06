@@ -14,7 +14,7 @@ from src.util.scheduler import Scheduler
 
 class TestQMixTrainer(unittest.TestCase):
     def setUp(self):
-        self.config_path = 'config/qmix_default.yaml'
+        self.config_path = 'test/config/qmix_default.yaml'
         with open(self.config_path, 'r') as file:
             self.config = yaml.safe_load(file)
         self.config['trainer_config']['train_args']['epochs'] = 10
@@ -73,6 +73,24 @@ class TestQMixTrainer(unittest.TestCase):
         call_list.append(call(self.trainer.target_critic.state_dict(), critic_path))
         #mock_torch_save.assert_has_calls(call_list)
         self.assertEqual(mock_torch_save.call_count, len(call_list))
+
+    def test_load_model(self):
+        checkpoint = "best_model"
+        model_params = deepcopy(self.trainer.target_agent_model_params)
+        fe_params = deepcopy(self.trainer.target_agent_fe_params)
+        critic_params = deepcopy(self.trainer.target_critic_params)
+        self.trainer.load_model(checkpoint)
+        
+        # Check Cirtic
+        for key in critic_params:
+            self.assertFalse(torch.equal(critic_params[key], self.trainer.target_critic_params[key]))
+        # Check Agent
+        for model_name in self.trainer.target_agent_group.models.keys():
+            for key in model_params[model_name]:
+                self.assertFalse(torch.equal(model_params[model_name][key], self.trainer.target_agent_model_params[model_name][key]))
+            for key in fe_params[model_name]:
+                self.assertFalse(torch.equal(fe_params[model_name][key], self.trainer.target_agent_fe_params[model_name][key]))
+
 
 if __name__ == '__main__':
     unittest.main()

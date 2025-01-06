@@ -31,6 +31,7 @@ class TrainerConfig:
         self.trainer_config = self.config['trainer_config']
         self.trainer_type = self.trainer_config.pop('type')
         self.train_args = self.trainer_config.pop('train_args')
+        self.checkpoint = self.trainer_config.pop('checkpoint', None)
         self.trainer = None
 
         self.registered_trainers = {
@@ -38,9 +39,7 @@ class TrainerConfig:
         }
 
     def create_trainer(self) -> Trainer:
-        if self.trainer_type not in self.registered_trainers:
-            raise ValueError(f"Unsupported algorithm: {self.trainer_type}")
-        else:
+        if self.trainer_type in self.registered_trainers:
             trainer_class = self.registered_trainers[self.trainer_type]
             self.trainer = trainer_class(
                 env_config=self.env_config,
@@ -53,6 +52,10 @@ class TrainerConfig:
                 replaybuffer_config = self.replaybuffer_config,
                 **self.trainer_config
             )
+            if self.checkpoint:
+                self.trainer.load_model(self.checkpoint)
+        else:
+            raise ValueError(f"Unsupported algorithm: {self.trainer_type}")
         return self.trainer
     
     def run(self):

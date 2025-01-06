@@ -111,28 +111,31 @@ class Trainer():
         for model_name in self.target_agent_group.models.keys():
             model_path = os.path.join(self.agentsdir, model_name, 'model', f'{checkpoint}.pth')
             if os.path.exists(model_path):
-                params = torch.load(model_path)
+                params = torch.load(model_path, weights_only=True)
                 agent_model_params[model_name] = params
                 logging.info(f"Actor {model_name} loaded from {model_path}")
             else:
                 logging.warning(f"Model path for actor {model_name} does not exist: {model_path}")
+                raise FileNotFoundError(f"Model path for actor {model_name} does not exist: {model_path}")
 
             fe_path = os.path.join(self.agentsdir, model_name, 'feature_extractor', f'{checkpoint}.pth')
             if os.path.exists(fe_path):
-                params = torch.load(fe_path)
+                params = torch.load(fe_path, weights_only=True)
                 agent_feature_extractor_params[model_name] = params
                 logging.info(f"{model_name}'s feature extractor loaded from {fe_path}")
             else:
                 logging.warning(f"Feature extractor path for actor {model_name} does not exist: {fe_path}")
+                raise FileNotFoundError(f"Feature extractor path for actor {model_name} does not exist: {fe_path}")
         self.target_agent_group.set_model_params(agent_model_params, agent_feature_extractor_params)
         logging.info("All actor models and feature extractors loaded successfully.")
 
         critic_path = os.path.join(self.criticdir, 'model', f'{checkpoint}.pth')
         if os.path.exists(critic_path):
-            self.target_critic.load_state_dict(torch.load(critic_path))
+            self.target_critic.load_state_dict(torch.load(critic_path, weights_only=True))
             logging.info(f"Critic model loaded from {critic_path}")
         else:
             logging.warning(f"Critic model path does not exist: {critic_path}")
+            raise FileNotFoundError(f"Critic model path does not exist: {critic_path}")
 
         self.update_params()
 
@@ -226,7 +229,7 @@ class Trainer():
 
             # Save checkpoint at the end of each epoch
             checkpoint_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            checkpoint_name = f"checkpoint_{epoch}_{checkpoint_time}"
+            checkpoint_name = f"checkpoint_{checkpoint_time}_{epoch}"
             self.save_model(checkpoint_name)
             logging.info(f"Checkpoint saved at {checkpoint_name}")
         

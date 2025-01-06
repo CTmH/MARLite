@@ -24,7 +24,7 @@ class TestQMIXAgentGroup(unittest.TestCase):
         self.obs_shape = self.obs_shape[0]
         self.action_space_shape = self.env.action_space(key).n
         # Agent group configuration
-        config_path = 'config/qmix_default.yaml'
+        config_path = 'test/config/qmix_default.yaml'
         with open(config_path, 'r') as file:
             config = yaml.safe_load(file)
         self.agent_group_config = AgentGroupConfig(**config['agent_group_config'])

@@ -6,7 +6,7 @@ from src.trainer.trainer import Trainer
 
 class TestTrainerConfig(unittest.TestCase):
     def setUp(self):
-        self.config_path = 'config/qmix_default.yaml'
+        self.config_path = 'test/config/qmix_default.yaml'
         with open(self.config_path, 'r') as file:
             self.config = yaml.safe_load(file)
         self.config['trainer_config']['train_args']['epochs'] = 10
