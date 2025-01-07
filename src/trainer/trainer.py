@@ -170,13 +170,13 @@ class Trainer():
         self.target_critic.load_state_dict(self.target_critic_params)
         return self
 
-    def evaluate(self, times=100):
+    def evaluate(self):
         self.target_agent_group.to(self.eval_device)
-        manager = self.rolloutmanager_config.create_manager(self.target_agent_group,
+        manager = self.rolloutmanager_config.create_eval_manager(self.target_agent_group,
                                                            self.env_config,
                                                            self.eval_epsilon)
         
-        logging.info(f"Evaluating for {times} episodes")
+        logging.info(f"Evaluating model...")
         episodes = manager.generate_episodes()
         manager.cleanup()
         rewards = np.array([episode['episode_reward'] for episode in episodes])

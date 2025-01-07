@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+import logging
 from torch.optim import Optimizer
 from copy import deepcopy
 from typing import Dict
@@ -134,7 +135,7 @@ class QMIXAgentGroup(AgentGroup):
         model_params = {model_name:deepcopy(model.state_dict()) for model_name, model in self.models.items()}
         feature_extractor_params = {model_name:deepcopy(fe.state_dict()) for model_name, fe in self.feature_extractors.items()}
         return model_params, feature_extractor_params
-    
+
     def zero_grad(self):
         self.optimizer.zero_grad()
         return self

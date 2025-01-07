@@ -80,7 +80,7 @@ class MultiThreadRolloutWorker(threading.Thread):
                 episode['next_states'].append(self.env.state()) # TODO: Check if this is correct
                 episode['next_observations'].append(observations) # TODO: Check if this is correct
 
-                episode_reward += np.sum(np.array([rewards[agent] for agent in rewards.keys()]))
+                episode_reward += np.sum(np.array([reward for _, reward in rewards.items()]))
 
                 # TODO win tag logic here
                 # TODO logic for lost units
