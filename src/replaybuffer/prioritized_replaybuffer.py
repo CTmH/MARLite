@@ -1,11 +1,13 @@
-import heapq
 import random
+import numpy as np
 from .replaybuffer import ReplayBuffer
 from ..util.trajectory_dataset import TrajectoryDataset
 
-class NormalReplayBuffer(ReplayBuffer):
+class PrioritizedReplayBuffer(ReplayBuffer):
 
-    def __init__(self, capacity, traj_len):
+    def __init__(self, capacity, traj_len, priority_attr, alpha=0.8):
+        self.priority_attr = priority_attr
+        self.alpha = alpha
         self.traj_len = traj_len
         self.capacity = capacity
         self.episode_buffer = {i: None for i in range(self.capacity)}
@@ -27,49 +29,32 @@ class NormalReplayBuffer(ReplayBuffer):
         self.episode_buffer[episode_id] = episode
         # Add new trajectory position to the replay buffer.
         for i in range(episode['episode_length']):
-            self.buffer.add((episode_id, i))
+            priority = episode[self.priority_attr][i]
+            self.buffer.add((priority, episode_id, i))
         return self
     
     def remove_episode(self, episode_id):
         for i in range(self.episode_buffer[episode_id]['episode_length']):
-            self.buffer.remove((episode_id, i))
+            priority = self.episode_buffer[episode_id][self.priority_attr][i]
+            self.buffer.remove((priority, episode_id, i))
         self.episode_buffer[episode_id] = None  # Remove the episode from the episode buffer
         return self
 
     def sample(self, sample_size):
-        idx = random.sample(list(self.buffer), min(sample_size, len(self.buffer)))
+        timestep_list = list(self.buffer)
+        priorities = [ts[0] for ts in timestep_list]
+        timestep_list = [ts[1:] for ts in timestep_list]
+        normalized_priorities = (priorities - np.min(priorities)) / (np.max(priorities) - np.min(priorities)) # Min-Max Normalization
+        weights = np.array(normalized_priorities) ** self.alpha  # 使用 alpha 调整优先级的影响
+        # weights 不需要手动归一化，random.choices 会自动处理。
+        
+        # 根据概率有放回进行采样
+        idx = random.choices(
+            population=timestep_list,  # 所有样本
+            weights=weights,        # 采样概率
+            k=sample_size,             # 采样数量
+        )
         if len(idx) == 0:
             assert False, "Replay Buffer is empty"
         samples = TrajectoryDataset(sample_id_list=idx, episode_buffer=self.episode_buffer, traj_len=self.traj_len)
         return samples
-
-
-class PrioritizedReplayBuffer(ReplayBuffer):
-    def __init__(self, capacity):
-        self.capacity = capacity
-        self.buffer = []
-    
-    def add(self, priority, experience):
-        if len(self.buffer) >= self.capacity:
-            # Remove the lowest priority item if buffer is full
-            heapq.heappop(self.buffer)
-        heapq.heappush(self.buffer, (priority, experience))
-    
-    def sample(self, batch_size):
-        sampled_experiences = random.sample(self.buffer, min(batch_size, len(self.buffer)))
-        return [exp for _, exp in sorted(sampled_experiences, key=lambda x: x[0])]
-    
-    def update_priority(self, index, new_priority):
-        # Find the experience with the old priority
-        for i, (priority, exp) in enumerate(self.buffer):
-            if i == index:
-                # Remove the old one
-                self.buffer[i] = None
-                heapq.heapify(self.buffer)
-                # Add the new one
-                self.add(new_priority, exp)
-                break
-    
-    def __len__(self):
-        return len([item for item in self.buffer if item is not None])
-

@@ -52,6 +52,7 @@ class MultiThreadRolloutWorker(threading.Thread):
             'terminations': [],
             'next_states': [],
             'next_observations': [],
+            'all_agents_sum_rewards': [],
             'episode_reward': 0,
             'win_tag': False,
             'episode_length': 0, 
@@ -75,6 +76,8 @@ class MultiThreadRolloutWorker(threading.Thread):
                 observations, rewards, terminations, truncations, infos = self.env.step(actions)
                 
                 episode['rewards'].append(rewards)
+                all_agents_rewards = [value for _, value in rewards.items()]
+                episode['all_agents_sum_rewards'].append(sum(all_agents_rewards))
                 episode['truncated'].append(truncations)
                 episode['terminations'].append(terminations)
                 episode['next_states'].append(self.env.state()) # TODO: Check if this is correct
