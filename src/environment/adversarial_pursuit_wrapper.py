@@ -26,7 +26,8 @@ class AdversarialPursuitPredator(ParallelEnvWrapper):
     def step(self, actions):
         opponent_avail_actions = {agent: self.env.action_spaces[agent] for agent in self.opponent_agents}
         opp_obs = list(self.opponent_observation_history)
-        self.opponent_actions = self.opponent_agent_group.act(opp_obs, opponent_avail_actions, epsilon=0.0)
+        opp_obs_dict = {agent: [opp_obs[i][agent] for i in range(len(opp_obs))] for agent in self.opponent_agents}
+        self.opponent_actions = self.opponent_agent_group.act(opp_obs_dict, opponent_avail_actions, epsilon=0.0)
         actions = {**actions, **self.opponent_actions}  # Combine actions with opponent's actions
         observations, rewards, terminations, truncations, infos = self.env.step(actions)
 
@@ -42,7 +43,7 @@ class AdversarialPursuitPredator(ParallelEnvWrapper):
         return agent_observations, agent_rewards, agent_terminations, agent_truncations, agent_infos
 
     def reset(self):
-        observations = self.env.reset() # Magent2 environment reset does not return info
+        observations = self.env.reset()  # Magent2 environment reset does not return info
         self.opponent_observations = {agent: observations[agent] for agent in self.opponent_agents}
         self.opponent_observation_history.clear()
         self.opponent_observation_history.append(self.opponent_observations)
@@ -73,8 +74,9 @@ class AdversarialPursuitPrey(ParallelEnvWrapper):
     def step(self, actions):
         opponent_avail_actions = {agent: self.env.action_spaces[agent] for agent in self.opponent_agents}
         opp_obs = list(self.opponent_observation_history)
-        self.opponent_actions = self.opponent_agent_group.act(opp_obs, opponent_avail_actions, epsilon=0.0)
-        actions = {**actions, **self.opponent_actions}  # Combine actions with opponent's actions
+        opp_obs_dict = {agent: [opp_obs[i][agent] for i in range(len(opp_obs))] for agent in self.opponent_agents}
+        self.opponent_actions = self.opponent_agent_group.act(opp_obs_dict, opponent_avail_actions, epsilon=0.0)
+        actions = {**self.opponent_actions, **actions}  # Combine actions with opponent's actions
         observations, rewards, terminations, truncations, infos = self.env.step(actions)
 
         self.opponent_observations = {agent: observations[agent] for agent in self.opponent_agents}

@@ -44,7 +44,12 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         timestep_list = list(self.buffer)
         priorities = [ts[0] for ts in timestep_list]
         timestep_list = [ts[1:] for ts in timestep_list]
-        normalized_priorities = (priorities - np.min(priorities)) / (np.max(priorities) - np.min(priorities)) # Min-Max Normalization
+        min_priority = np.min(priorities)
+        max_priority = np.max(priorities)
+        if min_priority != max_priority:
+            normalized_priorities = (priorities - min_priority) / (max_priority - min_priority) # Min-Max Normalization
+        else:
+            normalized_priorities = np.ones_like(priorities)
         weights = np.array(normalized_priorities) ** self.alpha  # 使用 alpha 调整优先级的影响
         # weights 不需要手动归一化，random.choices 会自动处理。
         

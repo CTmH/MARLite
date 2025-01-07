@@ -5,10 +5,14 @@ import importlib
 
 from .parallel_env_wrapper import ParallelEnvWrapper
 from .adversarial_pursuit_wrapper import AdversarialPursuitPredator, AdversarialPursuitPrey
+from .battle_wrapper import BattleWrapper
+from .battlefield_wrapper import BattleFieldWrapper
 
 custom_envs = {
     'adversarial_pursuit_predator': AdversarialPursuitPredator,
     'adversarial_pursuit_prey': AdversarialPursuitPrey,
+    'battle': BattleWrapper,
+    'battlefield': BattleFieldWrapper,
 }
 
 class EnvConfig():
