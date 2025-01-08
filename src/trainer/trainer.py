@@ -83,8 +83,20 @@ class Trainer():
     def learn(self, sample_size, batch_size: int, times: int):
         raise NotImplementedError
     
-    def save_model(self, checkpoint: str):
+    def save_current_model(self, checkpoint: str):
         agent_model_params, agent_feature_extractor_params = self.target_agent_group.get_model_params()
+        critic_params = self.target_critic.state_dict()
+        self.save_params(checkpoint, agent_model_params, agent_feature_extractor_params, critic_params)
+        return self
+    
+    def save_best_model(self):
+        self.save_params('best_model',
+                         self.target_agent_model_params,
+                         self.target_agent_fe_params,
+                         self.target_critic_params)
+        return self
+
+    def save_params(self, checkpoint: str, agent_model_params: dict, agent_feature_extractor_params: dict, critic_params):
         for model_name, params in agent_model_params.items():
             path = os.path.join(self.agentsdir, model_name, 'model')
             os.makedirs(path, exist_ok=True)
@@ -102,7 +114,7 @@ class Trainer():
         path = os.path.join(self.criticdir, 'model')
         os.makedirs(path, exist_ok=True)
         critic_path = os.path.join(path, f'{checkpoint}.pth')
-        torch.save(self.target_critic.state_dict(), critic_path)
+        torch.save(critic_params, critic_path)
         logging.info(f"Critic model saved to {critic_path}")
 
     def load_model(self, checkpoint: str):
@@ -137,7 +149,7 @@ class Trainer():
             logging.warning(f"Critic model path does not exist: {critic_path}")
             raise FileNotFoundError(f"Critic model path does not exist: {critic_path}")
 
-        self.update_params()
+        self.update_eval_model_params()
 
         return self
 
@@ -157,17 +169,17 @@ class Trainer():
         
         return self
 
-    def update_params(self):
+    def update_eval_model_params(self):
         # Update the evaluation models with the latest weights from the training models
-        self.target_agent_model_params, self.target_agent_fe_params = self.target_agent_group.get_model_params()
-        self.eval_agent_group.set_model_params(self.target_agent_model_params, self.target_agent_fe_params)
-        self.target_critic_params = deepcopy(self.target_critic.state_dict())  # Update critic parameters
-        self.eval_critic.load_state_dict(self.target_critic_params)
+        target_agent_model_params, target_agent_fe_params = self.target_agent_group.get_model_params()
+        self.eval_agent_group.set_model_params(target_agent_model_params, target_agent_fe_params)
+        target_critic_params = deepcopy(self.target_critic.state_dict())  # Update critic parameters
+        self.eval_critic.load_state_dict(target_critic_params)
         return self
-
-    def reload_params(self):
-        self.target_agent_group.set_model_params(self.target_agent_model_params, self.target_agent_fe_params)
-        self.target_critic.load_state_dict(self.target_critic_params)
+    
+    def update_best_params(self):
+        self.target_agent_model_params, self.target_agent_fe_params = self.target_agent_group.get_model_params()
+        self.target_critic_params = deepcopy(self.target_critic.state_dict())  # Update critic parameters
         return self
 
     def evaluate(self):
@@ -190,7 +202,7 @@ class Trainer():
     def train(self, epochs, target_reward, eval_interval=1, batch_size=64, learning_times_per_epoch=1):
         best_mean_reward = -np.inf
         best_reward_std = np.inf
-        best_loss = 0
+        best_loss = np.inf
 
         # Training loop
         for epoch in range(epochs):
@@ -208,6 +220,14 @@ class Trainer():
             loss = self.learn(sample_size=sample_size, batch_size=batch_size, times=learning_times_per_epoch)
             logging.info(f"Epoch {epoch}: Loss {loss}")
 
+            self.update_eval_model_params()
+
+            # Save checkpoint
+            checkpoint_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            checkpoint_name = f"checkpoint_{checkpoint_time}_{epoch}"
+            self.save_current_model(checkpoint_name)
+            logging.info(f"Checkpoint saved at {checkpoint_name}")
+
             if epoch % eval_interval == 0:
             
                 mean_reward, reward_std = self.evaluate()
@@ -218,24 +238,16 @@ class Trainer():
                     best_mean_reward = mean_reward
                     best_reward_std = reward_std
                     best_loss = loss
+                    self.update_best_params()
                     logging.info(f"Epoch {epoch}: New best mean reward {best_mean_reward}")
-                    self.update_params()
-                else:
-                    self.reload_params()
-
+                    
                 if mean_reward >= target_reward:
                     logging.info(f"Target reward reached: {mean_reward} >= {target_reward}")
                     break
 
-            # Save checkpoint at the end of each epoch
-            checkpoint_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            checkpoint_name = f"checkpoint_{checkpoint_time}_{epoch}"
-            self.save_model(checkpoint_name)
-            logging.info(f"Checkpoint saved at {checkpoint_name}")
-        
         self.save_intermediate_results('best', best_loss, best_mean_reward, best_reward_std)
         self.save_results_to_csv()
-        self.save_model("best_model")
+        self.save_best_model()
         return best_mean_reward, best_reward_std
     
     def save_intermediate_results(self, epoch, loss, mean_reward, reward_std):

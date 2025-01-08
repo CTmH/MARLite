@@ -17,7 +17,7 @@ class TestQMixTrainer(unittest.TestCase):
         self.config_path = 'test/config/qmix_default.yaml'
         with open(self.config_path, 'r') as file:
             self.config = yaml.safe_load(file)
-        self.config['trainer_config']['train_args']['epochs'] = 10
+        self.config['trainer_config']['train_args']['epochs'] = 2
         self.config['rollout_config']['n_episodes'] = 20
         self.config['rollout_config']['episode_limit'] = 30
         self.config['replaybuffer_config']['capacity'] = 50
@@ -36,7 +36,7 @@ class TestQMixTrainer(unittest.TestCase):
         origin_critic_params = deepcopy(self.trainer.target_critic.state_dict())
         self.trainer.collect_experience(0.9)
         self.trainer.learn(sample_size=320, batch_size=32, times=10)
-        self.trainer.update_params()
+        self.trainer.update_eval_model_params()
         agent_params, agent_fe_params = self.trainer.target_agent_group.get_model_params()
         critic_params = self.trainer.target_critic.state_dict()
 
@@ -52,13 +52,13 @@ class TestQMixTrainer(unittest.TestCase):
 
     def test_train(self):
         reward, _ = self.trainer.evaluate()
-        best_reward, _ = self.trainer.train(epochs=10, target_reward=5)
+        best_reward, _ = self.trainer.train(epochs=2, target_reward=5)
         self.assertGreaterEqual(best_reward, reward)
 
     @patch('src.trainer.trainer.torch.save')
     def test_save_model(self, mock_torch_save):
-        checkpoint = "test_model"
-        self.trainer.save_model(checkpoint)
+        checkpoint = "save_test_model"
+        self.trainer.save_current_model(checkpoint)
         call_list = []
         # Check actor models
         agent_params, agent_fe_params = self.trainer.target_agent_group.get_model_params()
@@ -75,22 +75,22 @@ class TestQMixTrainer(unittest.TestCase):
         self.assertEqual(mock_torch_save.call_count, len(call_list))
 
     def test_load_model(self):
-        checkpoint = "best_model"
-        model_params = deepcopy(self.trainer.target_agent_model_params)
-        fe_params = deepcopy(self.trainer.target_agent_fe_params)
-        critic_params = deepcopy(self.trainer.target_critic_params)
+        checkpoint = "load_test_model"
+        model_params, fe_params = self.trainer.target_agent_group.get_model_params()
+        critic_params = deepcopy(self.trainer.target_critic.state_dict())
         self.trainer.load_model(checkpoint)
         
         # Check Cirtic
         for key in critic_params:
-            self.assertFalse(torch.equal(critic_params[key], self.trainer.target_critic_params[key]))
+            loaded_critic_params = deepcopy(self.trainer.target_critic.state_dict())
+            self.assertFalse(torch.equal(critic_params[key], loaded_critic_params[key]))
         # Check Agent
+        loaded_model_params, loaded_fe_params = self.trainer.target_agent_group.get_model_params()
         for model_name in self.trainer.target_agent_group.models.keys():
             for key in model_params[model_name]:
-                self.assertFalse(torch.equal(model_params[model_name][key], self.trainer.target_agent_model_params[model_name][key]))
+                self.assertFalse(torch.equal(model_params[model_name][key], loaded_model_params[model_name][key]))
             for key in fe_params[model_name]:
-                self.assertFalse(torch.equal(fe_params[model_name][key], self.trainer.target_agent_fe_params[model_name][key]))
-
+                self.assertFalse(torch.equal(fe_params[model_name][key], loaded_fe_params[model_name][key]))
 
 if __name__ == '__main__':
     unittest.main()

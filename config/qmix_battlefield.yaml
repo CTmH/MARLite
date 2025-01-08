@@ -98,7 +98,7 @@ sample_ratio_scheduler:
 critic_config:
   type: "QMIX"
   state_shape: 256
-  input_dim: 325
+  input_dim: 156
   qmix_hidden_dim: 1024
   hyper_hidden_dim: 256
   feature_extractor:

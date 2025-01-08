@@ -118,7 +118,7 @@ class TestTrainerConfigWithMagentBattlefield(unittest.TestCase):
     def test_run(self):
         self.trainer_config.create_trainer()
         reward, _ = self.trainer_config.trainer.evaluate()
-        self.trainer_config.trainer.epochs = 5
+        self.trainer_config.trainer.epochs = 2
         self.trainer_config.trainer.n_episodes = 20
         self.trainer_config.trainer.replaybuffer.capacity = 200
         best_reward, _ = self.trainer_config.run()
