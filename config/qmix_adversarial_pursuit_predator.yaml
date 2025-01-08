@@ -79,6 +79,7 @@ agent_group_config:
 env_config:
   module_name: "custom"
   env_name: "adversarial_pursuit_predator"
+  tag_penalty: 0.0
   opponent_agent_group_config:
     type: "Random"
     agent_list:

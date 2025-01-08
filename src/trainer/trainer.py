@@ -50,29 +50,26 @@ class Trainer():
         self.rolloutmanager_config = rolloutmanager_config
 
         # Agent group
-        self.target_agent_group = agent_group_config.get_agent_group()
         self.eval_agent_group = agent_group_config.get_agent_group()
-        self.target_agent_model_params, self.target_agent_fe_params = self.target_agent_group.get_model_params()
-        self.eval_agent_group.set_model_params(self.target_agent_model_params, self.target_agent_fe_params)  # Load the model parameters to eval agent group
+        self.target_agent_group = agent_group_config.get_agent_group()
+        self.best_agent_model_params, self.best_agent_fe_params = self.eval_agent_group.get_model_params()
+        self.target_agent_group.set_model_params(self.best_agent_model_params, self.best_agent_fe_params)  # Load the model parameters to eval agent group
         self.agents = self.target_agent_group.agents
         
         # Critic
-        self.target_critic = critic_config.get_critic()
         self.eval_critic = critic_config.get_critic()
-        self.target_critic_params = deepcopy(self.target_critic.state_dict())
-        self.eval_critic.load_state_dict(self.target_critic_params)
-        self.optimizer = critic_optimizer_config.get_optimizer(self.target_critic.parameters())
+        self.target_critic = critic_config.get_critic()
+        self.best_critic_params = deepcopy(self.eval_critic.state_dict())
+        self.target_critic.load_state_dict(self.best_critic_params)
+        self.optimizer = critic_optimizer_config.get_optimizer(self.eval_critic.parameters())
 
         # Work directory
         self.workdir = workdir
-        os.makedirs(self.workdir, exist_ok=True)
         self.logdir = os.path.join(workdir, 'logs')
         self.modeldir = os.path.join(workdir, 'models')
         self.agentsdir = os.path.join(self.modeldir, 'agents')
         self.criticdir = os.path.join(self.modeldir, 'critic')
         self.results = {}  # Dictionary to save intermediate results
-        os.makedirs(self.logdir, exist_ok=True)
-        os.makedirs(self.modeldir, exist_ok=True)
         self.log = logging.basicConfig(level=logging.INFO,
                                        format='%(asctime)s - %(levelname)s - %(message)s',
                                        handlers=[
@@ -84,16 +81,16 @@ class Trainer():
         raise NotImplementedError
     
     def save_current_model(self, checkpoint: str):
-        agent_model_params, agent_feature_extractor_params = self.target_agent_group.get_model_params()
-        critic_params = self.target_critic.state_dict()
+        agent_model_params, agent_feature_extractor_params = self.eval_agent_group.get_model_params()
+        critic_params = self.eval_critic.state_dict()
         self.save_params(checkpoint, agent_model_params, agent_feature_extractor_params, critic_params)
         return self
     
     def save_best_model(self):
         self.save_params('best_model',
-                         self.target_agent_model_params,
-                         self.target_agent_fe_params,
-                         self.target_critic_params)
+                         self.best_agent_model_params,
+                         self.best_agent_fe_params,
+                         self.best_critic_params)
         return self
 
     def save_params(self, checkpoint: str, agent_model_params: dict, agent_feature_extractor_params: dict, critic_params):
@@ -120,7 +117,7 @@ class Trainer():
     def load_model(self, checkpoint: str):
         agent_model_params = {}
         agent_feature_extractor_params = {}
-        for model_name in self.target_agent_group.models.keys():
+        for model_name in self.eval_agent_group.models.keys():
             model_path = os.path.join(self.agentsdir, model_name, 'model', f'{checkpoint}.pth')
             if os.path.exists(model_path):
                 params = torch.load(model_path, weights_only=True)
@@ -138,18 +135,18 @@ class Trainer():
             else:
                 logging.warning(f"Feature extractor path for actor {model_name} does not exist: {fe_path}")
                 raise FileNotFoundError(f"Feature extractor path for actor {model_name} does not exist: {fe_path}")
-        self.target_agent_group.set_model_params(agent_model_params, agent_feature_extractor_params)
+        self.eval_agent_group.set_model_params(agent_model_params, agent_feature_extractor_params)
         logging.info("All actor models and feature extractors loaded successfully.")
 
         critic_path = os.path.join(self.criticdir, 'model', f'{checkpoint}.pth')
         if os.path.exists(critic_path):
-            self.target_critic.load_state_dict(torch.load(critic_path, weights_only=True))
+            self.eval_critic.load_state_dict(torch.load(critic_path, weights_only=True))
             logging.info(f"Critic model loaded from {critic_path}")
         else:
             logging.warning(f"Critic model path does not exist: {critic_path}")
             raise FileNotFoundError(f"Critic model path does not exist: {critic_path}")
 
-        self.update_eval_model_params()
+        self.update_target_model_params()
 
         return self
 
@@ -169,22 +166,22 @@ class Trainer():
         
         return self
 
-    def update_eval_model_params(self):
+    def update_target_model_params(self):
         # Update the evaluation models with the latest weights from the training models
-        target_agent_model_params, target_agent_fe_params = self.target_agent_group.get_model_params()
-        self.eval_agent_group.set_model_params(target_agent_model_params, target_agent_fe_params)
-        target_critic_params = deepcopy(self.target_critic.state_dict())  # Update critic parameters
-        self.eval_critic.load_state_dict(target_critic_params)
+        agent_model_params, agent_fe_params = self.eval_agent_group.get_model_params()
+        self.target_agent_group.set_model_params(agent_model_params, agent_fe_params)
+        critic_params = deepcopy(self.eval_critic.state_dict())  # Update critic parameters
+        self.target_critic.load_state_dict(critic_params)
         return self
     
     def update_best_params(self):
-        self.target_agent_model_params, self.target_agent_fe_params = self.target_agent_group.get_model_params()
-        self.target_critic_params = deepcopy(self.target_critic.state_dict())  # Update critic parameters
+        self.best_agent_model_params, self.best_agent_fe_params = self.eval_agent_group.get_model_params()
+        self.best_critic_params = deepcopy(self.eval_critic.state_dict())  # Update critic parameters
         return self
 
     def evaluate(self):
-        self.target_agent_group.to(self.eval_device)
-        manager = self.rolloutmanager_config.create_eval_manager(self.target_agent_group,
+        self.eval_agent_group.to(self.eval_device)
+        manager = self.rolloutmanager_config.create_eval_manager(self.eval_agent_group,
                                                            self.env_config,
                                                            self.eval_epsilon)
         
@@ -207,20 +204,16 @@ class Trainer():
         # Training loop
         for epoch in range(epochs):
 
-            self.target_agent_group.set_model_params(self.target_agent_model_params, self.target_agent_fe_params)
-            self.target_critic.load_state_dict(self.target_critic_params)
-
             logging.info(f"Epoch {epoch}: Collecting experiences")
             self.collect_experience(epsilon=self.epsilon.get_value(epoch))
             sample_ratio = self.sample_ratio.get_value(epoch)
             sample_size = len(self.replaybuffer.buffer) * sample_ratio
             sample_size = round(sample_size)
             
+            # Learn and update eval model
             logging.info(f"Epoch {epoch}: Learning with batch size {batch_size} and learning {learning_times_per_epoch} times per epoch")
             loss = self.learn(sample_size=sample_size, batch_size=batch_size, times=learning_times_per_epoch)
             logging.info(f"Epoch {epoch}: Loss {loss}")
-
-            self.update_eval_model_params()
 
             # Save checkpoint
             checkpoint_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -230,8 +223,10 @@ class Trainer():
 
             if epoch % eval_interval == 0:
             
-                mean_reward, reward_std = self.evaluate()
+                self.update_target_model_params()
+                logging.info(f"Epoch {epoch}: Target model updated with eval model params")
 
+                mean_reward, reward_std = self.evaluate()
                 self.save_intermediate_results(epoch, loss, mean_reward, reward_std)
                 
                 if mean_reward > best_mean_reward:
@@ -259,6 +254,7 @@ class Trainer():
         logging.info(f"Intermediate results saved for epoch {epoch}: Loss {loss}, Mean reward {mean_reward}, Std reward {reward_std}")
 
     def save_results_to_csv(self):
+        os.makedirs(self.logdir, exist_ok=True)
         csv_path = os.path.join(self.logdir, 'results.csv')
         with open(csv_path, 'w', newline='') as file:
             writer = csv.writer(file)

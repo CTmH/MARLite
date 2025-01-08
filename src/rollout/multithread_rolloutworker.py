@@ -34,7 +34,7 @@ class MultiThreadRolloutWorker(threading.Thread):
     def run(self):
         for i in range(self.n_episodes):
             self.episode_queue.put(self.rollout())
-            if i % (self.n_episodes // 10) == 0 or i == (self.n_episodes - 1):
+            if self.n_episodes < 10 or i % (self.n_episodes // 10) == 0 or i == (self.n_episodes - 1):
                 logging.info(f"Thread - {self.thread_id}:\t{self.thread_name}\tfinished job {i+1} / {self.n_episodes}")
         return self
 

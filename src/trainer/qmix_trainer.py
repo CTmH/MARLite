@@ -30,11 +30,11 @@ class QMIXTrainer(Trainer):
                     bs = states.shape[0]  # Actual batch size
                     # Compute the Q-tot
                     q_val = [None for _ in range(len(self.agents))]
-                    self.target_agent_group.train().to(self.train_device)
-                    for (model_name, model), (_, fe) in zip(self.target_agent_group.models.items(), 
-                                                            self.target_agent_group.feature_extractors.items()):
-                        selected_agents = self.target_agent_group.model_to_agents[model_name]
-                        idx = self.target_agent_group.model_to_agent_indices[model_name]
+                    self.eval_agent_group.train().to(self.train_device)
+                    for (model_name, model), (_, fe) in zip(self.eval_agent_group.models.items(), 
+                                                            self.eval_agent_group.feature_extractors.items()):
+                        selected_agents = self.eval_agent_group.model_to_agents[model_name]
+                        idx = self.eval_agent_group.model_to_agent_indices[model_name]
                         # observation shape: (Batch Size, Agent Number, Time Step, Feature Dimensions) (B, N, T, F)
                         obs = observations[:,idx]
                         obs = torch.Tensor(obs)
@@ -63,16 +63,16 @@ class QMIXTrainer(Trainer):
                     q_val = q_val.permute(1, 0, 2)  # (B, N, Action Space)
 
                     states = torch.Tensor(states[:,-1,:]).to(self.train_device) # (B, T, F) -> (B, F) Take only the last state in the sequence
-                    self.target_critic.train().to(self.train_device)
-                    q_tot = self.target_critic(q_val, states)
+                    self.eval_critic.train().to(self.train_device)
+                    q_tot = self.eval_critic(q_val, states)
 
                     # Compute TD targets
                     q_val = [None for _ in range(len(self.agents))]
-                    self.eval_agent_group.eval().to(self.train_device)
-                    for (model_name, model), (_, fe) in zip(self.eval_agent_group.models.items(), 
-                                                            self.eval_agent_group.feature_extractors.items()):
-                        selected_agents = self.eval_agent_group.model_to_agents[model_name]
-                        idx = self.eval_agent_group.model_to_agent_indices[model_name]
+                    self.target_agent_group.train().to(self.train_device) # cudnn RNN backward can only be called in training mode
+                    for (model_name, model), (_, fe) in zip(self.target_agent_group.models.items(), 
+                                                            self.target_agent_group.feature_extractors.items()):
+                        selected_agents = self.target_agent_group.model_to_agents[model_name]
+                        idx = self.target_agent_group.model_to_agent_indices[model_name]
                         # observation shape: (Batch Size, Agent Number, Time Step, Feature Dimensions) (B, N, T, F)
                         obs = next_observations[:,idx]
                         obs = torch.Tensor(obs)
@@ -101,8 +101,8 @@ class QMIXTrainer(Trainer):
                     q_val = q_val.permute(1, 0, 2)  # (B, N, Action Space)
 
                     next_states = torch.Tensor(next_states[:,-1,:]).to(self.train_device) # (B, T, F) -> (B, F) Take only the last state in the sequence
-                    self.eval_critic.eval().to(self.train_device)
-                    q_tot_next = self.eval_critic(q_val, next_states)
+                    self.target_critic.train().to(self.train_device) # cudnn RNN backward can only be called in training mode
+                    q_tot_next = self.target_critic(q_val, next_states)
 
                     # Compute the TD target
                     rewards = torch.Tensor(rewards[:,:,-1]).to(self.train_device) # (B, N, T) -> (B, N)
@@ -110,17 +110,17 @@ class QMIXTrainer(Trainer):
                     terminations = torch.Tensor(terminations[:,:,-1]).to(self.train_device) # (B, N, T) -> (B, N)
                     terminations = terminations.prod(dim=1) # (B, N) -> (B) if all agents are terminated then game over
 
-                    q_tot_next = rewards + (1 - terminations) * self.gamma * q_tot_next
+                    y_tot = rewards + (1 - terminations) * self.gamma * q_tot_next
 
                     # Compute the critic loss
-                    critic_loss = torch.nn.functional.mse_loss(q_tot, q_tot_next)
+                    critic_loss = torch.nn.functional.mse_loss(q_tot, y_tot)
                         
                     # Optimize the critic network
-                    self.target_agent_group.zero_grad()
-                    self.target_critic.zero_grad()
+                    self.eval_agent_group.zero_grad()
+                    self.eval_critic.zero_grad()
                     critic_loss.backward()
                     self.optimizer.step()
-                    self.target_agent_group.step()
+                    self.eval_agent_group.step()
 
                     total_loss += critic_loss.item()
                     total_batches += 1
