@@ -2,45 +2,45 @@ import multiprocessing
 import os
 import logging
 import numpy as np
-import multiprocessing as mp
+import torch.multiprocessing as mp
 from copy import deepcopy
 from ..environment.env_config import EnvConfig
 from ..algorithm.agents import AgentGroup
 from ..algorithm.model import RNNModel
+from ..algorithm.agents.agent_group import AgentGroup
 
 class MultiProcessRolloutWorker(mp.Process):
     def __init__(self,
-                 env_config: EnvConfig,
+                 env,
                  agent_group: AgentGroup,
-                 episode_queue: mp.Queue,
                  n_episodes: int,
                  rnn_traj_len=5,
                  episode_limit=100,
                  epsilon=0.5,
                  device='cpu'):
         super(MultiProcessRolloutWorker, self).__init__()
-        self.env_config = env_config
-        self.agent_group = deepcopy(agent_group)
-        self.episode_queue = episode_queue
+        self.device = device
+        self.env = env
+        self.episode_list = []
+        # Initialize AgentGroup
+        self.agent_group = agent_group
+        self.agent_group.to(self.device)
         self.n_episodes = n_episodes
         self.rnn_traj_len = rnn_traj_len
         self.episode_limit = episode_limit
         self.epsilon = epsilon
-        self.env = self.env_config.create_env()
-        self.device = device
 
         self.process_name = multiprocessing.current_process().name
         self.process_id = os.getpid()
 
     def run(self):
         for i in range(self.n_episodes):
-            self.episode_queue.put(self.rollout())
+            self.episode_list.append(self.rollout())
             if self.n_episodes < 10 or i % (self.n_episodes // 10) == 0 or i == (self.n_episodes - 1):
                 logging.info(f"Process - {self.process_id}:\t{self.process_name}\tfinished job {i+1} / {self.n_episodes}")
-        return self
+        return deepcopy(self.episode_list)
 
     def rollout(self):
-        self.agent_group.eval().to(self.device)
 
         # Initialize the episode dictionary
         episode = {
@@ -106,10 +106,11 @@ class MultiProcessRolloutWorker(mp.Process):
         return episode
     
     def _obs_preprocess(self, observations: list):
-        agents = self.agent_group.agents
+        agents = self.env.agents
         models = self.agent_group.models
-        processed_obs = {agent_id : [] for agent_id in agents.keys()}
-        for agent_id, model_name in agents.items():
+        agent_model_dict = self.agent_group.agent_model_dict
+        processed_obs = {agent_id : [] for agent_id in agents}
+        for agent_id, model_name in agent_model_dict.items():
             if isinstance(models[model_name], RNNModel):
                 obs = [o[agent_id] for o in observations[-self.rnn_traj_len:]]
             else:

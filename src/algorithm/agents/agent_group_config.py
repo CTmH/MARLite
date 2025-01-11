@@ -12,7 +12,7 @@ def get_qmix_agent_group(agent_group_config):
     feature_extractor_configs = {}
     for model, conf in text_model_configs.items():
         model_conf = deepcopy(conf)
-        if 'feature_extractor' in conf:  # Check if feature extractor is defined in the model configuration. If not, use Identity as default.
+        if 'feature_extractor' in model_conf:  # Check if feature extractor is defined in the model configuration. If not, use Identity as default.
             fe_conf = model_conf.pop('feature_extractor')
         else:
             fe_conf = {'model_type': 'Identity'}

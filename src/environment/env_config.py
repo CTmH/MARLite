@@ -8,19 +8,19 @@ from .adversarial_pursuit_wrapper import AdversarialPursuitPredator, Adversarial
 from .battle_wrapper import BattleWrapper
 from .battlefield_wrapper import BattleFieldWrapper
 
-custom_envs = {
-    'adversarial_pursuit_predator': AdversarialPursuitPredator,
-    'adversarial_pursuit_prey': AdversarialPursuitPrey,
-    'battle': BattleWrapper,
-    'battlefield': BattleFieldWrapper,
-}
-
 class EnvConfig():
 
     def __init__(self, **kwargs) -> None:
         self.module_name = kwargs.pop('module_name')
         self.env_name = kwargs.pop('env_name')
         self.env_config = kwargs
+
+        self.custom_envs = {
+            'adversarial_pursuit_predator': AdversarialPursuitPredator,
+            'adversarial_pursuit_prey': AdversarialPursuitPrey,
+            'battle': BattleWrapper,
+            'battlefield': BattleFieldWrapper,
+        }
 
         if self.module_name != 'custom':
             try:
@@ -29,8 +29,8 @@ class EnvConfig():
             except (ImportError, AttributeError) as e:
                 self.env = None
                 print(f"Error loading environment {self.env_name} from module {self.module_name}: {e}")
-        elif self.env_name in custom_envs:
-            self.env = custom_envs[self.env_name]
+        elif self.env_name in self.custom_envs:
+            self.env = self.custom_envs[self.env_name]
         else:
             raise ValueError(f"Custom environment {self.env_name} not registered.")
 

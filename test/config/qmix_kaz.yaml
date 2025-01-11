@@ -59,7 +59,7 @@ critic_config:
 rollout_config:
   manager_type: "multi-thread"
   worker_type: "multi-thread"
-  n_workers: 4
+  n_workers: 1
   n_episodes: 1000
   n_eval_episodes: 100
   traj_len: 5
@@ -67,7 +67,7 @@ rollout_config:
   device: "cpu"
 
 replaybuffer_config:
-  type: "Normal"
+  type: "Prioritized"
   capacity: 50000
   traj_len: 5
 

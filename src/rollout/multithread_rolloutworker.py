@@ -105,10 +105,11 @@ class MultiThreadRolloutWorker(threading.Thread):
         return episode
     
     def _obs_preprocess(self, observations: list):
-        agents = self.agent_group.agents
+        agents = self.env.agents
         models = self.agent_group.models
-        processed_obs = {agent_id : [] for agent_id in agents.keys()}
-        for agent_id, model_name in agents.items():
+        agent_model_dict = self.agent_group.agent_model_dict
+        processed_obs = {agent_id : [] for agent_id in agents}
+        for agent_id, model_name in agent_model_dict.items():
             if isinstance(models[model_name], RNNModel):
                 obs = [o[agent_id] for o in observations[-self.rnn_traj_len:]]
             else:

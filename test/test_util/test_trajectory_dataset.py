@@ -6,7 +6,7 @@ from src.replaybuffer.normal_replaybuffer import NormalReplayBuffer
 from src.util.trajectory_dataset import TrajectoryDataset, TrajectoryDataLoader
 from src.algorithm.agents import QMIXAgentGroup
 from src.algorithm.model import ModelConfig
-from src.rollout.multiprocess_rolloutworker import MultiProcessRolloutWorker
+from src.rollout.multithread_rolloutworker import MultiThreadRolloutWorker
 from src.environment.env_config import EnvConfig
 from src.util.optimizer_config import OptimizerConfig
 
@@ -60,7 +60,7 @@ class TestTrajectoryDataset(unittest.TestCase):
         self.optimizer_config = OptimizerConfig(type="Adam", lr=0.001)
         
         # Initialize QMIXAgents
-        self.agent_group = QMIXAgentGroup(agents=self.agents,
+        self.agent_group = QMIXAgentGroup(agent_model_dict=self.agents,
                                           model_configs=self.model_configs,
                                           feature_extractors_configs=self.feature_extractor_configs,
                                           optimizer_config=self.optimizer_config,
@@ -69,7 +69,7 @@ class TestTrajectoryDataset(unittest.TestCase):
         self.epsilon=0.5
         self.n_episodes = 5
         self.episode_queue = mp.Queue()
-        self.worker = MultiProcessRolloutWorker(env_config=self.env_config,
+        self.worker = MultiThreadRolloutWorker(env_config=self.env_config,
                                     agent_group=self.agent_group,
                                     episode_queue=self.episode_queue,
                                     n_episodes=self.n_episodes,
@@ -143,7 +143,7 @@ class TestTrajectoryDataloader(unittest.TestCase):
         self.optimizer_config = OptimizerConfig(type="Adam", lr=0.001)
         
         # Initialize QMIXAgents
-        self.agent_group = QMIXAgentGroup(agents=self.agents,
+        self.agent_group = QMIXAgentGroup(agent_model_dict=self.agents,
                                           model_configs=self.model_configs,
                                           feature_extractors_configs=self.feature_extractor_configs,
                                           optimizer_config=self.optimizer_config,
@@ -153,7 +153,7 @@ class TestTrajectoryDataloader(unittest.TestCase):
         self.epsilon=0.5
         self.n_episodes = 5
         self.episode_queue = mp.Queue()
-        self.worker = MultiProcessRolloutWorker(env_config=self.env_config,
+        self.worker = MultiThreadRolloutWorker(env_config=self.env_config,
                                     agent_group=self.agent_group,
                                     episode_queue=self.episode_queue,
                                     n_episodes=self.n_episodes,

@@ -59,7 +59,7 @@ class TestQMixTrainer(unittest.TestCase):
             self.trainer.workdir = temp_dir
             reward, _ = self.trainer.evaluate()
             best_reward, _ = self.trainer.train(epochs=2, target_reward=5)
-            self.assertGreaterEqual(best_reward, reward)
+            self.assertNotEqual(best_reward, reward)
 
     @patch('src.trainer.trainer.torch.save')
     def test_save_model(self, mock_torch_save):

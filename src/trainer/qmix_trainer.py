@@ -29,80 +29,20 @@ class QMIXTrainer(Trainer):
                     observations, states, actions, rewards, next_states, next_observations, terminations = batch
                     bs = states.shape[0]  # Actual batch size
                     # Compute the Q-tot
-                    q_val = [None for _ in range(len(self.agents))]
                     self.eval_agent_group.train().to(self.train_device)
-                    for (model_name, model), (_, fe) in zip(self.eval_agent_group.models.items(), 
-                                                            self.eval_agent_group.feature_extractors.items()):
-                        selected_agents = self.eval_agent_group.model_to_agents[model_name]
-                        idx = self.eval_agent_group.model_to_agent_indices[model_name]
-                        # observation shape: (Batch Size, Agent Number, Time Step, Feature Dimensions) (B, N, T, F)
-                        obs = observations[:,idx]
-                        obs = torch.Tensor(obs)
-                        # (B, N, T, (obs_shape)) -> (B*N*T, (obs_shape))
-                        bs = obs.shape[0]
-                        n_agents = len(selected_agents)
-                        ts = obs.shape[2]
-                        obs_shape = list(obs.shape[3:])
-                        obs = obs.reshape(bs*n_agents*ts, *obs_shape)
-                        obs = obs.to(self.train_device)  # Convert to tensor and move to device
-                        obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
-                        obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B*N*T, F) -> (B*N, T, F)
-                        if isinstance(model, RNNModel):
-                            h = [model.init_hidden() for _ in range(obs_vectorized.shape[0])]
-                            h = torch.stack(h).to(self.train_device)
-                            h = h.permute(1, 0, 2)
-                            q_selected, _ = model(obs_vectorized, h)
-                            q_selected = q_selected[:,-1,:] # get the last output 
-                        # TODO: Add code for handling other types of models (e.g., CNNs)
-                        q_selected = q_selected.reshape(bs, n_agents, -1) # (B, N, Action Space)
-                        q_selected = q_selected.permute(1, 0, 2)  # (N, B, Action Space)
-                        for i, q in zip(idx, q_selected):
-                            q_val[i] = q
-                    
-                    q_val = torch.stack(q_val).to(self.train_device) # (N, B, Action Space)
-                    q_val = q_val.permute(1, 0, 2)  # (B, N, Action Space)
+                    q_val = self.eval_agent_group.foward(observations)
 
                     states = torch.Tensor(states[:,-1,:]).to(self.train_device) # (B, T, F) -> (B, F) Take only the last state in the sequence
                     self.eval_critic.train().to(self.train_device)
                     q_tot = self.eval_critic(q_val, states)
 
                     # Compute TD targets
-                    q_val = [None for _ in range(len(self.agents))]
                     self.target_agent_group.train().to(self.train_device) # cudnn RNN backward can only be called in training mode
-                    for (model_name, model), (_, fe) in zip(self.target_agent_group.models.items(), 
-                                                            self.target_agent_group.feature_extractors.items()):
-                        selected_agents = self.target_agent_group.model_to_agents[model_name]
-                        idx = self.target_agent_group.model_to_agent_indices[model_name]
-                        # observation shape: (Batch Size, Agent Number, Time Step, Feature Dimensions) (B, N, T, F)
-                        obs = next_observations[:,idx]
-                        obs = torch.Tensor(obs)
-                        # (B, N, T, (obs_shape)) -> (B*N*T, (obs_shape))
-                        bs = obs.shape[0]
-                        n_agents = len(selected_agents)
-                        ts = obs.shape[2]
-                        obs_shape = list(obs.shape[3:])
-                        obs = obs.reshape(bs*n_agents*ts, *obs_shape)
-                        obs = obs.to(self.train_device)  # Convert to tensor and move to device
-                        obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
-                        obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B*N*T, F) -> (B*N, T, F)
-                        if isinstance(model, RNNModel):
-                            h = [model.init_hidden() for _ in range(obs_vectorized.shape[0])]
-                            h = torch.stack(h).to(self.train_device)
-                            h = h.permute(1, 0, 2)
-                            q_selected, _ = model(obs_vectorized, h)
-                            q_selected = q_selected[:,-1,:] # get the last output 
-                        # TODO: Add code for handling other types of models (e.g., CNNs)
-                        q_selected = q_selected.reshape(bs, len(selected_agents), -1) # (B, N, Action Space)
-                        q_selected = q_selected.permute(1, 0, 2)  # (N, B, Action Space)
-                        for i, q in zip(idx, q_selected):
-                            q_val[i] = q
-
-                    q_val = torch.stack(q_val).to(self.train_device) # (N, B, Action Space)
-                    q_val = q_val.permute(1, 0, 2)  # (B, N, Action Space)
+                    q_val_next = self.target_agent_group.foward(next_observations)
 
                     next_states = torch.Tensor(next_states[:,-1,:]).to(self.train_device) # (B, T, F) -> (B, F) Take only the last state in the sequence
-                    self.target_critic.train().to(self.train_device) # cudnn RNN backward can only be called in training mode
-                    q_tot_next = self.target_critic(q_val, next_states)
+                    self.target_critic.eval().to(self.train_device) 
+                    q_tot_next = self.target_critic(q_val_next, next_states)
 
                     # Compute the TD target
                     rewards = torch.Tensor(rewards[:,:,-1]).to(self.train_device) # (B, N, T) -> (B, N)

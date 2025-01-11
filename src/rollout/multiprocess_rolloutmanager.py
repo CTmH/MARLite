@@ -4,12 +4,20 @@ from ..algorithm.agents.agent_group import AgentGroup
 from ..environment.env_config import EnvConfig
 from .multiprocess_rolloutworker import MultiProcessRolloutWorker
 from .rolloutmanager import RolloutManager
+from ..algorithm.agents.agent_group_config import AgentGroupConfig
+
+def rollout_worker_func(worker_class: Type[MultiProcessRolloutWorker],
+                        worker_args):
+    worker = worker_class(*worker_args)
+    return worker.run()
 
 class MultiProcessRolloutManager(RolloutManager):
     def __init__(self,
                  worker_class: Type[MultiProcessRolloutWorker],
                  env_config: EnvConfig,
-                 agent_group: AgentGroup,
+                 agent_group_config: AgentGroupConfig,
+                 agent_model_params,
+                 agent_fe_params,
                  n_workers: int,
                  n_episodes: int,
                  traj_len: int,
@@ -19,7 +27,9 @@ class MultiProcessRolloutManager(RolloutManager):
 
         super().__init__(worker_class,
                          env_config,
-                         agent_group,
+                         agent_group_config,
+                         agent_model_params,
+                         agent_fe_params,
                          n_workers,
                          n_episodes,
                          traj_len,
@@ -45,7 +55,9 @@ class MultiProcessRolloutManager(RolloutManager):
             # 创建工作进程
             worker = self.worker_class(
                 env_config=self.env_config,
-                agent_group=self.agent_group,
+                agent_group_config=self.agent_group_config,
+                agent_model_params=self.agent_model_params,
+                agent_fe_params=self.agent_fe_params,
                 episode_queue=self.episode_queue,
                 n_episodes=episode_count,
                 rnn_traj_len=self.traj_len,

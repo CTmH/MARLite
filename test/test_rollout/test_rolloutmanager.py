@@ -55,7 +55,7 @@ class TestRolloutManager(unittest.TestCase):
         self.optimizer_config = OptimizerConfig(type="Adam", lr=0.001)
         
         # Initialize QMIXAgents
-        self.agent_group = QMIXAgentGroup(agents=self.agents,
+        self.agent_group = QMIXAgentGroup(agent_model_dict=self.agents,
                                           model_configs=self.model_configs,
                                           feature_extractors_configs=self.feature_extractor_configs,
                                           optimizer_config=self.optimizer_config,

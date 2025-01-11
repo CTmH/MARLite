@@ -4,6 +4,9 @@ import torch
 
 class AgentGroup(object):
 
+    def foward(self, observations):
+        raise NotImplementedError
+
     def get_q_values(self, observations: Dict[str, np.ndarray], eval_mode=True) -> torch.Tensor:
         raise NotImplementedError
 

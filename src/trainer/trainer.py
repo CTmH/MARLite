@@ -54,7 +54,6 @@ class Trainer():
         self.target_agent_group = agent_group_config.get_agent_group()
         self.best_agent_model_params, self.best_agent_fe_params = self.eval_agent_group.get_model_params()
         self.target_agent_group.set_model_params(self.best_agent_model_params, self.best_agent_fe_params)  # Load the model parameters to eval agent group
-        self.agents = self.target_agent_group.agents
         
         # Critic
         self.eval_critic = critic_config.get_critic()

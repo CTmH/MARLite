@@ -14,14 +14,14 @@ from src.util.optimizer_config import OptimizerConfig
 
 class QMIXAgentGroup(AgentGroup):
     def __init__(self, 
-                agents: Dict[str, str], 
+                agent_model_dict: Dict[str, str], 
                 model_configs: Dict[str, ModelConfig],
                 feature_extractors_configs: Dict[str, ModelConfig],
                 optimizer_config: OptimizerConfig,
                 device = 'cpu') -> None:
         super().__init__()
         self.device = device
-        self.agents = agents
+        self.agent_model_dict = agent_model_dict
         self.models = {model_name: config.get_model() for model_name, config in model_configs.items()}
         self.feature_extractors = {model_name: config.get_model() for model_name, config in feature_extractors_configs.items()}
         params_to_optimize = [{'params': model.parameters()} for model in self.models.values()]
@@ -31,7 +31,7 @@ class QMIXAgentGroup(AgentGroup):
         # Initialize model_to_agent dictionary and model_to_agent_indices dictionary
         self.model_to_agents = {model_name:[] for model_name in model_configs.keys()}
         self.model_to_agent_indices = {model_name:[] for model_name in model_configs.keys()}
-        for i, (agent_name, model_name) in enumerate(self.agents.items()):
+        for i, (agent_name, model_name) in enumerate(self.agent_model_dict.items()):
             assert model_name in self.model_to_agents.keys(), f"Model {model_name} not found in model_configs"
             self.model_to_agents[model_name].append(agent_name)
             self.model_to_agent_indices[model_name].append(i)
@@ -39,6 +39,43 @@ class QMIXAgentGroup(AgentGroup):
         # Initialize hidden states if the models are RNNModels
         self.hidden_states = {}
         self.init_hidden_states()
+
+    def foward(self, observations):
+        q_val = [None for _ in range(len(self.agent_model_dict))]
+        for (model_name, model), (_, fe) in zip(self.models.items(), 
+                                                self.feature_extractors.items()):
+            selected_agents = self.model_to_agents[model_name]
+            idx = self.model_to_agent_indices[model_name]
+            # observation shape: (Batch Size, Agent Number, Time Step, Feature Dimensions) (B, N, T, F)
+            obs = observations[:,idx]
+            obs = torch.Tensor(obs)
+            # (B, N, T, (obs_shape)) -> (B*N*T, (obs_shape))
+            bs = obs.shape[0]
+            n_agents = len(selected_agents)
+            ts = obs.shape[2]
+            obs_shape = list(obs.shape[3:])
+            obs = obs.reshape(bs*n_agents*ts, *obs_shape)
+            obs = obs.to(self.device)
+            obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
+            obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B*N*T, F) -> (B*N, T, F)
+            if isinstance(model, RNNModel):
+                h = [model.init_hidden() for _ in range(obs_vectorized.shape[0])]
+                h = torch.stack(h).to(self.device)
+                h = h.permute(1, 0, 2)
+                q_selected, _ = model(obs_vectorized, h)
+                q_selected = q_selected[:,-1,:] # get the last output 
+            # TODO: Add code for handling other types of models (e.g., CNNs)
+            q_selected = q_selected.reshape(bs, n_agents, -1) # (B, N, Action Space)
+            q_selected = q_selected.permute(1, 0, 2)  # (N, B, Action Space)
+
+            for i, q in zip(idx, q_selected):
+                q_val[i] = q
+        
+        q_val = torch.stack(q_val).to(self.device) # (N, B, Action Space)
+        q_val = q_val.permute(1, 0, 2)  # (B, N, Action Space)
+
+        return q_val
+
 
     def get_q_values(self, observations) -> Tensor:
         """
@@ -48,10 +85,9 @@ class QMIXAgentGroup(AgentGroup):
             Tensor: Concatenated Q-value tensor across all agents.
         """
 
-        q_values = [None for _ in range(len(self.agents))]
+        q_values = [None for _ in range(len(self.agent_model_dict))]
 
         for (model_name, model), (_, fe) in zip(self.models.items(), self.feature_extractors.items()):
-            #idx = [i for i, agent in enumerate(self.agents) if agent[1] == model_name]
             selected_agents = self.model_to_agents[model_name]
             idx = self.model_to_agent_indices[model_name]
             obs = [Tensor(observations[ag]) for ag in selected_agents]
@@ -105,7 +141,7 @@ class QMIXAgentGroup(AgentGroup):
         self.init_hidden_states()
         q_values = self.get_q_values(observations)
         q_values = q_values.detach().to('cpu')
-        random_choices = bernoulli(epsilon * ones(len(self.agents)))
+        random_choices = bernoulli(epsilon * ones(len(self.agent_model_dict)))
 
         random_actions = [avail_actions[key].sample() for key in avail_actions.keys()]
         random_actions = Tensor(random_actions).to(device='cpu')
@@ -115,14 +151,14 @@ class QMIXAgentGroup(AgentGroup):
         actions = actions.detach().to('cpu').numpy()
         actions = actions.astype(int).tolist()
 
-        actions = {agent_id: action for agent_id, action in zip(self.agents.keys(), actions)}
+        actions = {agent_id: action for agent_id, action in zip(self.agent_model_dict.keys(), actions)}
         
         return actions
 
     def init_hidden_states(self):
         self.hidden_states = {agent_name:
                         self.models[model_name].init_hidden() if isinstance(self.models[model_name], RNNModel) else None \
-                        for agent_name, model_name in self.agents.items()}
+                        for agent_name, model_name in self.agent_model_dict.items()}
         return self
 
     def set_model_params(self, model_params: Dict[str, dict], feature_extractor_params: Dict[str, dict]):
