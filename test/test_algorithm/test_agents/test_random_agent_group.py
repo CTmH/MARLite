@@ -30,7 +30,7 @@ class TestRandomAgentGroup(unittest.TestCase):
             self.assertIn(action, range(5))
 
     def test_get_q_values_returns_self(self):
-        result = self.random_agent_group.get_q_values(None)
+        result = self.random_agent_group.forward(None)
         self.assertIs(result, self.random_agent_group)
 
     def test_init_hidden_states_returns_self(self):

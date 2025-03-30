@@ -13,7 +13,7 @@ class RandomAgentGroup(AgentGroup):
     def __init__(self, agents: Dict[str, str]) -> None:
         self.agents = agents
 
-    def get_q_values(self, observations: Dict[str, np.ndarray], eval_mode=True) -> torch.Tensor:
+    def forward(self, observations: Dict[str, np.ndarray], eval_mode=True) -> torch.Tensor:
         return self
 
     def act(self, observations: Dict[str, np.ndarray], avail_actions: Dict, epsilon: int) -> np.ndarray:

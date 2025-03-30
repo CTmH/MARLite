@@ -38,6 +38,7 @@ class Trainer():
                  eval_device: str = 'cpu'):
         
         self.env_config = env_config
+        self.env = env_config.create_env()
         self.critic_config = critic_config
         self.sample_ratio = sample_ratio_scheduler
         self.train_device = train_device
@@ -68,7 +69,8 @@ class Trainer():
         self.modeldir = os.path.join(workdir, 'models')
         self.agentsdir = os.path.join(self.modeldir, 'agents')
         self.criticdir = os.path.join(self.modeldir, 'critic')
-        self.results = {}  # Dictionary to save intermediate results
+
+        self.results = {}
         self.log = logging.basicConfig(level=logging.INFO,
                                        format='%(asctime)s - %(levelname)s - %(message)s',
                                        handlers=[

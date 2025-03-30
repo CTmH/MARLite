@@ -1,6 +1,7 @@
 import torch
 from copy import deepcopy
 from .qmix_agent_group import QMIXAgentGroup
+from .gnn_agent_group import GNNAgentGroup
 from .random_agent_group import RandomAgentGroup
 from ..model import ModelConfig
 from ...util.optimizer_config import OptimizerConfig
@@ -22,12 +23,32 @@ def get_qmix_agent_group(agent_group_config):
     optimizer_config = OptimizerConfig(**optimizer_config)
     return QMIXAgentGroup(agents, model_configs, feature_extractor_configs, optimizer_config)
 
+def get_gnn_agent_group(agent_group_config):
+    agents = agent_group_config["agent_list"]
+    text_model_configs = agent_group_config["model_configs"]
+    model_configs = {}
+    feature_extractor_configs = {}
+    for model, conf in text_model_configs.items():
+        model_conf = deepcopy(conf)
+        if 'feature_extractor' in model_conf:  # Check if feature extractor is defined in the model configuration. If not, use Identity as default.
+            fe_conf = model_conf.pop('feature_extractor')
+        else:
+            fe_conf = {'model_type': 'Identity'}
+        model_configs[model] = ModelConfig(**model_conf)
+        feature_extractor_configs[model] = ModelConfig(**fe_conf)
+    graph_model_config = agent_group_config["graph_model_config"]
+    graph_model_config = ModelConfig(**graph_model_config)  # Convert the graph model configuration to a ModelConfig object.
+    optimizer_config = agent_group_config["optimizer"]
+    optimizer_config = OptimizerConfig(**optimizer_config)
+    return GNNAgentGroup(agents, model_configs, feature_extractor_configs, graph_model_config, optimizer_config)
+
 def get_random_agent_group(agent_group_config):
     agents = agent_group_config["agent_list"]
     return RandomAgentGroup(agents)
 
 registered_agent_groups = {
     "QMIX": get_qmix_agent_group,
+    "GNN": get_gnn_agent_group,
     "Random": get_random_agent_group
 }
 

@@ -18,14 +18,22 @@ class TestAgentGroupConfig(unittest.TestCase):
     def setUp(self):
         # Environment setup and model configuration
         self.env = simple_spread_v3.parallel_env(render_mode="human")
-
+        
+    def test_get_agent_group(self):
         # Agent group configuration
         config_path = 'test/config/qmix_default.yaml'
         with open(config_path, 'r') as file:
             config = yaml.safe_load(file)
         self.agent_group_config = AgentGroupConfig(**config['agent_group_config'])
-        
-    def test_get_agent_group(self):
+        self.agent_group = self.agent_group_config.get_agent_group()
+        self.assertIsInstance(self.agent_group, AgentGroup)
+
+    def test_get_gnn_agent_group(self):
+        # GNN agent group configuration
+        config_path = 'test/config/gnn_default.yaml'
+        with open(config_path, 'r') as file:
+            config = yaml.safe_load(file)
+        self.agent_group_config = AgentGroupConfig(**config['agent_group_config'])
         self.agent_group = self.agent_group_config.get_agent_group()
         self.assertIsInstance(self.agent_group, AgentGroup)
 

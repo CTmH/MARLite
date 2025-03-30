@@ -4,7 +4,6 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from .trainer import Trainer
-from ..algorithm.model import RNNModel
 from ..algorithm.agents import QMIXAgentGroup
 from ..algorithm.critic.qmix_critic_model import QMIXCriticModel
 from ..util.trajectory_dataset import TrajectoryDataLoader
@@ -30,7 +29,7 @@ class QMIXTrainer(Trainer):
                     bs = states.shape[0]  # Actual batch size
                     # Compute the Q-tot
                     self.eval_agent_group.train().to(self.train_device)
-                    q_val = self.eval_agent_group.foward(observations)
+                    q_val = self.eval_agent_group.forward(observations)
 
                     states = torch.Tensor(states[:,-1,:]).to(self.train_device) # (B, T, F) -> (B, F) Take only the last state in the sequence
                     self.eval_critic.train().to(self.train_device)
@@ -38,7 +37,7 @@ class QMIXTrainer(Trainer):
 
                     # Compute TD targets
                     self.target_agent_group.train().to(self.train_device) # cudnn RNN backward can only be called in training mode
-                    q_val_next = self.target_agent_group.foward(next_observations)
+                    q_val_next = self.target_agent_group.forward(next_observations)
 
                     next_states = torch.Tensor(next_states[:,-1,:]).to(self.train_device) # (B, T, F) -> (B, F) Take only the last state in the sequence
                     self.target_critic.eval().to(self.train_device) 

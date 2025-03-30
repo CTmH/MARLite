@@ -9,6 +9,7 @@ from ..util.scheduler import Scheduler
 from ..util.optimizer_config import OptimizerConfig
 from .trainer import Trainer
 from .qmix_trainer import QMIXTrainer
+from .graph_qmix_trainer import GraphQMIXTrainer
 from ..util.optimizer_config import OptimizerConfig
 from ..rollout.rolloutmanager_config import RolloutManagerConfig
 from ..replaybuffer.replaybuffer_config import ReplayBufferConfig
@@ -36,6 +37,7 @@ class TrainerConfig:
 
         self.registered_trainers = {
             'QMIX': QMIXTrainer,
+            'GraphQMIX': GraphQMIXTrainer
         }
 
     def create_trainer(self) -> Trainer:

@@ -1,7 +1,9 @@
+import numpy as np
 from magent2.environments import adversarial_pursuit_v4
 from collections import deque
 from .parallel_env_wrapper import ParallelEnvWrapper
 from ..algorithm.agents.agent_group_config import AgentGroupConfig
+from ..util.build_graph import build_graph_from_state_with_binary_agent_id, filter_edge_index
 
 class AdversarialPursuitPredator(ParallelEnvWrapper):
     def __init__(self, **kwargs):
@@ -9,6 +11,7 @@ class AdversarialPursuitPredator(ParallelEnvWrapper):
         self.opponent_agent_group_config = AgentGroupConfig(**self.opponent_agent_group_config)
         self.opponent_agent_group = self.opponent_agent_group_config.get_agent_group()
         self.opp_obs_queue_len = kwargs.pop('opp_obs_queue_len')
+        self.node_communication_distance = kwargs.pop('node_communication_distance', 10)
         self.env = adversarial_pursuit_v4.parallel_env(**kwargs)
 
         self.agents = [f'predator_{i}' for i in range(25)]
@@ -23,6 +26,11 @@ class AdversarialPursuitPredator(ParallelEnvWrapper):
         self.opponent_agents = [f'prey_{i}' for i in range(50)]
         self.opponent_observation_history = deque(maxlen=self.opp_obs_queue_len)  # Queue to store opponent's observationss
 
+        self.binary_agent_id_dim = [i for i in range(5,15)]
+        self.agent_presence_dim = [1, 3]
+        self.prey_presence_dim = [1]
+        self.predator_presence_dim = [3]
+
     def step(self, actions):
         opponent_avail_actions = {agent: self.env.action_spaces[agent] for agent in self.opponent_agents}
         opp_obs = list(self.opponent_observation_history)
@@ -30,6 +38,7 @@ class AdversarialPursuitPredator(ParallelEnvWrapper):
         self.opponent_actions = self.opponent_agent_group.act(opp_obs_dict, opponent_avail_actions, epsilon=0.0)
         actions = {**actions, **self.opponent_actions}  # Combine actions with opponent's actions
         observations, rewards, terminations, truncations, infos = self.env.step(actions)
+        #observations = self._filter_observations(observations)
 
         self.opponent_observations = {agent: observations[agent] for agent in self.opponent_agents}
         self.opponent_observation_history.append(self.opponent_observations)
@@ -44,6 +53,7 @@ class AdversarialPursuitPredator(ParallelEnvWrapper):
 
     def reset(self):
         observations = self.env.reset()  # Magent2 environment reset does not return info
+        #observations = self._filter_observations(observations)
         self.opponent_observations = {agent: observations[agent] for agent in self.opponent_agents}
         self.opponent_observation_history.clear()
         self.opponent_observation_history.append(self.opponent_observations)
@@ -51,12 +61,46 @@ class AdversarialPursuitPredator(ParallelEnvWrapper):
         agent_info = {agent: None for agent in self.agents} # For compatibility with other environments
         return agent_observations, agent_info
 
+    def build_graph_with_state(self, state):
+        adj_matrix, edge_index = build_graph_from_state_with_binary_agent_id(state, self.binary_agent_id_dim, self.agent_presence_dim, self.node_communication_distance)
+        return adj_matrix, edge_index
+
+    def build_my_team_graph_batch(self, states):
+        my_team_edge_index_batch = []
+        my_team_adj_matrix_batch = []
+        for state in states:
+            adj_matrix, edge_index = self.build_graph_with_state(state)
+            my_team_adj_matrix = adj_matrix[:25,:25]
+            my_team_edge_index = filter_edge_index(edge_index, [i for i in range(25)])
+            my_team_adj_matrix_batch.append(my_team_adj_matrix)
+            my_team_edge_index_batch.append(my_team_edge_index)
+        my_team_adj_matrix_batch = np.stack(my_team_adj_matrix_batch)
+        return my_team_adj_matrix_batch, my_team_edge_index_batch
+
+    def build_graph(self):
+        state = self.env.state()
+        adj_matrix, edge_index = build_graph_from_state_with_binary_agent_id(state, self.binary_agent_id_dim, self.agent_presence_dim, self.node_communication_distance)
+        return adj_matrix, edge_index
+    
+    def build_my_team_graph(self):
+        adj_matrix, edge_index = self.build_graph()
+        my_team_adj_matrix = adj_matrix[:25,:25]
+        my_team_edge_index = filter_edge_index(edge_index, [i for i in range(25)])
+        return my_team_adj_matrix, my_team_edge_index
+
+    def _filter_observations(self, observations):
+        # Filter out extra features
+        filtered_observations = {key: value[:,:,:5] for key, value in observations.items()}
+        return filtered_observations
+
 class AdversarialPursuitPrey(ParallelEnvWrapper):
     def __init__(self, **kwargs):
         self.opponent_agent_group_config = kwargs.pop('opponent_agent_group_config', None)
         self.opponent_agent_group_config = AgentGroupConfig(**self.opponent_agent_group_config)
         self.opponent_agent_group = self.opponent_agent_group_config.get_agent_group()
         self.opp_obs_queue_len = kwargs.pop('opp_obs_queue_len')
+        self.node_communication_distance = kwargs.pop('node_communication_distance', 10)
+        self.extra_features = kwargs.get('extra_features', False)
         self.env = adversarial_pursuit_v4.parallel_env(**kwargs)
 
         self.agents = [f'prey_{i}' for i in range(50)]
@@ -71,6 +115,11 @@ class AdversarialPursuitPrey(ParallelEnvWrapper):
         self.opponent_agents = [f'predator_{i}' for i in range(25)]
         self.opponent_observation_history = deque(maxlen=self.opp_obs_queue_len)  # Queue to store opponent's observations
 
+        self.binary_agent_id_dim = [i for i in range(5,15)]
+        self.agent_presence_dim = [1, 3]
+        self.prey_presence_dim = [1]
+        self.predator_presence_dim = [3]
+
     def step(self, actions):
         opponent_avail_actions = {agent: self.env.action_spaces[agent] for agent in self.opponent_agents}
         opp_obs = list(self.opponent_observation_history)
@@ -78,6 +127,7 @@ class AdversarialPursuitPrey(ParallelEnvWrapper):
         self.opponent_actions = self.opponent_agent_group.act(opp_obs_dict, opponent_avail_actions, epsilon=0.0)
         actions = {**self.opponent_actions, **actions}  # Combine actions with opponent's actions
         observations, rewards, terminations, truncations, infos = self.env.step(actions)
+        #observations = self._filter_observations(observations)
 
         self.opponent_observations = {agent: observations[agent] for agent in self.opponent_agents}
         self.opponent_observation_history.append(self.opponent_observations)
@@ -92,9 +142,42 @@ class AdversarialPursuitPrey(ParallelEnvWrapper):
 
     def reset(self):
         observations = self.env.reset()  # Magent2 environment reset does not return info
+        #observations = self._filter_observations(observations)
         self.opponent_observations = {agent: observations[agent] for agent in self.opponent_agents}
         self.opponent_observation_history.clear()
         self.opponent_observation_history.append(self.opponent_observations)
         agent_observations = {agent: observations[agent] for agent in self.agents}
         agent_info = {agent: None for agent in self.agents}  # For compatibility with other environments
         return agent_observations, agent_info
+    
+    def build_graph_with_state(self, state):
+        adj_matrix, edge_index = build_graph_from_state_with_binary_agent_id(state, self.binary_agent_id_dim, self.agent_presence_dim, self.node_communication_distance)
+        return adj_matrix, edge_index
+    
+    def build_my_team_graph_batch(self, states):
+        my_team_edge_index_batch = []
+        my_team_adj_matrix_batch = []
+        for state in states:
+            adj_matrix, edge_index = self.build_graph_with_state(state)
+            my_team_adj_matrix = adj_matrix[25:,25:]
+            my_team_edge_index = filter_edge_index(edge_index, [i for i in range(25, 75)])
+            my_team_adj_matrix_batch.append(my_team_adj_matrix)
+            my_team_edge_index_batch.append(my_team_edge_index)
+        my_team_adj_matrix_batch = np.stack(my_team_adj_matrix_batch)
+        return my_team_adj_matrix_batch, my_team_edge_index_batch
+    
+    def build_graph(self):
+        state = self.env.state()
+        adj_matrix, edge_index = build_graph_from_state_with_binary_agent_id(state, self.binary_agent_id_dim, self.agent_presence_dim, self.node_communication_distance)
+        return adj_matrix, edge_index
+    
+    def build_my_team_graph(self):
+        adj_matrix, edge_index = self.build_graph()
+        my_team_adj_matrix = adj_matrix[25:,25:]
+        my_team_edge_index = filter_edge_index(edge_index, [i for i in range(25, 75)])
+        return my_team_adj_matrix, my_team_edge_index
+    
+    def _filter_observations(self, observations):
+        # Filter out extra features
+        filtered_observations = {key: value[:,:,:5] for key, value in observations.items()}
+        return filtered_observations

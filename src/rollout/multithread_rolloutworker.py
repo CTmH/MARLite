@@ -5,6 +5,7 @@ import logging
 from copy import deepcopy
 from ..environment.env_config import EnvConfig
 from ..algorithm.agents import AgentGroup
+from ..algorithm.agents.gnn_agent_group import GNNAgentGroup
 from ..algorithm.model import RNNModel
 
 class MultiThreadRolloutWorker(threading.Thread):
@@ -93,7 +94,11 @@ class MultiThreadRolloutWorker(threading.Thread):
 
             avail_actions = {agent: self.env.action_space(agent) for agent in self.env.agents}
             processed_obs = self._obs_preprocess(episode['observations']+[observations])
-            actions = self.agent_group.act(processed_obs, avail_actions, self.epsilon)
+            if isinstance(self.agent_group, GNNAgentGroup):
+                _, edge_index = self.env.build_my_team_graph()
+                actions = self.agent_group.act(processed_obs, edge_index, avail_actions, self.epsilon)
+            else:
+                actions = self.agent_group.act(processed_obs, avail_actions, self.epsilon)
             
         episode['episode_length'] = len(episode['observations'])
         episode['episode_reward'] = episode_reward

@@ -1,6 +1,7 @@
 import torch.nn as nn
 import torch.nn.functional as F
 from .permute import Permute
+from .channel_selector import ChannelSelector
 
 class CustomModel(nn.Module):
     def __init__(self, **kwargs):
@@ -13,6 +14,9 @@ class CustomModel(nn.Module):
                 layers.append(nn.Flatten())
             elif layer_type == 'Permute':
                 layers.append(Permute(layer_config['dims']))
+            elif layer_type == 'ChannelSelector':
+                num_channels = layer_config['num_channels']
+                layers.append(ChannelSelector(num_channels))
             elif layer_type == 'Linear':
                 in_features = layer_config['in_features']
                 out_features = layer_config['out_features']

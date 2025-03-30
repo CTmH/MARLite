@@ -1,14 +1,16 @@
 import torch
 import logging
-from .rnn import RNNModel
+from .rnn import GRUModel
+from .gnn import GCNModel
 from .custom_model import CustomModel
-from .flatten import Flatten
 import torch.nn as nn
 
 REGISTERED_MODELS = {
-    "RNN": RNNModel,
+    "RNN": GRUModel,
+    "GRU": GRUModel,
+    "GCN": GCNModel,
     "Identity": nn.Identity,
-    "Flatten": Flatten,
+    "Flatten": nn.Flatten,
     "Custom": CustomModel,
 }
 
