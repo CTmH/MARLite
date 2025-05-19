@@ -5,8 +5,8 @@ from copy import deepcopy
 from typing import Dict, Tuple
 from torch import Tensor
 from torch import bernoulli, ones, argmax, stack
-from torch_geometric.data import Data
-from torch_geometric.nn import GCNConv, GATConv  # Example GNN layers
+from torch_geometric.data import Batch, Data
+from torch_geometric.utils import unbatch
 from ..model.model_config import ModelConfig
 from ..model import RNNModel
 from .agent_group import AgentGroup
@@ -68,22 +68,27 @@ class GNNAgentGroup(AgentGroup):
                 msg_selected, _ = model(obs_vectorized, h)
                 msg_selected = msg_selected[:,-1,:] # get the last output 
             # TODO: Add code for handling other types of models (e.g., CNNs)
-            msg_selected = msg_selected.reshape(bs, n_agents, -1) # (B, N, Action Space)
-            msg_selected = msg_selected.permute(1, 0, 2)  # (N, B, Action Space)
+            msg_selected = msg_selected.reshape(bs, n_agents, -1) # (B, N, F)
+            msg_selected = msg_selected.permute(1, 0, 2)  # (N, B, F)
 
             for i, m in zip(idx, msg_selected):
                 msg[i] = m
         
-        msg = torch.stack(msg).to(self.device) # (N, B, Action Space)
-        msg = msg.permute(1, 0, 2)  # (B, N, Action Space)
+        msg = torch.stack(msg).to(self.device) # (N, B, F)
+        msg = msg.permute(1, 0, 2)  # (B, N, F)
 
-        # Communication between agents using the graph model. 
-        q_val = []
-        for m, e in zip(msg, edge_index):
-            e = Tensor(e).type(torch.int64).to(self.device)
-            q = self.graph_model(m, e) # (B, N, Action Space)
-            q_val.append(q)
-        q_val = torch.stack(q_val).to(self.device) # (B, N, Action Space)
+        # Communication between agents using the graph model.
+        batch_data = [None for i in range(bs)]
+        for i in range(bs):
+            batch_data[i] = Data(
+                x = msg[i], 
+                edge_index = torch.Tensor(edge_index[i]).to(device=self.device, dtype=torch.int)
+            )
+        batch_data = Batch.from_data_list(batch_data)
+        x, e, batch = batch_data.x, batch_data.edge_index, batch_data.batch
+        batch_q_val = self.graph_model(x, e)
+        q_val = unbatch(batch_q_val, batch) # (B, N, Action Space)
+        q_val = torch.stack(q_val)
         return q_val
     
     def act(self, observations, edge_index, avail_actions, epsilon=0.0, eval_mode=True):

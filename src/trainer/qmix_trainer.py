@@ -36,12 +36,12 @@ class QMIXTrainer(Trainer):
                     q_tot = self.eval_critic(q_val, states)
 
                     # Compute TD targets
-                    self.target_agent_group.train().to(self.train_device) # cudnn RNN backward can only be called in training mode
-                    q_val_next = self.target_agent_group.forward(next_observations)
-
-                    next_states = torch.Tensor(next_states[:,-1,:]).to(self.train_device) # (B, T, F) -> (B, F) Take only the last state in the sequence
-                    self.target_critic.eval().to(self.train_device) 
-                    q_tot_next = self.target_critic(q_val_next, next_states)
+                    with torch.no_grad():
+                        #self.target_agent_group.train().to(self.train_device) # cudnn RNN backward can only be called in training mode
+                        q_val_next = self.eval_agent_group.forward(next_observations)
+                        next_states = torch.Tensor(next_states[:,-1,:]).to(self.train_device) # (B, T, F) -> (B, F) Take only the last state in the sequence
+                        self.target_critic.eval().to(self.train_device) 
+                        q_tot_next = self.target_critic(q_val_next, next_states)
 
                     # Compute the TD target
                     rewards = torch.Tensor(rewards[:,:,-1]).to(self.train_device) # (B, N, T) -> (B, N)
@@ -52,7 +52,7 @@ class QMIXTrainer(Trainer):
                     y_tot = rewards + (1 - terminations) * self.gamma * q_tot_next
 
                     # Compute the critic loss
-                    critic_loss = torch.nn.functional.mse_loss(q_tot, y_tot)
+                    critic_loss = torch.nn.functional.mse_loss(q_tot, y_tot.detach())
                         
                     # Optimize the critic network
                     self.eval_agent_group.zero_grad()

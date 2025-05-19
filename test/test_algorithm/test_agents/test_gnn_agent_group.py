@@ -45,27 +45,29 @@ class TestGNNAgentGroup(unittest.TestCase):
                 observations[agent].append(obs[agent])
         self.observations = {key: np.array(value) for key, value in observations.items()}
         self.adj_matrix, self.edge_index = self.env.build_my_team_graph()
-        self.adj_matrix, self.edge_index = np.expand_dims(self.adj_matrix, axis=0), np.expand_dims(self.edge_index, axis=0)
-        
+
     def test_foward(self):
+        bs = 5
         obs = [self.observations[ag] for ag in self.agent_group.agent_model_dict.keys()]
         obs = np.stack(obs)
-        obs = np.expand_dims(obs, axis=0)
+        obs = np.stack([obs for _ in range(bs)])
         obs = torch.Tensor(obs)
+        edge_index = np.stack([self.edge_index for _ in range(bs)])
+
         # Test get_q_values method in evaluation mode
-        q_values = self.agent_group.forward(observations=obs, edge_index=self.edge_index)
+        q_values = self.agent_group.forward(observations=obs, edge_index=edge_index)
         q_values = q_values.detach().cpu().numpy().squeeze()
-        self.assertEqual(q_values.shape, (len(self.env.agents), self.action_space_shape))
+        self.assertEqual(q_values.shape, (bs, len(self.env.agents), self.action_space_shape))
         
         # Test get_q_values method in training mode
         self.agent_group.train()
-        q_values = self.agent_group.forward(observations=obs, edge_index=self.edge_index)
+        q_values = self.agent_group.forward(observations=obs, edge_index=edge_index)
         q_values = q_values.detach().cpu().numpy().squeeze()
-        self.assertEqual(q_values.shape, (len(self.env.agents), self.action_space_shape))
+        self.assertEqual(q_values.shape, (bs, len(self.env.agents), self.action_space_shape))
 
     def test_act(self):
         # Test act method with epsilon = 0 (greedy policy)
-        edge_index = self.edge_index[0]
+        edge_index = self.edge_index
         actions = self.agent_group.act(self.observations, edge_index, self.env.action_spaces, epsilon=0)
         self.assertEqual(len(actions), len(self.env.agents))
 

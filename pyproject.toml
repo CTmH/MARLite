@@ -1,0 +1,19 @@
+[project]
+name = "MARLite"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "magent2>=0.3.3",
+    "pettingzoo[butterfly,mpe]>=1.25.0",
+    "pyyaml>=6.0.2",
+    "torch>=2.7.0",
+    "torch-geometric>=2.6.1",
+    "tqdm>=4.67.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.5",
+]
