@@ -12,9 +12,6 @@ class AgentGroup(object):
 
     def act(observations: Dict[str, np.ndarray], avail_actions: Dict, epsilon: int) -> np.ndarray:
         raise NotImplementedError
-   
-    def init_hidden_states(self):
-        raise NotImplementedError
 
     def set_model_params(self, model_params: Dict[str, dict], feature_extractor_params: Dict[str, dict]):
         raise NotImplementedError

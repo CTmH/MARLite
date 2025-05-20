@@ -41,7 +41,7 @@ class TestModelConfig(unittest.TestCase):
 
         # 定义 YAML 配置字符串
         yaml_config = f"""
-        model_type: "RNN"
+        model_type: "GRU"
         input_shape: 64
         rnn_hidden_dim: 128
         rnn_layers: 1

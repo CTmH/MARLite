@@ -1,6 +1,6 @@
 import torch
 import logging
-from .rnn import GRUModel
+from .time_seq_model import GRUModel
 from .gnn import GCNModel
 from .custom_model import CustomModel
 import torch.nn as nn

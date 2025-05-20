@@ -37,7 +37,7 @@ class QMIXTrainer(Trainer):
 
                     # Compute TD targets
                     with torch.no_grad():
-                        #self.target_agent_group.train().to(self.train_device) # cudnn RNN backward can only be called in training mode
+                        self.target_agent_group.eval().to(self.train_device)
                         q_val_next = self.eval_agent_group.forward(next_observations)
                         next_states = torch.Tensor(next_states[:,-1,:]).to(self.train_device) # (B, T, F) -> (B, F) Take only the last state in the sequence
                         self.target_critic.eval().to(self.train_device) 

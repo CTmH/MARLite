@@ -155,7 +155,7 @@ class Trainer():
         """
         Collect experiences using multiple rollout workers.
         """
-        self.eval_agent_group.to(self.eval_device)
+        self.eval_agent_group.eval().to(self.eval_device)
         manager = self.rolloutmanager_config.create_manager(self.eval_agent_group,
                                                            self.env_config,
                                                            epsilon)
@@ -181,7 +181,7 @@ class Trainer():
         return self
 
     def evaluate(self):
-        self.eval_agent_group.to(self.eval_device)
+        self.eval_agent_group.eval().to(self.eval_device)
         manager = self.rolloutmanager_config.create_eval_manager(self.eval_agent_group,
                                                            self.env_config,
                                                            self.eval_epsilon)

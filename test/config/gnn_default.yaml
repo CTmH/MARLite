@@ -30,7 +30,7 @@ agent_group_config:
     model1:
       model_type: "RNN"
       input_shape: 64
-      rnn_hidden_dim: 128
+      rnn_hidden_dim: 64
       rnn_layers: 1
       output_shape: 64
       feature_extractor:
@@ -46,38 +46,24 @@ agent_group_config:
           kernel_size: 3
           stride: 1
           padding: 1
+        - type: BatchNorm2d
+          num_features: 16
         - type: ReLU
-        - type: MaxPool2d
-          kernel_size: 2
-          stride: 2
         - type: Conv2d
           in_channels: 16
-          out_channels: 32
+          out_channels: 1
           kernel_size: 3
           stride: 1
-          padding: 1
+          padding: 0
+        - type: BatchNorm2d
+          num_features: 1
         - type: ReLU
-        - type: MaxPool2d
-          kernel_size: 2
-          stride: 2
-        - type: Conv2d
-          in_channels: 32
-          out_channels: 64
-          kernel_size: 3
-          stride: 1
-          padding: 1
-        - type: ReLU
-        - type: AdaptiveAvgPool2d
-          output_size: [1, 1]
         - type: Flatten
-        - type: Linear
-          in_features: 64
-          out_features: 64
   graph_model_config:
     model_type: "GCN"
     input_dim: 64
     gnn_dim: 64
-    embedding_dim: 32
+    embedding_dim: 64
     output_dim: 13
   optimizer:
     type: "Adam"

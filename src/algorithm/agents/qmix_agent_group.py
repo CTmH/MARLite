@@ -7,7 +7,7 @@ from typing import Dict
 from torch import Tensor
 from torch import bernoulli, ones, argmax, stack
 from ..model.model_config import ModelConfig
-from ..model import RNNModel
+from ..model import TimeSeqModel, RNNModel
 from .agent_group import AgentGroup
 from src.util.optimizer_config import OptimizerConfig
 
@@ -35,10 +35,6 @@ class QMIXAgentGroup(AgentGroup):
             self.model_to_agents[model_name].append(agent_name)
             self.model_to_agent_indices[model_name].append(i)
 
-        # Initialize hidden states if the models are RNNModels
-        self.hidden_states = {}
-        self.init_hidden_states()
-
     def forward(self, observations) -> Tensor:
         q_val = [None for _ in range(len(self.agent_model_dict))]
         for (model_name, model), (_, fe) in zip(self.models.items(), 
@@ -53,17 +49,19 @@ class QMIXAgentGroup(AgentGroup):
             n_agents = len(selected_agents)
             ts = obs.shape[2]
             obs_shape = list(obs.shape[3:])
-            obs = obs.reshape(bs*n_agents*ts, *obs_shape)
-            obs = obs.to(self.device)
-            obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
-            obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B*N*T, F) -> (B*N, T, F)
-            if isinstance(model, RNNModel):
-                h = [model.init_hidden() for _ in range(obs_vectorized.shape[0])]
-                h = torch.stack(h).to(self.device)
-                h = h.permute(1, 0, 2)
-                q_selected, _ = model(obs_vectorized, h)
-                q_selected = q_selected[:,-1,:] # get the last output 
-            # TODO: Add code for handling other types of models (e.g., CNNs)
+            if isinstance(model, TimeSeqModel):
+                # (B, N, T, *(obs_shape)) -> (B*N*T, *(obs_shape))
+                obs = obs.reshape(bs*n_agents*ts, *obs_shape).to(self.device)
+                obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
+                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B*N*T, F) -> (B*N, T, F)
+                # cudnn RNN backward can only be called in training mode
+                if isinstance(model, RNNModel):
+                    model.train()
+            else:
+                obs = obs[:,:,-1, :] # (B, N, T, *(obs_shape)) -> (B, N, *(obs_shape))
+                obs = obs.reshape(bs*n_agents, *obs_shape).to(self.device) # (B, N, *(obs_shape)) -> (B*N, *(obs_shape))
+                obs_vectorized = fe(obs) # (B*N, *(obs_shape)) -> (B*N, F)
+            q_selected = model(obs_vectorized)
             q_selected = q_selected.reshape(bs, n_agents, -1) # (B, N, Action Space)
             q_selected = q_selected.permute(1, 0, 2)  # (N, B, Action Space)
 
@@ -92,7 +90,6 @@ class QMIXAgentGroup(AgentGroup):
             self.eval()  # Set models to evaluation mode
         else:
             self.train()  # Set models to training mode
-        self.init_hidden_states()
         obs = [observations[ag] for ag in self.agent_model_dict.keys()]
         obs = np.stack(obs)
         obs = np.expand_dims(obs, axis=0)
@@ -109,12 +106,6 @@ class QMIXAgentGroup(AgentGroup):
         actions = {agent_id: action for agent_id, action in zip(self.agent_model_dict.keys(), actions)}
         
         return actions
-
-    def init_hidden_states(self):
-        self.hidden_states = {agent_name:
-                        self.models[model_name].init_hidden() if isinstance(self.models[model_name], RNNModel) else None \
-                        for agent_name, model_name in self.agent_model_dict.items()}
-        return self
 
     def set_model_params(self, model_params: Dict[str, dict], feature_extractor_params: Dict[str, dict]):
         for (model_name, model), (_, fe) in zip(self.models.items(), self.feature_extractors.items()):

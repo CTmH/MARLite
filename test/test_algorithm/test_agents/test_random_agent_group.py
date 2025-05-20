@@ -33,10 +33,6 @@ class TestRandomAgentGroup(unittest.TestCase):
         result = self.random_agent_group.forward(None)
         self.assertIs(result, self.random_agent_group)
 
-    def test_init_hidden_states_returns_self(self):
-        result = self.random_agent_group.init_hidden_states()
-        self.assertIs(result, self.random_agent_group)
-
     def test_set_model_params_returns_self(self):
         model_params = {"modelA": {}, "modelB": {}}
         feature_extractor_params = {}

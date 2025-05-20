@@ -2,12 +2,13 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import zeros
 
-class RNNModel(nn.Module):
+class TimeSeqModel(nn.Module):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-
-    def init_hidden(self):
-        raise NotImplementedError
+    
+class RNNModel(TimeSeqModel):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
 class GRUModel(RNNModel):
     def __init__(self, input_shape, output_shape, rnn_hidden_dim, rnn_layers=1):
@@ -20,13 +21,10 @@ class GRUModel(RNNModel):
         self.rnn = nn.GRU(rnn_hidden_dim, rnn_hidden_dim, num_layers=self.rnn_layers, batch_first=True)
         self.fc2 = nn.Linear(rnn_hidden_dim, output_shape)
 
-    def init_hidden(self):
-        # make hidden states on same device as model
-        return zeros(self.rnn_layers, self.rnn_dim, device=self.fc1.weight.device)
-
-    def forward(self, inputs, hidden_state):
+    def forward(self, inputs):
+        batch_size = inputs.size(0)
         x = F.relu(self.fc1(inputs))
-        h_in = hidden_state.reshape(-1, x.size(0), self.rnn_dim)
-        out, h = self.rnn(x, h_in)
+        h_in = zeros(self.rnn_layers, batch_size, self.rnn_dim).to(inputs.device)
+        out, _ = self.rnn(x, h_in)
         q = self.fc2(out)
-        return q, h
+        return q[:,-1,:] # get the last output of the sequence

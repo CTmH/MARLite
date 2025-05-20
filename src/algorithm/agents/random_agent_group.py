@@ -19,9 +19,6 @@ class RandomAgentGroup(AgentGroup):
     def act(self, observations: Dict[str, np.ndarray], avail_actions: Dict, epsilon: int) -> np.ndarray:
         random_actions = {agent: avail_actions[agent].sample() for agent in avail_actions.keys()}
         return random_actions
-   
-    def init_hidden_states(self):
-        return self
 
     def set_model_params(self, model_params: Dict[str, dict], feature_extractor_params: Dict[str, dict]):
         return self

@@ -6,7 +6,7 @@ import torch.multiprocessing as mp
 from copy import deepcopy
 from ..environment.env_config import EnvConfig
 from ..algorithm.agents import AgentGroup
-from ..algorithm.model import RNNModel
+from ..algorithm.model import TimeSeqModel
 from ..algorithm.agents.agent_group import AgentGroup
 
 class MultiProcessRolloutWorker(mp.Process):
@@ -111,7 +111,7 @@ class MultiProcessRolloutWorker(mp.Process):
         agent_model_dict = self.agent_group.agent_model_dict
         processed_obs = {agent_id : [] for agent_id in agents}
         for agent_id, model_name in agent_model_dict.items():
-            if isinstance(models[model_name], RNNModel):
+            if isinstance(models[model_name], TimeSeqModel):
                 obs = [o[agent_id] for o in observations[-self.rnn_traj_len:]]
             else:
                 obs = observations[-1][agent_id]
