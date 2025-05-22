@@ -53,8 +53,8 @@ class Trainer():
         # Agent group
         self.eval_agent_group = agent_group_config.get_agent_group()
         self.target_agent_group = agent_group_config.get_agent_group()
-        self.best_agent_model_params, self.best_agent_fe_params = self.eval_agent_group.get_model_params()
-        self.target_agent_group.set_model_params(self.best_agent_model_params, self.best_agent_fe_params)  # Load the model parameters to eval agent group
+        self.best_agent_group_params = self.eval_agent_group.get_agent_group_params()
+        self.target_agent_group.set_agent_group_params(self.best_agent_group_params)  # Load the model parameters to eval agent group
         
         # Critic
         self.eval_critic = critic_config.get_critic()
@@ -66,9 +66,7 @@ class Trainer():
         # Work directory
         self.workdir = workdir
         self.logdir = os.path.join(workdir, 'logs')
-        self.modeldir = os.path.join(workdir, 'models')
-        self.agentsdir = os.path.join(self.modeldir, 'agents')
-        self.criticdir = os.path.join(self.modeldir, 'critic')
+        self.checkpointdir = os.path.join(workdir, 'checkpoints')
 
         self.results = {}
         self.log = logging.basicConfig(level=logging.INFO,
@@ -82,73 +80,28 @@ class Trainer():
         raise NotImplementedError
     
     def save_current_model(self, checkpoint: str):
-        agent_model_params, agent_feature_extractor_params = self.eval_agent_group.get_model_params()
+        agent_path = os.path.join(self.checkpointdir, checkpoint, "agent")
+        os.makedirs(agent_path, exist_ok=True)
+        self.eval_agent_group.save_params(agent_path)
+
+        critic_path = os.path.join(self.checkpointdir, checkpoint, "critic")
+        os.makedirs(critic_path, exist_ok=True)
         critic_params = self.eval_critic.state_dict()
-        self.save_params(checkpoint, agent_model_params, agent_feature_extractor_params, critic_params)
+        torch.save(critic_params, os.path.join(critic_path, "critic.pth"))
+        return self
+    
+    def load_model(self, checkpoint: str):
+        agent_path = os.path.join(self.checkpointdir, checkpoint, "agent")
+        self.eval_agent_group.load_params(agent_path)
+        critic_path = os.path.join(self.checkpointdir, checkpoint, "critic", "critic.pth")
+        self.eval_critic.load_state_dict(torch.load(critic_path, weights_only=True))
+        self.update_target_model_params()
         return self
     
     def save_best_model(self):
-        self.save_params('best_model',
-                         self.best_agent_model_params,
-                         self.best_agent_fe_params,
-                         self.best_critic_params)
-        return self
-
-    def save_params(self, checkpoint: str, agent_model_params: dict, agent_feature_extractor_params: dict, critic_params):
-        for model_name, params in agent_model_params.items():
-            path = os.path.join(self.agentsdir, model_name, 'model')
-            os.makedirs(path, exist_ok=True)
-            model_path = os.path.join(path, f'{checkpoint}.pth')
-            torch.save(params, model_path)
-            logging.info(f"Actor {model_name} saved to {model_path}")
-
-        for model_name, params in agent_feature_extractor_params.items():
-            path = os.path.join(self.agentsdir, model_name, 'feature_extractor')
-            os.makedirs(path, exist_ok=True)
-            model_path = os.path.join(path, f'{checkpoint}.pth')
-            torch.save(params, model_path)
-            logging.info(f"{model_name}'s feature extractor saved to {model_path}")
-
-        path = os.path.join(self.criticdir, 'model')
-        os.makedirs(path, exist_ok=True)
-        critic_path = os.path.join(path, f'{checkpoint}.pth')
-        torch.save(critic_params, critic_path)
-        logging.info(f"Critic model saved to {critic_path}")
-
-    def load_model(self, checkpoint: str):
-        agent_model_params = {}
-        agent_feature_extractor_params = {}
-        for model_name in self.eval_agent_group.models.keys():
-            model_path = os.path.join(self.agentsdir, model_name, 'model', f'{checkpoint}.pth')
-            if os.path.exists(model_path):
-                params = torch.load(model_path, weights_only=True)
-                agent_model_params[model_name] = params
-                logging.info(f"Actor {model_name} loaded from {model_path}")
-            else:
-                logging.warning(f"Model path for actor {model_name} does not exist: {model_path}")
-                raise FileNotFoundError(f"Model path for actor {model_name} does not exist: {model_path}")
-
-            fe_path = os.path.join(self.agentsdir, model_name, 'feature_extractor', f'{checkpoint}.pth')
-            if os.path.exists(fe_path):
-                params = torch.load(fe_path, weights_only=True)
-                agent_feature_extractor_params[model_name] = params
-                logging.info(f"{model_name}'s feature extractor loaded from {fe_path}")
-            else:
-                logging.warning(f"Feature extractor path for actor {model_name} does not exist: {fe_path}")
-                raise FileNotFoundError(f"Feature extractor path for actor {model_name} does not exist: {fe_path}")
-        self.eval_agent_group.set_model_params(agent_model_params, agent_feature_extractor_params)
-        logging.info("All actor models and feature extractors loaded successfully.")
-
-        critic_path = os.path.join(self.criticdir, 'model', f'{checkpoint}.pth')
-        if os.path.exists(critic_path):
-            self.eval_critic.load_state_dict(torch.load(critic_path, weights_only=True))
-            logging.info(f"Critic model loaded from {critic_path}")
-        else:
-            logging.warning(f"Critic model path does not exist: {critic_path}")
-            raise FileNotFoundError(f"Critic model path does not exist: {critic_path}")
-
-        self.update_target_model_params()
-
+        self.eval_agent_group.set_agent_group_params(self.best_agent_group_params)
+        self.eval_critic.load_state_dict(self.best_critic_params)
+        self.save_current_model(checkpoint = 'best')
         return self
 
     def collect_experience(self, epsilon: float):
@@ -169,14 +122,14 @@ class Trainer():
 
     def update_target_model_params(self):
         # Update the evaluation models with the latest weights from the training models
-        agent_model_params, agent_fe_params = self.eval_agent_group.get_model_params()
-        self.target_agent_group.set_model_params(agent_model_params, agent_fe_params)
+        agent_group_params = self.eval_agent_group.get_agent_group_params()
+        self.target_agent_group.set_agent_group_params(agent_group_params)
         critic_params = deepcopy(self.eval_critic.state_dict())  # Update critic parameters
         self.target_critic.load_state_dict(critic_params)
         return self
     
     def update_best_params(self):
-        self.best_agent_model_params, self.best_agent_fe_params = self.eval_agent_group.get_model_params()
+        self.best_agent_group_params = self.eval_agent_group.get_agent_group_params()
         self.best_critic_params = deepcopy(self.eval_critic.state_dict())  # Update critic parameters
         return self
 

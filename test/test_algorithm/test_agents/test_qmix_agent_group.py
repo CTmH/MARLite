@@ -1,9 +1,8 @@
-import sys    
-print("In module products sys.path[0], __package__ ==", sys.path[0], __package__)
 import unittest
 import torch
 import yaml
 import numpy as np
+import tempfile
 from unittest.mock import MagicMock
 from pettingzoo.mpe import simple_spread_v3
 
@@ -83,6 +82,13 @@ class TestQMIXAgentGroup(unittest.TestCase):
         for (model_name, model), (_, fe) in zip(self.agent_group.models.items(), self.agent_group.feature_extractors.items()):
             self.assertTrue(model.training)
             self.assertTrue(fe.training)
+
+    def test_save_load_params(self):
+        # Create a temporary directory to save parameters
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            # Save the agent group parameters
+            self.agent_group.save_params(tmpdirname)
+            self.agent_group.load_params(tmpdirname)
         
 if __name__ == '__main__':
     unittest.main()

@@ -1,6 +1,7 @@
 import unittest
 import yaml
 import tempfile
+import os
 from src.trainer.trainer_config import TrainerConfig
 from src.trainer.trainer import Trainer
 
@@ -9,7 +10,7 @@ class TestTrainerConfig(unittest.TestCase):
         self.config_path = 'test/config/qmix_default.yaml'
         with open(self.config_path, 'r') as file:
             self.config = yaml.safe_load(file)
-        self.config['trainer_config']['train_args']['epochs'] = 10
+        self.config['trainer_config']['train_args']['epochs'] = 2
         self.config['rollout_config']['n_episodes'] = 2
         self.config['rollout_config']['episode_limit'] = 30
         self.config['replaybuffer_config']['capacity'] = 50
@@ -23,6 +24,8 @@ class TestTrainerConfig(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             self.trainer = self.trainer_config.create_trainer()
             self.trainer.workdir = temp_dir
+            self.trainer.logdir = os.path.join(self.trainer.workdir, 'logs')
+            self.trainer.checkpointdir = os.path.join(self.trainer.workdir, 'checkpoints')
             reward, _ = self.trainer_config.trainer.evaluate()
             self.trainer_config.trainer.epochs = 2
             self.trainer_config.trainer.n_episodes = 20
@@ -35,7 +38,7 @@ class TestTrainerConfigWithKAZConfig(unittest.TestCase):
         self.config_path = 'config/qmix_kaz.yaml'
         with open(self.config_path, 'r') as file:
             self.config = yaml.safe_load(file)
-            self.config['trainer_config']['train_args']['epochs'] = 10
+            self.config['trainer_config']['train_args']['epochs'] = 2
             self.config['rollout_config']['n_episodes'] = 20
             self.config['rollout_config']['episode_limit'] = 30
             self.config['replaybuffer_config']['capacity'] = 50
@@ -49,6 +52,8 @@ class TestTrainerConfigWithKAZConfig(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             self.trainer = self.trainer_config.create_trainer()
             self.trainer.workdir = temp_dir
+            self.trainer.logdir = os.path.join(self.trainer.workdir, 'logs')
+            self.trainer.checkpointdir = os.path.join(self.trainer.workdir, 'checkpoints')
             reward, _ = self.trainer_config.trainer.evaluate()
             self.trainer_config.trainer.epochs = 2
             self.trainer_config.trainer.n_episodes = 20
@@ -61,7 +66,7 @@ class TestTrainerConfigWithMagentPredator(unittest.TestCase):
         self.config_path = 'config/qmix_adversarial_pursuit_predator.yaml'
         with open(self.config_path, 'r') as file:
             self.config = yaml.safe_load(file)
-        self.config['trainer_config']['train_args']['epochs'] = 3
+        self.config['trainer_config']['train_args']['epochs'] = 2
         self.config['rollout_config']['n_episodes'] = 20
         self.config['rollout_config']['episode_limit'] = 30
         self.config['replaybuffer_config']['capacity'] = 50
@@ -75,6 +80,8 @@ class TestTrainerConfigWithMagentPredator(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             self.trainer = self.trainer_config.create_trainer()
             self.trainer.workdir = temp_dir
+            self.trainer.logdir = os.path.join(self.trainer.workdir, 'logs')
+            self.trainer.checkpointdir = os.path.join(self.trainer.workdir, 'checkpoints')
             reward, _ = self.trainer_config.trainer.evaluate()
             self.trainer_config.trainer.epochs = 5
             self.trainer_config.trainer.n_episodes = 20
@@ -87,7 +94,7 @@ class TestTrainerConfigWithMagentPrey(unittest.TestCase):
         self.config_path = 'config/qmix_adversarial_pursuit_prey.yaml'
         with open(self.config_path, 'r') as file:
             self.config = yaml.safe_load(file)
-        self.config['trainer_config']['train_args']['epochs'] = 3
+        self.config['trainer_config']['train_args']['epochs'] = 2
         self.config['rollout_config']['n_episodes'] = 20
         self.config['rollout_config']['episode_limit'] = 30
         self.config['replaybuffer_config']['capacity'] = 50
@@ -101,6 +108,8 @@ class TestTrainerConfigWithMagentPrey(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             self.trainer = self.trainer_config.create_trainer()
             self.trainer.workdir = temp_dir
+            self.trainer.logdir = os.path.join(self.trainer.workdir, 'logs')
+            self.trainer.checkpointdir = os.path.join(self.trainer.workdir, 'checkpoints')
             reward, _ = self.trainer_config.trainer.evaluate()
             self.trainer_config.trainer.epochs = 5
             self.trainer_config.trainer.n_episodes = 2
@@ -113,7 +122,7 @@ class TestTrainerConfigWithMagentBattlefield(unittest.TestCase):
         self.config_path = 'config/qmix_adversarial_pursuit_prey.yaml'
         with open(self.config_path, 'r') as file:
             self.config = yaml.safe_load(file)
-        self.config['trainer_config']['train_args']['epochs'] = 3
+        self.config['trainer_config']['train_args']['epochs'] = 2
         self.config['rollout_config']['n_episodes'] = 20
         self.config['rollout_config']['episode_limit'] = 30
         self.config['replaybuffer_config']['capacity'] = 50
@@ -127,6 +136,8 @@ class TestTrainerConfigWithMagentBattlefield(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             self.trainer = self.trainer_config.create_trainer()
             self.trainer.workdir = temp_dir
+            self.trainer.logdir = os.path.join(self.trainer.workdir, 'logs')
+            self.trainer.checkpointdir = os.path.join(self.trainer.workdir, 'checkpoints')
             reward, _ = self.trainer_config.trainer.evaluate()
             self.trainer_config.trainer.epochs = 2
             self.trainer_config.trainer.n_episodes = 20

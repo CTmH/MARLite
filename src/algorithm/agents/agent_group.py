@@ -13,10 +13,10 @@ class AgentGroup(object):
     def act(observations: Dict[str, np.ndarray], avail_actions: Dict, epsilon: int) -> np.ndarray:
         raise NotImplementedError
 
-    def set_model_params(self, model_params: Dict[str, dict], feature_extractor_params: Dict[str, dict]):
+    def set_agent_group_params(self, model_params: Dict[str, dict], feature_extractor_params: Dict[str, dict]):
         raise NotImplementedError
     
-    def get_model_params(self):
+    def get_agent_group_params(self):
         raise NotImplementedError
     
     def zero_grad(self):
@@ -32,4 +32,10 @@ class AgentGroup(object):
         raise NotImplementedError
     
     def train(self):
+        raise NotImplementedError
+    
+    def save_params(self, path: str):
+        raise NotImplementedError
+    
+    def load_params(self, path: str):
         raise NotImplementedError

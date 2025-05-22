@@ -1,8 +1,8 @@
 import torch
 import logging
-from .time_seq_model import GRUModel
 from .gnn import GCNModel
 from .custom_model import CustomModel
+from .time_seq_model import CustomTimeSeqModel, GRUModel
 import torch.nn as nn
 
 REGISTERED_MODELS = {
@@ -12,6 +12,7 @@ REGISTERED_MODELS = {
     "Identity": nn.Identity,
     "Flatten": nn.Flatten,
     "Custom": CustomModel,
+    "CustomTimeSeq": CustomTimeSeqModel,
 }
 
 class ModelConfig:

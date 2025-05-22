@@ -20,10 +20,10 @@ class RandomAgentGroup(AgentGroup):
         random_actions = {agent: avail_actions[agent].sample() for agent in avail_actions.keys()}
         return random_actions
 
-    def set_model_params(self, model_params: Dict[str, dict], feature_extractor_params: Dict[str, dict]):
+    def set_agent_group_params(self, model_params: Dict[str, dict], feature_extractor_params: Dict[str, dict]):
         return self
     
-    def get_model_params(self):
+    def get_agent_group_params(self):
         return self
     
     def zero_grad(self):

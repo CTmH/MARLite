@@ -1,17 +1,10 @@
-import sys    
-print("In module products sys.path[0], __package__ ==", sys.path[0], __package__)
 import unittest
 import torch
 import yaml
 import numpy as np
-from unittest.mock import MagicMock
-from pettingzoo.mpe import simple_spread_v3
-from torch import Tensor, stack
+import tempfile
 
-from src.algorithm.agents import QMIXAgentGroup
 from src.algorithm.agents.agent_group_config import AgentGroupConfig
-from src.algorithm.model import ModelConfig
-from src.util.optimizer_config import OptimizerConfig
 from src.environment.env_config import EnvConfig
 
 
@@ -82,16 +75,31 @@ class TestGNNAgentGroup(unittest.TestCase):
     def test_eval(self):
         self.agent_group.eval()
         # Check if the agent group is in evaluation mode
-        for (model_name, model), (_, fe) in zip(self.agent_group.models.items(), self.agent_group.feature_extractors.items()):
-            self.assertFalse(model.training)
+        for (_, fe), (_, encoder), (_, decoder)  in zip(
+                                                        self.agent_group.feature_extractors.items(),
+                                                        self.agent_group.encoders.items(),
+                                                        self.agent_group.decoders.items()):
             self.assertFalse(fe.training)
+            self.assertFalse(encoder.training)
+            self.assertFalse(decoder.training)
 
     def test_train(self):
         self.agent_group.train()
-        # Check if the agent group is in training mode
-        for (model_name, model), (_, fe) in zip(self.agent_group.models.items(), self.agent_group.feature_extractors.items()):
-            self.assertTrue(model.training)
+        # Check if the agent group is in evaluation mode
+        for (_, fe), (_, encoder), (_, decoder)  in zip(
+                                                        self.agent_group.feature_extractors.items(),
+                                                        self.agent_group.encoders.items(),
+                                                        self.agent_group.decoders.items()):
             self.assertTrue(fe.training)
-        
+            self.assertTrue(encoder.training)
+            self.assertTrue(decoder.training)
+
+    def test_save_load_params(self):
+        # Create a temporary directory to save parameters
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            # Save the agent group parameters
+            self.agent_group.save_params(tmpdirname)
+            self.agent_group.load_params(tmpdirname)
+
 if __name__ == '__main__':
     unittest.main()

@@ -36,11 +36,11 @@ class TestRandomAgentGroup(unittest.TestCase):
     def test_set_model_params_returns_self(self):
         model_params = {"modelA": {}, "modelB": {}}
         feature_extractor_params = {}
-        result = self.random_agent_group.set_model_params(model_params, feature_extractor_params)
+        result = self.random_agent_group.set_agent_group_params(model_params, feature_extractor_params)
         self.assertIs(result, self.random_agent_group)
 
     def test_get_model_params_returns_self(self):
-        result = self.random_agent_group.get_model_params()
+        result = self.random_agent_group.get_agent_group_params()
         self.assertIs(result, self.random_agent_group)
 
     def test_zero_grad_returns_self(self):

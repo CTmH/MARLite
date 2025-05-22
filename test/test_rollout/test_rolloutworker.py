@@ -49,13 +49,14 @@ class TestRolloutWorker(unittest.TestCase):
                     agent_2: model1
                 model_configs:
                     model1:
-                        model_type: "RNN"
-                        input_shape: 18
-                        rnn_hidden_dim: 128
-                        rnn_layers: 1
-                        output_shape: 5
                         feature_extractor:
                             model_type: "Identity"
+                        model:
+                            model_type: "RNN"
+                            input_shape: 18
+                            rnn_hidden_dim: 128
+                            rnn_layers: 1
+                            output_shape: 5
                 optimizer:
                     type: "Adam"
                     lr: 0.0005
@@ -70,7 +71,7 @@ class TestRolloutWorker(unittest.TestCase):
             model.apply(init_weights)
         for fe in self.agent_group.feature_extractors.values():
             fe.apply(init_weights)
-        self.agent_model_params, self.agent_fe_params = self.agent_group.get_model_params()
+        self.agent_model_params, self.agent_fe_params = self.agent_group.get_agent_group_params()
 
         self.traj_len = 5
         self.n_episodes = 2
@@ -117,13 +118,14 @@ class TestRolloutWorker(unittest.TestCase):
                     agent_2: model1
                 model_configs:
                     model1:
-                        model_type: "RNN"
-                        input_shape: 18
-                        rnn_hidden_dim: 128
-                        rnn_layers: 1
-                        output_shape: 5
                         feature_extractor:
                             model_type: "Identity"
+                        model:
+                            model_type: "RNN"
+                            input_shape: 18
+                            rnn_hidden_dim: 128
+                            rnn_layers: 1
+                            output_shape: 5
                 optimizer:
                     type: "Adam"
                     lr: 0.0005

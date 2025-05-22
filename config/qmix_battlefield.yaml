@@ -15,11 +15,6 @@ agent_group_config:
     red_11: model1
   model_configs:
     model1:
-      model_type: "RNN"
-      input_shape: 64
-      rnn_hidden_dim: 128
-      rnn_layers: 1
-      output_shape: 13
       feature_extractor:
         model_type: "Custom"
         layers:
@@ -58,6 +53,12 @@ agent_group_config:
         - type: Linear
           in_features: 64
           out_features: 64
+      model:
+        model_type: "RNN"
+        input_shape: 64
+        rnn_hidden_dim: 128
+        rnn_layers: 1
+        output_shape: 13
   optimizer:
     type: "Adam"
     lr: 0.0005

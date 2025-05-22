@@ -7,21 +7,23 @@ agent_group_config:
     knight_1: model2
   model_configs:
     model1:
-      model_type: "RNN"
-      input_shape: 135
-      rnn_hidden_dim: 128
-      rnn_layers: 1
-      output_shape: 6
       feature_extractor:
         model_type: "Flatten"
+      model:
+        model_type: "RNN"
+        input_shape: 135
+        rnn_hidden_dim: 128
+        rnn_layers: 1
+        output_shape: 6
     model2:
-      model_type: "RNN"
-      input_shape: 135
-      rnn_hidden_dim: 128
-      rnn_layers: 1
-      output_shape: 6
       feature_extractor:
         model_type: "Flatten"
+      model:
+        model_type: "RNN"
+        input_shape: 135
+        rnn_hidden_dim: 128
+        rnn_layers: 1
+        output_shape: 6
   optimizer:
     type: "Adam"
     lr: 0.0005

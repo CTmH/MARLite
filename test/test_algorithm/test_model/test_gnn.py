@@ -6,10 +6,9 @@ from src.algorithm.model.gnn import GCNModel
 class TestGCNModel(unittest.TestCase):
     def setUp(self):
         self.input_dim = 16
-        self.gnn_dim = 32
-        self.embedding_dim = 64
+        self.hidden_dim = 64
         self.output_dim = 10
-        self.model = GCNModel(self.input_dim, self.gnn_dim, self.embedding_dim, self.output_dim)
+        self.model = GCNModel(self.input_dim, self.hidden_dim, self.output_dim)
         
         # Create dummy data
         self.num_nodes = 5

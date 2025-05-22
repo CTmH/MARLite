@@ -54,7 +54,7 @@ class TestRolloutManager(unittest.TestCase):
             model.apply(init_weights)
         for fe in self.agent_group.feature_extractors.values():
             fe.apply(init_weights)
-        self.agent_model_params, self.agent_fe_params = self.agent_group.get_model_params()
+        self.agent_model_params, self.agent_fe_params = self.agent_group.get_agent_group_params()
 
         self.traj_len = 5
         self.n_episodes = 13

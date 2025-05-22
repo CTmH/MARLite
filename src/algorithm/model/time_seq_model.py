@@ -1,6 +1,7 @@
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import zeros
+from .custom_model import CustomModel
 
 class TimeSeqModel(nn.Module):
     def __init__(self, *args, **kwargs):
@@ -28,3 +29,11 @@ class GRUModel(RNNModel):
         out, _ = self.rnn(x, h_in)
         q = self.fc2(out)
         return q[:,-1,:] # get the last output of the sequence
+
+class CustomTimeSeqModel(TimeSeqModel, CustomModel):
+    def __init__(self, **kwargs):
+        super(CustomTimeSeqModel, self).__init__()
+        super(CustomModel, self).__init__(**kwargs)
+
+    def forward(self, inputs):
+        return CustomModel.forward(self, inputs)

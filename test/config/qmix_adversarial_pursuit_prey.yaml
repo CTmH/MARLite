@@ -53,11 +53,6 @@ agent_group_config:
     prey_49: model1
   model_configs:
     model1:
-      model_type: "RNN"
-      input_shape: 64
-      rnn_hidden_dim: 128
-      rnn_layers: 1
-      output_shape: 9
       feature_extractor:
         model_type: "Custom"
         layers:
@@ -90,6 +85,13 @@ agent_group_config:
             in_features: 128 # 32 * 2 * 2  # 经过两次池化后，特征图大小为 (2, 2)
             out_features: 64
             bias: True
+      model:
+        model_type: "RNN"
+        input_shape: 64
+        rnn_hidden_dim: 128
+        rnn_layers: 1
+        output_shape: 9
+      
   optimizer:
     type: "Adam"
     lr: 0.0005

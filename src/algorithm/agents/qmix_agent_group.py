@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-import logging
+import os
 from torch.optim import Optimizer
 from copy import deepcopy
 from typing import Dict
@@ -106,17 +106,33 @@ class QMIXAgentGroup(AgentGroup):
         actions = {agent_id: action for agent_id, action in zip(self.agent_model_dict.keys(), actions)}
         
         return actions
-
-    def set_model_params(self, model_params: Dict[str, dict], feature_extractor_params: Dict[str, dict]):
-        for (model_name, model), (_, fe) in zip(self.models.items(), self.feature_extractors.items()):
-            model.load_state_dict(model_params[model_name])
+    
+    def set_agent_group_params(self, params: Dict[str, dict]):
+        feature_extractor_params = params.get("feature_extractor", {})
+        model_params = params.get("model", {})
+        for (model_name, fe), (_, model) in zip(
+                self.feature_extractors.items(),
+                self.models.items()
+        ):
             fe.load_state_dict(feature_extractor_params[model_name])
+            model.load_state_dict(model_params[model_name])
+
         return self
     
-    def get_model_params(self):
-        model_params = {model_name:deepcopy(model.state_dict()) for model_name, model in self.models.items()}
-        feature_extractor_params = {model_name:deepcopy(fe.state_dict()) for model_name, fe in self.feature_extractors.items()}
-        return model_params, feature_extractor_params
+    def get_agent_group_params(self):
+        feature_extractor_params = {
+            model_name: deepcopy(fe.state_dict()) 
+            for model_name, fe in self.feature_extractors.items()
+        }
+        model_params = {
+            model_name: deepcopy(model.state_dict()) 
+            for model_name, model in self.models.items()
+        }
+        params = {
+            "feature_extractor": feature_extractor_params,
+            "model": model_params,
+        }
+        return params
 
     def zero_grad(self):
         self.optimizer.zero_grad()
@@ -143,4 +159,24 @@ class QMIXAgentGroup(AgentGroup):
         for (_, model), (_, fe) in zip(self.models.items(), self.feature_extractors.items()):
             model.train()
             fe.train()
+        return self
+    
+    def save_params(self, path: str):
+        os.makedirs(path, exist_ok=True)
+        for (model_name, model), (_, fe) in zip(
+            self.models.items(),
+            self.feature_extractors.items()):
+            model_dir = os.path.join(path, model_name)
+            os.makedirs(model_dir, exist_ok=True)
+            torch.save(fe.state_dict(), os.path.join(model_dir, 'feature_extractor.pth'))
+            torch.save(model.state_dict(), os.path.join(model_dir, 'model.pth'))
+        return self
+    
+    def load_params(self, path: str):
+        for (model_name, model), (_, fe) in zip(
+            self.models.items(),
+            self.feature_extractors.items()):
+            model_dir = os.path.join(path, model_name)
+            fe.load_state_dict(torch.load(os.path.join(model_dir, 'feature_extractor.pth')))
+            model.load_state_dict(torch.load(os.path.join(model_dir, 'model.pth')))
         return self

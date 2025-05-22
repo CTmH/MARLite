@@ -6,13 +6,14 @@ agent_group_config:
     agent_2: model1
   model_configs:
     model1:
-      model_type: "RNN"
-      input_shape: 18
-      rnn_hidden_dim: 128
-      rnn_layers: 1
-      output_shape: 5
       feature_extractor:
         model_type: "Identity"
+      model:
+        model_type: "RNN"
+        input_shape: 18
+        rnn_hidden_dim: 128
+        rnn_layers: 1
+        output_shape: 5
   optimizer:
     type: "Adam"
     lr: 0.0005
