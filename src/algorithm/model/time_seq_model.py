@@ -5,11 +5,11 @@ from .custom_model import CustomModel
 
 class TimeSeqModel(nn.Module):
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+        super().__init__()
     
 class RNNModel(TimeSeqModel):
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+        super().__init__()
 
 class GRUModel(RNNModel):
     def __init__(self, input_shape, output_shape, rnn_hidden_dim, rnn_layers=1):
@@ -30,10 +30,12 @@ class GRUModel(RNNModel):
         q = self.fc2(out)
         return q[:,-1,:] # get the last output of the sequence
 
-class CustomTimeSeqModel(TimeSeqModel, CustomModel):
+class CustomTimeSeqModel(TimeSeqModel):
     def __init__(self, **kwargs):
-        super(CustomTimeSeqModel, self).__init__()
-        super(CustomModel, self).__init__(**kwargs)
+        super().__init__(self, **kwargs)
+        self.model = CustomModel(**kwargs)
+        #TimeSeqModel.__init__(self)
+        #CustomModel.__init__(self, **kwargs)
 
     def forward(self, inputs):
-        return CustomModel.forward(self, inputs)
+        return self.model(inputs)

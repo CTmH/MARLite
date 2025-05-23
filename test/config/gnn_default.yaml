@@ -55,11 +55,18 @@ agent_group_config:
         - type: ReLU
         - type: Flatten
       encoder:
-        model_type: "RNN"
-        input_shape: 64
-        rnn_hidden_dim: 64
-        rnn_layers: 1
-        output_shape: 64
+        model_type: "CustomTimeSeq"
+        layers:
+        - type: Permute
+          dims: [0, 2, 1]
+        - type: Conv1d
+          in_channels: 64
+          out_channels: 32
+          kernel_size: 3
+          stride: 2
+          padding: 0
+        - type: Flatten
+        - type: ReLU
       decoder:
         model_type: "Custom"
         layers:

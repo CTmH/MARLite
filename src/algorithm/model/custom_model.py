@@ -1,5 +1,6 @@
 import torch.nn as nn
 import torch.nn.functional as F
+from copy import deepcopy
 from .permute import Permute
 from .channel_selector import ChannelSelector
 
@@ -42,6 +43,10 @@ class CustomModel(nn.Module):
             elif layer_type == 'AdaptiveAvgPool2d':
                 output_size = layer_config['output_size']
                 layers.append(nn.AdaptiveAvgPool2d(output_size=output_size))
+            elif layer_type == 'Conv1d':
+                model_kwargs = deepcopy(layer_config)
+                model_kwargs.pop('type')
+                layers.append(nn.Conv1d(**model_kwargs))
             elif layer_type == 'ReLU':
                 layers.append(nn.ReLU())
             elif layer_type == 'Sigmoid':

@@ -1,7 +1,5 @@
 import numpy as np
 import torch
-from torch.optim import Optimizer as TorchOptimizer
-from copy import deepcopy
 from typing import Dict
 from .agent_group import AgentGroup
 

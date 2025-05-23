@@ -3,6 +3,7 @@ from copy import deepcopy
 from .qmix_agent_group import QMIXAgentGroup
 from .gnn_agent_group import GNNAgentGroup
 from .random_agent_group import RandomAgentGroup
+from .magent_agent_group import MagentPreyAgentGroup
 from ..model import ModelConfig
 from ...util.optimizer_config import OptimizerConfig
 
@@ -42,10 +43,15 @@ def get_random_agent_group(agent_group_config):
     agents = agent_group_config["agent_list"]
     return RandomAgentGroup(agents)
 
+def get_magent_prey_agent_group(agent_group_config):
+    agents = agent_group_config["agent_list"]
+    return MagentPreyAgentGroup(agents)
+
 registered_agent_groups = {
     "QMIX": get_qmix_agent_group,
     "GNN": get_gnn_agent_group,
-    "Random": get_random_agent_group
+    "Random": get_random_agent_group,
+    "MagentPrey": get_magent_prey_agent_group
 }
 
 class AgentGroupConfig(object):
