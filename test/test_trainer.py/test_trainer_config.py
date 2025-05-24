@@ -35,7 +35,7 @@ class TestTrainerConfig(unittest.TestCase):
 
 class TestTrainerConfigWithKAZConfig(unittest.TestCase):
     def setUp(self):
-        self.config_path = 'config/qmix_kaz.yaml'
+        self.config_path = 'test/config/qmix_kaz.yaml'
         with open(self.config_path, 'r') as file:
             self.config = yaml.safe_load(file)
             self.config['trainer_config']['train_args']['epochs'] = 2
@@ -63,7 +63,7 @@ class TestTrainerConfigWithKAZConfig(unittest.TestCase):
 
 class TestTrainerConfigWithMagentPredator(unittest.TestCase):
     def setUp(self):
-        self.config_path = 'config/qmix_adversarial_pursuit_predator.yaml'
+        self.config_path = 'test/config/qmix_adversarial_pursuit_predator.yaml'
         with open(self.config_path, 'r') as file:
             self.config = yaml.safe_load(file)
         self.config['trainer_config']['train_args']['epochs'] = 2
@@ -91,7 +91,7 @@ class TestTrainerConfigWithMagentPredator(unittest.TestCase):
 
 class TestTrainerConfigWithMagentPrey(unittest.TestCase):
     def setUp(self):
-        self.config_path = 'config/qmix_adversarial_pursuit_prey.yaml'
+        self.config_path = 'test/config/qmix_adversarial_pursuit_prey.yaml'
         with open(self.config_path, 'r') as file:
             self.config = yaml.safe_load(file)
         self.config['trainer_config']['train_args']['epochs'] = 2
@@ -119,7 +119,7 @@ class TestTrainerConfigWithMagentPrey(unittest.TestCase):
 
 class TestTrainerConfigWithMagentBattlefield(unittest.TestCase):
     def setUp(self):
-        self.config_path = 'config/qmix_adversarial_pursuit_prey.yaml'
+        self.config_path = 'test/config/qmix_adversarial_pursuit_prey.yaml'
         with open(self.config_path, 'r') as file:
             self.config = yaml.safe_load(file)
         self.config['trainer_config']['train_args']['epochs'] = 2

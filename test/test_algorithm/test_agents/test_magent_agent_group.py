@@ -1,9 +1,7 @@
 import unittest
 import yaml
-import numpy as np
 from src.algorithm.agents.magent_agent_group import MagentPreyAgentGroup
 from src.environment.env_config import EnvConfig
-from gymnasium.spaces import Discrete
 
 class TestMagentPreyAgentGroup(unittest.TestCase):
 
@@ -53,7 +51,7 @@ class TestMagentPreyAgentGroup(unittest.TestCase):
         self.avail_actions = {}
         self.magent_prey_agent_group = MagentPreyAgentGroup(self.agents)
 
-    def test_act_random_actions(self):
+    def test_act(self):
         env = self.env_conf.create_env()
         obs, _ = env.reset()
         actions = self.magent_prey_agent_group.act(obs, self.avail_actions, 0)

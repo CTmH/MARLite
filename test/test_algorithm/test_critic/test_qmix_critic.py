@@ -9,13 +9,12 @@ class TestQMIXCritic(unittest.TestCase):
         state_shape = 32
         input_dim = 5
         qmix_hidden_dim = 128
-        hyper_hidden_dim = 64
-        self.critic = QMIXCriticModel(state_shape, input_dim, qmix_hidden_dim, hyper_hidden_dim)
+        self.critic = QMIXCriticModel(state_shape, input_dim, qmix_hidden_dim)
 
     def test_forward_pass(self):
         # Create dummy input data
         batch_size = 10
-        q_values = torch.randn(batch_size, self.critic.input_dim)
+        q_values = torch.randn(batch_size, self.critic.input_dim, 5)
         states = torch.randn(batch_size, self.critic.state_shape)
 
         # Perform a forward pass

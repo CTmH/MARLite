@@ -116,7 +116,13 @@ class MultiThreadRolloutWorker(threading.Thread):
         processed_obs = {agent_id : [] for agent_id in agents}
         for agent_id, model_name in agent_model_dict.items():
             if isinstance(models[model_name], TimeSeqModel):
-                obs = [o[agent_id] for o in observations[-self.rnn_traj_len:]]
+                obs_len = len(observations[-self.rnn_traj_len:])
+                if obs_len < self.rnn_traj_len:
+                    padding_length = self.rnn_traj_len - obs_len
+                    obs_padding = [np.zeros_like(observations[-1][agent_id]) for _ in range(padding_length)]
+                    obs = obs_padding + [o[agent_id] for o in observations[-self.rnn_traj_len:]]
+                else:
+                    obs = [o[agent_id] for o in observations[-self.rnn_traj_len:]]
             else:
                 obs = observations[-1][agent_id]
             processed_obs[agent_id] = np.array(obs)

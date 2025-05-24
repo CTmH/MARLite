@@ -38,9 +38,8 @@ sample_ratio_scheduler:
 critic_config:
   type: "QMIX"
   state_shape: 54
-  input_dim: 15
+  input_dim: 3
   qmix_hidden_dim: 128
-  hyper_hidden_dim: 64
   feature_extractor:
     model_type: "Identity"
   optimizer:

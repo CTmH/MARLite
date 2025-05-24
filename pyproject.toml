@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "magent2>=0.3.3",
-    "pettingzoo[butterfly,mpe]>=1.25.0",
+    "pettingzoo[butterfly,mpe,sisl]>=1.25.0",
     "pyyaml>=6.0.2",
     "torch>=2.7.0",
     "torch-geometric>=2.6.1",

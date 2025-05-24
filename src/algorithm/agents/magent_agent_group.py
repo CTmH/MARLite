@@ -28,23 +28,23 @@ class MagentPreyAgentGroup(AgentGroup):
                         (0,-1),  (0,0),  (0,1),
                         (1,-1),  (1,0),  (1,1)])
         
-        # 获取所有智能体位置坐标 (batch_size, m, 2)
+        # Get all agent coordinates (batch_size, m, 2)
         points = [np.argwhere(o > 0) for o in o_tensor]
         
-        # 向量化计算曼哈顿距离和
+        # Vectorized calculation of Manhattan distance sum
         grid_coords = offsets + (cx, cy)
         dist_sums = np.zeros((batch_size, 9))
         
         for i in range(batch_size):
             if len(points[i]) > 0:
-                # 计算每个网格点到所有目标的距离和
-                diff = np.abs(grid_coords[:, None] - points[i][None])
+                diff = np.abs(grid_coords[:, None] - points[i][None]) # grid_coords shape changes to (9, 1, 2), points shape changes to (1, N, 2)
+                # Calculate the distance from each grid point to all targets
                 dist_sums[i] = np.sum(np.sum(diff, axis=-1), axis=-1)
         
-        # 找到最大距离和的位置索引
+        # Find the index of the position with the maximum distance sum
         max_indices = np.argmax(dist_sums, axis=1)
         
-        # 构建动作字典
+        # Construct action dictionary
         actions = {agent: max_indices[i] 
                 for i, agent in enumerate(other_team_presence.keys())}
     

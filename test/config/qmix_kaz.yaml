@@ -48,9 +48,8 @@ sample_ratio_scheduler:
 critic_config:
   type: "QMIX"
   state_shape: 104
-  input_dim: 24
+  input_dim: 4
   qmix_hidden_dim: 128
-  hyper_hidden_dim: 64
   feature_extractor:
     model_type: "Flatten"
   optimizer:
@@ -72,6 +71,7 @@ replaybuffer_config:
   type: "Prioritized"
   capacity: 50000
   traj_len: 5
+  priority_attr: "all_agents_sum_rewards"
 
 trainer_config:
   type: "QMIX"

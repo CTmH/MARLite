@@ -160,59 +160,36 @@ sample_ratio_scheduler:
 critic_config:
   type: "QMIX"
   state_shape: 256
-  input_dim: 325
-  qmix_hidden_dim: 512
+  input_dim: 25
+  qmix_hidden_dim: 128
+  hypernet_layers: 2
   hyper_hidden_dim: 256
   feature_extractor:
     model_type: "Custom"
     layers:
-      - type: ChannelSelector
-        num_channels: [0, 1, 2, 3, 4]
       - type: Permute
         dims: [0, 3, 1, 2]
       - type: Conv2d
-        in_channels: 5
-        out_channels: 16
-        kernel_size: 3
-        stride: 1
-        padding: 1
-      - type: ReLU
-      - type: MaxPool2d
-        kernel_size: 2
-        stride: 2
-        padding: 0
-      - type: Conv2d
-        in_channels: 16
+        in_channels: 29
         out_channels: 32
-        kernel_size: 3
-        stride: 1
-        padding: 1
+        kernel_size: 9
+        stride: 4
+        padding: 4
+      - type: BatchNorm2d
+        num_features: 32
       - type: ReLU
-      - type: MaxPool2d
-        kernel_size: 2
-        stride: 2
-        padding: 0
       - type: Conv2d
         in_channels: 32
         out_channels: 64
-        kernel_size: 3
-        stride: 1
+        kernel_size: 4
+        stride: 2
         padding: 1
       - type: ReLU
-      - type: MaxPool2d
-        kernel_size: 2
-        stride: 2
-        padding: 0
+      - type: BatchNorm2d
+        num_features: 64
+      - type: AdaptiveAvgPool2d
+        output_size: [2,2]
       - type: Flatten
-      - type: Linear
-        in_features: 1600 # 64 * 5 * 5  # 经过三次池化后，特征图大小为 5x5
-        out_features: 256
-      - type: ReLU
-      - type: Dropout
-        p: 0.5
-      - type: Linear
-        in_features: 256
-        out_features: 256
   optimizer:
     type: "Adam"
     lr: 0.0005
@@ -245,5 +222,5 @@ trainer_config:
     epochs: 100
     target_reward: 100
     eval_interval: 1
-    batch_size: 128
+    batch_size: 8
     learning_times_per_epoch: 1
