@@ -61,7 +61,7 @@ class QMIXTrainer(Trainer):
                     self.optimizer.step()
                     self.eval_agent_group.step()
 
-                    total_loss += critic_loss.item()
+                    total_loss += critic_loss.detach().cpu().item()
                     total_batches += 1
 
                     pbar.update(bs)

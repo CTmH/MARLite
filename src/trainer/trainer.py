@@ -175,13 +175,13 @@ class Trainer():
             self.save_current_model(checkpoint_name)
             logging.info(f"Checkpoint saved at {checkpoint_name}")
 
+            mean_reward, reward_std = self.evaluate()
+            self.save_intermediate_results(epoch, loss, mean_reward, reward_std)
+
             if epoch % eval_interval == 0:
             
                 self.update_target_model_params()
                 logging.info(f"Epoch {epoch}: Target model updated with eval model params")
-
-                mean_reward, reward_std = self.evaluate()
-                self.save_intermediate_results(epoch, loss, mean_reward, reward_std)
                 
                 if mean_reward > best_mean_reward:
                     best_mean_reward = mean_reward
