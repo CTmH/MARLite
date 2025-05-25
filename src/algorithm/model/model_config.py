@@ -1,6 +1,6 @@
 import torch
 import logging
-from .gnn import GCNModel
+from .gnn import GCNModel, GATModel
 from .custom_model import CustomModel
 from .time_seq_model import CustomTimeSeqModel, GRUModel
 import torch.nn as nn
@@ -9,6 +9,7 @@ REGISTERED_MODELS = {
     "RNN": GRUModel,
     "GRU": GRUModel,
     "GCN": GCNModel,
+    "GAT": GATModel,
     "Identity": nn.Identity,
     "Flatten": nn.Flatten,
     "Custom": CustomModel,
