@@ -9,7 +9,8 @@ class CustomModel(nn.Module):
         config = kwargs
         super(CustomModel, self).__init__()
         layers = []
-        for layer_config in config['layers']:
+        for conf in config['layers']:
+            layer_config = deepcopy(conf)
             layer_type = layer_config.pop('type')
             if layer_type == 'Permute':
                 layers.append(Permute(layer_config['dims']))
