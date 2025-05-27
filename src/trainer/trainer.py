@@ -178,21 +178,21 @@ class Trainer():
             mean_reward, reward_std = self.evaluate()
             self.save_intermediate_results(epoch, loss, mean_reward, reward_std)
 
+            if mean_reward > best_mean_reward:
+                best_mean_reward = mean_reward
+                best_reward_std = reward_std
+                best_loss = loss
+                self.update_best_params()
+                logging.info(f"Epoch {epoch}: New best mean reward {best_mean_reward}")
+
+            if mean_reward >= target_reward:
+                logging.info(f"Target reward reached: {mean_reward} >= {target_reward}")
+                break
+
             if epoch % eval_interval == 0:
             
                 self.update_target_model_params()
                 logging.info(f"Epoch {epoch}: Target model updated with eval model params")
-                
-                if mean_reward > best_mean_reward:
-                    best_mean_reward = mean_reward
-                    best_reward_std = reward_std
-                    best_loss = loss
-                    self.update_best_params()
-                    logging.info(f"Epoch {epoch}: New best mean reward {best_mean_reward}")
-                    
-                if mean_reward >= target_reward:
-                    logging.info(f"Target reward reached: {mean_reward} >= {target_reward}")
-                    break
 
         self.save_intermediate_results('best', best_loss, best_mean_reward, best_reward_std)
         self.save_results_to_csv()
