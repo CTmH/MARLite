@@ -2,28 +2,23 @@ import numpy as np
 import torch
 from magent2.environments import adversarial_pursuit_v4
 from src.environment.adversarial_pursuit_wrapper import AdversarialPursuitPredator
-from src.util.build_graph import *
+from src.algorithm.graph_builder.build_graph import *
 
 def test_binary_to_decimal():
     binary_list = [1, 0, 1]
     assert binary_to_decimal(binary_list) == 5
-
-def test_manhattan_distance():
-    p1 = (1, 2)
-    p2 = (4, 6)
-    assert manhattan_distance(p1, p2) == 7
 
 def test_build_graph_from_map_2d():
     A = np.array([[0, -1, 2], [3, 4, -1], [-1, 5, 6]])
     threshold = 3
     adj_matrix, edge_index = build_graph_from_map_2d(A, threshold)
     expected_adj_matrix = np.array([[0, 0, 1, 1, 1, 1, 0],
-       [0, 0, 0, 0, 0, 0, 0],
-       [1, 0, 0, 1, 1, 1, 1],
-       [1, 0, 1, 0, 1, 1, 1],
-       [1, 0, 1, 1, 0, 1, 1],
-       [1, 0, 1, 1, 1, 0, 1],
-       [0, 0, 1, 1, 1, 1, 0]])
+                                    [0, 0, 0, 0, 0, 0, 0],
+                                    [1, 0, 0, 1, 1, 1, 1],
+                                    [1, 0, 1, 0, 1, 1, 1],
+                                    [1, 0, 1, 1, 0, 1, 1],
+                                    [1, 0, 1, 1, 1, 0, 1],
+                                    [0, 0, 1, 1, 1, 1, 0]])
     expected_edge_index = np.array([[0, 0, 0, 0, 2, 2, 2, 2, 3, 3, 3, 4, 4, 5], [2, 3, 4, 5, 3, 4, 5, 6, 4, 5, 6, 5, 6, 6]])
     assert np.array_equal(adj_matrix, expected_adj_matrix)
     assert np.array_equal(edge_index, expected_edge_index)

@@ -3,7 +3,7 @@ from magent2.environments import adversarial_pursuit_v4
 from collections import deque
 from .parallel_env_wrapper import ParallelEnvWrapper
 from ..algorithm.agents.agent_group_config import AgentGroupConfig
-from ..util.build_graph import build_graph_from_state_with_binary_agent_id, filter_edge_index
+from ..algorithm.graph_builder.build_graph import build_graph_from_state_with_binary_agent_id, filter_edge_index
 
 class AdversarialPursuitPredator(ParallelEnvWrapper):
     def __init__(self, **kwargs):
