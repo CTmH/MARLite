@@ -11,6 +11,7 @@ from torch_geometric.utils import unbatch
 from ..model.model_config import ModelConfig
 from ..model import TimeSeqModel, RNNModel
 from .agent_group import AgentGroup
+from ..graph_builder import GraphBuilderConfig
 from src.util.optimizer_config import OptimizerConfig
 
 class GNNAgentGroup(AgentGroup):
@@ -19,6 +20,7 @@ class GNNAgentGroup(AgentGroup):
                 feature_extractor_configs: Dict[str, ModelConfig],
                 encoder_configs: Dict[str, ModelConfig],
                 decoder_configs: Dict[str, ModelConfig],
+                graph_builder_config: GraphBuilderConfig,
                 graph_model_config: ModelConfig,
                 optimizer_config: OptimizerConfig,
                 device = 'cpu') -> None:
@@ -30,6 +32,7 @@ class GNNAgentGroup(AgentGroup):
         self.models = self.encoders # For compatibility
         self.decoders = {model_name: config.get_model() for model_name, config in decoder_configs.items()}
         self.graph_model = graph_model_config.get_model()  # Graph model for message passing
+        self.graph_builder = graph_builder_config.get_graph_builder()
         params_to_optimize = [{'params': extractor.parameters()} for extractor in self.feature_extractors.values()]
         params_to_optimize += [{'params': encoder.parameters()} for encoder in self.encoders.values()]
         params_to_optimize += [{'params': decoder.parameters()} for decoder in self.decoders.values()]

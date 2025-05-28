@@ -5,6 +5,7 @@ from .gnn_agent_group import GNNAgentGroup
 from .random_agent_group import RandomAgentGroup
 from .magent_agent_group import MagentPreyAgentGroup
 from ..model import ModelConfig
+from ..graph_builder import GraphBuilderConfig
 from ...util.optimizer_config import OptimizerConfig
 
 def get_qmix_agent_group(agent_group_config):
@@ -30,12 +31,14 @@ def get_gnn_agent_group(agent_group_config):
         encoder_configs[model_id] = ModelConfig(**conf['encoder'])
         decoder_configs[model_id] = ModelConfig(**conf['decoder'])
     graph_model_config = ModelConfig(**agent_group_config["graph_model_config"])
+    graph_builder_config = GraphBuilderConfig(**agent_group_config["graph_builder_config"])
     optimizer_config = OptimizerConfig(**agent_group_config["optimizer"])
     return GNNAgentGroup(
                         agents,
                         feature_extractor_configs,
                         encoder_configs,
                         decoder_configs,
+                        graph_builder_config,
                         graph_model_config,
                         optimizer_config)
 
