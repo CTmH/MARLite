@@ -1,6 +1,7 @@
 from copy import deepcopy
 from .normal_replaybuffer import NormalReplayBuffer
 from .prioritized_replaybuffer import PrioritizedReplayBuffer
+from .replaybuffer import ReplayBuffer
 
 class ReplayBufferConfig:
     def __init__(self, **kwargs):
@@ -11,7 +12,7 @@ class ReplayBufferConfig:
             "Prioritized": PrioritizedReplayBuffer,
         }
 
-    def create_replaybuffer(self):
+    def create_replaybuffer(self) -> ReplayBuffer:
         if self.type not in self.registered_replaybuffers:
             raise ValueError(f"Unknown replaybuffer type: {self.type}")
         replaybuffer_class = self.registered_replaybuffers[self.type]

@@ -30,7 +30,7 @@ class ModelConfig:
             discr += f"{key}: {value}, \n"
         return discr + "}"
     
-    def get_model(self):
+    def get_model(self) -> nn.Module:
         if self.model_type in REGISTERED_MODELS:
             model_class = REGISTERED_MODELS[self.model_type]
             model = model_class(**self.model_config)

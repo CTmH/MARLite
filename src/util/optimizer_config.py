@@ -1,9 +1,9 @@
-import torch
+import torch.optim as optim
 
 registered_optimizers = {
-    "Adam": torch.optim.Adam,
-    "SGD": torch.optim.SGD,
-    "RMSprop": torch.optim.RMSprop,
+    "Adam": optim.Adam,
+    "SGD": optim.SGD,
+    "RMSprop": optim.RMSprop,
 }
 
 class OptimizerConfig:
@@ -11,7 +11,7 @@ class OptimizerConfig:
         self.optimizer_type = kwargs.pop('type')
         self.optimizer_kwargs = kwargs
 
-    def get_optimizer(self, params_dict):
+    def get_optimizer(self, params_dict) -> optim.Optimizer:
         if self.optimizer_type in registered_optimizers:
             optim_class = registered_optimizers[self.optimizer_type]
             return optim_class(params_dict, **self.optimizer_kwargs)

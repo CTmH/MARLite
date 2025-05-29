@@ -23,9 +23,9 @@ class QMIXAgentGroup(AgentGroup):
         self.agent_model_dict = agent_model_dict
         self.models = {model_name: config.get_model() for model_name, config in model_configs.items()}
         self.feature_extractors = {model_name: config.get_model() for model_name, config in feature_extractors_configs.items()}
-        params_to_optimize = [{'params': model.parameters()} for model in self.models.values()]
-        params_to_optimize += [{'params': extractor.parameters()} for extractor in self.feature_extractors.values()]
-        self.optimizer = optimizer_config.get_optimizer(params_to_optimize)
+        self.params_to_optimize = [{'params': model.parameters()} for model in self.models.values()]
+        self.params_to_optimize += [{'params': extractor.parameters()} for extractor in self.feature_extractors.values()]
+        self.optimizer = optimizer_config.get_optimizer(self.params_to_optimize)
 
         # Initialize model_to_agent dictionary and model_to_agent_indices dictionary
         self.model_to_agents = {model_name:[] for model_name in model_configs.keys()}
@@ -139,6 +139,11 @@ class QMIXAgentGroup(AgentGroup):
         return self
     
     def step(self):
+        for p in self.params_to_optimize:
+            torch.nn.utils.clip_grad_norm_(
+                p['params'],
+                max_norm=5.0
+            )
         self.optimizer.step()
         return self
     

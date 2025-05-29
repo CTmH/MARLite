@@ -55,11 +55,16 @@ class QMIXTrainer(Trainer):
                     critic_loss = torch.nn.functional.mse_loss(q_tot, y_tot.detach())
                         
                     # Optimize the critic network
-                    self.eval_agent_group.zero_grad()
-                    self.eval_critic.zero_grad()
                     critic_loss.backward()
+                    torch.nn.utils.clip_grad_norm_(
+                        self.eval_critic.parameters(), 
+                        max_norm=5.0
+                    )
                     self.optimizer.step()
                     self.eval_agent_group.step()
+
+                    self.eval_agent_group.zero_grad()
+                    self.eval_critic.zero_grad()
 
                     total_loss += critic_loss.detach().cpu().item()
                     total_batches += 1

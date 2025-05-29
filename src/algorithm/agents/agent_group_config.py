@@ -1,5 +1,5 @@
-import torch
 from copy import deepcopy
+from .agent_group import AgentGroup
 from .qmix_agent_group import QMIXAgentGroup
 from .gnn_agent_group import GNNAgentGroup
 from .random_agent_group import RandomAgentGroup
@@ -64,5 +64,5 @@ class AgentGroupConfig(object):
         if self.ag_type not in registered_agent_groups:
             raise ValueError(f"Agent group type {self.ag_type} not registered.")
         
-    def get_agent_group(self):
+    def get_agent_group(self) -> AgentGroup:
         return registered_agent_groups[self.ag_type](self.agent_group_config)

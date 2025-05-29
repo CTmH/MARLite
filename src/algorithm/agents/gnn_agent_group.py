@@ -33,11 +33,11 @@ class GNNAgentGroup(AgentGroup):
         self.decoders = {model_name: config.get_model() for model_name, config in decoder_configs.items()}
         self.graph_model = graph_model_config.get_model()  # Graph model for message passing
         self.graph_builder = graph_builder_config.get_graph_builder()
-        params_to_optimize = [{'params': extractor.parameters()} for extractor in self.feature_extractors.values()]
-        params_to_optimize += [{'params': encoder.parameters()} for encoder in self.encoders.values()]
-        params_to_optimize += [{'params': decoder.parameters()} for decoder in self.decoders.values()]
-        params_to_optimize += [{'params': self.graph_model.parameters()}]
-        self.optimizer = optimizer_config.get_optimizer(params_to_optimize)
+        self.params_to_optimize = [{'params': extractor.parameters()} for extractor in self.feature_extractors.values()]
+        self.params_to_optimize += [{'params': encoder.parameters()} for encoder in self.encoders.values()]
+        self.params_to_optimize += [{'params': decoder.parameters()} for decoder in self.decoders.values()]
+        self.params_to_optimize += [{'params': self.graph_model.parameters()}]
+        self.optimizer = optimizer_config.get_optimizer(self.params_to_optimize)
 
         # Initialize model_to_agent dictionary and model_to_agent_indices dictionary
         self.model_to_agents = {model_name:[] for model_name in encoder_configs.keys()}
@@ -198,6 +198,11 @@ class GNNAgentGroup(AgentGroup):
         return self
     
     def step(self):
+        for p in self.params_to_optimize:
+            torch.nn.utils.clip_grad_norm_(
+                p['params'],
+                max_norm=5.0
+            )
         self.optimizer.step()
         return self
     
