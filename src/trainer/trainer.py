@@ -61,6 +61,7 @@ class Trainer():
         self.target_critic = critic_config.get_critic()
         self.best_critic_params = deepcopy(self.eval_critic.state_dict())
         self.target_critic.load_state_dict(self.best_critic_params)
+
         self.optimizer = critic_optimizer_config.get_optimizer(self.eval_critic.parameters())
 
         # Work directory
@@ -121,7 +122,6 @@ class Trainer():
         return self
 
     def update_target_model_params(self):
-        # Update the evaluation models with the latest weights from the training models
         agent_group_params = self.eval_agent_group.get_agent_group_params()
         self.target_agent_group.set_agent_group_params(agent_group_params)
         critic_params = deepcopy(self.eval_critic.state_dict())  # Update critic parameters

@@ -67,5 +67,56 @@ class TestQMixTrainer(unittest.TestCase):
             reward, _ = self.trainer.evaluate()
             best_reward, _ = self.trainer.train(epochs=2, target_reward=5)
 
+    def test_target_update(self):
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self.trainer = self.trainer_config.create_trainer()
+            self.trainer.workdir = temp_dir
+            self.trainer.logdir = os.path.join(self.trainer.workdir, 'logs')
+            self.trainer.checkpointdir = os.path.join(self.trainer.workdir, 'checkpoints')
+
+            # 使用随机参数初始化评估模型
+            for param in self.trainer.eval_critic.parameters():
+                torch.nn.init.ones_(param)
+            for param in self.trainer.target_critic.parameters():
+                torch.nn.init.zeros_(param)
+
+            # 获取更新前的参数
+            original_target_critic_params = deepcopy(self.trainer.target_critic.state_dict())
+
+            # 执行参数更新
+            self.trainer.update_target_model_params()
+
+            self.assertEqual(
+                self.trainer.target_critic._modules.keys(),
+                self.trainer.eval_critic._modules.keys()
+            )
+            # 验证critic参数更新及深拷贝正确性
+            new_target_critic_params = deepcopy(self.trainer.target_critic.state_dict())
+            for name in new_target_critic_params:
+                self.assertTrue(torch.equal(
+                    new_target_critic_params[name],
+                    self.trainer.eval_critic.state_dict()[name]
+                ))
+                self.assertFalse(torch.equal(
+                    new_target_critic_params[name],
+                    original_target_critic_params[name]
+                ))
+
+            # 验证深拷贝有效性：修改eval参数不应影响target
+            for param in self.trainer.eval_critic.parameters():
+                torch.nn.init.normal_(param)
+
+            for name in new_target_critic_params:
+                self.assertFalse(torch.equal(
+                    self.trainer.eval_critic.state_dict()[name],
+                    self.trainer.target_critic.state_dict()[name]
+                ))
+                self.assertFalse(torch.equal(
+                    new_target_critic_params[name],
+                    self.trainer.eval_critic.state_dict()[name]
+                ))
+
+
 if __name__ == '__main__':
     unittest.main()

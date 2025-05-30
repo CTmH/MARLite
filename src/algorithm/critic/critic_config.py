@@ -15,12 +15,12 @@ class CriticConfig:
             fe_conf = kwargs.pop('feature_extractor')
         else:
             fe_conf = {'model_type': 'Identity'}
-        critic_fe_config = ModelConfig(**fe_conf)
-        self.critic_feature_extractor = critic_fe_config.get_model()
-        model_config = kwargs
-        critic_model = registered_critic_models[self.critic_type]
-        self.critic_model = critic_model(**model_config)
+        self.critic_fe_config = ModelConfig(**fe_conf)
+        #self.critic_feature_extractor = self.critic_fe_config.get_model()
+        self.model_config = kwargs
+        self.critic_model_class = registered_critic_models[self.critic_type]
+        #self.critic_model = critic_model_class(**model_config)
 
     def get_critic(self):
-        critic = Critic(self.critic_model, self.critic_feature_extractor)
+        critic = Critic(self.critic_model_class(**self.model_config), self.critic_fe_config.get_model())
         return critic

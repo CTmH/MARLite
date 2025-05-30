@@ -8,6 +8,13 @@ from .adversarial_pursuit_wrapper import AdversarialPursuitPredator, Adversarial
 from .battle_wrapper import BattleWrapper
 from .battlefield_wrapper import BattleFieldWrapper
 
+CUSTOM_ENVS = {
+            'adversarial_pursuit_predator': AdversarialPursuitPredator,
+            'adversarial_pursuit_prey': AdversarialPursuitPrey,
+            'battle': BattleWrapper,
+            'battlefield': BattleFieldWrapper,
+        }
+
 class EnvConfig():
 
     def __init__(self, **kwargs) -> None:
@@ -15,27 +22,21 @@ class EnvConfig():
         self.env_name = kwargs.pop('env_name')
         self.env_config = kwargs
 
-        self.custom_envs = {
-            'adversarial_pursuit_predator': AdversarialPursuitPredator,
-            'adversarial_pursuit_prey': AdversarialPursuitPrey,
-            'battle': BattleWrapper,
-            'battlefield': BattleFieldWrapper,
-        }
+    def create_env(self) -> ParallelEnv:
 
         if self.module_name != 'custom':
             try:
                 module = importlib.import_module(self.module_name)
-                self.env = getattr(module, self.env_name)
+                env = getattr(module, self.env_name)
             except (ImportError, AttributeError) as e:
-                self.env = None
+                env = None
                 print(f"Error loading environment {self.env_name} from module {self.module_name}: {e}")
-        elif self.env_name in self.custom_envs:
-            self.env = self.custom_envs[self.env_name]
+        elif self.env_name in CUSTOM_ENVS:
+            env = CUSTOM_ENVS[self.env_name]
         else:
             raise ValueError(f"Custom environment {self.env_name} not registered.")
-
-    def create_env(self) -> ParallelEnv:
+        
         if self.module_name != 'custom':
-            return self.env.parallel_env()
+            return env.parallel_env()
         else:
-            return self.env(**self.env_config)
+            return env(**self.env_config)
