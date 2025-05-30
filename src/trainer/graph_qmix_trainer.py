@@ -38,8 +38,10 @@ class GraphQMIXTrainer(Trainer):
 
                     # Compute the Q-tot
                     self.eval_agent_group.train().to(self.train_device)
-                    q_val = self.eval_agent_group.forward(observations, edge_index_batch)
-
+                    q_val = self.eval_agent_group.forward(observations, edge_index_batch) # obs.shape (B, N, T, F)
+                    actions = torch.Tensor(actions[:,:,-1:]).to(device=self.train_device, dtype=torch.int64) # (B, N, T, A)
+                    q_val = torch.gather(q_val, dim=-1, index=actions)
+                    q_val = q_val.squeeze(-1) # (B, N, 1) -> (B, N)
                     states = torch.Tensor(states).to(self.train_device)
                     self.eval_critic.train().to(self.train_device)
                     q_tot = self.eval_critic(q_val, states)
@@ -52,6 +54,7 @@ class GraphQMIXTrainer(Trainer):
                     with torch.no_grad():
                         self.target_agent_group.eval().to(self.train_device)
                         q_val_next = self.eval_agent_group.forward(next_observations, edge_index_batch_next)
+                        q_val_next = q_val_next.max(dim=-1).values
                         next_states = torch.Tensor(next_states).to(self.train_device) # (B, T, F) -> (B, F) Take only the last state in the sequence
                         self.target_critic.eval().to(self.train_device) 
                         q_tot_next = self.target_critic(q_val_next, next_states)

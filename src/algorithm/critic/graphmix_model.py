@@ -31,15 +31,14 @@ class GraphMIXCriticModel(nn.Module):
     # Need to check if algorithm is correct
     def forward(self, q_val: torch.Tensor, states: torch.Tensor):
         bs = q_val.size(0)
-        q = torch.max(q_val, dim=-1) # (B, N, Action Space) -> (B, N)
-
+        q_val = q_val.reshape(bs, 1, self.input_dim) # (B, 1, N)
         w1 = torch.abs(self.hyper_w1(states))
         b1 = self.hyper_b1(states)
 
         w1 = w1.view(bs, self.input_dim, self.qmix_hidden_dim)
         b1 = b1.view(bs, 1, self.qmix_hidden_dim)
 
-        hidden = F.elu(torch.bmm(q, w1) + b1)
+        hidden = F.elu(torch.bmm(q_val, w1) + b1)
 
         w2 = torch.abs(self.hyper_w2(states))
         b2 = self.hyper_b2(states)

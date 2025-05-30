@@ -53,14 +53,14 @@ rollout_config:
   n_workers: 4
   n_episodes: 1000
   n_eval_episodes: 100
-  traj_len: 5
+  traj_len: 7
   episode_limit: 500
   device: "cpu"
 
 replaybuffer_config:
   type: "Normal"
   capacity: 50000
-  traj_len: 5
+  traj_len: 7
 
 trainer_config:
   type: "QMIX"
