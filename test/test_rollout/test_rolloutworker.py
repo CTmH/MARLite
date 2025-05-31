@@ -2,11 +2,11 @@ import unittest
 import torch
 import yaml
 import numpy as np
-import torch.multiprocessing as mp
+import queue
 from copy import deepcopy
 
 from src.algorithm.agents import QMIXAgentGroup
-from src.rollout.multiprocess_rolloutworker import MultiProcessRolloutWorker
+from src.rollout.multithread_rolloutworker import MultiThreadRolloutWorker
 from src.algorithm.model import ModelConfig
 from src.environment.env_config import EnvConfig
 from src.util.optimizer_config import OptimizerConfig
@@ -76,9 +76,10 @@ class TestRolloutWorker(unittest.TestCase):
         self.traj_len = 5
         self.n_episodes = 2
         self.episode_limit = 10
-        self.episode_queue = mp.Queue()
-        self.worker = MultiProcessRolloutWorker(env=self.env_config.create_env(),
+        self.episode_queue = queue.Queue()
+        self.worker = MultiThreadRolloutWorker(env_config=self.env_config,
                                     agent_group = self.agent_group,
+                                    episode_queue=self.episode_queue,
                                     n_episodes=self.n_episodes,
                                     rnn_traj_len=self.traj_len,
                                     episode_limit=self.episode_limit,
@@ -92,7 +93,14 @@ class TestRolloutWorker(unittest.TestCase):
         self.assertEqual(len(episode["rewards"]), self.episode_limit)
 
     def test_run(self):
-        episodes = self.worker.run()
+        self.worker.run()
+        # 可靠的数据收集方式
+        episodes = []
+        while True:
+            try:
+                episodes.append(self.episode_queue.get_nowait())
+            except queue.Empty:
+                break
         for episode in episodes:
             self.assertFalse(not isinstance(episode, dict))
             self.assertEqual(len(episode["rewards"]), self.episode_limit)

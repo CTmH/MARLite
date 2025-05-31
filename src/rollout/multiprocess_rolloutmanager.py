@@ -1,23 +1,15 @@
-import multiprocessing as mp
+import torch.multiprocessing as mp
+from multiprocessing import queues
 from typing import List, Any, Type
 from ..algorithm.agents.agent_group import AgentGroup
 from ..environment.env_config import EnvConfig
 from .multiprocess_rolloutworker import MultiProcessRolloutWorker
-from .rolloutmanager import RolloutManager
-from ..algorithm.agents.agent_group_config import AgentGroupConfig
 
-def rollout_worker_func(worker_class: Type[MultiProcessRolloutWorker],
-                        worker_args):
-    worker = worker_class(*worker_args)
-    return worker.run()
-
-class MultiProcessRolloutManager(RolloutManager):
+class MultiProcessRolloutManager:
     def __init__(self,
                  worker_class: Type[MultiProcessRolloutWorker],
                  env_config: EnvConfig,
-                 agent_group_config: AgentGroupConfig,
-                 agent_model_params,
-                 agent_fe_params,
+                 agent_group: AgentGroup,
                  n_workers: int,
                  n_episodes: int,
                  traj_len: int,
@@ -25,21 +17,21 @@ class MultiProcessRolloutManager(RolloutManager):
                  epsilon: float,
                  device: str):
 
-        super().__init__(worker_class,
-                         env_config,
-                         agent_group_config,
-                         agent_model_params,
-                         agent_fe_params,
-                         n_workers,
-                         n_episodes,
-                         traj_len,
-                         episode_limit,
-                         epsilon,
-                         device)
+        # 使用spawn启动方法确保CUDA兼容性
+        mp.set_start_method('spawn', force=True)
+        
+        self.worker_class = worker_class
+        self.env_config = env_config
+        self.agent_group = agent_group
+        self.n_workers = n_workers
+        self.n_episodes = n_episodes
+        self.traj_len = traj_len
+        self.episode_limit = episode_limit
+        self.epsilon = epsilon
+        self.device = device
 
-        self.workers: List[MultiProcessRolloutWorker] = []
-
-        self.episode_queue = mp.Queue()
+        self.workers: List[mp.Process] = []
+        self.episode_queue = mp.Queue()  # 多进程安全队列
 
     def start(self):
         """启动所有工作进程"""
@@ -47,17 +39,14 @@ class MultiProcessRolloutManager(RolloutManager):
         remaining_episodes = self.n_episodes % self.n_workers
 
         for i in range(self.n_workers):
-            # 分配每个工作进程的任务量
             episode_count = episodes_per_worker
             if i < remaining_episodes:
                 episode_count += 1
 
-            # 创建工作进程
+            # 创建并启动工作进程
             worker = self.worker_class(
                 env_config=self.env_config,
-                agent_group_config=self.agent_group_config,
-                agent_model_params=self.agent_model_params,
-                agent_fe_params=self.agent_fe_params,
+                agent_group=self.agent_group,
                 episode_queue=self.episode_queue,
                 n_episodes=episode_count,
                 rnn_traj_len=self.traj_len,
@@ -65,8 +54,9 @@ class MultiProcessRolloutManager(RolloutManager):
                 epsilon=self.epsilon,
                 device=self.device
             )
-            self.workers.append(worker)
-            worker.start()
+            process = mp.Process(target=worker.run)
+            self.workers.append(process)
+            process.start()
         return self
 
     def join(self):
@@ -76,25 +66,27 @@ class MultiProcessRolloutManager(RolloutManager):
         return self
 
     def generate_episodes(self) -> List[Any]:
-        """生成并返回所有 episode 数据"""
-        self.start()  # 启动工作进程
-        self.join()   # 等待所有工作进程完成
+        """生成并返回所有episode数据"""
+        self.start()
+        self.join()
 
-        # 从队列中收集所有 episode 数据
+        # 收集所有episode数据
         episodes = []
-        while not self.episode_queue.empty():
+        while True:
             try:
-                episodes.append(self.episode_queue.get_nowait())
-            except mp.queues.Empty:
-                # 如果队列为空，退出循环
+                # 设置超时防止死锁
+                episode = self.episode_queue.get(block=False, timeout=0.1)
+                episodes.append(episode)
+            except (queues.Empty, KeyboardInterrupt):
                 break
-
         return episodes
 
     def cleanup(self):
-        """清理资源"""
+        """确保终止所有子进程"""
         for worker in self.workers:
             if worker.is_alive():
                 worker.terminate()
-            worker.join()
+            worker.close()  # 添加进程资源释放
+        self.episode_queue.cancel_join_thread()  # 防止队列线程阻塞
+        self.episode_queue.close()
         return self

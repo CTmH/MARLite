@@ -33,11 +33,12 @@ class TestRolloutManager(unittest.TestCase):
                     agent_2: model1
                 model_configs:
                     model1:
-                        model_type: "RNN"
-                        input_shape: 18
-                        rnn_hidden_dim: 128
-                        rnn_layers: 1
-                        output_shape: 5
+                        model:
+                            model_type: "RNN"
+                            input_shape: 18
+                            rnn_hidden_dim: 128
+                            rnn_layers: 1
+                            output_shape: 5
                         feature_extractor:
                             model_type: "Identity"
                 optimizer:
@@ -57,27 +58,25 @@ class TestRolloutManager(unittest.TestCase):
         self.agent_model_params, self.agent_fe_params = self.agent_group.get_agent_group_params()
 
         self.traj_len = 5
-        self.n_episodes = 13
-        self.episode_limit = 10
-        self.n_workers = 1
+        self.n_episodes = 3
+        self.episode_limit = 7
+        self.n_workers = 3
+        self.agent_group = self.agent_group_config.get_agent_group()
         self.manager = MultiProcessRolloutManager(worker_class=MultiProcessRolloutWorker,
                                                   env_config=self.env_config,
-                                                  agent_group_config=self.agent_group_config,
-                                                  agent_model_params=self.agent_model_params,
-                                                  agent_fe_params=self.agent_fe_params,
+                                                  agent_group=self.agent_group,
                                                   n_workers=self.n_workers,
                                                   n_episodes=self.n_episodes,
                                                   traj_len=self.traj_len,
                                                   episode_limit=self.episode_limit,
                                                   epsilon=0.9,
                                                   device='cpu')
-'''
+
     def test_generate_episodes(self):
         episodes = self.manager.generate_episodes()
         self.assertEqual(len(episodes), self.n_episodes)
         for episode in episodes:
             self.assertEqual(len(episode['rewards']), self.episode_limit)
-'''
 
 if __name__ == '__main__':
     unittest.main()

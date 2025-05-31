@@ -81,8 +81,26 @@ class TestQMixTrainer(unittest.TestCase):
             for param in self.trainer.target_critic.parameters():
                 torch.nn.init.zeros_(param)
 
+            for (_, fe), (_, model) in zip(
+                self.trainer.eval_agent_group.feature_extractors.items(),
+                self.trainer.eval_agent_group.models.items()):
+                for param in fe.parameters():
+                    torch.nn.init.ones_(param)
+                for param in model.parameters():
+                    torch.nn.init.ones_(param)
+
+            for (_, fe), (_, model) in zip(
+                self.trainer.target_agent_group.feature_extractors.items(),
+                self.trainer.target_agent_group.models.items()):
+                for param in fe.parameters():
+                    torch.nn.init.zeros_(param)
+                for param in model.parameters():
+                    torch.nn.init.zeros_(param)
+
             # 获取更新前的参数
             original_target_critic_params = deepcopy(self.trainer.target_critic.state_dict())
+
+            original_target_agent_group_params = self.trainer.target_agent_group.get_agent_group_params()
 
             # 执行参数更新
             self.trainer.update_target_model_params()
@@ -103,10 +121,25 @@ class TestQMixTrainer(unittest.TestCase):
                     original_target_critic_params[name]
                 ))
 
+            # 验证 agent group 参数更新及深拷贝正确性
+            eval_agent_group_models = {'feature_extractor': self.trainer.eval_agent_group.feature_extractors,
+                                       'model': self.trainer.eval_agent_group.models}
+            new_target_agent_group_params = self.trainer.target_agent_group.get_agent_group_params()
+            for key in eval_agent_group_models.keys():
+                for model_name in self.trainer.eval_agent_group.models.keys():
+                    for name in original_target_agent_group_params[key][model_name]:
+                        self.assertTrue(torch.equal(
+                            new_target_agent_group_params[key][model_name][name],
+                            eval_agent_group_models[key][model_name].state_dict()[name]
+                        ))
+                        self.assertFalse(torch.equal(
+                            new_target_agent_group_params[key][model_name][name],
+                            original_target_agent_group_params[key][model_name][name],
+                        ))
+
             # 验证深拷贝有效性：修改eval参数不应影响target
             for param in self.trainer.eval_critic.parameters():
                 torch.nn.init.normal_(param)
-
             for name in new_target_critic_params:
                 self.assertFalse(torch.equal(
                     self.trainer.eval_critic.state_dict()[name],
@@ -116,6 +149,28 @@ class TestQMixTrainer(unittest.TestCase):
                     new_target_critic_params[name],
                     self.trainer.eval_critic.state_dict()[name]
                 ))
+
+            for (_, fe), (_, model) in zip(
+                self.trainer.eval_agent_group.feature_extractors.items(),
+                self.trainer.eval_agent_group.models.items()):
+                for param in fe.parameters():
+                    torch.nn.init.normal_(param)
+                for param in model.parameters():
+                    torch.nn.init.normal_(param)
+
+            new_target_agent_group_params = self.trainer.target_agent_group.get_agent_group_params()
+            for key in eval_agent_group_models.keys():
+                for model_name in self.trainer.eval_agent_group.models.keys():
+                    for name in original_target_agent_group_params[key][model_name]:
+                        self.assertFalse(torch.equal(
+                            new_target_agent_group_params[key][model_name][name],
+                            eval_agent_group_models[key][model_name].state_dict()[name]
+                        ))
+                        self.assertFalse(torch.equal(
+                            new_target_agent_group_params[key][model_name][name],
+                            original_target_agent_group_params[key][model_name][name],
+                        ))
+
 
 
 if __name__ == '__main__':

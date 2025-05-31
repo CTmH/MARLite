@@ -1,46 +1,50 @@
-import multiprocessing
-import os
-import logging
-import numpy as np
 import torch.multiprocessing as mp
+import numpy as np
+import logging
 from copy import deepcopy
 from ..environment.env_config import EnvConfig
 from ..algorithm.agents import AgentGroup
+from ..algorithm.agents.gnn_agent_group import GNNAgentGroup
 from ..algorithm.model import TimeSeqModel
-from ..algorithm.agents.agent_group import AgentGroup
 
 class MultiProcessRolloutWorker(mp.Process):
     def __init__(self,
-                 env,
+                 env_config: EnvConfig,
                  agent_group: AgentGroup,
+                 episode_queue: mp.Queue,
                  n_episodes: int,
                  rnn_traj_len=5,
                  episode_limit=100,
                  epsilon=0.5,
                  device='cpu'):
         super(MultiProcessRolloutWorker, self).__init__()
-        self.device = device
-        self.env = env
-        self.episode_list = []
-        # Initialize AgentGroup
-        self.agent_group = agent_group
-        self.agent_group.to(self.device)
+        
+        # 共享参数需要深拷贝
+        self.env_config = deepcopy(env_config)
+        self.agent_group = deepcopy(agent_group)
+        self.episode_queue = episode_queue
         self.n_episodes = n_episodes
         self.rnn_traj_len = rnn_traj_len
         self.episode_limit = episode_limit
         self.epsilon = epsilon
-
-        self.process_name = multiprocessing.current_process().name
-        self.process_id = os.getpid()
+        self.device = device
 
     def run(self):
+        self.agent_group = deepcopy(self.agent_group).to(self.device)
+        
         for i in range(self.n_episodes):
-            self.episode_list.append(self.rollout())
+            episode = self.rollout()
+            self.episode_queue.put(episode)
+            
+            # 日志记录进程信息
             if self.n_episodes < 10 or i % (self.n_episodes // 10) == 0 or i == (self.n_episodes - 1):
-                logging.info(f"Process - {self.process_id}:\t{self.process_name}\tfinished job {i+1} / {self.n_episodes}")
-        return deepcopy(self.episode_list)
+                logging.info(f"Process {self.pid} finished {i+1}/{self.n_episodes}")
+        
+        self.env.close()
+        return
 
     def rollout(self):
+        self.env = self.env_config.create_env()
 
         # Initialize the episode dictionary
         episode = {

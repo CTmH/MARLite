@@ -19,15 +19,16 @@ class MultiThreadRolloutWorker(threading.Thread):
                  epsilon=0.5,
                  device='cpu'):
         super(MultiThreadRolloutWorker, self).__init__()
-        self.env_config = env_config
+        self.env_config = deepcopy(env_config)
         self.agent_group = deepcopy(agent_group)
         self.episode_queue = episode_queue
         self.n_episodes = n_episodes
         self.rnn_traj_len = rnn_traj_len
         self.episode_limit = episode_limit
         self.epsilon = epsilon
-        self.env = self.env_config.create_env()
         self.device = device
+
+        self.agent_group.eval().to(self.device)
 
         self.thread_name = threading.current_thread().name
         self.thread_id = threading.current_thread().ident
@@ -40,7 +41,7 @@ class MultiThreadRolloutWorker(threading.Thread):
         return self
 
     def rollout(self):
-        self.agent_group.eval().to(self.device)
+        self.env = self.env_config.create_env()
 
         # Initialize the episode dictionary
         episode = {

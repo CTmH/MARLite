@@ -240,6 +240,17 @@ class GNNAgentGroup(AgentGroup):
         self.graph_model.train()
         return self
     
+    def share_memory(self):
+        for (_, enc), (_, fe), (_, dec) in zip(
+            self.encoders.items(),
+            self.feature_extractors.items(),
+            self.decoders.items()):
+            enc.share_memory()
+            fe.share_memory()
+            dec.share_memory()
+        self.graph_model.share_memory()
+        return self
+    
     def save_params(self, path: str):
         os.makedirs(path, exist_ok=True)
         for (model_name, enc), (_, fe), (_, dec) in zip(

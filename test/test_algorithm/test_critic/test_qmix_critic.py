@@ -14,7 +14,7 @@ class TestQMIXCritic(unittest.TestCase):
     def test_forward_pass(self):
         # Create dummy input data
         batch_size = 10
-        q_values = torch.randn(batch_size, self.critic.input_dim, 5)
+        q_values = torch.randn(batch_size, self.critic.input_dim)
         states = torch.randn(batch_size, self.critic.state_shape)
 
         # Perform a forward pass

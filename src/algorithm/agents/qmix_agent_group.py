@@ -166,6 +166,12 @@ class QMIXAgentGroup(AgentGroup):
             fe.train()
         return self
     
+    def share_memory(self):
+        for (_, model), (_, fe) in zip(self.models.items(), self.feature_extractors.items()):
+            model.share_memory()
+            fe.share_memory()
+        return self
+    
     def save_params(self, path: str):
         os.makedirs(path, exist_ok=True)
         for (model_name, model), (_, fe) in zip(
