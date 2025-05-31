@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch, call, mock_open
 from copy import deepcopy
 import tempfile
 import torch
+import pygame
 
 from src.trainer.qmix_trainer import QMIXTrainer
 from src.trainer.trainer_config import TrainerConfig
@@ -14,7 +15,7 @@ from src.util.scheduler import Scheduler
 
 class TestQMixTrainer(unittest.TestCase):
     def setUp(self):
-        self.config_path = 'test/config/qmix_default.yaml'
+        self.config_path = 'test/config/qmix_kaz.yaml'
         with open(self.config_path, 'r') as file:
             self.config = yaml.safe_load(file)
         self.config['trainer_config']['train_args']['epochs'] = 2
@@ -59,6 +60,7 @@ class TestQMixTrainer(unittest.TestCase):
             self.trainer.load_model(checkpoint)
 
     def test_train(self):
+        pygame.font.init() 
         with tempfile.TemporaryDirectory() as temp_dir:
             self.trainer = self.trainer_config.create_trainer()
             self.trainer.workdir = temp_dir

@@ -37,6 +37,6 @@ class EnvConfig():
             raise ValueError(f"Custom environment {self.env_name} not registered.")
         
         if self.module_name != 'custom':
-            return env.parallel_env()
+            return env.parallel_env(**self.env_config)
         else:
             return env(**self.env_config)

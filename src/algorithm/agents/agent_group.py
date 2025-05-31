@@ -34,6 +34,9 @@ class AgentGroup(object):
     def train(self):
         raise NotImplementedError
     
+    def share_memory(self):
+        raise NotImplementedError
+    
     def save_params(self, path: str):
         raise NotImplementedError
     

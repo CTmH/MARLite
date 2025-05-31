@@ -65,7 +65,7 @@ class MultiThreadRolloutManager:
         for i, count in enumerate(episodes_per_worker):
             worker = self.worker_class(
                 env_config=self.env_config,
-                agent_group=self.agent_group,
+                agent_group=self.agent_group.share_memory(),
                 episode_queue=self.episode_queue,
                 n_episodes=count,
                 rnn_traj_len=self.traj_len,

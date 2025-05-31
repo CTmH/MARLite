@@ -27,7 +27,6 @@ class MultiThreadRolloutWorker(threading.Thread):
         self.episode_limit = episode_limit
         self.epsilon = epsilon
         self.device = device
-        self.agent_group.eval().to(self.device)
 
     def run(self):
         n_episodes = self.n_episodes
@@ -36,12 +35,12 @@ class MultiThreadRolloutWorker(threading.Thread):
         for i in range(n_episodes):
             self.episode_queue.put(self.rollout())
             if n_episodes < 10 or i % (n_episodes // 10) == 0 or i == (n_episodes - 1):
-                logging.info(f"Thread - {thread_id}:\t{thread_name}\tfinished job {i+1} / {n_episodes}")
+                logging.info(f"Thread - {thread_id:03d}:\t{thread_name}\tfinished job {i+1} / {n_episodes}")
         return self
 
     def rollout(self):
         env = self.env_config.create_env()
-
+        agent_group = deepcopy(self.agent_group).eval().to(self.device)
         # Initialize the episode dictionary
         episode = {
             'observations':[],
@@ -94,11 +93,11 @@ class MultiThreadRolloutWorker(threading.Thread):
 
             avail_actions = {agent: env.action_space(agent) for agent in env.agents}
             processed_obs = self._obs_preprocess(episode['observations']+[observations])
-            if isinstance(self.agent_group, GNNAgentGroup):
+            if isinstance(agent_group, GNNAgentGroup):
                 _, edge_index = env.build_my_team_graph()
-                actions = self.agent_group.act(processed_obs, edge_index, avail_actions, self.epsilon)
+                actions = agent_group.act(processed_obs, edge_index, avail_actions, self.epsilon)
             else:
-                actions = self.agent_group.act(processed_obs, avail_actions, self.epsilon)
+                actions = agent_group.act(processed_obs, avail_actions, self.epsilon)
             
         episode['episode_length'] = len(episode['observations'])
         episode['episode_reward'] = episode_reward
