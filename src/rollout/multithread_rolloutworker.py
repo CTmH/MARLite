@@ -27,21 +27,20 @@ class MultiThreadRolloutWorker(threading.Thread):
         self.episode_limit = episode_limit
         self.epsilon = epsilon
         self.device = device
-
         self.agent_group.eval().to(self.device)
 
-        self.thread_name = threading.current_thread().name
-        self.thread_id = threading.current_thread().ident
-
     def run(self):
-        for i in range(self.n_episodes):
+        n_episodes = self.n_episodes
+        thread_name = threading.current_thread().name
+        thread_id = threading.current_thread().ident
+        for i in range(n_episodes):
             self.episode_queue.put(self.rollout())
-            if self.n_episodes < 10 or i % (self.n_episodes // 10) == 0 or i == (self.n_episodes - 1):
-                logging.info(f"Thread - {self.thread_id}:\t{self.thread_name}\tfinished job {i+1} / {self.n_episodes}")
+            if n_episodes < 10 or i % (n_episodes // 10) == 0 or i == (n_episodes - 1):
+                logging.info(f"Thread - {thread_id}:\t{thread_name}\tfinished job {i+1} / {n_episodes}")
         return self
 
     def rollout(self):
-        self.env = self.env_config.create_env()
+        env = self.env_config.create_env()
 
         # Initialize the episode dictionary
         episode = {
@@ -68,21 +67,21 @@ class MultiThreadRolloutWorker(threading.Thread):
             # Collect the observations, actions, rewards, available actions, and truncations into the episode dictionary
 
             if i == 0:
-                observations, infos = self.env.reset()
+                observations, infos = env.reset()
             else:
                 episode['observations'].append(observations)
-                episode['states'].append(self.env.state())
+                episode['states'].append(env.state())
                 episode['actions'].append(actions)
                 episode['avail_actions'].append(avail_actions)
 
-                observations, rewards, terminations, truncations, infos = self.env.step(actions)
+                observations, rewards, terminations, truncations, infos = env.step(actions)
                 
                 episode['rewards'].append(rewards)
                 all_agents_rewards = [value for _, value in rewards.items()]
                 episode['all_agents_sum_rewards'].append(sum(all_agents_rewards))
                 episode['truncated'].append(truncations)
                 episode['terminations'].append(terminations)
-                episode['next_states'].append(self.env.state()) # TODO: Check if this is correct
+                episode['next_states'].append(env.state()) # TODO: Check if this is correct
                 episode['next_observations'].append(observations) # TODO: Check if this is correct
 
                 episode_reward += np.sum(np.array([reward for _, reward in rewards.items()]))
@@ -93,10 +92,10 @@ class MultiThreadRolloutWorker(threading.Thread):
                 if True in terminations.values() or True in truncations.values():
                     break
 
-            avail_actions = {agent: self.env.action_space(agent) for agent in self.env.agents}
+            avail_actions = {agent: env.action_space(agent) for agent in env.agents}
             processed_obs = self._obs_preprocess(episode['observations']+[observations])
             if isinstance(self.agent_group, GNNAgentGroup):
-                _, edge_index = self.env.build_my_team_graph()
+                _, edge_index = env.build_my_team_graph()
                 actions = self.agent_group.act(processed_obs, edge_index, avail_actions, self.epsilon)
             else:
                 actions = self.agent_group.act(processed_obs, avail_actions, self.epsilon)
@@ -106,12 +105,12 @@ class MultiThreadRolloutWorker(threading.Thread):
         episode['win_tag'] = win_tag
 
         # Close the environment after generating the episode
-        self.env.close()
+        env.close()
 
         return episode
     
     def _obs_preprocess(self, observations: list):
-        agents = self.env.agents
+        agents = self.agent_group.agent_model_dict.keys()
         models = self.agent_group.models
         agent_model_dict = self.agent_group.agent_model_dict
         processed_obs = {agent_id : [] for agent_id in agents}
