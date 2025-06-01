@@ -190,7 +190,9 @@ class Trainer():
                 break
 
             if epoch % eval_interval == 0:
-            
+                if mean_reward < best_mean_reward:
+                    self.eval_agent_group.set_agent_group_params(self.best_agent_group_params)
+                    self.eval_critic.load_state_dict(self.best_critic_params)
                 self.update_target_model_params()
                 logging.info(f"Epoch {epoch}: Target model updated with eval model params")
 

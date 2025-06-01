@@ -37,8 +37,8 @@ class MultiProcessRolloutWorker(mp.Process):
             self.episode_queue.put(episode)
             
             # 日志记录进程信息
-            if self.n_episodes < 10 or i % (self.n_episodes // 10) == 0 or i == (self.n_episodes - 1):
-                logging.info(f"Process {self.pid} finished {i+1}/{self.n_episodes}")
+            #if self.n_episodes < 10 or i % (self.n_episodes // 10) == 0 or i == (self.n_episodes - 1):
+            #    logging.info(f"Process {self.pid} finished {i+1}/{self.n_episodes}")
         
         self.env.close()
         return
