@@ -7,7 +7,7 @@ class TestGraphBuilderConfig(unittest.TestCase):
     def test_get_graph_builder(self):
         # Initialize with valid parameters
         config = {
-            "type": "Magent2",
+            "type": "Magent",
             "binary_agent_id_dim": [5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
             "agent_presence_dim": [3],
             "comm_distance": 10,

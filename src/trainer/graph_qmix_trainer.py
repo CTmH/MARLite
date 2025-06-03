@@ -32,13 +32,10 @@ class GraphQMIXTrainer(Trainer):
                     observations, states, actions, rewards, next_states, next_observations, terminations = batch
                     bs = states.shape[0]  # Actual batch size
 
-                    # Build the graph for the current state
-                    states = states[:,-1,:] # (B, T, F) -> (B, F) Take only the last state in the sequence
-                    _, edge_index_batch = self.env.build_my_team_graph_batch(states)
-
                     # Compute the Q-tot
+                    states = states[:,-1,:] # (B, T, F) -> (B, F) Take only the last state in the sequence
                     self.eval_agent_group.train().to(self.train_device)
-                    q_val = self.eval_agent_group.forward(observations, edge_index_batch) # obs.shape (B, N, T, F)
+                    q_val = self.eval_agent_group.forward(observations, states) # obs.shape (B, N, T, F)
                     actions = torch.Tensor(actions[:,:,-1:]).to(device=self.train_device, dtype=torch.int64) # (B, N, T, A)
                     q_val = torch.gather(q_val, dim=-1, index=actions)
                     q_val = q_val.squeeze(-1) # (B, N, 1) -> (B, N)
@@ -46,14 +43,11 @@ class GraphQMIXTrainer(Trainer):
                     self.eval_critic.train().to(self.train_device)
                     q_tot = self.eval_critic(q_val, states)
 
-                    # Build the graph for the next state
-                    next_states = next_states[:,-1,:] # (B, T, F) -> (B, F) Take only the last state in the sequence
-                    _, edge_index_batch_next = self.env.build_my_team_graph_batch(next_states)
-
                     # Double Q-learning, we use eval agent group to choose actions,and use target critic to compute q_target
                     with torch.no_grad():
+                        next_states = next_states[:,-1,:] # (B, T, F) -> (B, F) Take only the last state in the sequence
                         self.target_agent_group.eval().to(self.train_device)
-                        q_val_next = self.eval_agent_group.forward(next_observations, edge_index_batch_next)
+                        q_val_next = self.eval_agent_group.forward(next_observations, next_states)
                         q_val_next = q_val_next.max(dim=-1).values
                         next_states = torch.Tensor(next_states).to(self.train_device) # (B, T, F) -> (B, F) Take only the last state in the sequence
                         self.target_critic.eval().to(self.train_device) 

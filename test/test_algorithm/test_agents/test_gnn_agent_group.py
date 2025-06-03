@@ -37,7 +37,6 @@ class TestGNNAgentGroup(unittest.TestCase):
             for agent in self.env.agents:
                 observations[agent].append(obs[agent])
         self.observations = {key: np.array(value) for key, value in observations.items()}
-        self.adj_matrix, self.edge_index = self.env.build_my_team_graph()
 
     def test_foward(self):
         bs = 5
@@ -45,31 +44,31 @@ class TestGNNAgentGroup(unittest.TestCase):
         obs = np.stack(obs)
         obs = np.stack([obs for _ in range(bs)])
         obs = torch.Tensor(obs)
-        edge_index = np.stack([self.edge_index for _ in range(bs)])
+        states = np.stack([self.env.state() for _ in range(bs)])
 
         # Test get_q_values method in evaluation mode
-        q_values = self.agent_group.forward(observations=obs, edge_index=edge_index)
+        q_values = self.agent_group.forward(observations=obs, states=states)
         q_values = q_values.detach().cpu().numpy().squeeze()
         self.assertEqual(q_values.shape, (bs, len(self.env.agents), self.action_space_shape))
         
         # Test get_q_values method in training mode
         self.agent_group.train()
-        q_values = self.agent_group.forward(observations=obs, edge_index=edge_index)
+        q_values = self.agent_group.forward(observations=obs, states=states)
         q_values = q_values.detach().cpu().numpy().squeeze()
         self.assertEqual(q_values.shape, (bs, len(self.env.agents), self.action_space_shape))
 
     def test_act(self):
         # Test act method with epsilon = 0 (greedy policy)
-        edge_index = self.edge_index
-        actions = self.agent_group.act(self.observations, edge_index, self.env.action_spaces, epsilon=0)
+        state = self.env.state()
+        actions = self.agent_group.act(self.observations, state, self.env.action_spaces, epsilon=0)
         self.assertEqual(len(actions), len(self.env.agents))
 
         # Test act method with epsilon = 1 (random policy)
-        actions = self.agent_group.act(self.observations, edge_index, self.env.action_spaces, epsilon=1)
+        actions = self.agent_group.act(self.observations, state, self.env.action_spaces, epsilon=1)
         self.assertEqual(len(actions), len(self.env.agents))
 
         # Test act method with epsilon = 0.5
-        actions = self.agent_group.act(self.observations, edge_index, self.env.action_spaces, epsilon=0.5)
+        actions = self.agent_group.act(self.observations, state, self.env.action_spaces, epsilon=0.5)
         self.assertEqual(len(actions), len(self.env.agents))
 
     def test_eval(self):

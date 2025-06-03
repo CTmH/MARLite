@@ -94,8 +94,7 @@ class MultiThreadRolloutWorker(threading.Thread):
             avail_actions = {agent: env.action_space(agent) for agent in env.agents}
             processed_obs = self._obs_preprocess(episode['observations']+[observations])
             if isinstance(agent_group, GNNAgentGroup):
-                _, edge_index = env.build_my_team_graph()
-                actions = agent_group.act(processed_obs, edge_index, avail_actions, self.epsilon)
+                actions = agent_group.act(processed_obs, env.state(), avail_actions, self.epsilon)
             else:
                 actions = agent_group.act(processed_obs, avail_actions, self.epsilon)
             

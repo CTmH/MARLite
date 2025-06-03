@@ -1,9 +1,11 @@
 from copy import deepcopy
 from .graph_builder import GraphBuilder
 from .magent_graph_builder import MagentGraphBuilder
+from .partial_graph_builder import PartialGraphMagentBuilder
 
 registered_graph_builder_models = {
-    "Magent2": MagentGraphBuilder,
+    "Magent": MagentGraphBuilder,
+    "PartialMagent": PartialGraphMagentBuilder
 }
 class GraphBuilderConfig:
 

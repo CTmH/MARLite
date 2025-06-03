@@ -36,6 +36,7 @@ class GNNAgentGroup(AgentGroup):
         self.params_to_optimize = [{'params': extractor.parameters()} for extractor in self.feature_extractors.values()]
         self.params_to_optimize += [{'params': encoder.parameters()} for encoder in self.encoders.values()]
         self.params_to_optimize += [{'params': decoder.parameters()} for decoder in self.decoders.values()]
+        self.params_to_optimize += [{'params': self.graph_builder.parameters()}]
         self.params_to_optimize += [{'params': self.graph_model.parameters()}]
         self.optimizer = optimizer_config.get_optimizer(self.params_to_optimize)
 
@@ -47,7 +48,7 @@ class GNNAgentGroup(AgentGroup):
             self.model_to_agents[model_name].append(agent_name)
             self.model_to_agent_indices[model_name].append(i)
 
-    def forward(self, observations, edge_index: list) -> Tensor:
+    def forward(self, observations, states) -> Tensor:
         msg = [None for _ in range(len(self.agent_model_dict))]
         for (model_name, fe), (_, enc) in zip(self.feature_extractors.items(),
                                                 self.encoders.items()):
@@ -82,6 +83,9 @@ class GNNAgentGroup(AgentGroup):
         
         msg = torch.stack(msg).to(self.device) # (N, B, F)
         msg = msg.permute(1, 0, 2)  # (B, N, F)
+
+        # Build Graph
+        _, edge_index = self.graph_builder(states)
 
         # Communication between agents using the graph model.
         batch_data = [None for i in range(bs)]
@@ -118,7 +122,7 @@ class GNNAgentGroup(AgentGroup):
         
         return q_val
     
-    def act(self, observations, edge_index, avail_actions, epsilon=0.0, eval_mode=True):
+    def act(self, observations, state, avail_actions, epsilon=0.0, eval_mode=True):
         """
         Select actions based on Q-values and exploration.
 
@@ -138,8 +142,7 @@ class GNNAgentGroup(AgentGroup):
         obs = [observations[ag] for ag in self.agent_model_dict.keys()]
         obs = np.stack(obs)
         obs = np.expand_dims(obs, axis=0)
-        edge_index = np.expand_dims(edge_index, axis=0)
-        q_values = self.forward(obs, edge_index)
+        q_values = self.forward(obs, np.expand_dims(state, axis=0))
         q_values = q_values.detach().cpu().numpy().squeeze()
         random_choices = np.random.binomial(1, epsilon, len(self.agent_model_dict)).astype(np.int64)
         random_actions = [avail_actions[key].sample() for key in avail_actions.keys()]
@@ -157,6 +160,7 @@ class GNNAgentGroup(AgentGroup):
         feature_extractor_params = params.get("feature_extractor", {})
         encoder_params = params.get("encoder", {})
         decoder_params = params.get("decoder", {})
+        graph_builder_params = params.get("graph_builder", {})
         graph_model_params = params.get("graph_model", {})
         for (model_name, enc), (_, fe), (_, dec) in zip(
                 self.encoders.items(),
@@ -167,6 +171,7 @@ class GNNAgentGroup(AgentGroup):
             fe.load_state_dict(feature_extractor_params[model_name])
             dec.load_state_dict(decoder_params[model_name])
 
+        self.graph_builder.load_state_dict(graph_builder_params)
         self.graph_model.load_state_dict(graph_model_params)
 
         return self
@@ -184,11 +189,13 @@ class GNNAgentGroup(AgentGroup):
             model_name: deepcopy(dec.state_dict()) 
             for model_name, dec in self.decoders.items()
         }
+        graph_builder_params = deepcopy(self.graph_builder.state_dict())
         comm_model_params = deepcopy(self.graph_model.state_dict())
         params = {
             "encoder": encoder_params,
             "feature_extractor": feature_extractor_params,
             "decoder": decoder_params,
+            "graph_builder": graph_builder_params,
             "graph_model": comm_model_params,
         }
         return params
@@ -214,6 +221,7 @@ class GNNAgentGroup(AgentGroup):
             enc.to(device)
             fe.to(device)
             dec.to(device)
+        self.graph_builder.to(device)
         self.graph_model.to(device)
         self.device = device
         return self
@@ -226,6 +234,7 @@ class GNNAgentGroup(AgentGroup):
             enc.eval()
             fe.eval()
             dec.eval()
+        self.graph_builder.eval()
         self.graph_model.eval()
         return self
     
@@ -237,6 +246,7 @@ class GNNAgentGroup(AgentGroup):
             enc.train()
             fe.train()
             dec.train()
+        self.graph_builder.train()
         self.graph_model.train()
         return self
     
@@ -248,6 +258,7 @@ class GNNAgentGroup(AgentGroup):
             enc.share_memory()
             fe.share_memory()
             dec.share_memory()
+        self.graph_builder.share_memory()
         self.graph_model.share_memory()
         return self
     
@@ -262,6 +273,7 @@ class GNNAgentGroup(AgentGroup):
             torch.save(fe.state_dict(), os.path.join(model_dir, 'feature_extractor.pth'))
             torch.save(enc.state_dict(), os.path.join(model_dir, 'encoder.pth'))
             torch.save(dec.state_dict(), os.path.join(model_dir, 'decoder.pth'))
+        torch.save(self.graph_builder.state_dict(), os.path.join(path, 'graph_builder.pth'))
         torch.save(self.graph_model.state_dict(), os.path.join(path, 'graph_model.pth'))
         return self
     
@@ -274,5 +286,6 @@ class GNNAgentGroup(AgentGroup):
             fe.load_state_dict(torch.load(os.path.join(model_dir, 'feature_extractor.pth')))
             enc.load_state_dict(torch.load(os.path.join(model_dir, 'encoder.pth')))
             dec.load_state_dict(torch.load(os.path.join(model_dir, 'decoder.pth')))
+        self.graph_builder.load_state_dict(torch.load(os.path.join(path, 'graph_builder.pth')))
         self.graph_model.load_state_dict(torch.load(os.path.join(path, 'graph_model.pth')))
         return self

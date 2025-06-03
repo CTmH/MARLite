@@ -925,6 +925,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "magent2" },
     { name = "mpe2" },
+    { name = "networkx" },
     { name = "pettingzoo", extra = ["butterfly", "mpe", "sisl"] },
     { name = "pyyaml" },
     { name = "torch" },
@@ -943,6 +944,7 @@ dev = [
 requires-dist = [
     { name = "magent2", specifier = ">=0.3.3" },
     { name = "mpe2", specifier = ">=0.0.1" },
+    { name = "networkx", specifier = ">=3.4.2" },
     { name = "pettingzoo", extras = ["butterfly", "mpe", "sisl"], specifier = ">=1.25.0" },
     { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "torch", specifier = ">=2.7.0" },
