@@ -144,7 +144,13 @@ class Trainer():
         manager.cleanup()
         rewards = np.array([episode['episode_reward'] for episode in episodes])
         
-        mean_reward = np.mean(rewards)
+        sum_total = rewards.sum()
+        max_val = rewards.max()
+        min_val = rewards.min()
+        adjusted_sum = sum_total - max_val - min_val
+        adjusted_count = len(rewards) - 2
+        mean_reward = adjusted_sum / adjusted_count
+        
         std_reward = np.std(rewards)
         logging.info(f"Evaluation results: Mean reward {mean_reward}, Std reward {std_reward}")
         

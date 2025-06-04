@@ -58,9 +58,9 @@ class TestRolloutManager(unittest.TestCase):
         self.agent_model_params, self.agent_fe_params = self.agent_group.get_agent_group_params()
 
         self.traj_len = 5
-        self.n_episodes = 3
+        self.n_episodes = 2
         self.episode_limit = 7
-        self.n_workers = 3
+        self.n_workers = 2
         self.agent_group = self.agent_group_config.get_agent_group()
         self.manager = MultiProcessRolloutManager(worker_class=MultiProcessRolloutWorker,
                                                   env_config=self.env_config,

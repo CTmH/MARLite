@@ -94,7 +94,8 @@ class MultiThreadRolloutWorker(threading.Thread):
             avail_actions = {agent: env.action_space(agent) for agent in env.agents}
             processed_obs = self._obs_preprocess(episode['observations']+[observations])
             if isinstance(agent_group, GNNAgentGroup):
-                actions = agent_group.act(processed_obs, env.state(), avail_actions, self.epsilon)
+                state = env.state()
+                actions = agent_group.act(processed_obs, state, avail_actions, self.epsilon)
             else:
                 actions = agent_group.act(processed_obs, avail_actions, self.epsilon)
             
@@ -114,7 +115,7 @@ class MultiThreadRolloutWorker(threading.Thread):
         processed_obs = {agent_id : [] for agent_id in agents}
         for agent_id, model_name in agent_model_dict.items():
             if isinstance(models[model_name], TimeSeqModel):
-                obs_len = len(observations[-self.rnn_traj_len:])
+                obs_len = len(observations)
                 if obs_len < self.rnn_traj_len:
                     padding_length = self.rnn_traj_len - obs_len
                     obs_padding = [np.zeros_like(observations[-1][agent_id]) for _ in range(padding_length)]

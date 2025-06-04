@@ -11,8 +11,6 @@ class MultiProcessRolloutWorker(mp.Process):
     def __init__(self,
                  env_config: EnvConfig,
                  agent_group: AgentGroup,
-                 episode_queue: mp.Queue,
-                 n_episodes: int,
                  rnn_traj_len=5,
                  episode_limit=100,
                  epsilon=0.5,
@@ -22,8 +20,6 @@ class MultiProcessRolloutWorker(mp.Process):
         # 共享参数需要深拷贝
         self.env_config = deepcopy(env_config)
         self.agent_group = deepcopy(agent_group)
-        self.episode_queue = episode_queue
-        self.n_episodes = n_episodes
         self.rnn_traj_len = rnn_traj_len
         self.episode_limit = episode_limit
         self.epsilon = epsilon
@@ -31,17 +27,7 @@ class MultiProcessRolloutWorker(mp.Process):
 
     def run(self):
         self.agent_group = deepcopy(self.agent_group).to(self.device)
-        
-        for i in range(self.n_episodes):
-            episode = self.rollout()
-            self.episode_queue.put(episode)
-            
-            # 日志记录进程信息
-            #if self.n_episodes < 10 or i % (self.n_episodes // 10) == 0 or i == (self.n_episodes - 1):
-            #    logging.info(f"Process {self.pid} finished {i+1}/{self.n_episodes}")
-        
-        self.env.close()
-        return
+        return self.rollout()
 
     def rollout(self):
         env = self.env_config.create_env()
@@ -117,14 +103,91 @@ class MultiProcessRolloutWorker(mp.Process):
 
         return episode
 
-@staticmethod
 def _obs_preprocess(observations: list, agent_model_dict: dict, models: dict, rnn_traj_len: int):
         agents = agent_model_dict.keys()
         processed_obs = {agent_id : [] for agent_id in agents}
         for agent_id, model_name in agent_model_dict.items():
             if isinstance(models[model_name], TimeSeqModel):
-                obs = [o[agent_id] for o in observations[-rnn_traj_len:]]
+                obs_len = len(observations)
+                if obs_len < rnn_traj_len:
+                    padding_length = rnn_traj_len - obs_len
+                    obs_padding = [np.zeros_like(observations[-1][agent_id]) for _ in range(padding_length)]
+                    obs = obs_padding + [o[agent_id] for o in observations[-rnn_traj_len:]]
+                else:
+                    obs = [o[agent_id] for o in observations[-rnn_traj_len:]]
             else:
                 obs = observations[-1][agent_id]
             processed_obs[agent_id] = np.array(obs)
         return processed_obs
+
+def rollout(env_config: EnvConfig,
+            agent_group: AgentGroup,
+            rnn_traj_len=5,
+            episode_limit=100,
+            epsilon=0.5,
+            device='cpu'):
+    env = env_config.create_env()
+    agent_group = agent_group.eval().to(device)
+
+    # 初始化 episode 字典
+    episode = {
+        'observations': [],
+        'states': [],
+        'actions': [],
+        'rewards': [],
+        'avail_actions': [],
+        'truncated': [],
+        'terminations': [],
+        'next_states': [],
+        'next_observations': [],
+        'all_agents_sum_rewards': [],
+        'episode_reward': 0,
+        'win_tag': False,
+        'episode_length': 0,
+    }
+
+    win_tag = False
+    episode_reward = 0
+
+    for i in range(episode_limit + 1):
+        if i == 0:
+            observations, infos = env.reset()
+        else:
+            episode['observations'].append(observations)
+            episode['states'].append(env.state())
+            episode['actions'].append(actions)
+            episode['avail_actions'].append(avail_actions)
+
+            observations, rewards, terminations, truncations, infos = env.step(actions)
+
+            episode['rewards'].append(rewards)
+            all_agents_rewards = [value for _, value in rewards.items()]
+            episode['all_agents_sum_rewards'].append(sum(all_agents_rewards))
+            episode['truncated'].append(truncations)
+            episode['terminations'].append(terminations)
+            episode['next_states'].append(env.state())
+            episode['next_observations'].append(observations)
+
+            episode_reward += np.sum(np.array([rewards[agent] for agent in rewards.keys()]))
+
+            if True in terminations.values() or True in truncations.values():
+                break
+
+        avail_actions = {agent: env.action_space(agent) for agent in env.agents}
+        processed_obs = _obs_preprocess(
+            observations=episode['observations'] + [observations],
+            agent_model_dict=agent_group.agent_model_dict,
+            models=agent_group.models,
+            rnn_traj_len=rnn_traj_len
+        )
+        if isinstance(agent_group, GNNAgentGroup):
+            actions = agent_group.act(processed_obs, env.state(), avail_actions, epsilon)
+        else:
+            actions = agent_group.act(processed_obs, avail_actions, epsilon)
+
+    episode['episode_length'] = len(episode['observations'])
+    episode['episode_reward'] = episode_reward
+    episode['win_tag'] = win_tag
+
+    env.close()
+    return episode

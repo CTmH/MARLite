@@ -6,13 +6,16 @@ from src.algorithm.graph_builder import GraphBuilderConfig
 class TestMagentGraphBuilder(unittest.TestCase):
     
     def test_process_batch_normal_case(self):
+        valid_node_list = [i for i in range(25)]
         config = {
             "type": "PartialMagent",
             "binary_agent_id_dim": [5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
-            "agent_presence_dim": [3],
-            "comm_distance": 20,
+            "agent_presence_dim": [1, 3],
+            "comm_distance": 10,
             "distance_metric": "cityblock",
-            "n_subgraphs": 5 
+            "n_workers": 8,
+            "n_subgraphs": 5,
+            "valid_node_list": valid_node_list
         }
         bs = 5
         env = adversarial_pursuit_v4.parallel_env(map_size=45, minimap_mode=False, tag_penalty=-0.2,
@@ -26,5 +29,5 @@ class TestMagentGraphBuilder(unittest.TestCase):
         # Call get_graph_builder method
         graph_builder = builder_config.get_graph_builder()
         adj_matrix, edge_index = graph_builder(states)
-        self.assertEqual(adj_matrix.shape, np.zeros((bs, len(env.agents), len(env.agents))).shape)
+        self.assertEqual(adj_matrix.shape, np.zeros((bs, len(valid_node_list), len(valid_node_list))).shape)
         self.assertEqual(len(edge_index), bs)

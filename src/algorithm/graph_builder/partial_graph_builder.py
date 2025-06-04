@@ -1,5 +1,6 @@
 import numpy as np
 import networkx as nx
+from typing import Union
 from networkx.algorithms.community import greedy_modularity_communities
 from scipy.spatial.distance import cdist
 from .magent_graph_builder import MagentGraphBuilder
@@ -15,7 +16,8 @@ class PartialGraphMagentBuilder(MagentGraphBuilder):
             comm_distance: int,
             distance_metric: str = 'cityblock',
             n_workers: int = 8,
-            n_subgraphs=2):
+            n_subgraphs=2,
+            valid_node_list: Union[list, None] = None):
         super().__init__(
             binary_agent_id_dim,
             agent_presence_dim,
@@ -27,15 +29,17 @@ class PartialGraphMagentBuilder(MagentGraphBuilder):
         self.distance_metric = distance_metric
         self.n_workers = n_workers
         self.n_subgraphs = n_subgraphs
+        self.valid_node_list = valid_node_list
 
     @staticmethod
     def _process_batch(
-            batch_state,
-            binary_agent_id_dim,
-            agent_presence_dim,
-            comm_distance,
-            distance_metric,
-            n_subgraphs
+            batch_state: np.ndarray,
+            binary_agent_id_dim: list,
+            agent_presence_dim: list,
+            comm_distance: int,
+            distance_metric: str,
+            n_subgraphs: int,
+            valid_node_list: Union[list, None] = None
     ):
         """Process a single batch item"""
         binary_agent_id = batch_state[:, :, binary_agent_id_dim]
@@ -104,7 +108,33 @@ class PartialGraphMagentBuilder(MagentGraphBuilder):
             adj_matrix[edge_index[0], edge_index[1]] = 1
             adj_matrix[edge_index[1], edge_index[0]] = 1  # Maintain symmetry
 
-        return adj_matrix, edge_index
+        if valid_node_list == None:
+            return adj_matrix, edge_index
+
+        # Filter nodes and edges based on valid_node_list
+        valid_node_mask = np.isin(sorted_ids, valid_node_list)
+
+        # Filter sorted_ids to only include valid nodes
+        filtered_sorted_ids = sorted_ids[valid_node_mask]
+
+        # Create a mapping from old node IDs to new compact IDs
+        old_to_new_id_map = {old_id: new_id for new_id, old_id in enumerate(filtered_sorted_ids)}
+
+        # Filter edge_index to only include edges between valid nodes
+        valid_edge_mask = np.isin(edge_index, filtered_sorted_ids).all(axis=0)
+        filtered_edge_index = edge_index[:, valid_edge_mask]
+
+        # Remap edge_index to use the new compact IDs
+        filtered_edge_index = np.vectorize(old_to_new_id_map.get)(filtered_edge_index)
+
+        # Build the new adjacency matrix based on the filtered and remapped edges
+        n_valid_nodes = len(filtered_sorted_ids)
+        filtered_adj_matrix = np.zeros((n_valid_nodes, n_valid_nodes), dtype=np.int64)
+        if filtered_edge_index.size > 0:
+            filtered_adj_matrix[filtered_edge_index[0], filtered_edge_index[1]] = 1
+            filtered_adj_matrix[filtered_edge_index[1], filtered_edge_index[0]] = 1  # Maintain symmetry
+
+        return filtered_adj_matrix, filtered_edge_index
         
     def forward(self, state):
         batch_adj_matrices = []
@@ -118,7 +148,8 @@ class PartialGraphMagentBuilder(MagentGraphBuilder):
                 self.agent_presence_dim,
                 self.comm_distance,
                 self.distance_metric,
-                self.n_subgraphs
+                self.n_subgraphs,
+                self.valid_node_list
             ) for b in range(state.shape[0])]
             
             for future in as_completed(futures):
