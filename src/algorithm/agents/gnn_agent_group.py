@@ -122,7 +122,7 @@ class GNNAgentGroup(AgentGroup):
         
         return q_val
     
-    def act(self, observations, state, avail_actions, epsilon=0.0, eval_mode=True):
+    def act(self, observations, state, avail_actions, epsilon=0.0):
         """
         Select actions based on Q-values and exploration.
 
@@ -135,15 +135,12 @@ class GNNAgentGroup(AgentGroup):
         Returns:
             numpy array: Selected actions for each agent.
         """
-        if eval_mode:
-            self.eval()  # Set models to evaluation mode
-        else:
-            self.train()  # Set models to training mode
         obs = [observations[ag] for ag in self.agent_model_dict.keys()]
         obs = np.stack(obs)
         obs = np.expand_dims(obs, axis=0)
-        q_values = self.forward(obs, np.expand_dims(state, axis=0))
-        q_values = q_values.detach().cpu().numpy().squeeze()
+        with torch.no_grad():
+            q_values = self.forward(obs, np.expand_dims(state, axis=0))
+            q_values = q_values.detach().cpu().numpy().squeeze()
         random_choices = np.random.binomial(1, epsilon, len(self.agent_model_dict)).astype(np.int64)
         random_actions = [avail_actions[key].sample() for key in avail_actions.keys()]
         random_actions = np.array(random_actions).astype(np.int64)
@@ -288,4 +285,8 @@ class GNNAgentGroup(AgentGroup):
             dec.load_state_dict(torch.load(os.path.join(model_dir, 'decoder.pth')))
         self.graph_builder.load_state_dict(torch.load(os.path.join(path, 'graph_builder.pth')))
         self.graph_model.load_state_dict(torch.load(os.path.join(path, 'graph_model.pth')))
+        return self
+    
+    def reset(self):
+        self.graph_builder.reset()
         return self

@@ -73,7 +73,7 @@ class QMIXAgentGroup(AgentGroup):
 
         return q_val
 
-    def act(self, observations, avail_actions, epsilon=0.0, eval_mode=True):
+    def act(self, observations, avail_actions, epsilon=0.0):
         """
         Select actions based on Q-values and exploration.
 
@@ -86,15 +86,12 @@ class QMIXAgentGroup(AgentGroup):
         Returns:
             numpy array: Selected actions for each agent.
         """
-        if eval_mode:
-            self.eval()  # Set models to evaluation mode
-        else:
-            self.train()  # Set models to training mode
         obs = [observations[ag] for ag in self.agent_model_dict.keys()]
         obs = np.stack(obs)
         obs = np.expand_dims(obs, axis=0)
-        q_values = self.forward(obs)
-        q_values = q_values.detach().cpu().numpy().squeeze()
+        with torch.no_grad():
+            q_values = self.forward(obs)
+            q_values = q_values.detach().cpu().numpy().squeeze()
         random_choices = np.random.binomial(1, epsilon, len(self.agent_model_dict)).astype(np.int64)
         random_actions = [avail_actions[key].sample() for key in avail_actions.keys()]
         random_actions = np.array(random_actions).astype(np.int64)
@@ -190,4 +187,7 @@ class QMIXAgentGroup(AgentGroup):
             model_dir = os.path.join(path, model_name)
             fe.load_state_dict(torch.load(os.path.join(model_dir, 'feature_extractor.pth')))
             model.load_state_dict(torch.load(os.path.join(model_dir, 'model.pth')))
+        return self
+    
+    def reset(self):
         return self

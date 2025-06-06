@@ -127,7 +127,7 @@ def rollout(env_config: EnvConfig,
             epsilon=0.5,
             device='cpu'):
     env = env_config.create_env()
-    agent_group = agent_group.eval().to(device)
+    agent_group = deepcopy(agent_group).reset().eval().to(device)
 
     # 初始化 episode 字典
     episode = {

@@ -7,3 +7,6 @@ class GraphBuilder(nn.Module):
     
     def forward(self, state):
         raise NotImplementedError
+    
+    def reset(self) -> nn.Module:
+        raise self

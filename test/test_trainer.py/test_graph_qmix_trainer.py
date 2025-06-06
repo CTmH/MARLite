@@ -14,7 +14,7 @@ class TestGraphQMIXTrainer(unittest.TestCase):
         with open(self.config_path, 'r') as file:
             self.config = yaml.safe_load(file)
         self.config['trainer_config']['train_args']['epochs'] = 2
-        self.config['rollout_config']['n_episodes'] = 1
+        self.config['rollout_config']['n_episodes'] = 2
         self.config['rollout_config']['episode_limit'] = 2
         self.config['replaybuffer_config']['capacity'] = 2
         self.trainer_config = TrainerConfig(self.config)

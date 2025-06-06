@@ -40,7 +40,7 @@ class MultiThreadRolloutWorker(threading.Thread):
 
     def rollout(self):
         env = self.env_config.create_env()
-        agent_group = deepcopy(self.agent_group).eval().to(self.device)
+        agent_group = deepcopy(self.agent_group).reset().eval().to(self.device)
         # Initialize the episode dictionary
         episode = {
             'observations':[],

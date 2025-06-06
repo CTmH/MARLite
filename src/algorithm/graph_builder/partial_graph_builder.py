@@ -1,6 +1,7 @@
 import numpy as np
 import networkx as nx
 from typing import Union
+from copy  import deepcopy
 from networkx.algorithms.community import greedy_modularity_communities
 from scipy.spatial.distance import cdist
 from .magent_graph_builder import MagentGraphBuilder
@@ -17,7 +18,8 @@ class PartialGraphMagentBuilder(MagentGraphBuilder):
             distance_metric: str = 'cityblock',
             n_workers: int = 8,
             n_subgraphs=2,
-            valid_node_list: Union[list, None] = None):
+            valid_node_list: Union[list, None] = None,
+            update_interval: int = 1):
         super().__init__(
             binary_agent_id_dim,
             agent_presence_dim,
@@ -30,6 +32,11 @@ class PartialGraphMagentBuilder(MagentGraphBuilder):
         self.n_workers = n_workers
         self.n_subgraphs = n_subgraphs
         self.valid_node_list = valid_node_list
+
+        self.update_interval = update_interval
+        self.step_counter = 0
+        self.cached_adj_matrices = None
+        self.cached_edge_indices = None
 
     @staticmethod
     def _process_batch(
@@ -137,24 +144,38 @@ class PartialGraphMagentBuilder(MagentGraphBuilder):
         return filtered_adj_matrix, filtered_edge_index
         
     def forward(self, state):
-        batch_adj_matrices = []
-        batch_edge_indices = []
-        
+
+        if not self.training:
+            self.step_counter += 1
+            if (self.step_counter % self.update_interval != 0 
+                and self.cached_adj_matrices is not None
+                and self.cached_edge_indices is not None):
+                return deepcopy(self.cached_adj_matrices), deepcopy(self.cached_edge_indices)
+
         with ProcessPoolExecutor(max_workers=self.n_workers) as executor:
-            futures = [executor.submit(
+            results = list(executor.map(
                 self._process_batch,
-                state[b],
-                self.binary_agent_id_dim,
-                self.agent_presence_dim,
-                self.comm_distance,
-                self.distance_metric,
-                self.n_subgraphs,
-                self.valid_node_list
-            ) for b in range(state.shape[0])]
-            
-            for future in as_completed(futures):
-                adj_matrix, edge_index = future.result()
-                batch_adj_matrices.append(adj_matrix)
-                batch_edge_indices.append(edge_index)
-        
-        return np.array(batch_adj_matrices), batch_edge_indices
+                [state[b] for b in range(state.shape[0])],
+                [self.binary_agent_id_dim] * state.shape[0],
+                [self.agent_presence_dim] * state.shape[0],
+                [self.comm_distance] * state.shape[0],
+                [self.distance_metric] * state.shape[0],
+                [self.n_subgraphs] * state.shape[0],
+                [self.valid_node_list] * state.shape[0]
+            ))
+
+        batch_adj_matrices, batch_edge_indices = zip(*results)
+        batch_adj_matrices = np.array(batch_adj_matrices)
+        batch_edge_indices = list(batch_edge_indices)
+
+        if not self.training:
+            self.cached_adj_matrices = batch_adj_matrices
+            self.cached_edge_indices = batch_edge_indices
+
+        return batch_adj_matrices, batch_edge_indices
+    
+    def reset(self):
+        self.step_counter = 0
+        self.cached_adj_matrices = None
+        self.cached_edge_indices = None
+        return self

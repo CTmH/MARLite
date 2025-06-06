@@ -42,3 +42,6 @@ class AgentGroup(object):
     
     def load_params(self, path: str):
         raise NotImplementedError
+    
+    def reset(self):
+        raise NotImplementedError
