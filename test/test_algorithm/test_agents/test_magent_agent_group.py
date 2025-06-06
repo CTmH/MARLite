@@ -11,7 +11,6 @@ class TestMagentPreyAgentGroup(unittest.TestCase):
                 module_name: "custom"
                 env_name: "adversarial_pursuit_prey"
                 tag_penalty: 0.0
-                node_communication_distance: 10
                 extra_features: false
                 opponent_agent_group_config:
                     type: "Random"
