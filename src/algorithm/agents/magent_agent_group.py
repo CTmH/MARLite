@@ -15,7 +15,7 @@ class MagentPreyAgentGroup(AgentGroup):
         return self
 
     def act(self, observations: Dict[str, np.ndarray], avail_actions: Dict, epsilon: int) -> np.ndarray:
-        other_team_presence = {key: value[3] for key, value in observations.items()}
+        other_team_presence = {key: value[-1,:,:,3] for key, value in observations.items()} # value: (T*obs_len*obs_len*F)
     
         # (num_agents, n, n)
         o_tensor = np.stack(list(other_team_presence.values()))

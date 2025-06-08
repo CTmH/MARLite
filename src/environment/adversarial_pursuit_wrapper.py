@@ -33,7 +33,7 @@ class AdversarialPursuitPredator(ParallelEnvWrapper):
     def step(self, actions):
         opponent_avail_actions = {agent: self.env.action_spaces[agent] for agent in self.opponent_agents}
         opp_obs = list(self.opponent_observation_history)
-        opp_obs_dict = {agent: [opp_obs[i][agent] for i in range(len(opp_obs))] for agent in self.opponent_agents}
+        opp_obs_dict = {agent: np.array([opp_obs[i][agent] for i in range(len(opp_obs))]) for agent in self.opponent_agents}
         self.opponent_actions = self.opponent_agent_group.act(opp_obs_dict, opponent_avail_actions, epsilon=0.0)
         actions = actions | self.opponent_actions  # Combine actions with opponent's actions
         observations, rewards, terminations, truncations, infos = self.env.step(actions)
@@ -94,7 +94,7 @@ class AdversarialPursuitPrey(ParallelEnvWrapper):
     def step(self, actions):
         opponent_avail_actions = {agent: self.env.action_spaces[agent] for agent in self.opponent_agents}
         opp_obs = list(self.opponent_observation_history)
-        opp_obs_dict = {agent: [opp_obs[i][agent] for i in range(len(opp_obs))] for agent in self.opponent_agents}
+        opp_obs_dict = {agent: np.array([opp_obs[i][agent] for i in range(len(opp_obs))]) for agent in self.opponent_agents}
         self.opponent_actions = self.opponent_agent_group.act(opp_obs_dict, opponent_avail_actions, epsilon=0.0)
         actions = self.opponent_actions | actions  # Combine actions with opponent's actions
         observations, rewards, terminations, truncations, infos = self.env.step(actions)
