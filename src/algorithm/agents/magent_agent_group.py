@@ -15,10 +15,10 @@ class MagentPreyAgentGroup(AgentGroup):
         return self
 
     def act(self, observations: Dict[str, np.ndarray], avail_actions: Dict, epsilon: int) -> np.ndarray:
-        other_team_presence = {key: value[-1,:,:,3] for key, value in observations.items()} # value: (T*obs_len*obs_len*F)
+        obstacle_and_other_team_presence = {key: value[-1,:,:,0] + value[-1,:,:,3] for key, value in observations.items()} # value: (T*obs_len*obs_len*F)
     
         # (num_agents, n, n)
-        o_tensor = np.stack(list(other_team_presence.values()))
+        o_tensor = np.stack(list(obstacle_and_other_team_presence.values()))
         batch_size, n, m = o_tensor.shape
         # Centre Coord
         cx = n // 2
@@ -46,7 +46,7 @@ class MagentPreyAgentGroup(AgentGroup):
         
         # Construct action dictionary
         actions = {agent: max_indices[i] 
-                for i, agent in enumerate(other_team_presence.keys())}
+                for i, agent in enumerate(obstacle_and_other_team_presence.keys())}
     
         return actions
 

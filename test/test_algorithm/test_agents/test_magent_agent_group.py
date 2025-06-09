@@ -1,5 +1,6 @@
 import unittest
 import yaml
+import numpy as np
 from src.algorithm.agents.magent_agent_group import MagentPreyAgentGroup
 from src.environment.env_config import EnvConfig
 
@@ -53,6 +54,7 @@ class TestMagentPreyAgentGroup(unittest.TestCase):
     def test_act(self):
         env = self.env_conf.create_env()
         obs, _ = env.reset()
+        obs = {key: np.expand_dims(value, axis=0) for key, value in obs.items()} # Add Time Dim
         actions = self.magent_prey_agent_group.act(obs, self.avail_actions, 0)
         env.step(actions)
 
