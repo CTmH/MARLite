@@ -80,8 +80,9 @@ class MagentGraphBuilder(GraphBuilder):
 
         return adj_matrix, edge_index
         
-    def forward(self, state) -> Tuple[ndarray, List[ndarray]]:
+    def forward(self, state: ndarray) -> Tuple[ndarray, List[ndarray]]:
 
+        bs = state.shape[0]
         if not self.training:
             self.step_counter += 1
             if (self.step_counter % self.update_interval != 0 
@@ -89,14 +90,15 @@ class MagentGraphBuilder(GraphBuilder):
                 and self.cached_edge_indices is not None):
                 return deepcopy(self.cached_adj_matrices), deepcopy(self.cached_edge_indices)
 
+        n_workers = min(bs, self.n_workers)
         with ProcessPoolExecutor(max_workers=self.n_workers) as executor:
             results = list(executor.map(
                 self._process_batch,
-                [state[b] for b in range(state.shape[0])],
-                [self.binary_agent_id_dim] * state.shape[0],
-                [self.agent_presence_dim] * state.shape[0],
-                [self.comm_distance] * state.shape[0],
-                [self.distance_metric] * state.shape[0]
+                [state[b] for b in range(bs)],
+                [self.binary_agent_id_dim] * bs,
+                [self.agent_presence_dim] * bs,
+                [self.comm_distance] * bs,
+                [self.distance_metric] * bs
             ))
 
         batch_adj_matrices, batch_edge_indices = zip(*results)

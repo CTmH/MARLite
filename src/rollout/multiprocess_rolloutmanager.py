@@ -29,7 +29,8 @@ class MultiProcessRolloutManager:
 
     def generate_episodes(self) -> List[Any]:
         mp.set_start_method('spawn', force=True)
-        with ProcessPoolExecutor(max_workers=self.n_workers) as executor:
+        n_workers = min(self.n_workers, self.n_episodes)
+        with ProcessPoolExecutor(max_workers=n_workers) as executor:
             episodes = list(tqdm(executor.map(
                 rollout,
                 [self.env_config] * self.n_episodes,
