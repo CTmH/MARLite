@@ -1,6 +1,7 @@
 import numpy as np
 import networkx as nx
-from typing import Union
+from typing import Union, Tuple, List
+from numpy import ndarray
 from copy  import deepcopy
 from networkx.algorithms.community import greedy_modularity_communities
 from scipy.spatial.distance import cdist
@@ -139,7 +140,7 @@ class PartialGraphMagentBuilder(GraphBuilder):
 
         return filtered_adj_matrix, filtered_edge_index
         
-    def forward(self, state):
+    def forward(self, state) -> Tuple[ndarray, List[ndarray]]:
 
         if not self.training:
             self.step_counter += 1

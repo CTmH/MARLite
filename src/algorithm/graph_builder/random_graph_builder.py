@@ -165,7 +165,7 @@ class PartialGraphMagentBuilder(MagentGraphBuilder):
             ))
 
         batch_adj_matrices, batch_edge_indices = zip(*results)
-        batch_adj_matrices = np.array(batch_adj_matrices)
+        batch_adj_matrices = list(batch_adj_matrices)
         batch_edge_indices = list(batch_edge_indices)
 
         if not self.training:

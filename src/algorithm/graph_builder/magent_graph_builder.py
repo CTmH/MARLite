@@ -1,6 +1,7 @@
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor
 import numpy as np
-from typing import Union
+from typing import Union, Tuple, List
+from numpy import ndarray
 from scipy.spatial.distance import cdist
 from copy import deepcopy
 from .graph_builder import GraphBuilder
@@ -53,38 +54,33 @@ class MagentGraphBuilder(GraphBuilder):
         sorted_ids = np.array(sorted_ids, dtype=np.int64)
         coords = np.array([valid_elements[k] for k in sorted_ids], dtype=np.int64)
         
+        # 提前节点映射
+        if valid_node_list is None:
+            valid_node_list = sorted_ids.tolist()
+        node_mapping = {old_id: new_id for new_id, old_id in enumerate(valid_node_list)}
+        map_func = np.vectorize(lambda x: node_mapping.get(x))
+
         if len(coords) > 0:
             distances = cdist(coords, coords, metric=distance_metric)
             mask = (distances <= threshold) & (np.triu(np.ones_like(distances, dtype=bool), k=1))
             rows, cols = np.where(mask)
             
-            max_id = agent_positions.max()
-            n = max_id + 1
-            adj_matrix = np.zeros((n, n), dtype=np.int64)
-            adj_matrix[sorted_ids[rows], sorted_ids[cols]] = 1
-            adj_matrix[sorted_ids[cols], sorted_ids[rows]] = 1
+            # 使用映射后的ID构建边
+            mapped_rows = map_func(sorted_ids[rows])
+            mapped_cols = map_func(sorted_ids[cols])
+            edge_index = np.vstack([mapped_rows, mapped_cols]).astype(np.int64)
             
-            edge_index = np.vstack([sorted_ids[rows], sorted_ids[cols]]).astype(np.int64)
-        else:
-            adj_matrix = np.zeros((0, 0), dtype=np.int64)
-            edge_index = np.zeros((2, 0), dtype=np.int64)
-        
-        if edge_index.size > 0 and edge_index.min() != 0:
-            if valid_node_list is None:
-                node_mapping = {old_id: new_id for new_id, old_id in enumerate(np.unique(edge_index))}
-            else:
-                node_mapping = {old_id: new_id for new_id, old_id in enumerate(valid_node_list)}
-            map_func = np.vectorize(lambda x: node_mapping[x])
-            edge_index = map_func(edge_index)
-            n = len(node_mapping)
+            # 构建邻接矩阵
+            n = len(valid_node_list)
             adj_matrix = np.zeros((n, n), dtype=np.int64)
-            for i, j in zip(edge_index[0], edge_index[1]):
-                adj_matrix[i, j] = 1
-                adj_matrix[j, i] = 1
+            adj_matrix[mapped_rows, mapped_cols] = 1
+            adj_matrix[mapped_cols, mapped_rows] = 1
+        else:
+            raise ValueError("No valid nodes found in the state.")
 
         return adj_matrix, edge_index
         
-    def forward(self, state):
+    def forward(self, state) -> Tuple[ndarray, List[ndarray]]:
 
         if not self.training:
             self.step_counter += 1

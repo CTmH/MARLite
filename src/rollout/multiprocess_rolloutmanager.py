@@ -4,6 +4,7 @@ from concurrent.futures import ProcessPoolExecutor
 from ..algorithm.agents.agent_group import AgentGroup
 from ..environment.env_config import EnvConfig
 from .multiprocess_rolloutworker import MultiProcessRolloutWorker, rollout
+from tqdm import tqdm
 
 class MultiProcessRolloutManager:
     def __init__(self,
@@ -29,7 +30,7 @@ class MultiProcessRolloutManager:
     def generate_episodes(self) -> List[Any]:
         mp.set_start_method('spawn', force=True)
         with ProcessPoolExecutor(max_workers=self.n_workers) as executor:
-            episodes = list(executor.map(
+            episodes = list(tqdm(executor.map(
                 rollout,
                 [self.env_config] * self.n_episodes,
                 [self.agent_group.share_memory()] * self.n_episodes,
@@ -37,7 +38,7 @@ class MultiProcessRolloutManager:
                 [self.episode_limit] * self.n_episodes,
                 [self.epsilon] * self.n_episodes,
                 [self.device] * self.n_episodes
-            ))
+            ), total=self.n_episodes, desc="Generating Episodes"))
         return episodes
     
     def cleanup(self): # For compatibility
