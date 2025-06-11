@@ -1,9 +1,7 @@
 import os
 import numpy as np
 import torch
-from typing import Dict
 from copy import deepcopy
-from multiprocessing import Process, Queue, Pool
 import datetime
 import logging
 import csv
@@ -83,19 +81,25 @@ class Trainer():
     def save_current_model(self, checkpoint: str):
         agent_path = os.path.join(self.checkpointdir, checkpoint, "agent")
         os.makedirs(agent_path, exist_ok=True)
+        self.eval_agent_group.to("cpu")
         self.eval_agent_group.save_params(agent_path)
 
         critic_path = os.path.join(self.checkpointdir, checkpoint, "critic")
         os.makedirs(critic_path, exist_ok=True)
+        self.eval_critic.to("cpu")
         critic_params = self.eval_critic.state_dict()
         torch.save(critic_params, os.path.join(critic_path, "critic.pth"))
         return self
     
     def load_model(self, checkpoint: str):
         agent_path = os.path.join(self.checkpointdir, checkpoint, "agent")
+        self.eval_agent_group.to("cpu")
+        self.eval_critic.to("cpu")
         self.eval_agent_group.load_params(agent_path)
         critic_path = os.path.join(self.checkpointdir, checkpoint, "critic", "critic.pth")
         self.eval_critic.load_state_dict(torch.load(critic_path, weights_only=True))
+        self.eval_agent_group.to(self.train_device)
+        self.eval_critic.to(self.train_device)
         self.update_target_model_params()
         return self
     

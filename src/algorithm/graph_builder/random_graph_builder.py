@@ -4,11 +4,11 @@ from typing import Union
 from copy  import deepcopy
 from networkx.algorithms.community import greedy_modularity_communities
 from scipy.spatial.distance import cdist
-from .graph_builder import GraphBuilder
+from .magent_graph_builder import MagentGraphBuilder
 from .build_graph import binary_to_decimal
 from concurrent.futures import ProcessPoolExecutor
 
-class PartialGraphMagentBuilder(GraphBuilder):
+class PartialGraphMagentBuilder(MagentGraphBuilder):
 
     def __init__(
             self,
@@ -20,7 +20,11 @@ class PartialGraphMagentBuilder(GraphBuilder):
             n_subgraphs=2,
             valid_node_list: Union[list, None] = None,
             update_interval: int = 1):
-        super().__init__()
+        super().__init__(
+            binary_agent_id_dim,
+            agent_presence_dim,
+            comm_distance,
+            distance_metric)
         self.binary_agent_id_dim = binary_agent_id_dim
         self.agent_presence_dim = agent_presence_dim
         self.comm_distance = comm_distance

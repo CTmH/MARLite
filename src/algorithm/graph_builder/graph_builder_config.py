@@ -1,9 +1,11 @@
 from copy import deepcopy
 from .graph_builder import GraphBuilder
+from .fullconn_graph_builder import FullConnGraphBuilder
 from .magent_graph_builder import MagentGraphBuilder
 from .partial_graph_builder import PartialGraphMagentBuilder
 
 registered_graph_builder_models = {
+    "FullConn": FullConnGraphBuilder,
     "Magent": MagentGraphBuilder,
     "PartialMagent": PartialGraphMagentBuilder
 }

@@ -1,5 +1,6 @@
 # Experiment Results Folder
 results/
+analysis.ipynb
 
 # Test Work Folder
 test_workdir

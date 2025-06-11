@@ -23,14 +23,16 @@ class GATModel(nn.Module):
             out_channels=hidden_dim,
             heads=head_conv1,  # 使用8个注意力头
             concat=True,
-            dropout=0.6
+            dropout=0.75,
+            add_self_loops=True,
         )
         self.conv2 = GATConv(
             in_channels=hidden_dim * head_conv1,  # 因为concat=True时输出维度是hidden_dim * heads
             out_channels=output_dim,
             heads=1,  # 最后一层用单个注意力头
             concat=False,
-            dropout=0.6
+            dropout=0.75,
+            add_self_loops=True,
         )
 
     def forward(self, inputs: Tensor, edge_index):

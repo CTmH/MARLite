@@ -1,6 +1,8 @@
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import numpy as np
+from typing import Union
 from scipy.spatial.distance import cdist
+from copy import deepcopy
 from .graph_builder import GraphBuilder
 from .build_graph import binary_to_decimal
 
@@ -12,13 +14,21 @@ class MagentGraphBuilder(GraphBuilder):
             agent_presence_dim: list,
             comm_distance: int,
             distance_metric: str = 'cityblock',
-            n_workers: int = 8):
+            n_workers: int = 8,
+            valid_node_list: Union[list, None] = None, # Suggestion: Add valid_node_list, otherwise isolated nodes will be ignored in the node mapping.
+            update_interval: int = 1):
         super().__init__()
         self.binary_agent_id_dim = binary_agent_id_dim
         self.agent_presence_dim = agent_presence_dim
         self.comm_distance = comm_distance
         self.distance_metric = distance_metric
         self.n_workers = n_workers
+        self.valid_node_list = valid_node_list
+
+        self.update_interval = update_interval
+        self.step_counter = 0
+        self.cached_adj_matrices = None
+        self.cached_edge_indices = None
 
     @staticmethod
     def _process_batch(
@@ -26,7 +36,8 @@ class MagentGraphBuilder(GraphBuilder):
             binary_agent_id_dim: list,
             agent_presence_dim: list,
             comm_distance: int,
-            distance_metric: str):
+            distance_metric: str,
+            valid_node_list: Union[list, None] = None):
         """Process a single batch item"""
         binary_agent_id = batch_state[:, :, binary_agent_id_dim]
         agent_positions = np.apply_along_axis(binary_to_decimal, -1, binary_agent_id).astype(np.int64)
@@ -58,25 +69,52 @@ class MagentGraphBuilder(GraphBuilder):
             adj_matrix = np.zeros((0, 0), dtype=np.int64)
             edge_index = np.zeros((2, 0), dtype=np.int64)
         
+        if edge_index.size > 0 and edge_index.min() != 0:
+            if valid_node_list is None:
+                node_mapping = {old_id: new_id for new_id, old_id in enumerate(np.unique(edge_index))}
+            else:
+                node_mapping = {old_id: new_id for new_id, old_id in enumerate(valid_node_list)}
+            map_func = np.vectorize(lambda x: node_mapping[x])
+            edge_index = map_func(edge_index)
+            n = len(node_mapping)
+            adj_matrix = np.zeros((n, n), dtype=np.int64)
+            for i, j in zip(edge_index[0], edge_index[1]):
+                adj_matrix[i, j] = 1
+                adj_matrix[j, i] = 1
+
         return adj_matrix, edge_index
         
     def forward(self, state):
-        batch_adj_matrices = []
-        batch_edge_indices = []
-        
+
+        if not self.training:
+            self.step_counter += 1
+            if (self.step_counter % self.update_interval != 0 
+                and self.cached_adj_matrices is not None
+                and self.cached_edge_indices is not None):
+                return deepcopy(self.cached_adj_matrices), deepcopy(self.cached_edge_indices)
+
         with ProcessPoolExecutor(max_workers=self.n_workers) as executor:
-            futures = [executor.submit(
+            results = list(executor.map(
                 self._process_batch,
-                state[b],
-                self.binary_agent_id_dim,
-                self.agent_presence_dim,
-                self.comm_distance,
-                self.distance_metric
-            ) for b in range(state.shape[0])]
-            
-            for future in as_completed(futures):
-                adj_matrix, edge_index = future.result()
-                batch_adj_matrices.append(adj_matrix)
-                batch_edge_indices.append(edge_index)
-        
-        return np.array(batch_adj_matrices), batch_edge_indices
+                [state[b] for b in range(state.shape[0])],
+                [self.binary_agent_id_dim] * state.shape[0],
+                [self.agent_presence_dim] * state.shape[0],
+                [self.comm_distance] * state.shape[0],
+                [self.distance_metric] * state.shape[0]
+            ))
+
+        batch_adj_matrices, batch_edge_indices = zip(*results)
+        batch_adj_matrices = np.array(batch_adj_matrices)
+        batch_edge_indices = list(batch_edge_indices)
+
+        if not self.training:
+            self.cached_adj_matrices = batch_adj_matrices
+            self.cached_edge_indices = batch_edge_indices
+
+        return batch_adj_matrices, batch_edge_indices
+    
+    def reset(self):
+        self.step_counter = 0
+        self.cached_adj_matrices = None
+        self.cached_edge_indices = None
+        return self

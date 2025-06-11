@@ -280,11 +280,16 @@ class GNNAgentGroup(AgentGroup):
             self.feature_extractors.items(),
             self.decoders.items()):
             model_dir = os.path.join(path, model_name)
-            fe.load_state_dict(torch.load(os.path.join(model_dir, 'feature_extractor.pth')))
-            enc.load_state_dict(torch.load(os.path.join(model_dir, 'encoder.pth')))
-            dec.load_state_dict(torch.load(os.path.join(model_dir, 'decoder.pth')))
-        self.graph_builder.load_state_dict(torch.load(os.path.join(path, 'graph_builder.pth')))
-        self.graph_model.load_state_dict(torch.load(os.path.join(path, 'graph_model.pth')))
+            fe.load_state_dict(torch.load(os.path.join(model_dir, 'feature_extractor.pth'),
+                                          map_location=torch.device('cpu')))
+            enc.load_state_dict(torch.load(os.path.join(model_dir, 'encoder.pth'),
+                                           map_location=torch.device('cpu')))
+            dec.load_state_dict(torch.load(os.path.join(model_dir, 'decoder.pth'),
+                                           map_location=torch.device('cpu')))
+        self.graph_builder.load_state_dict(torch.load(os.path.join(path, 'graph_builder.pth'),
+                                                    map_location=torch.device('cpu')))
+        self.graph_model.load_state_dict(torch.load(os.path.join(path, 'graph_model.pth'),
+                                                    map_location=torch.device('cpu')))
         return self
     
     def reset(self):
