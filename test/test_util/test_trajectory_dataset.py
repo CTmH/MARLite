@@ -88,6 +88,7 @@ class TestTrajectoryDataset(unittest.TestCase):
             self.assertEqual(len(sample['actions']), self.traj_len)
             self.assertEqual(len(sample['rewards']), self.traj_len)
             self.assertEqual(len(sample['states']), self.traj_len)
+            self.assertEqual(len(sample['edge_indices']), self.traj_len)
             self.assertTrue(isinstance(sample['observations'][0], dict))
             self.assertTrue(isinstance(sample['actions'][0], dict))
             self.assertTrue(isinstance(sample['rewards'][0], dict))
@@ -169,7 +170,8 @@ class TestTrajectoryDataloader(unittest.TestCase):
 
     def test_get_batch(self):
         for batch in self.dataloader:
-            print(batch)
+            for key1, key2 in zip(batch.keys(), self.dataloader.attr):
+                self.assertEqual(key1, key2)
 
 if __name__ == '__main__':
     unittest.main()

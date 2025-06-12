@@ -21,7 +21,8 @@ class TestRandomAgentGroup(unittest.TestCase):
         }
         obs = {agent: np.zeros(10) for agent in avail_actions.keys()}
 
-        actions = self.random_agent_group.act(obs, avail_actions, 0.1)
+        ret = self.random_agent_group.act(obs, avail_actions, 0.1)
+        actions = ret["actions"]
         
         # Check if the correct number of actions are returned
         self.assertEqual(len(actions), len(avail_actions))
@@ -30,8 +31,9 @@ class TestRandomAgentGroup(unittest.TestCase):
             self.assertIn(action, range(5))
 
     def test_get_q_values_returns_self(self):
-        result = self.random_agent_group.forward(None)
-        self.assertIs(result, self.random_agent_group)
+        ret = self.random_agent_group.forward({})
+        result = ret['q_val']
+        self.assertIs(result, None)
 
     def test_set_model_params_returns_self(self):
         model_params = {"modelA": {}, "modelB": {}}

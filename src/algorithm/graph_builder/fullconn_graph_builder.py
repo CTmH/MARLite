@@ -1,5 +1,6 @@
 import numpy as np
-from typing import Union
+from typing import Tuple, List, Union
+from numpy import ndarray
 from .graph_builder import GraphBuilder
 
 class FullConnGraphBuilder(GraphBuilder):
@@ -12,7 +13,7 @@ class FullConnGraphBuilder(GraphBuilder):
         self.valid_node_list = valid_node_list
         self.add_self_loop = add_self_loop
 
-    def forward(self, state):
+    def forward(self, state: np.ndarray) -> Tuple[ndarray, List[ndarray]]:
         bs = state.shape[0]
         num_nodes = len(self.valid_node_list)
         edge_indices = [[i, j] for i in range(num_nodes) for j in range(num_nodes) if i != j]
@@ -25,6 +26,6 @@ class FullConnGraphBuilder(GraphBuilder):
         edge_indices = np.array(edge_indices, dtype=np.int64).T
         batch_edge_indices = np.repeat(edge_indices[np.newaxis], bs, axis=0)
         return batch_adj_matrices, batch_edge_indices
-    
+
     def reset(self):
         return self

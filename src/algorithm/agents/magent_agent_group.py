@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-from typing import Dict
+from typing import Dict, Any, Type
 from .agent_group import AgentGroup
 
 class MagentPreyAgentGroup(AgentGroup):
@@ -11,10 +11,10 @@ class MagentPreyAgentGroup(AgentGroup):
     def __init__(self, agents: Dict[str, str]) -> None:
         self.agents = agents
 
-    def forward(self, observations: Dict[str, np.ndarray], eval_mode=True) -> torch.Tensor:
-        return self
+    def forward(self, observations: Dict[str, np.ndarray], eval_mode=True) -> Dict[str, Any]:
+        return {'q_val': None}
 
-    def act(self, observations: Dict[str, np.ndarray], avail_actions: Dict, epsilon: int) -> np.ndarray:
+    def act(self, observations: Dict[str, np.ndarray], avail_actions: Dict, epsilon: int) -> Dict[str, Any]:
         obstacle_and_other_team_presence = {key: value[-1,:,:,0] + value[-1,:,:,3] for key, value in observations.items()} # value: (T*obs_len*obs_len*F)
     
         # (num_agents, n, n)
@@ -48,16 +48,16 @@ class MagentPreyAgentGroup(AgentGroup):
         actions = {agent: max_indices[i] 
                 for i, agent in enumerate(obstacle_and_other_team_presence.keys())}
     
-        return actions
+        return {"actions": actions}
 
-    def set_agent_group_params(self, model_params: Dict[str, dict], feature_extractor_params: Dict[str, dict]):
+    def set_agent_group_params(self, model_params: Dict[str, dict], feature_extractor_params: Dict[str, dict]) -> Type[AgentGroup]:
         return self
     
-    def get_agent_group_params(self):
+    def get_agent_group_params(self) -> Type[AgentGroup]:
         return self
     
-    def zero_grad(self):
+    def zero_grad(self) -> Type[AgentGroup]:
         return self
     
-    def step(self):
+    def step(self) -> Type[AgentGroup]:
         return self

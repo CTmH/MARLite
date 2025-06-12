@@ -45,6 +45,7 @@ class MultiThreadRolloutWorker(threading.Thread):
         episode = {
             'observations':[],
             'states': [],
+            'edge_indices': [],
             'actions': [],
             'rewards': [],
             'avail_actions': [],
@@ -70,6 +71,7 @@ class MultiThreadRolloutWorker(threading.Thread):
             else:
                 episode['observations'].append(observations)
                 episode['states'].append(env.state())
+                episode['edge_indices'].append(edge_indices)
                 episode['actions'].append(actions)
                 episode['avail_actions'].append(avail_actions)
 
@@ -94,10 +96,11 @@ class MultiThreadRolloutWorker(threading.Thread):
             avail_actions = {agent: env.action_space(agent) for agent in env.agents}
             processed_obs = self._obs_preprocess(episode['observations']+[observations])
             if isinstance(agent_group, GNNAgentGroup):
-                state = env.state()
-                actions = agent_group.act(processed_obs, state, avail_actions, self.epsilon)
+                ret = agent_group.act(processed_obs, env.state(), avail_actions, self.epsilon)
             else:
-                actions = agent_group.act(processed_obs, avail_actions, self.epsilon)
+                ret = agent_group.act(processed_obs, avail_actions, self.epsilon)
+            actions = ret['actions']
+            edge_indices = ret.get('edge_indices', None)
             
         episode['episode_length'] = len(episode['observations'])
         episode['episode_reward'] = episode_reward

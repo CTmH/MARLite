@@ -55,12 +55,14 @@ class TestMagentPreyAgentGroup(unittest.TestCase):
         env = self.env_conf.create_env()
         obs, _ = env.reset()
         obs = {key: np.expand_dims(value, axis=0) for key, value in obs.items()} # Add Time Dim
-        actions = self.magent_prey_agent_group.act(obs, self.avail_actions, 0)
+        ret = self.magent_prey_agent_group.act(obs, self.avail_actions, 0)
+        actions = ret['actions']
         env.step(actions)
 
     def test_get_q_values_returns_self(self):
-        result = self.magent_prey_agent_group.forward(None)
-        self.assertIs(result, self.magent_prey_agent_group)
+        ret = self.magent_prey_agent_group.forward({})
+        result = ret['q_val']
+        self.assertIs(result, None)
 
     def test_set_model_params_returns_self(self):
         model_params = {"modelA": {}, "modelB": {}}

@@ -29,13 +29,22 @@ class GraphQMIXTrainer(Trainer):
                 dataloader = TrajectoryDataLoader(dataset, batch_size=batch_size, shuffle=True)
                 for batch in dataloader:
                     # Extract batch data
-                    observations, states, actions, rewards, next_states, next_observations, terminations = batch
+                    observations = batch['observations']
+                    states = batch['states']
+                    edge_indices = batch['edge_indices']
+                    actions = batch['actions']
+                    rewards = batch['rewards']
+                    next_states = batch['next_states']
+                    next_observations = batch['next_observations']
+                    terminations = batch['terminations']
                     bs = states.shape[0]  # Actual batch size
 
                     # Compute the Q-tot
                     states = states[:,-1,:] # (B, T, F) -> (B, F) Take only the last state in the sequence
+                    edge_indices = edge_indices[:,-1,:,:] # (B, T, 2, N) -> (B, 2, N) Take only the last edge indices
                     self.eval_agent_group.reset().train().to(self.train_device) # Reset Graph Builder intervals
-                    q_val = self.eval_agent_group.forward(observations, states) # obs.shape (B, N, T, F)
+                    ret = self.eval_agent_group.forward(observations, states, edge_indices) # obs.shape (B, N, T, F)
+                    q_val = ret['q_val']
                     actions = torch.Tensor(actions[:,:,-1:]).to(device=self.train_device, dtype=torch.int64) # (B, N, T, A)
                     q_val = torch.gather(q_val, dim=-1, index=actions)
                     q_val = q_val.squeeze(-1) # (B, N, 1) -> (B, N)
@@ -47,7 +56,8 @@ class GraphQMIXTrainer(Trainer):
                     with torch.no_grad():
                         next_states = next_states[:,-1,:] # (B, T, F) -> (B, F) Take only the last state in the sequence
                         self.target_agent_group.reset().eval().to(self.train_device) # Reset Graph Builder intervals
-                        q_val_next = self.eval_agent_group.forward(next_observations, next_states)
+                        ret_next = self.eval_agent_group.forward(next_observations, next_states, edge_indices)
+                        q_val_next = ret_next['q_val']
                         q_val_next = q_val_next.max(dim=-1).values
                         next_states = torch.Tensor(next_states).to(self.train_device) # (B, T, F) -> (B, F) Take only the last state in the sequence
                         self.target_critic.eval().to(self.train_device) 

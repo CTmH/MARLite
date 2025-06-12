@@ -9,6 +9,7 @@ class TrajectoryDataset(Dataset):
         self.traj_len = traj_len
         self.attr = ['observations',
                      'states',
+                     'edge_indices',
                      'next_states',
                      'next_observations',
                      'actions',
@@ -44,12 +45,21 @@ class TrajectoryDataLoader(DataLoader):
             num_workers=num_workers,
             collate_fn=self.collate_fn
         )
+        self.attr = ['observations',
+                     'states',
+                     'edge_indices',
+                     'next_states',
+                     'next_observations',
+                     'actions',
+                     'rewards',
+                     'terminations']
 
     @staticmethod
     def collate_fn(batch):
         # Extract necessary components from the trajectory
         observations = [traj['observations'] for traj in batch]
         states = [traj['states'] for traj in batch]
+        edge_indices = [traj['edge_indices'] for traj in batch]
         actions = [traj['actions'] for traj in batch]
         rewards = [traj['rewards'] for traj in batch]
         next_state = [traj['next_states'] for traj in batch]
@@ -80,5 +90,17 @@ class TrajectoryDataLoader(DataLoader):
         # States (Batch Size, Time Step, Feature Dimensions) (B, T, F)
         states = np.array(states)
         next_state = np.array(next_state)
+        edge_indices = np.array(edge_indices)
 
-        return observations, states, actions, rewards, next_state, next_observations, terminations
+        batch_dict = {
+            'observations': observations,
+            'states': states,
+            'edge_indices': edge_indices,
+            'next_states': next_state,
+            'next_observations': next_observations,
+            'actions': actions,
+            'rewards': rewards,
+            'terminations': terminations
+        } 
+
+        return batch_dict

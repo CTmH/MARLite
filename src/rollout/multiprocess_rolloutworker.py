@@ -133,6 +133,7 @@ def rollout(env_config: EnvConfig,
     episode = {
         'observations': [],
         'states': [],
+        'edge_indices': [],
         'actions': [],
         'rewards': [],
         'avail_actions': [],
@@ -155,6 +156,7 @@ def rollout(env_config: EnvConfig,
         else:
             episode['observations'].append(observations)
             episode['states'].append(env.state())
+            episode['edge_indices'].append(edge_indices)
             episode['actions'].append(actions)
             episode['avail_actions'].append(avail_actions)
 
@@ -181,9 +183,11 @@ def rollout(env_config: EnvConfig,
             rnn_traj_len=rnn_traj_len
         )
         if isinstance(agent_group, GNNAgentGroup):
-            actions = agent_group.act(processed_obs, env.state(), avail_actions, epsilon)
+            ret = agent_group.act(processed_obs, env.state(), avail_actions, epsilon)
         else:
-            actions = agent_group.act(processed_obs, avail_actions, epsilon)
+            ret = agent_group.act(processed_obs, avail_actions, epsilon)
+        actions = ret['actions']
+        edge_indices = ret.get('edge_indices', None)
 
     episode['episode_length'] = len(episode['observations'])
     episode['episode_reward'] = episode_reward
