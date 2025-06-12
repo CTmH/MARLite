@@ -90,7 +90,6 @@ class TrajectoryDataLoader(DataLoader):
         # States (Batch Size, Time Step, Feature Dimensions) (B, T, F)
         states = np.array(states)
         next_state = np.array(next_state)
-        edge_indices = np.array(edge_indices)
 
         batch_dict = {
             'observations': observations,

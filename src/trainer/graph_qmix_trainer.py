@@ -41,7 +41,8 @@ class GraphQMIXTrainer(Trainer):
 
                     # Compute the Q-tot
                     states = states[:,-1,:] # (B, T, F) -> (B, F) Take only the last state in the sequence
-                    edge_indices = edge_indices[:,-1,:,:] # (B, T, 2, N) -> (B, 2, N) Take only the last edge indices
+                    #edge_indices = edge_indices[:,-1,:,:] # (B, T, 2, N) -> (B, 2, N) Take only the last edge indices
+                    edge_indices = [edge_indices[i][-1] for i in range(bs)] # (B, T, 2, N) -> (B, 2, N) Take only the last edge indices
                     self.eval_agent_group.reset().train().to(self.train_device) # Reset Graph Builder intervals
                     ret = self.eval_agent_group.forward(observations, states, edge_indices) # obs.shape (B, N, T, F)
                     q_val = ret['q_val']
