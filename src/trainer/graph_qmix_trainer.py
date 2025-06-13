@@ -91,5 +91,10 @@ class GraphQMIXTrainer(Trainer):
                     total_batches += 1
 
                     pbar.update(bs)
-            
+
+        self.eval_agent_group.to("cpu")
+        self.eval_critic.to("cpu")
+        self.target_agent_group.to("cpu")
+        self.target_critic.to("cpu")
+
         return total_loss / total_batches

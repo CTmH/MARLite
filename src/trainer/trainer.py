@@ -98,8 +98,6 @@ class Trainer():
         self.eval_agent_group.load_params(agent_path)
         critic_path = os.path.join(self.checkpointdir, checkpoint, "critic", "critic.pth")
         self.eval_critic.load_state_dict(torch.load(critic_path, weights_only=True))
-        self.eval_agent_group.to(self.train_device)
-        self.eval_critic.to(self.train_device)
         self.update_target_model_params()
         return self
     
@@ -122,6 +120,8 @@ class Trainer():
 
         for episode in episodes:
             self.replaybuffer.add_episode(episode)
+
+        self.eval_agent_group.to("cpu")
         
         return self
 
@@ -157,6 +157,7 @@ class Trainer():
         
         std_reward = np.std(rewards)
         logging.info(f"Evaluation results: Mean reward {mean_reward}, Std reward {std_reward}")
+        self.eval_agent_group.to("cpu")
         
         return mean_reward, std_reward
     
