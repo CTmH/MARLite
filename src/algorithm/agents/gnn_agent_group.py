@@ -315,5 +315,8 @@ class GNNAgentGroup(AgentGroup):
         return self
 
     def reset(self) -> Type[AgentGroup]:
-        self.graph_builder.reset()
+        if isinstance(self.graph_builder, DataParallel):
+            self.graph_builder.module.reset()
+        else:
+            self.graph_builder.reset()
         return self
