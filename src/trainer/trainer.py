@@ -20,8 +20,8 @@ from ..util.optimizer_config import OptimizerConfig
 from ..rollout.rolloutmanager_config import RolloutManagerConfig
 
 class Trainer():
-    def __init__(self, 
-                 env_config: EnvConfig, 
+    def __init__(self,
+                 env_config: EnvConfig,
                  agent_group_config: AgentGroupConfig,
                  critic_config: CriticConfig,
                  epsilon_scheduler: Scheduler,
@@ -33,17 +33,18 @@ class Trainer():
                  eval_epsilon: float = 0.01,
                  workdir: str = "",
                  train_device: str = 'cpu',
-                 eval_device: str = 'cpu'):
-        
+                 eval_device: str = 'cpu',
+                 n_workers = 1,
+                 use_data_parallel: bool = False):
+
         self.env_config = env_config
         self.env = env_config.create_env()
         self.critic_config = critic_config
         self.sample_ratio = sample_ratio_scheduler
-        self.train_device = train_device
-        self.eval_device = eval_device
         self.epsilon = epsilon_scheduler
         self.eval_epsilon = eval_epsilon
         self.gamma = gamma
+        self.n_workers = n_workers
 
         self.replaybuffer = replaybuffer_config.create_replaybuffer()
         self.rolloutmanager_config = rolloutmanager_config
@@ -53,7 +54,7 @@ class Trainer():
         self.target_agent_group = agent_group_config.get_agent_group()
         self.best_agent_group_params = self.eval_agent_group.get_agent_group_params()
         self.target_agent_group.set_agent_group_params(self.best_agent_group_params)  # Load the model parameters to eval agent group
-        
+
         # Critic
         self.eval_critic = critic_config.get_critic()
         self.target_critic = critic_config.get_critic()
@@ -75,9 +76,19 @@ class Trainer():
                                                  #logging.FileHandler(os.path.join(self.logdir, "training.log"))
                                                  ])
 
+        # Device
+        self.num_gpus = torch.cuda.device_count()
+        if self.num_gpus > 1 and use_data_parallel:
+            self.train_device = "cuda"
+            self.use_data_parallel = use_data_parallel
+        else:
+            self.train_device = train_device
+            self.use_data_parallel = False
+        self.eval_device = eval_device
+
     def learn(self, sample_size, batch_size: int, times: int):
         raise NotImplementedError
-    
+
     def save_current_model(self, checkpoint: str):
         agent_path = os.path.join(self.checkpointdir, checkpoint, "agent")
         os.makedirs(agent_path, exist_ok=True)
@@ -90,7 +101,7 @@ class Trainer():
         critic_params = self.eval_critic.state_dict()
         torch.save(critic_params, os.path.join(critic_path, "critic.pth"))
         return self
-    
+
     def load_model(self, checkpoint: str):
         agent_path = os.path.join(self.checkpointdir, checkpoint, "agent")
         self.eval_agent_group.to("cpu")
@@ -100,7 +111,7 @@ class Trainer():
         self.eval_critic.load_state_dict(torch.load(critic_path, weights_only=True))
         self.update_target_model_params()
         return self
-    
+
     def save_best_model(self):
         self.eval_agent_group.set_agent_group_params(self.best_agent_group_params)
         self.eval_critic.load_state_dict(self.best_critic_params)
@@ -122,7 +133,8 @@ class Trainer():
             self.replaybuffer.add_episode(episode)
 
         self.eval_agent_group.to("cpu")
-        
+        torch.cuda.empty_cache()
+
         return self
 
     def update_target_model_params(self):
@@ -131,7 +143,7 @@ class Trainer():
         critic_params = deepcopy(self.eval_critic.state_dict())  # Update critic parameters
         self.target_critic.load_state_dict(critic_params)
         return self
-    
+
     def update_best_params(self):
         self.best_agent_group_params = self.eval_agent_group.get_agent_group_params()
         self.best_critic_params = deepcopy(self.eval_critic.state_dict())  # Update critic parameters
@@ -142,25 +154,27 @@ class Trainer():
         manager = self.rolloutmanager_config.create_eval_manager(self.eval_agent_group,
                                                            self.env_config,
                                                            self.eval_epsilon)
-        
+
         logging.info(f"Evaluating model...")
         episodes = manager.generate_episodes()
         manager.cleanup()
         rewards = np.array([episode['episode_reward'] for episode in episodes])
-        
+
         sum_total = rewards.sum()
         max_val = rewards.max()
         min_val = rewards.min()
         adjusted_sum = sum_total - max_val - min_val
         adjusted_count = len(rewards) - 2
         mean_reward = adjusted_sum / adjusted_count
-        
+
         std_reward = np.std(rewards)
         logging.info(f"Evaluation results: Mean reward {mean_reward}, Std reward {std_reward}")
+
         self.eval_agent_group.to("cpu")
-        
+        torch.cuda.empty_cache()
+
         return mean_reward, std_reward
-    
+
     def train(self, epochs, target_reward, eval_interval=1, batch_size=64, learning_times_per_epoch=1):
         best_mean_reward = -np.inf
         best_reward_std = np.inf
@@ -174,7 +188,7 @@ class Trainer():
             sample_ratio = self.sample_ratio.get_value(epoch)
             sample_size = len(self.replaybuffer.buffer) * sample_ratio
             sample_size = round(sample_size)
-            
+
             # Learn and update eval model
             logging.info(f"Epoch {epoch}: Learning with batch size {batch_size} and learning {learning_times_per_epoch} times per epoch")
             loss = self.learn(sample_size=sample_size, batch_size=batch_size, times=learning_times_per_epoch)
@@ -211,7 +225,7 @@ class Trainer():
         self.save_results_to_csv()
         self.save_best_model()
         return best_mean_reward, best_reward_std
-    
+
     def save_intermediate_results(self, epoch, loss, mean_reward, reward_std):
         self.results[epoch] = {
             'loss': loss,

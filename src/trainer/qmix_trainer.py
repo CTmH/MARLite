@@ -1,13 +1,9 @@
 import torch
-from copy import deepcopy
-from torch.utils.data import DataLoader
+from torch.nn import DataParallel
 from tqdm import tqdm
 
 from .trainer import Trainer
-from ..algorithm.agents import QMIXAgentGroup
-from ..algorithm.critic.qmix_critic_model import QMIXCriticModel
 from ..util.trajectory_dataset import TrajectoryDataLoader
-from ..util.scheduler import Scheduler
 
 class QMIXTrainer(Trainer):
     def __init__(self, **kwargs):
@@ -17,12 +13,21 @@ class QMIXTrainer(Trainer):
         total_loss = 0.0
         total_batches = 0
 
+        if self.use_data_parallel:
+            self.eval_agent_group.wrap_data_parallel()
+            self.eval_critic = DataParallel(self.eval_critic)
+            self.target_agent_group.wrap_data_parallel()
+            self.target_critic = DataParallel(self.target_critic)
+
         for t in range(times):
             with tqdm(total=sample_size, desc=f'Times {t+1}/{times}', unit='batch') as pbar:
                 # Implement the learning logic for QMix
                 # Get a batch of data from the replay buffer
                 dataset = self.replaybuffer.sample(sample_size)
-                dataloader = TrajectoryDataLoader(dataset, batch_size=batch_size, shuffle=True)
+                dataloader = TrajectoryDataLoader(dataset,
+                                                  batch_size=batch_size,
+                                                  shuffle=True,
+                                                  num_workers=self.n_workers)
                 for batch in dataloader:
                     # Extract batch data
                     observations = batch['observations']
@@ -51,7 +56,7 @@ class QMIXTrainer(Trainer):
                         q_val_next = ret_next['q_val']
                         q_val_next = q_val_next.max(dim=-1).values
                         next_states = torch.Tensor(next_states[:,-1,:]).to(self.train_device) # (B, T, F) -> (B, F) Take only the last state in the sequence
-                        self.target_critic.eval().to(self.train_device) 
+                        self.target_critic.eval().to(self.train_device)
                         q_tot_next = self.target_critic(q_val_next, next_states)
 
                     # Compute the TD target
@@ -64,11 +69,13 @@ class QMIXTrainer(Trainer):
 
                     # Compute the critic loss
                     critic_loss = torch.nn.functional.mse_loss(q_tot, y_tot.detach())
-                        
+                    if self.use_data_parallel:
+                        critic_loss = critic_loss.mean() # Reduce across all GPUs
+
                     # Optimize the critic network
                     critic_loss.backward()
                     torch.nn.utils.clip_grad_norm_(
-                        self.eval_critic.parameters(), 
+                        self.eval_critic.parameters(),
                         max_norm=5.0
                     )
                     self.optimizer.step()
@@ -86,5 +93,12 @@ class QMIXTrainer(Trainer):
         self.eval_critic.to("cpu")
         self.target_agent_group.to("cpu")
         self.target_critic.to("cpu")
+        torch.cuda.empty_cache()
+
+        if self.use_data_parallel:
+            self.eval_agent_group.unwrap_data_parallel()
+            self.eval_critic = self.eval_critic.module
+            self.target_agent_group.unwrap_data_parallel()
+            self.target_critic = self.target_critic.module
 
         return total_loss / total_batches

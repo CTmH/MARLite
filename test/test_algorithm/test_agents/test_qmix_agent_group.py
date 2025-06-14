@@ -3,14 +3,9 @@ import torch
 import yaml
 import numpy as np
 import tempfile
-from unittest.mock import MagicMock
 from pettingzoo.mpe import simple_spread_v3
-
-from src.algorithm.agents import QMIXAgentGroup
+from torch.nn import DataParallel
 from src.algorithm.agents.agent_group_config import AgentGroupConfig
-from src.algorithm.model import ModelConfig
-from src.util.optimizer_config import OptimizerConfig
-
 
 class TestQMIXAgentGroup(unittest.TestCase):
 
@@ -27,7 +22,7 @@ class TestQMIXAgentGroup(unittest.TestCase):
         with open(config_path, 'r') as file:
             config = yaml.safe_load(file)
         self.agent_group_config = AgentGroupConfig(**config['agent_group_config'])
-        
+
         # Initialize QMIXAgents
         self.agent_group = self.agent_group_config.get_agent_group()
 
@@ -39,7 +34,7 @@ class TestQMIXAgentGroup(unittest.TestCase):
             for agent in self.env.agents:
                 observations[agent].append(obs[agent])
         self.observations = {key: np.array(value) for key, value in observations.items()}
-        
+
     def test_forward(self):
         obs = [self.observations[ag] for ag in self.agent_group.agent_model_dict.keys()]
         obs = np.stack(obs)
@@ -50,7 +45,7 @@ class TestQMIXAgentGroup(unittest.TestCase):
         q_values = ret['q_val']
         q_values = q_values.detach().cpu().numpy().squeeze()
         self.assertEqual(q_values.shape, (len(self.env.agents), self.action_space_shape))
-        
+
         # Test get_q_values method in training mode
         self.agent_group.train()
         ret = self.agent_group.forward(observations=obs)
@@ -88,12 +83,25 @@ class TestQMIXAgentGroup(unittest.TestCase):
             self.assertTrue(model.training)
             self.assertTrue(fe.training)
 
+    def test_wrap_data_parallel(self):
+        self.agent_group.wrap_data_parallel()
+        for (model_name, model), (_, fe) in zip(self.agent_group.models.items(), self.agent_group.feature_extractors.items()):
+            self.assertIsInstance(model, DataParallel)
+            self.assertIsInstance(fe, DataParallel)
+
+        self.agent_group.unwrap_data_parallel()
+        for (model_name, model), (_, fe) in zip(self.agent_group.models.items(), self.agent_group.feature_extractors.items()):
+            self.assertNotIsInstance(model, DataParallel)
+            self.assertNotIsInstance(fe, DataParallel)
+            self.assertIsInstance(model, torch.nn.Module)
+            self.assertIsInstance(fe, torch.nn.Module)
+
     def test_save_load_params(self):
         # Create a temporary directory to save parameters
         with tempfile.TemporaryDirectory() as tmpdirname:
             # Save the agent group parameters
             self.agent_group.save_params(tmpdirname)
             self.agent_group.load_params(tmpdirname)
-        
+
 if __name__ == '__main__':
     unittest.main()

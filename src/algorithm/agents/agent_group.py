@@ -40,6 +40,12 @@ class AgentGroup(object):
     def share_memory(self):
         raise NotImplementedError
     
+    def wrap_data_parallel(self):
+        raise NotImplementedError
+    
+    def unwrap_data_parallel(self):
+        raise NotImplementedError
+    
     def save_params(self, path: str):
         raise NotImplementedError
     
