@@ -88,7 +88,7 @@ class GNNAgentGroup(AgentGroup):
 
         # Build Graph
         if edge_indices is None:  # If edge_indices are not provided
-            adj_matrices, edge_indices = self.graph_builder(states)
+            adj_matrix, edge_indices = self.graph_builder(states)
 
         # Communication between agents using the graph model.
         batch_data = [None for i in range(bs)]

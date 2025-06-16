@@ -18,7 +18,7 @@ class TestTrajectoryDataset(unittest.TestCase):
         self.buffer = NormalReplayBuffer(capacity=self.capacity, traj_len=self.traj_len)
 
         # Environment setup and model configuration
-        self.env_config = {"module_name": "pettingzoo.mpe", "env_name": "simple_spread_v3"}
+        self.env_config = {"module_name": "mpe2", "env_name": "simple_spread_v3"}
         self.env_config = EnvConfig(**self.env_config)
         self.env = self.env_config.create_env()
         obs, _ = self.env.reset()
@@ -56,9 +56,9 @@ class TestTrajectoryDataset(unittest.TestCase):
             "RNN0": ModelConfig(model_type="Identity"),
             "RNN1": ModelConfig(model_type="Identity"),
         }
-        
+
         self.optimizer_config = OptimizerConfig(type="Adam", lr=0.001)
-        
+
         # Initialize QMIXAgents
         self.agent_group = QMIXAgentGroup(agent_model_dict=self.agents,
                                           model_configs=self.model_configs,
@@ -102,7 +102,7 @@ class TestTrajectoryDataloader(unittest.TestCase):
         self.buffer = NormalReplayBuffer(capacity=self.capacity, traj_len=self.traj_len)
 
         # Environment setup and model configuration
-        self.env_config = {"module_name": "pettingzoo.mpe", "env_name": "simple_spread_v3"}
+        self.env_config = {"module_name": "mpe2", "env_name": "simple_spread_v3"}
         self.env_config = EnvConfig(**self.env_config)
         self.env = self.env_config.create_env()
         obs, _ = self.env.reset()
@@ -140,9 +140,9 @@ class TestTrajectoryDataloader(unittest.TestCase):
             "RNN0": ModelConfig(model_type="Identity"),
             "RNN1": ModelConfig(model_type="Identity"),
         }
-        
+
         self.optimizer_config = OptimizerConfig(type="Adam", lr=0.001)
-        
+
         # Initialize QMIXAgents
         self.agent_group = QMIXAgentGroup(agent_model_dict=self.agents,
                                           model_configs=self.model_configs,

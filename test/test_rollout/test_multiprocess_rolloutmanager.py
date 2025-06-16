@@ -1,13 +1,8 @@
 import unittest
-import torch
-import numpy as np
 import yaml
-from src.algorithm.agents import QMIXAgentGroup
 from src.rollout.multiprocess_rolloutmanager import MultiProcessRolloutManager
 from src.rollout.multiprocess_rolloutworker import MultiProcessRolloutWorker
-from src.algorithm.model import ModelConfig
 from src.environment.env_config import EnvConfig
-from src.util.optimizer_config import OptimizerConfig
 from src.algorithm.agents.agent_group_config import AgentGroupConfig
 import torch.nn as nn
 import torch.nn.init as init
@@ -48,7 +43,7 @@ class TestRolloutManager(unittest.TestCase):
         """
         config = yaml.safe_load(config)
         self.agent_group_config = AgentGroupConfig(**config['agent_group_config'])
-        
+
         # Initialize QMIXAgents models parameters
         self.agent_group = self.agent_group_config.get_agent_group()
         for model in self.agent_group.models.values():

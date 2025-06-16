@@ -20,7 +20,7 @@ class TestPrioritizedReplayBuffer(unittest.TestCase):
         self.buffer = PrioritizedReplayBuffer(capacity=self.capacity, traj_len=self.traj_len, priority_attr="all_agents_sum_rewards", alpha=1)
 
         # Environment setup and model configuration
-        self.env_config = {"module_name": "pettingzoo.mpe", "env_name": "simple_spread_v3"}
+        self.env_config = {"module_name": "mpe2", "env_name": "simple_spread_v3"}
         self.env_config = EnvConfig(**self.env_config)
         self.env = self.env_config.create_env()
         obs, _ = self.env.reset()
@@ -58,16 +58,16 @@ class TestPrioritizedReplayBuffer(unittest.TestCase):
             "RNN0": ModelConfig(model_type="Identity"),
             "RNN1": ModelConfig(model_type="Identity"),
         }
-        
+
         self.optimizer_config = OptimizerConfig(type="Adam", lr=0.001)
-        
+
         # Initialize QMIXAgents
         self.agent_group = QMIXAgentGroup(agent_model_dict=self.agents,
                                           model_configs=self.model_configs,
                                           feature_extractors_configs=self.feature_extractor_configs,
                                           optimizer_config=self.optimizer_config,
                                           device='cpu')
-        
+
         self.traj_len = 5
         self.n_episodes = 2
         self.episode_limit = 10

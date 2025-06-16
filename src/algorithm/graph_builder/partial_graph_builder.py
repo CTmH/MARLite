@@ -32,7 +32,7 @@ class PartialGraphMagentBuilder(GraphBuilder):
 
         self.update_interval = update_interval
         self.step_counter = 0
-        self.cached_adj_matrices = None
+        self.cached_adj_matrix = None
         self.cached_edge_indices = None
 
     @staticmethod
@@ -55,24 +55,24 @@ class PartialGraphMagentBuilder(GraphBuilder):
         threshold = comm_distance
 
         # Collect valid element coordinates
-        valid_elements = {val: (i, j) for i, row in enumerate(agent_positions) 
+        valid_elements = {val: (i, j) for i, row in enumerate(agent_positions)
                          for j, val in enumerate(row) if val >= 0}
         sorted_ids = np.array(sorted(valid_elements.keys()), dtype=np.int64)
         coords = np.array([valid_elements[k] for k in sorted_ids], dtype=np.int64)
-        
+
         # Calculate distance matrix
         if len(coords) > 0:
             distances = cdist(coords, coords, metric=distance_metric)
             mask = (distances <= threshold) & np.triu(np.ones_like(distances, dtype=bool), k=1)
             rows, cols = np.where(mask)
-            
+
             # Build adjacency matrix
             max_id = agent_positions.max()
             n = max_id + 1
             adj_matrix = np.zeros((n, n), dtype=np.int64)
             adj_matrix[sorted_ids[rows], sorted_ids[cols]] = 1
             adj_matrix[sorted_ids[cols], sorted_ids[rows]] = 1  # Symmetric connections
-            
+
             # Generate edge index in COO format
             edge_index = np.vstack([sorted_ids[rows], sorted_ids[cols]]).astype(np.int64)
         else:
@@ -139,16 +139,16 @@ class PartialGraphMagentBuilder(GraphBuilder):
             filtered_adj_matrix[filtered_edge_index[1], filtered_edge_index[0]] = 1  # Maintain symmetry
 
         return filtered_adj_matrix, filtered_edge_index
-        
+
     def forward(self, state: ndarray) -> Tuple[ndarray, List[ndarray]]:
 
         bs = state.shape[0]
         if not self.training:
             self.step_counter += 1
-            if (self.step_counter % self.update_interval != 0 
-                and self.cached_adj_matrices is not None
+            if (self.step_counter % self.update_interval != 0
+                and self.cached_adj_matrix is not None
                 and self.cached_edge_indices is not None):
-                return deepcopy(self.cached_adj_matrices), deepcopy(self.cached_edge_indices)
+                return deepcopy(self.cached_adj_matrix), deepcopy(self.cached_edge_indices)
 
         n_workers = min(bs, self.n_workers)
         with ProcessPoolExecutor(max_workers=n_workers) as executor:
@@ -163,18 +163,18 @@ class PartialGraphMagentBuilder(GraphBuilder):
                 [self.valid_node_list] * bs
             ))
 
-        batch_adj_matrices, batch_edge_indices = zip(*results)
-        batch_adj_matrices = np.array(batch_adj_matrices)
+        batch_adj_matrix, batch_edge_indices = zip(*results)
+        batch_adj_matrix = np.array(batch_adj_matrix)
         batch_edge_indices = list(batch_edge_indices)
 
         if not self.training:
-            self.cached_adj_matrices = batch_adj_matrices
+            self.cached_adj_matrix = batch_adj_matrix
             self.cached_edge_indices = batch_edge_indices
 
-        return batch_adj_matrices, batch_edge_indices
-    
+        return batch_adj_matrix, batch_edge_indices
+
     def reset(self):
         self.step_counter = 0
-        self.cached_adj_matrices = None
+        self.cached_adj_matrix = None
         self.cached_edge_indices = None
         return self

@@ -1,6 +1,6 @@
 from typing import Dict
 from pettingzoo import ParallelEnv
-from pettingzoo.mpe import simple_spread_v3
+from mpe2 import simple_spread_v3
 from .env_config import EnvConfig
 
 class MPEEnvConfig(EnvConfig):

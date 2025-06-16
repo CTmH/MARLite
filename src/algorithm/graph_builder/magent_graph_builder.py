@@ -28,7 +28,7 @@ class MagentGraphBuilder(GraphBuilder):
 
         self.update_interval = update_interval
         self.step_counter = 0
-        self.cached_adj_matrices = None
+        self.cached_adj_matrix = None
         self.cached_edge_indices = None
 
     @staticmethod
@@ -48,13 +48,13 @@ class MagentGraphBuilder(GraphBuilder):
         agent_positions = agent_positions * agent_presence + agent_presence - np.ones_like(agent_presence)
         threshold = comm_distance
 
-        valid_elements = {val: (i, j) for i, row in enumerate(agent_positions) 
+        valid_elements = {val: (i, j) for i, row in enumerate(agent_positions)
                          for j, val in enumerate(row) if val >= 0}
         sorted_ids = sorted(valid_elements.keys())
         sorted_ids = np.array(sorted_ids, dtype=np.int64)
         coords = np.array([valid_elements[k] for k in sorted_ids], dtype=np.int64)
-        
-        # 提前节点映射
+
+        # Map nodes in advance
         if valid_node_list is None:
             valid_node_list = sorted_ids.tolist()
         node_mapping = {old_id: new_id for new_id, old_id in enumerate(valid_node_list)}
@@ -64,13 +64,13 @@ class MagentGraphBuilder(GraphBuilder):
             distances = cdist(coords, coords, metric=distance_metric)
             mask = (distances <= threshold) & (np.triu(np.ones_like(distances, dtype=bool), k=1))
             rows, cols = np.where(mask)
-            
-            # 使用映射后的ID构建边
+
+            # Use mapped IDs to build edges
             mapped_rows = map_func(sorted_ids[rows])
             mapped_cols = map_func(sorted_ids[cols])
             edge_index = np.vstack([mapped_rows, mapped_cols]).astype(np.int64)
-            
-            # 构建邻接矩阵
+
+            # Build adjacency matrix
             n = len(valid_node_list)
             adj_matrix = np.zeros((n, n), dtype=np.int64)
             adj_matrix[mapped_rows, mapped_cols] = 1
@@ -79,16 +79,16 @@ class MagentGraphBuilder(GraphBuilder):
             raise ValueError("No valid nodes found in the state.")
 
         return adj_matrix, edge_index
-        
+
     def forward(self, state: ndarray) -> Tuple[ndarray, List[ndarray]]:
 
         bs = state.shape[0]
         if not self.training:
             self.step_counter += 1
-            if (self.step_counter % self.update_interval != 0 
-                and self.cached_adj_matrices is not None
+            if (self.step_counter % self.update_interval != 0
+                and self.cached_adj_matrix is not None
                 and self.cached_edge_indices is not None):
-                return deepcopy(self.cached_adj_matrices), deepcopy(self.cached_edge_indices)
+                return deepcopy(self.cached_adj_matrix), deepcopy(self.cached_edge_indices)
 
         n_workers = min(bs, self.n_workers)
         with ProcessPoolExecutor(max_workers=self.n_workers) as executor:
@@ -101,18 +101,18 @@ class MagentGraphBuilder(GraphBuilder):
                 [self.distance_metric] * bs
             ))
 
-        batch_adj_matrices, batch_edge_indices = zip(*results)
-        batch_adj_matrices = np.array(batch_adj_matrices)
+        batch_adj_matrix, batch_edge_indices = zip(*results)
+        batch_adj_matrix = np.array(batch_adj_matrix)
         batch_edge_indices = list(batch_edge_indices)
 
         if not self.training:
-            self.cached_adj_matrices = batch_adj_matrices
+            self.cached_adj_matrix = batch_adj_matrix
             self.cached_edge_indices = batch_edge_indices
 
-        return batch_adj_matrices, batch_edge_indices
-    
+        return batch_adj_matrix, batch_edge_indices
+
     def reset(self):
         self.step_counter = 0
-        self.cached_adj_matrices = None
+        self.cached_adj_matrix = None
         self.cached_edge_indices = None
         return self

@@ -3,9 +3,11 @@ from .graph_builder import GraphBuilder
 from .fullconn_graph_builder import FullConnGraphBuilder
 from .magent_graph_builder import MagentGraphBuilder
 from .partial_graph_builder import PartialGraphMagentBuilder
+from .random_group_graph_builder import RandomGroupGraphBuilder
 
 registered_graph_builder_models = {
     "FullConn": FullConnGraphBuilder,
+    "RandomGroup": RandomGroupGraphBuilder,
     "Magent": MagentGraphBuilder,
     "PartialMagent": PartialGraphMagentBuilder
 }

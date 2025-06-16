@@ -1,9 +1,6 @@
-import pettingzoo as pz
 from pettingzoo import ParallelEnv
-from typing import Dict
 import importlib
 
-from .parallel_env_wrapper import ParallelEnvWrapper
 from .adversarial_pursuit_wrapper import AdversarialPursuitPredator, AdversarialPursuitPrey
 from .battle_wrapper import BattleWrapper
 from .battlefield_wrapper import BattleFieldWrapper
@@ -35,7 +32,7 @@ class EnvConfig():
             env = CUSTOM_ENVS[self.env_name]
         else:
             raise ValueError(f"Custom environment {self.env_name} not registered.")
-        
+
         if self.module_name != 'custom':
             return env.parallel_env(**self.env_config)
         else:
