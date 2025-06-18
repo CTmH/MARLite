@@ -7,5 +7,9 @@ class Permute(nn.Module):
         self.order = order
 
     def forward(self, x: torch.Tensor):
-        # x is expected to be a 4D tensor with shape (batch_size, channels, height, width)
-        return x.permute(*self.order)
+        # Check if in DataParallel
+        if x.dim() == len(self.order) + 1:
+            adjusted_order = (0,) + tuple(i + 1 for i in self.order)
+            return x.permute(*adjusted_order)
+        else:
+            return x.permute(*self.order)

@@ -1,7 +1,6 @@
 import torch
 import numpy as np
 from copy import deepcopy
-from ..algorithm.model.model_config import ModelConfig
 from ..algorithm.agents.agent_group_config import AgentGroupConfig
 from ..algorithm.critic.critic_config import CriticConfig
 from ..environment.env_config import EnvConfig
@@ -10,6 +9,7 @@ from ..util.optimizer_config import OptimizerConfig
 from .trainer import Trainer
 from .qmix_trainer import QMIXTrainer
 from .graph_qmix_trainer import GraphQMIXTrainer
+from .msg_aggr_qmix_trainer import MsgAggrQMIXTrainer
 from ..util.optimizer_config import OptimizerConfig
 from ..rollout.rolloutmanager_config import RolloutManagerConfig
 from ..replaybuffer.replaybuffer_config import ReplayBufferConfig
@@ -37,7 +37,8 @@ class TrainerConfig:
 
         self.registered_trainers = {
             'QMIX': QMIXTrainer,
-            'GraphQMIX': GraphQMIXTrainer
+            'GraphQMIX': GraphQMIXTrainer,
+            'MessageAggregator': MsgAggrQMIXTrainer,
         }
 
     def create_trainer(self) -> Trainer:
@@ -59,7 +60,7 @@ class TrainerConfig:
         else:
             raise ValueError(f"Unsupported algorithm: {self.trainer_type}")
         return self.trainer
-    
+
     def run(self):
         self.create_trainer()
         if self.trainer:

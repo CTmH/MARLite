@@ -4,10 +4,15 @@ from tqdm import tqdm
 
 from .trainer import Trainer
 from ..util.trajectory_dataset import TrajectoryDataLoader
+from ..util.loss_func import PITLoss
 
-class QMIXTrainer(Trainer):
+class MsgAggrQMIXTrainer(Trainer):
     def __init__(self, **kwargs):
+        margin = kwargs.pop('triplet_loss_margin', 1.0)
+        pit_loss_alpha = kwargs.pop('pit_loss_alpha', 0.9)
         super().__init__(**kwargs)
+        self.triplet_loss = torch.nn.TripletMarginLoss(margin=margin)
+        self.pit_loss = PITLoss(num_tasks=2, alpha=pit_loss_alpha)
 
     def learn(self, sample_size, batch_size: int, times: int = 1):
         total_loss = 0.0
@@ -42,6 +47,7 @@ class QMIXTrainer(Trainer):
                     self.eval_agent_group.train().to(self.train_device)
                     ret = self.eval_agent_group.forward(observations) # obs.shape (B, N, T, F)
                     q_val = ret['q_val']
+                    aggregated_msg = ret['aggregated_msg']
                     actions = torch.Tensor(actions[:,:,-1:]).to(device=self.train_device, dtype=torch.int64) # (B, N, T, A)
                     q_val = torch.gather(q_val, dim=-1, index=actions)
                     q_val = q_val.squeeze(-1) # (B, N, 1) -> (B, N)
@@ -49,17 +55,20 @@ class QMIXTrainer(Trainer):
                     self.eval_critic.train().to(self.train_device)
                     ret = self.eval_critic(q_val, states)
                     q_tot = ret['q_tot']
+                    state_features = ret['state_features']
 
                     # Compute TD targets
                     with torch.no_grad():
                         self.target_agent_group.eval().to(self.train_device)
                         ret_next = self.eval_agent_group.forward(next_observations)
                         q_val_next = ret_next['q_val']
+                        aggregated_msg_next = ret_next['aggregated_msg']
                         q_val_next = q_val_next.max(dim=-1).values
                         next_states = torch.Tensor(next_states[:,-1,:]).to(self.train_device) # (B, T, F) -> (B, F) Take only the last state in the sequence
                         self.target_critic.eval().to(self.train_device)
                         ret_next = self.target_critic(q_val_next, next_states)
                         q_tot_next = ret_next['q_tot']
+                        state_features_next = ret_next['state_features']
 
                     # Compute the TD target
                     rewards = torch.Tensor(rewards[:,:,-1]).to(self.train_device) # (B, N, T) -> (B, N)
@@ -69,10 +78,16 @@ class QMIXTrainer(Trainer):
 
                     y_tot = rewards + (1 - terminations) * self.gamma * q_tot_next
 
-                    # Compute the critic loss
-                    critic_loss = torch.nn.functional.mse_loss(q_tot, y_tot.detach())
+                    # TD error
+                    td_error = torch.nn.functional.mse_loss(q_tot, y_tot.detach())
+                    # Message aggregation loss
+                    indices = torch.randperm(bs).to(state_features.device)
+                    negatives = aggregated_msg[indices]
+                    msg_aggr_loss = self.triplet_loss(state_features, aggregated_msg, negatives)
+
+                    critic_loss = self.pit_loss(td_error, msg_aggr_loss)
                     if self.use_data_parallel:
-                        critic_loss = critic_loss.mean() # Reduce across all GPUs
+                        critic_loss = torch.mean(critic_loss) # Reduce across all GPUs
 
                     # Optimize the critic network
                     critic_loss.backward()

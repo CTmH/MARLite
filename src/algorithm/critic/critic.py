@@ -9,4 +9,5 @@ class Critic(nn.Module):
 
     def forward(self, info_from_agents: torch.Tensor, states: torch.Tensor):
         state_features = self.feature_extractor(states)
-        return self.critic_model(info_from_agents, state_features)
+        q_tot = self.critic_model(info_from_agents, state_features)
+        return {"q_tot": q_tot, "state_features": state_features}

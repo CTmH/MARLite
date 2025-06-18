@@ -27,6 +27,7 @@ class Trainer():
                  replaybuffer_config: ReplayBufferConfig,
                  gamma: float = 0.9,
                  eval_epsilon: float = 0.01,
+                 eval_threshold: float = 0.03,
                  workdir: str = "",
                  train_device: str = 'cpu',
                  eval_device: str = 'cpu',
@@ -39,6 +40,7 @@ class Trainer():
         self.sample_ratio = sample_ratio_scheduler
         self.epsilon = epsilon_scheduler
         self.eval_epsilon = eval_epsilon
+        self.eval_threshold = eval_threshold
         self.gamma = gamma
         self.n_workers = n_workers
 
@@ -50,12 +52,14 @@ class Trainer():
         self.target_agent_group = agent_group_config.get_agent_group()
         self.best_agent_group_params = self.eval_agent_group.get_agent_group_params()
         self.target_agent_group.set_agent_group_params(self.best_agent_group_params)  # Load the model parameters to eval agent group
+        self._cached_agent_group_params = self.best_agent_group_params
 
         # Critic
         self.eval_critic = critic_config.get_critic()
         self.target_critic = critic_config.get_critic()
         self.best_critic_params = deepcopy(self.eval_critic.state_dict())
         self.target_critic.load_state_dict(self.best_critic_params)
+        self._cached_critic_params = self.best_critic_params
 
         self.optimizer = critic_optimizer_config.get_optimizer(self.eval_critic.parameters())
 
@@ -140,11 +144,6 @@ class Trainer():
         self.target_critic.load_state_dict(critic_params)
         return self
 
-    def update_best_params(self):
-        self.best_agent_group_params = self.eval_agent_group.get_agent_group_params()
-        self.best_critic_params = deepcopy(self.eval_critic.state_dict())  # Update critic parameters
-        return self
-
     def evaluate(self):
         self.eval_agent_group.eval().to(self.eval_device)
         manager = self.rolloutmanager_config.create_eval_manager(self.eval_agent_group,
@@ -199,21 +198,26 @@ class Trainer():
             mean_reward, reward_std = self.evaluate()
             self.save_intermediate_results(epoch, loss, mean_reward, reward_std)
 
-            if mean_reward > best_mean_reward:
+            if mean_reward >= best_mean_reward:
                 best_mean_reward = mean_reward
                 best_reward_std = reward_std
                 best_loss = loss
-                self.update_best_params()
+                self.best_agent_group_params = self.eval_agent_group.get_agent_group_params()
+                self.best_critic_params = deepcopy(self.eval_critic.state_dict())
                 logging.info(f"Epoch {epoch}: New best mean reward {best_mean_reward}")
 
+            if mean_reward >= best_mean_reward * (1 - self.eval_threshold):
+                self._cached_agent_group_params = self.eval_agent_group.get_agent_group_params()
+                self._cached_critic_params = deepcopy(self.eval_critic.state_dict())
+                logging.info(f"Epoch {epoch}: Cached parameters updated with current parameters.")
+
             if mean_reward >= target_reward:
-                logging.info(f"Target reward reached: {mean_reward} >= {target_reward}")
+                logging.info(f"Epoch {epoch}: Target reward reached: {mean_reward} >= {target_reward}")
                 break
 
             if epoch % eval_interval == 0:
-                if mean_reward < best_mean_reward:
-                    self.eval_agent_group.set_agent_group_params(self.best_agent_group_params)
-                    self.eval_critic.load_state_dict(self.best_critic_params)
+                self.eval_agent_group.set_agent_group_params(self._cached_agent_group_params)
+                self.eval_critic.load_state_dict(self._cached_critic_params)
                 self.update_target_model_params()
                 logging.info(f"Epoch {epoch}: Target model updated with eval model params")
 

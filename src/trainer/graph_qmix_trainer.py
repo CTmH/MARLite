@@ -57,7 +57,9 @@ class GraphQMIXTrainer(Trainer):
                     q_val = q_val.squeeze(-1) # (B, N, 1) -> (B, N)
                     states = torch.Tensor(states).to(self.train_device)
                     self.eval_critic.train().to(self.train_device)
-                    q_tot = self.eval_critic(q_val, states)
+                    ret = self.eval_critic(q_val, states)
+                    q_tot = ret['q_tot']
+                    state_features = ret['state_features']
 
                     # Double Q-learning, we use eval agent group to choose actions,and use target critic to compute q_target
                     with torch.no_grad():
@@ -68,7 +70,8 @@ class GraphQMIXTrainer(Trainer):
                         q_val_next = q_val_next.max(dim=-1).values
                         next_states = torch.Tensor(next_states).to(self.train_device) # (B, T, F) -> (B, F) Take only the last state in the sequence
                         self.target_critic.eval().to(self.train_device)
-                        q_tot_next = self.target_critic(q_val_next, next_states)
+                        ret_next = self.target_critic(q_val_next, next_states)
+                        q_tot_next = ret_next['q_tot']
 
                     # Compute the TD target
                     rewards = torch.Tensor(rewards[:,:,-1]).to(self.train_device) # (B, N, T) -> (B, N)
