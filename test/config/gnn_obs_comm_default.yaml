@@ -1,5 +1,5 @@
 agent_group_config:
-  type: "MsgAggr"
+  type: "GNNObsComm"
   agent_list:
     predator_0: model1
     predator_1: model1
@@ -42,51 +42,44 @@ agent_group_config:
         - type: ELU
         - type: Conv2d
           in_channels: 8
-          out_channels: 4
+          out_channels: 1
           kernel_size: 3
           stride: 1
           padding: 0
         - type: BatchNorm2d
-          num_features: 4
+          num_features: 1
+        - type: ELU
         - type: Flatten
       encoder:
-        model_type: "CustomTimeSeq"
+        model_type: "Custom"
         layers:
-        - type: Permute
-          dims: [0, 2, 1]
-        - type: Conv1d
-          in_channels: 256
-          out_channels: 128
-          kernel_size: 3
-          stride: 2
-          padding: 0
-        - type: Flatten
         - type: Linear
-          in_features: 256
-          out_features: 256
+          in_features: 64
+          out_features: 64
+        - type: Flatten
         - type: ELU
       decoder:
         model_type: "Custom"
         layers:
-        - type: Linear
-          in_features: 512
-          out_features: 13
-  aggr_model_config:
-    model_type: "Custom"
-    layers:
-        - type: SelfAttention
-          embed_dim: 256
-          num_heads: 8
-          batch_first: true
-        - type: Permute
-          dims: [0, 2, 1]
-        - type: AdaptiveAvgPool1d
-          output_size: 1
-        - type: Flatten
-        - type: Linear
-          in_features: 256
-          out_features: 256
         - type: ELU
+        - type: Linear
+          in_features: 128
+          out_features: 13
+  graph_builder_config:
+    type: "PartialMagent"
+    binary_agent_id_dim: [5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+    agent_presence_dim: [1, 3] # Predator: 1, Prey: 3
+    comm_distance: 20
+    distance_metric: "cityblock"
+    n_workers: 20
+    n_subgraphs: 5
+    valid_node_list: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24]
+    update_interval: 5
+  graph_model_config:
+    model_type: "GAT"
+    input_dim: 64
+    hidden_dim: 64
+    output_dim: 64
   optimizer:
     type: "Adam"
     lr: 0.0002
@@ -197,10 +190,6 @@ critic_config:
       - type: AdaptiveAvgPool2d
         output_size: [2,2]
       - type: Flatten
-      - type: Linear
-        in_features: 256
-        out_features: 256
-      - type: ELU
   optimizer:
     type: "Adam"
     lr: 0.0002
@@ -212,18 +201,18 @@ rollout_config:
   n_workers: 2
   n_episodes: 10
   n_eval_episodes: 50
-  traj_len: 5
+  traj_len: 1
   episode_limit: 200
   device: "cpu"
 
 replaybuffer_config:
   type: "Prioritized"
   capacity: 2000
-  traj_len: 5
+  traj_len: 1
   priority_attr: "all_agents_sum_rewards"
 
 trainer_config:
-  type: "MsgAggr"
+  type: "GraphQMIX"
   gamma: 0.95
   eval_epsilon: 0.01
   workdir: "/home/ctmh/exp/partial_gnn_202506051030"

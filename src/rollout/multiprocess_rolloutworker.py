@@ -4,7 +4,7 @@ import logging
 from copy import deepcopy
 from ..environment.env_config import EnvConfig
 from ..algorithm.agents import AgentGroup
-from ..algorithm.agents.gnn_agent_group import GNNAgentGroup
+from ..algorithm.agents.graph_agent_group import GraphAgentGroup
 from ..algorithm.model import TimeSeqModel
 
 class MultiProcessRolloutWorker(mp.Process):
@@ -16,7 +16,7 @@ class MultiProcessRolloutWorker(mp.Process):
                  epsilon=0.5,
                  device='cpu'):
         super(MultiProcessRolloutWorker, self).__init__()
-        
+
         # 共享参数需要深拷贝
         self.env_config = deepcopy(env_config)
         self.agent_group = deepcopy(agent_group)
@@ -47,7 +47,7 @@ class MultiProcessRolloutWorker(mp.Process):
             'all_agents_sum_rewards': [],
             'episode_reward': 0,
             'win_tag': False,
-            'episode_length': 0, 
+            'episode_length': 0,
         }
 
         win_tag = False
@@ -66,7 +66,7 @@ class MultiProcessRolloutWorker(mp.Process):
                 episode['avail_actions'].append(avail_actions)
 
                 observations, rewards, terminations, truncations, infos = env.step(actions)
-                
+
                 episode['rewards'].append(rewards)
                 all_agents_rewards = [value for _, value in rewards.items()]
                 episode['all_agents_sum_rewards'].append(sum(all_agents_rewards))
@@ -89,11 +89,11 @@ class MultiProcessRolloutWorker(mp.Process):
                 agent_model_dict=agent_group.agent_model_dict,
                 models=agent_group.models,
                 rnn_traj_len=self.rnn_traj_len)
-            if isinstance(agent_group, GNNAgentGroup):
+            if isinstance(agent_group, GraphAgentGroup):
                 actions = agent_group.act(processed_obs, env.state(), avail_actions, self.epsilon)
             else:
                 actions = agent_group.act(processed_obs, avail_actions, self.epsilon)
-            
+
         episode['episode_length'] = len(episode['observations'])
         episode['episode_reward'] = episode_reward
         episode['win_tag'] = win_tag
@@ -116,7 +116,7 @@ def _obs_preprocess(observations: list, agent_model_dict: dict, models: dict, rn
                 else:
                     obs = [o[agent_id] for o in observations[-rnn_traj_len:]]
             else:
-                obs = observations[-1][agent_id]
+                obs = [observations[-1].get(agent_id)]
             processed_obs[agent_id] = np.array(obs)
         return processed_obs
 
@@ -129,7 +129,6 @@ def rollout(env_config: EnvConfig,
     env = env_config.create_env()
     agent_group = deepcopy(agent_group).reset().eval().to(device)
 
-    # 初始化 episode 字典
     episode = {
         'observations': [],
         'states': [],
@@ -182,7 +181,7 @@ def rollout(env_config: EnvConfig,
             models=agent_group.models,
             rnn_traj_len=rnn_traj_len
         )
-        if isinstance(agent_group, GNNAgentGroup):
+        if isinstance(agent_group, GraphAgentGroup):
             ret = agent_group.act(processed_obs, env.state(), avail_actions, epsilon)
         else:
             ret = agent_group.act(processed_obs, avail_actions, epsilon)

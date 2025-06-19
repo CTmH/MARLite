@@ -13,7 +13,7 @@ from .graph_agent_group import GraphAgentGroup
 from ..graph_builder import GraphBuilderConfig
 from src.util.optimizer_config import OptimizerConfig
 
-class GNNAgentGroup(GraphAgentGroup):
+class GNNObsCommAgentGroup(GraphAgentGroup):
     def __init__(self,
                 agent_model_dict: Dict[str, str],
                 feature_extractor_configs: Dict[str, ModelConfig],
@@ -72,6 +72,7 @@ class GNNAgentGroup(GraphAgentGroup):
 
         msg = torch.stack(msg).to(self.device) # (N, B, F)
         msg = msg.permute(1, 0, 2)  # (B, N, F)
+        local_obs = msg
 
         # Build Graph
         if edge_indices is None:  # If edge_indices are not provided
@@ -91,16 +92,18 @@ class GNNAgentGroup(GraphAgentGroup):
         hidden_states = torch.stack(hidden_states)
 
         q_val = [None for _ in range(len(self.agent_model_dict))]
+        emb_size = hidden_states.shape[-1] + local_obs.shape[-1]
         for model_name, dec in self.decoders.items():
             selected_agents = self.model_to_agents[model_name]
             idx = self.model_to_agent_indices[model_name]
             h = hidden_states[:,idx]
+            lo = local_obs[:,idx] # (B, N, F)
             h = torch.Tensor(h) # (B, N, Hidden Size)
             bs = h.shape[0]
             n_agents = len(selected_agents)
-            hidden_size = h.shape[-1]
-            h = h.reshape(bs*n_agents, hidden_size) # (B*N, Hidden Size)
-            q_selected = dec(h)
+            emb = torch.cat((h, lo), dim=-1)
+            emb = emb.reshape(bs*n_agents, emb_size) # (B*N, Hidden Size)
+            q_selected = dec(emb)
             q_selected = q_selected.reshape(bs, n_agents, -1) # (B, N, Action)
             q_selected = q_selected.permute(1, 0, 2)  # (N, B, Action)
 

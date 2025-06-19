@@ -5,7 +5,7 @@ import logging
 from copy import deepcopy
 from ..environment.env_config import EnvConfig
 from ..algorithm.agents import AgentGroup
-from ..algorithm.agents.gnn_agent_group import GNNAgentGroup
+from ..algorithm.agents.graph_agent_group import GraphAgentGroup
 from ..algorithm.model import TimeSeqModel
 
 class MultiThreadRolloutWorker(threading.Thread):
@@ -56,7 +56,7 @@ class MultiThreadRolloutWorker(threading.Thread):
             'all_agents_sum_rewards': [],
             'episode_reward': 0,
             'win_tag': False,
-            'episode_length': 0, 
+            'episode_length': 0,
         }
 
         win_tag = False
@@ -76,7 +76,7 @@ class MultiThreadRolloutWorker(threading.Thread):
                 episode['avail_actions'].append(avail_actions)
 
                 observations, rewards, terminations, truncations, infos = env.step(actions)
-                
+
                 episode['rewards'].append(rewards)
                 all_agents_rewards = [value for _, value in rewards.items()]
                 episode['all_agents_sum_rewards'].append(sum(all_agents_rewards))
@@ -95,13 +95,13 @@ class MultiThreadRolloutWorker(threading.Thread):
 
             avail_actions = {agent: env.action_space(agent) for agent in env.agents}
             processed_obs = self._obs_preprocess(episode['observations']+[observations])
-            if isinstance(agent_group, GNNAgentGroup):
+            if isinstance(agent_group, GraphAgentGroup):
                 ret = agent_group.act(processed_obs, env.state(), avail_actions, self.epsilon)
             else:
                 ret = agent_group.act(processed_obs, avail_actions, self.epsilon)
             actions = ret['actions']
             edge_indices = ret.get('edge_indices', None)
-            
+
         episode['episode_length'] = len(episode['observations'])
         episode['episode_reward'] = episode_reward
         episode['win_tag'] = win_tag
@@ -110,7 +110,7 @@ class MultiThreadRolloutWorker(threading.Thread):
         env.close()
 
         return episode
-    
+
     def _obs_preprocess(self, observations: list):
         agents = self.agent_group.agent_model_dict.keys()
         models = self.agent_group.models
@@ -126,6 +126,6 @@ class MultiThreadRolloutWorker(threading.Thread):
                 else:
                     obs = [o[agent_id] for o in observations[-self.rnn_traj_len:]]
             else:
-                obs = observations[-1][agent_id]
+                obs = [observations[-1].get(agent_id)]
             processed_obs[agent_id] = np.array(obs)
         return processed_obs

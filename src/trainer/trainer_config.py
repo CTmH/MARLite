@@ -38,7 +38,7 @@ class TrainerConfig:
         self.registered_trainers = {
             'QMIX': QMIXTrainer,
             'GraphQMIX': GraphQMIXTrainer,
-            'MessageAggregator': MsgAggrQMIXTrainer,
+            'MsgAggr': MsgAggrQMIXTrainer,
         }
 
     def create_trainer(self) -> Trainer:

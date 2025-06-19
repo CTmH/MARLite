@@ -2,9 +2,9 @@ import torch
 import torch.nn as nn
 
 class Permute(nn.Module):
-    def __init__(self, order):
+    def __init__(self, dims):
         super(Permute, self).__init__()
-        self.order = order
+        self.order = dims
 
     def forward(self, x: torch.Tensor):
         # Check if in DataParallel
