@@ -33,6 +33,7 @@ class PITLoss(_Loss):
         Returns:
             torch.Tensor: PIT loss value
         """
+        # PyTorch automatically handles device consistency for registered buffers
         # 1. Update variance estimate using exponential moving average (EMA)
         with torch.no_grad():
             if self.training:
@@ -54,7 +55,9 @@ class PITLoss(_Loss):
         normalized_losses = losses / std
 
         # 3. Calculate CDF values (standard normal distribution)
-        cdf_values = 0.5 * (1 + torch.erf(normalized_losses / torch.sqrt(torch.tensor(2.0))))
+        # Create constant tensor on same device as losses
+        sqrt2 = torch.sqrt(torch.tensor(2.0, device=losses.device))
+        cdf_values = 0.5 * (1 + torch.erf(normalized_losses / sqrt2))
 
         # 4. Calculate the base PIT loss
         pit_loss = (cdf_values - 0.5) ** 2

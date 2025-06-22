@@ -85,6 +85,7 @@ class MsgAggrQMIXTrainer(Trainer):
                     negatives = aggregated_msg[indices]
                     msg_aggr_loss = self.triplet_loss(state_features, aggregated_msg, negatives)
 
+                    self.pit_loss.to(self.train_device)
                     critic_loss = self.pit_loss(torch.stack([td_error, msg_aggr_loss]))
                     if self.use_data_parallel:
                         critic_loss = torch.mean(critic_loss) # Reduce across all GPUs

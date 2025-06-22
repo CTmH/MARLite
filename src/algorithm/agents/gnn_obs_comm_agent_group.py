@@ -1,10 +1,6 @@
 import numpy as np
 import torch
-import os
-from torch.optim import Optimizer
-from copy import deepcopy
 from typing import Dict, Tuple, Type, List, Any
-from torch.nn import DataParallel
 from torch_geometric.data import Batch, Data
 from torch_geometric.utils import unbatch
 from ..model.model_config import ModelConfig

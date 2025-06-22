@@ -1,5 +1,3 @@
-import torch
-import numpy as np
 from copy import deepcopy
 from ..algorithm.agents.agent_group_config import AgentGroupConfig
 from ..algorithm.critic.critic_config import CriticConfig
