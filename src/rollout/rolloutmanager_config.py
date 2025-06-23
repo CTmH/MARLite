@@ -17,11 +17,11 @@ class RolloutManagerConfig:
         self.n_eval_episodes = self.config.pop('n_eval_episodes', 100)
         self.registered_managers = {
             "multi-thread": MultiThreadRolloutManager,
-            "multi-process": MultiProcessRolloutManager, # DO NOT USE, sitll need to debug
+            "multi-process": MultiProcessRolloutManager,
         }
         self.registered_workers = {
             "multi-thread": MultiThreadRolloutWorker,
-            "multi-process": MultiProcessRolloutWorker, # DO NOT USE, sitll need to debug
+            "multi-process": MultiProcessRolloutWorker,
         }
         self.manager_class = self.registered_managers[self.manager_type]
         self.worker_class = self.registered_workers[self.worker_type]
@@ -35,7 +35,7 @@ class RolloutManagerConfig:
             epsilon = epsilon,
             **self.config)
         return manager
-    
+
     def create_eval_manager(self, agent_group: AgentGroup, env_config: EnvConfig, epsilon: float) -> RolloutManager:
         manager = self.manager_class(
             worker_class = self.worker_class,

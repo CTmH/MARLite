@@ -10,8 +10,7 @@ class Analyzer:
                  workdir: str,
                  env_config: EnvConfig,
                  agent_group_config: AgentGroupConfig,
-                 rolloutmanager_config: RolloutManagerConfig,
-                 device: str = 'cpu'):
+                 rolloutmanager_config: RolloutManagerConfig):
         """
         Analyzer class to load the best model and analyze various features of the model
 
@@ -20,13 +19,11 @@ class Analyzer:
             env_config: Environment configuration
             agent_group_config: Agent group configuration
             rolloutmanager_config: Rollout manager configuration
-            device: Device to run on (cpu/cuda)
         """
         self.workdir = workdir
         self.env_config = env_config
         self.agent_group_config = agent_group_config
         self.rolloutmanager_config = rolloutmanager_config
-        self.device = device
 
         # Directory paths
         self.checkpointdir = os.path.join(workdir, 'checkpoints')
@@ -45,11 +42,10 @@ class Analyzer:
     def load_best_model(self):
         """Load the best model parameters from the work directory"""
         agent_path = os.path.join(self.checkpointdir, 'best', 'agent')
-        self.agent_group.to(self.device)
         self.agent_group.load_params(agent_path)
         logging.info(f"Successfully loaded best model parameters: {agent_path}")
 
-    def generate_episodes(self, num_episodes: int = 10, epsilon: float = 0.01):
+    def generate_episodes(self, epsilon: float = 0.01):
         """
         Generate multiple episodes using the best model
 
@@ -60,15 +56,14 @@ class Analyzer:
         Returns:
             List of generated episodes
         """
-        self.agent_group.eval().to(self.device)
         manager = self.rolloutmanager_config.create_eval_manager(
             self.agent_group,
             self.env_config,
-            epsilon
+            epsilon,
         )
 
-        logging.info(f"Generating {num_episodes} episodes using the best model...")
-        episodes = manager.generate_episodes(num_episodes)
+        logging.info(f"Generating {manager.n_episodes} episodes using the best model...")
+        episodes = manager.generate_episodes()
         manager.cleanup()
 
         return episodes
@@ -90,6 +85,8 @@ class Analyzer:
                     if agent_id not in decision_stats:
                         decision_stats[agent_id] = {}
                     decision_stats[agent_id][action] = decision_stats[agent_id].get(action, 0) + 1
+
+        decision_stats = {agent_id: decision_stats[agent_id] for agent_id, _ in self.agent_group.agent_model_dict.items()}
 
         for agent_id, actions in decision_stats.items():
             total = sum(actions.values())
@@ -115,7 +112,6 @@ class Analyzer:
             'min': float(np.min(rewards)),
             'max': float(np.max(rewards)),
             'median': float(np.median(rewards)),
-            'sum': float(np.sum(rewards))
         }
 
     def analyze_edge_counts(self, episodes):
@@ -146,7 +142,6 @@ class Analyzer:
             'min': float(np.min(edge_counts)),
             'max': float(np.max(edge_counts)),
             'median': float(np.median(edge_counts)),
-            'sum': float(np.sum(edge_counts))
         }
 
     def analyze_positive_rewards_per_step(self, episodes):
@@ -175,7 +170,6 @@ class Analyzer:
             'min': float(np.min(data)),
             'max': float(np.max(data)),
             'median': float(np.median(data)),
-            'sum': float(np.sum(data)),
             'total_steps': len(step_counts)
         }
 
@@ -205,7 +199,6 @@ class Analyzer:
             'min': float(np.min(data)),
             'max': float(np.max(data)),
             'median': float(np.median(data)),
-            'sum': float(np.sum(data)),
             'total_steps': len(step_counts)
         }
 
@@ -227,6 +220,7 @@ class Analyzer:
                         if agent_id not in positive_counts:
                             positive_counts[agent_id] = 0
                         positive_counts[agent_id] += 1
+        positive_counts = {agent_id: positive_counts.get(agent_id, 0) for agent_id, _ in self.agent_group.agent_model_dict.items()}
         return positive_counts
 
     def analyze_negative_rewards(self, episodes):
@@ -247,9 +241,10 @@ class Analyzer:
                         if agent_id not in negative_counts:
                             negative_counts[agent_id] = 0
                         negative_counts[agent_id] += 1
+        negative_counts = {agent_id: negative_counts.get(agent_id, 0) for agent_id, _ in self.agent_group.agent_model_dict.items()}
         return negative_counts
 
-    def comprehensive_analysis(self, num_episodes: int = 100, epsilon: float = 0.01):
+    def comprehensive_analysis(self, epsilon: float = 0.01):
         """
         Perform a comprehensive analysis and return all results
 
@@ -260,11 +255,10 @@ class Analyzer:
         Returns:
             Dictionary containing all analysis results
         """
-        episodes = self.generate_episodes(num_episodes, epsilon)
+        episodes = self.generate_episodes(epsilon)
 
         return {
             'decision_distribution': self.analyze_decision_distribution(episodes),
-            'state_values': self.analyze_state_values(episodes),
             'reward_distribution': self.analyze_reward_distribution(episodes),
             'edge_counts': self.analyze_edge_counts(episodes),
             'positive_rewards_per_step': self.analyze_positive_rewards_per_step(episodes),
