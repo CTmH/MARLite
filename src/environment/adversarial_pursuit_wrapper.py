@@ -42,7 +42,7 @@ class AdversarialPursuitPredator(ParallelEnvWrapper):
         self.opponent_observations = {agent: observations[agent] for agent in self.opponent_agents}
         self.opponent_observation_history.append(self.opponent_observations)
 
-        agent_observations = {agent: observations[agent] for agent in self.agents}
+        agent_observations = {agent: observations[agent].astype(np.int8) for agent in self.agents}
         agent_rewards = {agent: rewards[agent] for agent in self.agents}
         agent_terminations = {agent: terminations[agent] for agent in self.agents}
         agent_truncations = {agent: truncations[agent] for agent in self.agents}
@@ -56,9 +56,12 @@ class AdversarialPursuitPredator(ParallelEnvWrapper):
         self.opponent_observations = {agent: observations[agent] for agent in self.opponent_agents}
         self.opponent_observation_history.clear()
         self.opponent_observation_history.append(self.opponent_observations)
-        agent_observations = {agent: observations[agent] for agent in self.agents}
+        agent_observations = {agent: observations[agent].astype(np.int8) for agent in self.agents}
         agent_info = {agent: None for agent in self.agents} # For compatibility with other environments
         return agent_observations, agent_info
+
+    def state(self):
+        return self.env.state().astype(np.int8)
 
     def _filter_observations(self, observations):
         # Filter out extra features
@@ -103,7 +106,7 @@ class AdversarialPursuitPrey(ParallelEnvWrapper):
         self.opponent_observations = {agent: observations[agent] for agent in self.opponent_agents}
         self.opponent_observation_history.append(self.opponent_observations)
 
-        agent_observations = {agent: observations[agent] for agent in self.agents}
+        agent_observations = {agent: observations[agent].astype(np.int8) for agent in self.agents}
         agent_rewards = {agent: rewards[agent] for agent in self.agents}
         agent_terminations = {agent: terminations[agent] for agent in self.agents}
         agent_truncations = {agent: truncations[agent] for agent in self.agents}
@@ -117,9 +120,12 @@ class AdversarialPursuitPrey(ParallelEnvWrapper):
         self.opponent_observations = {agent: observations[agent] for agent in self.opponent_agents}
         self.opponent_observation_history.clear()
         self.opponent_observation_history.append(self.opponent_observations)
-        agent_observations = {agent: observations[agent] for agent in self.agents}
+        agent_observations = {agent: observations[agent].astype(np.int8) for agent in self.agents}
         agent_info = {agent: None for agent in self.agents}  # For compatibility with other environments
         return agent_observations, agent_info
+
+    def state(self):
+        return self.env.state().astype(np.int8)
 
     def _filter_observations(self, observations):
         # Filter out extra features

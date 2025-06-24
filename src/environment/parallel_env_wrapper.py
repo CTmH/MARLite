@@ -1,3 +1,4 @@
+import numpy as np
 from pettingzoo.utils.env import ParallelEnv
 from ..algorithm.agents.agent_group_config import AgentGroupConfig
 
@@ -14,18 +15,18 @@ class ParallelEnvWrapper:
 
     def reset(self):
         raise NotImplementedError
-    
-    def render(self):
-        return self.env.render()
-    
+
+    def state(self):
+        return NotImplementedError
+
+    def render(self, *args, **kwargs):
+        return self.env.render(*args, **kwargs)
+
     def close(self):
         return self.env.close()
-    
-    def state(self):
-        return self.env.state()
-    
+
     def observation_space(self, agent):
         return self.env.observation_space(agent)
-    
+
     def action_space(self, agent):
         return self.env.action_space(agent)
