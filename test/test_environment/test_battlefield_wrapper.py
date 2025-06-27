@@ -6,7 +6,7 @@ from src.environment.battlefield_wrapper import BattleFieldWrapper
 from src.algorithm.agents.random_agent_group import RandomAgentGroup
 
 class TestBattleFieldWrapper(unittest.TestCase):
-    
+
     def setUp(self):
         opponent_agents = {f'blue_{i}':'random' for i in range(50)}
         self.opponent_agents_with_model = {agent: 'model1' for agent in opponent_agents}
@@ -21,7 +21,7 @@ class TestBattleFieldWrapper(unittest.TestCase):
         self.wrapper = BattleFieldWrapper(**kwargs)
         self.n_agent = 12
         self.n_oppo = 12
-        
+
     def test_init(self):
         self.assertEqual(len(self.wrapper.agents), self.n_agent)
         self.assertEqual(self.wrapper.num_agents, self.n_agent)
@@ -45,13 +45,13 @@ class TestBattleFieldWrapper(unittest.TestCase):
 
     def test_render(self):
         self.wrapper.render()
-        
+
     def test_close(self):
         self.wrapper.close()
 
     def test_state(self):
         state = self.wrapper.state()
-        self.assertTrue(np.array_equal(state, self.wrapper.env.state()))
+        self.assertTrue(np.array_equal(state.astype(np.float32), self.wrapper.env.state().astype(np.float32)))
 
     def test_observation_space(self):
         agent = 'red_0'

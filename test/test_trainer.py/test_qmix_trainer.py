@@ -49,7 +49,7 @@ class TestQMixTrainer(unittest.TestCase):
             for w1, w2 in zip(critic_params.values(), origin_critic_params.values()):
                 self.assertFalse(torch.equal(w1, w2))
 
-    def test_save_load_model(self):
+    def test_save_load_checkpoint(self):
         checkpoint = 'test_checkpoint'
         with tempfile.TemporaryDirectory() as temp_dir:
             self.trainer = self.trainer_config.create_trainer()
@@ -57,10 +57,10 @@ class TestQMixTrainer(unittest.TestCase):
             self.trainer.logdir = os.path.join(self.trainer.workdir, 'logs')
             self.trainer.checkpointdir = os.path.join(self.trainer.workdir, 'checkpoints')
             self.trainer.save_current_model(checkpoint)
-            self.trainer.load_model(checkpoint)
+            self.trainer.load_checkpoint(checkpoint)
 
     def test_train(self):
-        pygame.font.init() 
+        pygame.font.init()
         with tempfile.TemporaryDirectory() as temp_dir:
             self.trainer = self.trainer_config.create_trainer()
             self.trainer.workdir = temp_dir

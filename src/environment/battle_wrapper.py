@@ -1,3 +1,4 @@
+import numpy as np
 from magent2.environments import battle_v4
 from collections import deque
 from .parallel_env_wrapper import ParallelEnvWrapper
@@ -51,3 +52,6 @@ class BattleWrapper(ParallelEnvWrapper):
         agent_observations = {agent: observations[agent] for agent in self.agents}
         agent_info = {agent: None for agent in self.agents} # For compatibility with other environments
         return agent_observations, agent_info
+
+    def state(self):
+        return self.env.state().astype(np.int8)

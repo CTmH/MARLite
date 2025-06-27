@@ -1,4 +1,5 @@
 from copy import deepcopy
+import numpy as np
 from ..algorithm.agents.agent_group_config import AgentGroupConfig
 from ..algorithm.critic.critic_config import CriticConfig
 from ..environment.env_config import EnvConfig
@@ -31,6 +32,7 @@ class TrainerConfig:
         self.trainer_type = self.trainer_config.pop('type')
         self.train_args = self.trainer_config.pop('train_args')
         self.checkpoint = self.trainer_config.pop('checkpoint', None)
+        self.checkpoint_mean_reward = self.trainer_config.pop('checkpoint_mean_reward', -np.inf)
         self.trainer = None
 
         self.registered_trainers = {
@@ -54,7 +56,8 @@ class TrainerConfig:
                 **self.trainer_config
             )
             if self.checkpoint:
-                self.trainer.load_model(self.checkpoint)
+                self.trainer.load_checkpoint(checkpoint=self.checkpoint,
+                                             checkpoint_mean_reward=self.checkpoint_mean_reward)
         else:
             raise ValueError(f"Unsupported algorithm: {self.trainer_type}")
         return self.trainer

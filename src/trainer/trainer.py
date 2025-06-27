@@ -86,6 +86,10 @@ class Trainer():
             self.use_data_parallel = False
         self.eval_device = eval_device
 
+        # Metrics
+        self.best_mean_reward = -np.inf
+        self.best_reward_std = np.inf
+
     def learn(self, sample_size, batch_size: int, times: int):
         raise NotImplementedError
 
@@ -102,13 +106,19 @@ class Trainer():
         torch.save(critic_params, os.path.join(critic_path, "critic.pth"))
         return self
 
-    def load_model(self, checkpoint: str):
+    def load_checkpoint(self, checkpoint: str, checkpoint_mean_reward = -np.inf, checkpoint_reward_std = np.inf):
+        self.best_mean_reward = checkpoint_mean_reward
+        self.best_reward_std = checkpoint_reward_std
         agent_path = os.path.join(self.checkpointdir, checkpoint, "agent")
         self.eval_agent_group.to("cpu")
         self.eval_critic.to("cpu")
         self.eval_agent_group.load_params(agent_path)
         critic_path = os.path.join(self.checkpointdir, checkpoint, "critic", "critic.pth")
         self.eval_critic.load_state_dict(torch.load(critic_path, weights_only=True))
+        self.best_agent_group_params = self.eval_agent_group.get_agent_group_params()
+        self.best_critic_params = deepcopy(self.eval_critic.state_dict())
+        self._cached_agent_group_params = self.eval_agent_group.get_agent_group_params()
+        self._cached_critic_params = deepcopy(self.eval_critic.state_dict())
         self.update_target_model_params()
         return self
 
@@ -171,10 +181,8 @@ class Trainer():
         return mean_reward, std_reward
 
     def train(self, epochs, target_reward, eval_interval=1, batch_size=64, learning_times_per_epoch=1):
-        best_mean_reward = -np.inf
-        best_reward_std = np.inf
-        best_loss = np.inf
 
+        best_loss = np.inf
         # Training loop
         for epoch in range(epochs):
 
@@ -198,15 +206,15 @@ class Trainer():
             mean_reward, reward_std = self.evaluate()
             self.save_intermediate_results(epoch, loss, mean_reward, reward_std)
 
-            if mean_reward >= best_mean_reward:
-                best_mean_reward = mean_reward
-                best_reward_std = reward_std
+            if mean_reward >= self.best_mean_reward:
+                self.best_mean_reward = mean_reward
+                self.best_reward_std = reward_std
                 best_loss = loss
                 self.best_agent_group_params = self.eval_agent_group.get_agent_group_params()
                 self.best_critic_params = deepcopy(self.eval_critic.state_dict())
-                logging.info(f"Epoch {epoch}: New best mean reward {best_mean_reward}")
+                logging.info(f"Epoch {epoch}: New best mean reward {self.best_mean_reward}")
 
-            if mean_reward >= best_mean_reward * (1 - self.eval_threshold):
+            if mean_reward >= self.best_mean_reward * (1 - self.eval_threshold):
                 self._cached_agent_group_params = self.eval_agent_group.get_agent_group_params()
                 self._cached_critic_params = deepcopy(self.eval_critic.state_dict())
                 logging.info(f"Epoch {epoch}: Cached parameters updated with current parameters.")
@@ -218,13 +226,14 @@ class Trainer():
             if epoch % eval_interval == 0:
                 self.eval_agent_group.set_agent_group_params(self._cached_agent_group_params)
                 self.eval_critic.load_state_dict(self._cached_critic_params)
+                logging.info(f"Epoch {epoch}: Eval model updated with cached parameters.")
                 self.update_target_model_params()
-                logging.info(f"Epoch {epoch}: Target model updated with eval model params")
+                logging.info(f"Epoch {epoch}: Target model updated with eval model parameters.")
 
-        self.save_intermediate_results('best', best_loss, best_mean_reward, best_reward_std)
+        self.save_intermediate_results('best', best_loss, self.best_mean_reward, self.best_reward_std)
         self.save_results_to_csv()
         self.save_best_model()
-        return best_mean_reward, best_reward_std
+        return self.best_mean_reward, self.best_reward_std
 
     def save_intermediate_results(self, epoch, loss, mean_reward, reward_std):
         self.results[epoch] = {
