@@ -173,33 +173,35 @@ class Analyzer:
             'total_steps': len(step_counts)
         }
 
-    def analyze_negative_rewards_per_step(self, episodes):
+    def analyze_negative_rewards_per_episode(self, episodes):
         """
-        Analyze negative reward occurrences per step across all episodes
+        Analyze total negative reward occurrences per episode across all episodes
 
         Parameters:
             episodes: List of episodes to analyze
 
         Returns:
-            Dictionary with statistics of negative reward counts per step
+            Dictionary with statistics of total negative reward counts per episode
         """
-        step_counts = []
+        episode_counts = []
         for episode in episodes:
+            episode_count = 0
             for step_rewards in episode['rewards']:
                 count = sum(1 for reward in step_rewards.values() if reward < 0)
-                step_counts.append(count)
+                episode_count += count
+            episode_counts.append(episode_count)
 
-        if not step_counts:
+        if not episode_counts:
             return None
 
-        data = np.array(step_counts)
+        data = np.array(episode_counts)
         return {
             'mean': float(np.mean(data)),
             'std': float(np.std(data)),
             'min': float(np.min(data)),
             'max': float(np.max(data)),
             'median': float(np.median(data)),
-            'total_steps': len(step_counts)
+            'total_episodes': len(episode_counts)
         }
 
     def analyze_positive_rewards(self, episodes):
@@ -262,7 +264,7 @@ class Analyzer:
             'reward_distribution': self.analyze_reward_distribution(episodes),
             'edge_counts': self.analyze_edge_counts(episodes),
             'positive_rewards_per_step': self.analyze_positive_rewards_per_step(episodes),
-            'negative_rewards_per_step': self.analyze_negative_rewards_per_step(episodes),
+            'negative_rewards_per_episode': self.analyze_negative_rewards_per_episode(episodes),
             'positive_rewards': self.analyze_positive_rewards(episodes),
             'negative_rewards': self.analyze_negative_rewards(episodes),
         }
