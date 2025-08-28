@@ -1,7 +1,7 @@
 import unittest
 import yaml
 from src.rollout.multiprocess_rolloutmanager import MultiProcessRolloutManager
-from src.rollout.multiprocess_rolloutworker import MultiProcessRolloutWorker
+from src.rollout.rollout_func import multiprocess_rollout
 from src.environment.env_config import EnvConfig
 from src.algorithm.agents.agent_group_config import AgentGroupConfig
 import torch.nn as nn
@@ -57,7 +57,7 @@ class TestRolloutManager(unittest.TestCase):
         self.episode_limit = 7
         self.n_workers = 2
         self.agent_group = self.agent_group_config.get_agent_group()
-        self.manager = MultiProcessRolloutManager(worker_class=MultiProcessRolloutWorker,
+        self.manager = MultiProcessRolloutManager(worker_func=multiprocess_rollout,
                                                   env_config=self.env_config,
                                                   agent_group=self.agent_group,
                                                   n_workers=self.n_workers,

@@ -39,7 +39,7 @@ agent_group_config:
           kernel_size: 1
           stride: 1
           padding: 0
-        - type: ELU
+        - type: LeakyReLU
         - type: Conv2d
           in_channels: 8
           out_channels: 1
@@ -48,7 +48,7 @@ agent_group_config:
           padding: 0
         - type: BatchNorm2d
           num_features: 1
-        - type: ELU
+        - type: LeakyReLU
         - type: Flatten
       encoder:
         model_type: "CustomTimeSeq"
@@ -62,11 +62,11 @@ agent_group_config:
           stride: 2
           padding: 0
         - type: Flatten
-        - type: ELU
+        - type: LeakyReLU
       decoder:
         model_type: "Custom"
         layers:
-        - type: ELU
+        - type: LeakyReLU
         - type: Linear
           in_features: 64
           out_features: 13
@@ -203,7 +203,7 @@ critic_config:
 rollout_config:
   manager_type: "multi-process"
   worker_type: "multi-process"
-  n_workers: 2
+  n_workers: 8
   n_episodes: 10
   n_eval_episodes: 50
   traj_len: 5

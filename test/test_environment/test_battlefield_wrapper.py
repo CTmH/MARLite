@@ -34,7 +34,6 @@ class TestBattleFieldWrapper(unittest.TestCase):
         self.assertEqual(len(info), self.n_agent)
 
     def test_step(self):
-        key = 'predator_0'
         actions = {agent: action_space.sample() for agent, action_space in self.wrapper.action_spaces.items()}
         observations, rewards, terminations, truncations, infos = self.wrapper.step(actions)
         self.assertEqual(len(observations), self.n_agent)

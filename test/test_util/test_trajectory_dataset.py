@@ -3,10 +3,10 @@ import numpy as np
 import multiprocessing as mp
 
 from src.replaybuffer.normal_replaybuffer import NormalReplayBuffer
-from src.util.trajectory_dataset import TrajectoryDataset, TrajectoryDataLoader
+from src.util.trajectory_dataset import TrajectoryDataLoader
 from src.algorithm.agents import QMIXAgentGroup
 from src.algorithm.model import ModelConfig
-from src.rollout.multithread_rolloutworker import MultiThreadRolloutWorker
+from src.rollout.rollout_func import multiprocess_rollout
 from src.environment.env_config import EnvConfig
 from src.util.optimizer_config import OptimizerConfig
 
@@ -68,17 +68,13 @@ class TestTrajectoryDataset(unittest.TestCase):
         self.episode_limit=10
         self.epsilon=0.5
         self.n_episodes = 5
-        self.episode_queue = mp.Queue()
-        self.worker = MultiThreadRolloutWorker(env_config=self.env_config,
+        self.buffer = NormalReplayBuffer(capacity=self.capacity, traj_len=self.traj_len)
+        episode = episode = multiprocess_rollout(env_config=self.env_config,
                                     agent_group=self.agent_group,
-                                    episode_queue=self.episode_queue,
-                                    n_episodes=self.n_episodes,
                                     rnn_traj_len=self.traj_len,
                                     episode_limit=self.episode_limit,
                                     epsilon=0.9,
                                     device='cpu')
-        self.buffer = NormalReplayBuffer(capacity=self.capacity, traj_len=self.traj_len)
-        episode = self.worker.rollout()
         self.buffer.add_episode(episode)
         self.dataset = self.buffer.sample(10)
 
@@ -153,17 +149,13 @@ class TestTrajectoryDataloader(unittest.TestCase):
         self.episode_limit=10
         self.epsilon=0.5
         self.n_episodes = 5
-        self.episode_queue = mp.Queue()
-        self.worker = MultiThreadRolloutWorker(env_config=self.env_config,
+        self.buffer = NormalReplayBuffer(capacity=self.capacity, traj_len=self.traj_len)
+        episode = episode = multiprocess_rollout(env_config=self.env_config,
                                     agent_group=self.agent_group,
-                                    episode_queue=self.episode_queue,
-                                    n_episodes=self.n_episodes,
                                     rnn_traj_len=self.traj_len,
                                     episode_limit=self.episode_limit,
                                     epsilon=0.9,
                                     device='cpu')
-        self.buffer = NormalReplayBuffer(capacity=self.capacity, traj_len=self.traj_len)
-        episode = self.worker.rollout()
         self.buffer.add_episode(episode)
         self.dataset = self.buffer.sample(10)
         self.dataloader = TrajectoryDataLoader(dataset=self.dataset, batch_size=3, shuffle=True)

@@ -202,9 +202,9 @@ critic_config:
     weight_decay: 0.0001
 
 rollout_config:
-  manager_type: "multi-thread"
-  worker_type: "multi-thread"
-  n_workers: 1
+  manager_type: "multi-process"
+  worker_type: "multi-process"
+  n_workers: 8
   n_episodes: 100
   n_eval_episodes: 20
   traj_len: 5

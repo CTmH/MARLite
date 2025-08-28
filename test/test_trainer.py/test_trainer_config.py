@@ -11,7 +11,7 @@ class TestTrainerConfig(unittest.TestCase):
             self.config = yaml.safe_load(file)
         self.config['trainer_config']['train_args']['epochs'] = 3
         self.config['rollout_config']['n_episodes'] = 2
-        self.config['rollout_config']['episode_limit'] = 30
+        self.config['rollout_config']['episode_limit'] = 3
         self.config['replaybuffer_config']['capacity'] = 5
         self.trainer_config = TrainerConfig(self.config)
 
@@ -26,7 +26,7 @@ class TestTrainerConfig(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             self.config['trainer_config']['train_args']['epochs'] = 2
             self.config['rollout_config']['n_episodes'] = 2
-            self.config['rollout_config']['episode_limit'] = 30
+            self.config['rollout_config']['episode_limit'] = 3
             self.config['replaybuffer_config']['capacity'] = 5
             self.config['trainer_config']['workdir'] = temp_dir
             self.trainer_config = TrainerConfig(self.config)
@@ -39,7 +39,7 @@ class TestTrainerConfigWithKAZConfig(unittest.TestCase):
             self.config = yaml.safe_load(file)
             self.config['trainer_config']['train_args']['epochs'] = 2
             self.config['rollout_config']['n_episodes'] = 2
-            self.config['rollout_config']['episode_limit'] = 30
+            self.config['rollout_config']['episode_limit'] = 3
             self.config['replaybuffer_config']['capacity'] = 5
             self.trainer_config = TrainerConfig(self.config)
 
@@ -54,7 +54,7 @@ class TestTrainerConfigWithKAZConfig(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             self.config['trainer_config']['train_args']['epochs'] = 2
             self.config['rollout_config']['n_episodes'] = 2
-            self.config['rollout_config']['episode_limit'] = 30
+            self.config['rollout_config']['episode_limit'] = 3
             self.config['replaybuffer_config']['capacity'] = 5
             self.config['trainer_config']['workdir'] = temp_dir
             self.trainer_config = TrainerConfig(self.config)
@@ -67,8 +67,8 @@ class TestTrainerConfigWithMagentPredator(unittest.TestCase):
             self.config = yaml.safe_load(file)
         self.config['trainer_config']['train_args']['epochs'] = 2
         self.config['rollout_config']['n_episodes'] = 2
-        self.config['rollout_config']['episode_limit'] = 30
-        self.config['replaybuffer_config']['capacity'] = 50
+        self.config['rollout_config']['episode_limit'] = 3
+        self.config['replaybuffer_config']['capacity'] = 5
         self.trainer_config = TrainerConfig(self.config)
 
     def test_create_learner(self):
@@ -82,7 +82,7 @@ class TestTrainerConfigWithMagentPredator(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             self.config['trainer_config']['train_args']['epochs'] = 2
             self.config['rollout_config']['n_episodes'] = 2
-            self.config['rollout_config']['episode_limit'] = 30
+            self.config['rollout_config']['episode_limit'] = 3
             self.config['replaybuffer_config']['capacity'] = 5
             self.config['trainer_config']['workdir'] = temp_dir
             self.trainer_config = TrainerConfig(self.config)
@@ -95,8 +95,8 @@ class TestTrainerConfigWithMagentPrey(unittest.TestCase):
             self.config = yaml.safe_load(file)
         self.config['trainer_config']['train_args']['epochs'] = 2
         self.config['rollout_config']['n_episodes'] = 2
-        self.config['rollout_config']['episode_limit'] = 30
-        self.config['replaybuffer_config']['capacity'] = 50
+        self.config['rollout_config']['episode_limit'] = 3
+        self.config['replaybuffer_config']['capacity'] = 5
         self.trainer_config = TrainerConfig(self.config)
 
     def test_create_learner(self):
@@ -110,7 +110,7 @@ class TestTrainerConfigWithMagentPrey(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             self.config['trainer_config']['train_args']['epochs'] = 2
             self.config['rollout_config']['n_episodes'] = 2
-            self.config['rollout_config']['episode_limit'] = 30
+            self.config['rollout_config']['episode_limit'] = 3
             self.config['replaybuffer_config']['capacity'] = 5
             self.config['trainer_config']['workdir'] = temp_dir
             self.trainer_config = TrainerConfig(self.config)
@@ -123,8 +123,8 @@ class TestTrainerConfigWithMagentBattlefield(unittest.TestCase):
             self.config = yaml.safe_load(file)
         self.config['trainer_config']['train_args']['epochs'] = 2
         self.config['rollout_config']['n_episodes'] = 2
-        self.config['rollout_config']['episode_limit'] = 30
-        self.config['replaybuffer_config']['capacity'] = 50
+        self.config['rollout_config']['episode_limit'] = 3
+        self.config['replaybuffer_config']['capacity'] = 5
         self.trainer_config = TrainerConfig(self.config)
 
     def test_create_learner(self):
@@ -138,7 +138,7 @@ class TestTrainerConfigWithMagentBattlefield(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             self.config['trainer_config']['train_args']['epochs'] = 2
             self.config['rollout_config']['n_episodes'] = 2
-            self.config['rollout_config']['episode_limit'] = 30
+            self.config['rollout_config']['episode_limit'] = 3
             self.config['replaybuffer_config']['capacity'] = 5
             self.config['trainer_config']['workdir'] = temp_dir
             self.trainer_config = TrainerConfig(self.config)

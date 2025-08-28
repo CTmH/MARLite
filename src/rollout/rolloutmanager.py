@@ -1,15 +1,12 @@
 import multiprocessing as mp
 import queue
-from typing import List, Any, Type
-from ..algorithm.agents.agent_group import AgentGroup
+from typing import List, Any, Callable
 from ..environment.env_config import EnvConfig
-from .multiprocess_rolloutworker import MultiProcessRolloutWorker
-from .multithread_rolloutworker import MultiThreadRolloutWorker
 from ..algorithm.agents.agent_group_config import AgentGroupConfig
 
 class RolloutManager:
     def __init__(self,
-                 worker_class: Type[MultiProcessRolloutWorker | MultiThreadRolloutWorker],
+                 worker_func: Callable,
                  env_config: EnvConfig,
                  agent_group_config: AgentGroupConfig,
                  agent_model_params,
@@ -21,7 +18,7 @@ class RolloutManager:
                  epsilon: float,
                  device: str):
 
-        self.worker_class = worker_class
+        self.worker_func = worker_func
         self.env_config = env_config
         self.agent_group_config = agent_group_config
         self.agent_model_params = agent_model_params
@@ -33,7 +30,7 @@ class RolloutManager:
         self.epsilon = epsilon
         self.device = device
 
-        self.workers: List[MultiProcessRolloutWorker | MultiThreadRolloutWorker] = []
+        self.workers = []
         self.episode_queue: mp.Queue | queue.Queue = None
 
     def start(self):

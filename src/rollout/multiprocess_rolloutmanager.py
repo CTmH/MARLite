@@ -1,14 +1,13 @@
 import torch.multiprocessing as mp
-from typing import List, Any, Type
+from typing import List, Any, Callable
 from concurrent.futures import ProcessPoolExecutor
 from ..algorithm.agents.agent_group import AgentGroup
 from ..environment.env_config import EnvConfig
-from .multiprocess_rolloutworker import MultiProcessRolloutWorker, rollout
 from tqdm import tqdm
 
 class MultiProcessRolloutManager:
     def __init__(self,
-                 worker_class: Type[MultiProcessRolloutWorker],
+                 worker_func: Callable,
                  env_config: EnvConfig,
                  agent_group: AgentGroup,
                  n_workers: int,
@@ -18,6 +17,7 @@ class MultiProcessRolloutManager:
                  epsilon: float,
                  device: str):
         
+        self.worker_func = worker_func
         self.env_config = env_config
         self.agent_group = agent_group
         self.n_workers = n_workers
@@ -32,7 +32,7 @@ class MultiProcessRolloutManager:
         n_workers = min(self.n_workers, self.n_episodes)
         with ProcessPoolExecutor(max_workers=n_workers) as executor:
             episodes = list(tqdm(executor.map(
-                rollout,
+                self.worker_func,
                 [self.env_config] * self.n_episodes,
                 [self.agent_group.share_memory()] * self.n_episodes,
                 [self.traj_len] * self.n_episodes,
