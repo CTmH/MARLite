@@ -1,56 +1,73 @@
+from abc import abstractmethod
 import numpy as np
-from typing import Dict, Type, List, Tuple, Any
-import torch
+from typing import Dict, List, Any
 
 class AgentGroup(object):
 
+    @abstractmethod
     def forward(self, observations: Dict[str, np.ndarray]) -> Dict[str, Any]:
         raise NotImplementedError
     
-    def forward(self, observations: Dict[str, np.ndarray], states: np.ndarray, edge_indices: Type[List[np.ndarray] | None] = None) -> Dict[str, Any]:
+    @abstractmethod
+    def forward(self, observations: Dict[str, np.ndarray], states: np.ndarray, edge_indices: List[np.ndarray] | None = None) -> Dict[str, Any]:
         raise NotImplementedError
 
-    def act(observations: Dict[str, np.ndarray], avail_actions: Dict, epsilon: float) -> Dict[str, Any]:
+    @abstractmethod
+    def act(self, observations: Dict[str, np.ndarray], avail_actions: Dict[str, Any], epsilon: float) -> Dict[str, Any]:
         raise NotImplementedError
     
-    def act(self, observations: Dict[str, np.ndarray], state: np.ndarray, avail_actions: Dict, epsilon: float) -> Dict[str, Any]:
+    @abstractmethod
+    def act(self, observations: Dict[str, np.ndarray], state: np.ndarray, avail_actions: Dict[str, Any], epsilon: float) -> Dict[str, Any]:
         raise NotImplementedError
 
+    @abstractmethod
     def set_agent_group_params(self, model_params: Dict[str, dict], feature_extractor_params: Dict[str, dict]):
         raise NotImplementedError
     
-    def get_agent_group_params(self):
+    @abstractmethod
+    def get_agent_group_params(self) -> Dict[str, dict]:
         raise NotImplementedError
     
-    def zero_grad(self):
+    @abstractmethod
+    def zero_grad(self) -> 'AgentGroup':
         raise NotImplementedError
     
-    def step(self):
+    @abstractmethod
+    def step(self) -> 'AgentGroup':
         raise NotImplementedError
     
-    def to_device(self, device):
+    @abstractmethod
+    def to_device(self, device) -> 'AgentGroup':
         raise NotImplementedError
     
-    def eval(self):
+    @abstractmethod
+    def eval(self) -> 'AgentGroup':
         raise NotImplementedError
     
-    def train(self):
+    @abstractmethod
+    def train(self) -> 'AgentGroup':
         raise NotImplementedError
     
-    def share_memory(self):
+    @abstractmethod
+    def share_memory(self) -> 'AgentGroup':
         raise NotImplementedError
     
-    def wrap_data_parallel(self):
+    @abstractmethod
+    def wrap_data_parallel(self) -> 'AgentGroup':
         raise NotImplementedError
     
-    def unwrap_data_parallel(self):
+    @abstractmethod
+    def unwrap_data_parallel(self) -> 'AgentGroup':
         raise NotImplementedError
     
-    def save_params(self, path: str):
+    @abstractmethod
+    def save_params(self, path: str) -> 'AgentGroup':
         raise NotImplementedError
     
-    def load_params(self, path: str):
+    @abstractmethod
+    def load_params(self, path: str) -> 'AgentGroup':
         raise NotImplementedError
     
-    def reset(self):
+    @abstractmethod
+    def reset(self) -> 'AgentGroup':
         raise NotImplementedError

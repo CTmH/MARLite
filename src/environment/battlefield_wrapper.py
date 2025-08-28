@@ -44,12 +44,12 @@ class BattleFieldWrapper(ParallelEnvWrapper):
         return agent_observations, agent_rewards, agent_terminations, agent_truncations, agent_infos
 
     def reset(self):
-        observations = self.env.reset()  # Magent2 environment reset does not return info
+        observations, info = self.env.reset()  # Magent2 environment reset does not return info
         self.opponent_observations = {agent: observations[agent] for agent in self.opponent_agents}
         self.opponent_observation_history.clear()
         self.opponent_observation_history.append(self.opponent_observations)
-        agent_observations = {agent: observations[agent] for agent in self.agents}
-        agent_info = {agent: None for agent in self.agents} # For compatibility with other environments
+        agent_observations = {agent: observations[agent].astype(np.int8) for agent in self.agents}
+        agent_info = {agent: info[agent] for agent in self.agents} # For compatibility with other environments
         return agent_observations, agent_info
 
     def state(self):

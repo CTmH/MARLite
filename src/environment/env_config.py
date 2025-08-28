@@ -23,11 +23,12 @@ class EnvConfig():
 
         if self.module_name != 'custom':
             try:
+                importlib.import_module(f'{self.module_name}.{self.env_name}')
                 module = importlib.import_module(self.module_name)
                 env = getattr(module, self.env_name)
             except (ImportError, AttributeError) as e:
                 env = None
-                print(f"Error loading environment {self.env_name} from module {self.module_name}: {e}")
+                raise ValueError(f"Error loading environment {self.env_name} from module {self.module_name}: {e}")
         elif self.env_name in CUSTOM_ENVS:
             env = CUSTOM_ENVS[self.env_name]
         else:

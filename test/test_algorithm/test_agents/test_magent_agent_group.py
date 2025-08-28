@@ -64,23 +64,5 @@ class TestMagentPreyAgentGroup(unittest.TestCase):
         result = ret['q_val']
         self.assertIs(result, None)
 
-    def test_set_model_params_returns_self(self):
-        model_params = {"modelA": {}, "modelB": {}}
-        feature_extractor_params = {}
-        result = self.magent_prey_agent_group.set_agent_group_params(model_params, feature_extractor_params)
-        self.assertIs(result, self.magent_prey_agent_group)
-
-    def test_get_model_params_returns_self(self):
-        result = self.magent_prey_agent_group.get_agent_group_params()
-        self.assertIs(result, self.magent_prey_agent_group)
-
-    def test_zero_grad_returns_self(self):
-        result = self.magent_prey_agent_group.zero_grad()
-        self.assertIs(result, self.magent_prey_agent_group)
-
-    def test_step_returns_self(self):
-        result = self.magent_prey_agent_group.step()
-        self.assertIs(result, self.magent_prey_agent_group)
-
 if __name__ == '__main__':
     unittest.main()

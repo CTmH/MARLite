@@ -1,10 +1,8 @@
 import numpy as np
 import torch
-import os
 from torch.optim import Optimizer
 from copy import deepcopy
-from typing import Dict, Tuple, Type, List, Any
-from torch.nn import DataParallel
+from typing import Dict, List, Any
 from torch_geometric.data import Batch, Data
 from torch_geometric.utils import unbatch
 from ..model.model_config import ModelConfig
@@ -37,7 +35,7 @@ class GNNAgentGroup(GraphAgentGroup):
     def forward(self,
                 observations: Dict[str, np.ndarray],
                 states: np.ndarray,
-                edge_indices: Type[List[np.ndarray] | None] = None) -> Dict[str, Any]:
+                edge_indices: List[np.ndarray] | None = None) -> Dict[str, Any]:
         msg = [None for _ in range(len(self.agent_model_dict))]
         for (model_name, fe), (_, enc) in zip(self.feature_extractors.items(),
                                                 self.encoders.items()):

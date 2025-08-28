@@ -1,9 +1,8 @@
 import numpy as np
 import torch
 import os
-from torch.optim import Optimizer
 from copy import deepcopy
-from typing import Dict, Any, Type
+from typing import Dict, Any
 from torch.nn import DataParallel
 from ..model.model_config import ModelConfig
 from ..model import TimeSeqModel, RNNModel
@@ -72,39 +71,64 @@ class QMIXAgentGroup(AgentGroup):
 
         return {'q_val': q_val}
 
-    def act(self, observations, avail_actions, epsilon=0.0) -> Dict[str, Any]:
+    def act(self, observations: Dict[str , np.ndarray], avail_actions: Dict[str, Any], epsilon=.0) -> Dict[str, Any]:
         """
-        Select actions based on Q-values and exploration.
+        Select actions based on Q-values and exploration with action masking.
 
         Args:
-            observations (list of Tensor): List of observation tensors.
-            avail_actions (dict): Dictionary mapping agent IDs to available action distributions.
+            observations (dict): Dictionary mapping agent IDs to observation arrays.
+            avail_actions (dict): Dictionary mapping agent IDs to either action masks (numpy arrays)
+                                 or action spaces (gymnasium.spaces.Space). Each mask is a 1D array where 1 
+                                 indicates available actions, and 0 indicates unavailable actions.
             epsilon (float): Exploration rate.
-            eval_mode (bool): Whether to set models to evaluation mode.
 
         Returns:
-            numpy array: Selected actions for each agent.
+            dict: Selected actions for each agent, with action mask applied.
         """
+        # Convert observations to tensor format
         obs = [observations[ag] for ag in self.agent_model_dict.keys()]
         obs = np.stack(obs)
         obs = np.expand_dims(obs, axis=0)
+        
+        # Get Q-values
         with torch.no_grad():
             ret = self.forward(obs)
             q_values = ret['q_val']
             q_values = q_values.detach().cpu().numpy().squeeze()
+        
+        # Handle different types of avail_actions
+        if isinstance(next(iter(avail_actions.values())), np.ndarray):
+            # Action masking case
+            action_masks = np.array([avail_actions[agent_id] for agent_id in self.agent_model_dict.keys()])
+            
+            # Apply action masks to Q-values
+            masked_q_values = q_values * action_masks + (1 - action_masks) * (-np.inf)
+            
+            # Get optimal actions
+            optimal_actions = np.argmax(masked_q_values, axis=-1).astype(np.int64)
+            
+            # Generate random actions according to action masks
+            mask_probs = action_masks / np.sum(action_masks, axis=1, keepdims=True)
+            random_actions = np.array([
+                np.random.choice(len(probs), p=probs) 
+                for probs in mask_probs
+            ]).astype(np.int64)
+        else:
+            # Action space sampling case
+            optimal_actions = np.argmax(q_values, axis=-1).astype(np.int64)
+            random_actions = np.array([avail_actions[key].sample() for key in avail_actions.keys()]).astype(np.int64)
+        
+        # Epsilon-greedy action selection
         random_choices = np.random.binomial(1, epsilon, len(self.agent_model_dict)).astype(np.int64)
-        random_actions = [avail_actions[key].sample() for key in avail_actions.keys()]
-        random_actions = np.array(random_actions).astype(np.int64)
-
-        actions = random_choices * random_actions \
-        + (1 - random_choices) * np.argmax(q_values, axis=-1).astype(np.int64)
+        actions = random_choices * random_actions + (1 - random_choices) * optimal_actions
         actions = actions.astype(np.int64).tolist()
-
+        
+        # Create action dictionary
         actions = {agent_id: action for agent_id, action in zip(self.agent_model_dict.keys(), actions)}
-
+        
         return {'actions': actions}
 
-    def set_agent_group_params(self, params: Dict[str, dict]) -> Type[AgentGroup]:
+    def set_agent_group_params(self, params: Dict[str, dict]) -> 'AgentGroup':
         feature_extractor_params = params.get("feature_extractor", {})
         model_params = params.get("model", {})
         for (model_name, fe), (_, model) in zip(
@@ -116,7 +140,7 @@ class QMIXAgentGroup(AgentGroup):
 
         return self
 
-    def get_agent_group_params(self) -> Type[AgentGroup]:
+    def get_agent_group_params(self) -> Dict[str, dict]:
         feature_extractor_params = {
             model_name: deepcopy(fe.state_dict())
             for model_name, fe in self.feature_extractors.items()
@@ -131,11 +155,11 @@ class QMIXAgentGroup(AgentGroup):
         }
         return params
 
-    def zero_grad(self) -> Type[AgentGroup]:
+    def zero_grad(self) -> 'AgentGroup':
         self.optimizer.zero_grad()
         return self
 
-    def step(self) -> Type[AgentGroup]:
+    def step(self) -> 'AgentGroup':
         for p in self.params_to_optimize:
             torch.nn.utils.clip_grad_norm_(
                 p['params'],
@@ -144,44 +168,44 @@ class QMIXAgentGroup(AgentGroup):
         self.optimizer.step()
         return self
 
-    def to(self, device: str) -> Type[AgentGroup]:
+    def to(self, device: str) -> 'AgentGroup':
         for (_, model), (_, fe) in zip(self.models.items(), self.feature_extractors.items()):
             model.to(device)
             fe.to(device)
         self.device = device
         return self
 
-    def eval(self) -> Type[AgentGroup]:
+    def eval(self) -> 'AgentGroup':
         for (_, model), (_, fe) in zip(self.models.items(), self.feature_extractors.items()):
             model.eval()
             fe.eval()
         return self
 
-    def train(self) -> Type[AgentGroup]:
+    def train(self) -> 'AgentGroup':
         for (_, model), (_, fe) in zip(self.models.items(), self.feature_extractors.items()):
             model.train()
             fe.train()
         return self
 
-    def share_memory(self) -> Type[AgentGroup]:
+    def share_memory(self) -> 'AgentGroup':
         for (_, model), (_, fe) in zip(self.models.items(), self.feature_extractors.items()):
             model.share_memory()
             fe.share_memory()
         return self
 
-    def wrap_data_parallel(self) -> Type[AgentGroup]:
+    def wrap_data_parallel(self) -> 'AgentGroup':
         for id in self.models.keys():
             self.models[id] = DataParallel(self.models[id])
             self.feature_extractors[id] = DataParallel(self.feature_extractors[id])
         return self
 
-    def unwrap_data_parallel(self) -> Type[AgentGroup]:
+    def unwrap_data_parallel(self) -> 'AgentGroup':
         for id in self.models.keys():
             self.models[id] = self.models[id].module
             self.feature_extractors[id] = self.feature_extractors[id].module
         return self
 
-    def save_params(self, path: str) -> Type[AgentGroup]:
+    def save_params(self, path: str) -> 'AgentGroup':
         os.makedirs(path, exist_ok=True)
         for (model_name, model), (_, fe) in zip(
             self.models.items(),
@@ -192,7 +216,7 @@ class QMIXAgentGroup(AgentGroup):
             torch.save(model.state_dict(), os.path.join(model_dir, 'model.pth'))
         return self
 
-    def load_params(self, path: str) -> Type[AgentGroup]:
+    def load_params(self, path: str) -> 'AgentGroup':
         for (model_name, model), (_, fe) in zip(
             self.models.items(),
             self.feature_extractors.items()):
@@ -201,5 +225,5 @@ class QMIXAgentGroup(AgentGroup):
             model.load_state_dict(torch.load(os.path.join(model_dir, 'model.pth')))
         return self
 
-    def reset(self) -> Type[AgentGroup]:
+    def reset(self) -> 'AgentGroup':
         return self

@@ -1,6 +1,5 @@
 import numpy as np
-import torch
-from typing import Dict, Any, Type
+from typing import Dict, Any
 from .agent_group import AgentGroup
 
 class MagentPreyAgentGroup(AgentGroup):
@@ -49,15 +48,3 @@ class MagentPreyAgentGroup(AgentGroup):
                 for i, agent in enumerate(obstacle_and_other_team_presence.keys())}
     
         return {"actions": actions}
-
-    def set_agent_group_params(self, model_params: Dict[str, dict], feature_extractor_params: Dict[str, dict]) -> Type[AgentGroup]:
-        return self
-    
-    def get_agent_group_params(self) -> Type[AgentGroup]:
-        return self
-    
-    def zero_grad(self) -> Type[AgentGroup]:
-        return self
-    
-    def step(self) -> Type[AgentGroup]:
-        return self

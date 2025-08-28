@@ -60,6 +60,7 @@ class MultiThreadRolloutWorker(threading.Thread):
         }
 
         win_tag = False
+        use_action_mask = False
         episode_reward = 0
 
         for i in range(self.episode_limit+1):
@@ -68,6 +69,9 @@ class MultiThreadRolloutWorker(threading.Thread):
 
             if i == 0:
                 observations, infos = env.reset()
+                info_item = infos.get(env.agents[0])
+                if isinstance(info_item, dict) and isinstance(info_item.get('action_mask'), np.ndarray):
+                    use_action_mask = True
             else:
                 episode['observations'].append(observations)
                 episode['states'].append(env.state())
@@ -93,7 +97,10 @@ class MultiThreadRolloutWorker(threading.Thread):
                 if True in terminations.values() or True in truncations.values():
                     break
 
-            avail_actions = {agent: env.action_space(agent) for agent in env.agents}
+            if use_action_mask:
+                avail_actions = {agent: infos[agent]['action_mask'] for agent in env.agents}
+            else:
+                avail_actions = {agent: env.action_space(agent) for agent in env.agents}
             processed_obs = self._obs_preprocess(episode['observations']+[observations])
             if isinstance(agent_group, GraphAgentGroup):
                 ret = agent_group.act(processed_obs, env.state(), avail_actions, self.epsilon)

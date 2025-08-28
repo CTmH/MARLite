@@ -5,25 +5,44 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "mpe2>=0.0.1",
-    "networkx>=3.4.2",
-    "pettingzoo[butterfly,mpe,sisl]>=1.25.0",
     "pyyaml>=6.0.2",
-    "smac-pettingzoo",
-    "smacv2",
-    "torch>=2.7.0",
+    "torch>=2.8.0",
     "torch-geometric>=2.6.1",
     "tqdm>=4.67.1",
+    "mpe2>=0.0.1",
+    "networkx>=3.4.2",
+    "pettingzoo[butterfly,mpe]>=1.25.0",
+    "smac-pettingzoo",
+    "magent2",
 ]
 
 [dependency-groups]
 dev = [
+    "pytest>=8.3.5",
+    "pytest-xdist>=3.8.0",
+]
+
+analysis = [
     "matplotlib>=3.10.3",
     "notebook>=7.4.2",
-    "pytest>=8.3.5",
     "pandas>=2.3.0",
 ]
 
+[tool.uv]
+index-strategy = "unsafe-best-match"
+
 [tool.uv.sources]
-smacv2 = { git = "https://github.com/oxwhirl/smacv2" }
-smac-pettingzoo = { git = "https://github.com/xihuai18/SMAC-PettingZoo" }
+smac-pettingzoo = { git = "https://github.com/CTmH/SMAC-PettingZoo.git" }
+magent2 = { git = "https://github.com/CTmH/MAgent2.git" }
+dm_env = { git = "https://github.com/CTmH/dm_env.git" }
+torch = { index = "pytorch-rocm" }
+
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
+default = true
+
+[[tool.uv.index]]
+name = "pytorch-rocm"
+url = "https://download.pytorch.org/whl/rocm6.4"
+default = false

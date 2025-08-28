@@ -1,6 +1,5 @@
 import numpy as np
-import torch
-from typing import Dict, Any, Type
+from typing import Dict, Any
 from .agent_group import AgentGroup
 
 class RandomAgentGroup(AgentGroup):
@@ -18,14 +17,5 @@ class RandomAgentGroup(AgentGroup):
         random_actions = {agent: avail_actions[agent].sample() for agent in avail_actions.keys()}
         return {'actions': random_actions}
 
-    def set_agent_group_params(self, model_params: Dict[str, dict], feature_extractor_params: Dict[str, dict]) -> Type[AgentGroup]:
-        return self
-    
-    def get_agent_group_params(self) -> Type[AgentGroup]:
-        return self
-    
-    def zero_grad(self) -> Type[AgentGroup]:
-        return self
-    
-    def step(self) -> Type[AgentGroup]:
+    def set_agent_group_params(self, model_params: Dict[str, dict], feature_extractor_params: Dict[str, dict]) -> 'AgentGroup':
         return self
