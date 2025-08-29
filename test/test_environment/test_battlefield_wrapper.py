@@ -50,17 +50,17 @@ class TestBattleFieldWrapper(unittest.TestCase):
 
     def test_state(self):
         state = self.wrapper.state()
-        self.assertTrue(np.array_equal(state.astype(np.float32), self.wrapper.env.state().astype(np.float32)))
+        self.assertTrue(np.array_equal(state.astype(np.float32), self.wrapper._env.state().astype(np.float32)))
 
     def test_observation_space(self):
         agent = 'red_0'
         obs_space = self.wrapper.observation_space(agent)
-        self.assertEqual(obs_space, self.wrapper.env.observation_space(agent))
+        self.assertEqual(obs_space, self.wrapper._env.observation_space(agent))
 
     def test_action_space(self):
         agent = 'red_0'
         act_space = self.wrapper.action_space(agent)
-        self.assertEqual(act_space, self.wrapper.env.action_space(agent))
+        self.assertEqual(act_space, self.wrapper._env.action_space(agent))
 
 if __name__ == '__main__':
     unittest.main()

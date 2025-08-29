@@ -51,17 +51,17 @@ class TestAdversarialPursuitPredator(unittest.TestCase):
 
     def test_state(self):
         state = self.wrapper.state()
-        self.assertTrue(np.array_equal(state, self.wrapper.env.state()))
+        self.assertTrue(np.array_equal(state, self.wrapper._env.state()))
 
     def test_observation_space(self):
         agent = 'predator_0'
         obs_space = self.wrapper.observation_space(agent)
-        self.assertEqual(obs_space, self.wrapper.env.observation_space(agent))
+        self.assertEqual(obs_space, self.wrapper._env.observation_space(agent))
 
     def test_action_space(self):
         agent = 'predator_0'
         act_space = self.wrapper.action_space(agent)
-        self.assertEqual(act_space, self.wrapper.env.action_space(agent))
+        self.assertEqual(act_space, self.wrapper._env.action_space(agent))
 
 
 class TestAdversarialPursuitPrey(unittest.TestCase):
@@ -109,17 +109,17 @@ class TestAdversarialPursuitPrey(unittest.TestCase):
 
     def test_state(self):
         state = self.wrapper.state()
-        self.assertTrue(np.array_equal(state, self.wrapper.env.state()))
+        self.assertTrue(np.array_equal(state, self.wrapper._env.state()))
 
     def test_observation_space(self):
         agent = 'prey_0'
         obs_space = self.wrapper.observation_space(agent)
-        self.assertEqual(obs_space, self.wrapper.env.observation_space(agent))
+        self.assertEqual(obs_space, self.wrapper._env.observation_space(agent))
 
     def test_action_space(self):
         agent = 'prey_0'
         act_space = self.wrapper.action_space(agent)
-        self.assertEqual(act_space, self.wrapper.env.action_space(agent))
+        self.assertEqual(act_space, self.wrapper._env.action_space(agent))
 
 if __name__ == '__main__':
     unittest.main()
