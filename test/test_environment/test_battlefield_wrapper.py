@@ -1,9 +1,7 @@
 import unittest
 import numpy as np
-from unittest.mock import MagicMock, patch
-from magent2.environments import adversarial_pursuit_v4
+from magent2.environments import battlefield_v5
 from src.environment.battlefield_wrapper import BattleFieldWrapper
-from src.algorithm.agents.random_agent_group import RandomAgentGroup
 
 class TestBattleFieldWrapper(unittest.TestCase):
 
@@ -18,7 +16,7 @@ class TestBattleFieldWrapper(unittest.TestCase):
             'opponent_agent_group_config': self.opponent_agent_group_config,
             'opp_obs_queue_len': 5
         }
-        self.wrapper = BattleFieldWrapper(**kwargs)
+        self.wrapper = BattleFieldWrapper(env=battlefield_v5.parallel_env(), **kwargs)
         self.n_agent = 12
         self.n_oppo = 12
 
@@ -50,17 +48,17 @@ class TestBattleFieldWrapper(unittest.TestCase):
 
     def test_state(self):
         state = self.wrapper.state()
-        self.assertTrue(np.array_equal(state.astype(np.float32), self.wrapper._env.state().astype(np.float32)))
+        self.assertTrue(np.array_equal(state.astype(np.float32), self.wrapper.env.state().astype(np.float32)))
 
     def test_observation_space(self):
         agent = 'red_0'
         obs_space = self.wrapper.observation_space(agent)
-        self.assertEqual(obs_space, self.wrapper._env.observation_space(agent))
+        self.assertEqual(obs_space, self.wrapper.env.observation_space(agent))
 
     def test_action_space(self):
         agent = 'red_0'
         act_space = self.wrapper.action_space(agent)
-        self.assertEqual(act_space, self.wrapper._env.action_space(agent))
+        self.assertEqual(act_space, self.wrapper.env.action_space(agent))
 
 if __name__ == '__main__':
     unittest.main()

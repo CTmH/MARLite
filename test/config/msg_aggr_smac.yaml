@@ -1,0 +1,199 @@
+agent_group_config:
+  type: "MsgAggr"
+  agent_list:
+    colossus_0: model_0
+    colossus_1: model_0
+    colossus_2: model_0
+    stalker_0: model_1
+    stalker_1: model_1
+    stalker_2: model_1
+    stalker_3: model_1
+    stalker_4: model_1
+    stalker_5: model_1
+    stalker_6: model_1
+    stalker_7: model_1
+    zealot_0: model_2
+    zealot_1: model_2
+    zealot_2: model_2
+    zealot_3: model_2
+    zealot_4: model_2
+    zealot_5: model_2
+    zealot_6: model_2
+    zealot_7: model_2
+    zealot_8: model_2
+  model_configs:
+    model_0:
+      feature_extractor:
+        model_type: "Custom"
+        layers:
+        - type: Linear
+          in_features: 989
+          out_features: 256
+      encoder:
+        model_type: "CustomTimeSeq"
+        layers:
+        - type: Permute
+          dims: [0, 2, 1]
+        - type: Conv1d
+          in_channels: 256
+          out_channels: 128
+          kernel_size: 3
+          stride: 2
+          padding: 0
+        - type: Flatten
+        - type: Linear
+          in_features: 256
+          out_features: 256
+        - type: ELU
+      decoder:
+        model_type: "Custom"
+        layers:
+        - type: Linear
+          in_features: 512
+          out_features: 29
+    model_1:
+      feature_extractor:
+        model_type: "Custom"
+        layers:
+        - type: Linear
+          in_features: 989
+          out_features: 256
+      encoder:
+        model_type: "CustomTimeSeq"
+        layers:
+        - type: Permute
+          dims: [0, 2, 1]
+        - type: Conv1d
+          in_channels: 256
+          out_channels: 128
+          kernel_size: 3
+          stride: 2
+          padding: 0
+        - type: Flatten
+        - type: Linear
+          in_features: 256
+          out_features: 256
+        - type: ELU
+      decoder:
+        model_type: "Custom"
+        layers:
+        - type: Linear
+          in_features: 512
+          out_features: 29
+    model_2:
+      feature_extractor:
+        model_type: "Custom"
+        layers:
+        - type: Linear
+          in_features: 989
+          out_features: 256
+      encoder:
+        model_type: "CustomTimeSeq"
+        layers:
+        - type: Permute
+          dims: [0, 2, 1]
+        - type: Conv1d
+          in_channels: 256
+          out_channels: 128
+          kernel_size: 3
+          stride: 2
+          padding: 0
+        - type: Flatten
+        - type: Linear
+          in_features: 256
+          out_features: 256
+        - type: ELU
+      decoder:
+        model_type: "Custom"
+        layers:
+        - type: Linear
+          in_features: 512
+          out_features: 29
+  aggr_model_config:
+    model_type: "Custom"
+    layers:
+        - type: SelfAttention
+          embed_dim: 256
+          num_heads: 8
+          batch_first: true
+        - type: Permute
+          dims: [0, 2, 1]
+        - type: AdaptiveAvgPool1d
+          output_size: 1
+        - type: Flatten
+        - type: Linear
+          in_features: 256
+          out_features: 256
+        - type: ELU
+  optimizer:
+    type: "Adam"
+    lr: 0.0002
+    weight_decay: 0.00005
+
+env_config:
+  module_name: "smac_pettingzoo"
+  env_name: "smacv2_pettingzoo_v1"
+  env_config:
+    map_name: 10gen_protoss_20_vs_23
+  wrapper_config:
+    type: smac
+
+epsilon_scheduler:
+  type: "linear"
+  start_value: 1.0
+  end_value: 0.1
+  decay_steps: 100
+
+sample_ratio_scheduler:
+  type: "linear"
+  start_value: 0.7
+  end_value: 0.3
+  decay_steps: 40
+
+critic_config:
+  type: "QMIX"
+  state_shape: 22340
+  input_dim: 20
+  qmix_hidden_dim: 128
+  hypernet_layers: 2
+  hyper_hidden_dim: 256
+  feature_extractor:
+    model_type: "Custom"
+    layers:
+      - type: Flatten
+  optimizer:
+    type: "Adam"
+    lr: 0.0002
+    weight_decay: 0.00005
+
+rollout_config:
+  manager_type: "multi-process"
+  worker_type: "multi-process"
+  n_workers: 8
+  n_episodes: 10
+  n_eval_episodes: 50
+  traj_len: 5
+  episode_limit: 200
+  device: "cpu"
+
+replaybuffer_config:
+  type: "Prioritized"
+  capacity: 2000
+  traj_len: 5
+  priority_attr: "all_agents_sum_rewards"
+
+trainer_config:
+  type: "MsgAggr"
+  gamma: 0.95
+  eval_epsilon: 0.01
+  workdir: "/home/ctmh/exp/test_msg_aggr_smac"
+  train_device: "cuda:0"
+  eval_device: "cpu"
+  n_workers: 2
+
+  train_args:
+    epochs: 2
+    target_reward: 1000
+    eval_interval: 4
+    batch_size: 1024
+    learning_times_per_epoch: 1

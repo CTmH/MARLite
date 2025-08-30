@@ -1,10 +1,14 @@
 import unittest
+import yaml
 from src.environment.env_config import EnvConfig
 from pettingzoo import ParallelEnv
 
 class TestEnvConfig(unittest.TestCase):
     def setUp(self):
-        env_config = {"module_name": "mpe2", "env_name": "simple_speaker_listener_v4"}
+        self.config_path = 'test/config/gnn_default.yaml'
+        with open(self.config_path, 'r') as file:
+            self.config = yaml.safe_load(file)
+        env_config = self.config['env_config']
         self.env_config = EnvConfig(**env_config)
 
     def test_create_env(self):

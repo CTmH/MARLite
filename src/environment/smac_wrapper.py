@@ -1,9 +1,8 @@
 import numpy as np
-from typing import Dict, Any
-from .parallel_env_wrapper import ParallelEnvWrapper
+from typing import Dict
+from pettingzoo.utils import BaseParallelWrapper
 
-
-class SMACWrapper(ParallelEnvWrapper):
+class SMACWrapper(BaseParallelWrapper):
     """
     A wrapper for SMAC PettingZoo environments that modifies the state() method
     to return a concatenated numpy array of all state components, sorted by key
@@ -23,7 +22,7 @@ class SMACWrapper(ParallelEnvWrapper):
         Returns:
             np.ndarray: Concatenated state vector.
         """
-        state_dict: Dict[str, np.ndarray] = self._env.state()
+        state_dict: Dict[str, np.ndarray] = self.env.state()
         
         # Sort by key alphabetically and concatenate values
         sorted_keys = sorted(state_dict.keys())

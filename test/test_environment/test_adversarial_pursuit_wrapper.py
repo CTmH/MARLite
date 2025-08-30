@@ -1,9 +1,7 @@
 import unittest
 import numpy as np
-from unittest.mock import MagicMock, patch
 from magent2.environments import adversarial_pursuit_v4
 from src.environment.adversarial_pursuit_wrapper import AdversarialPursuitPredator, AdversarialPursuitPrey
-from src.algorithm.agents.random_agent_group import RandomAgentGroup
 
 class TestAdversarialPursuitPredator(unittest.TestCase):
     
@@ -18,7 +16,7 @@ class TestAdversarialPursuitPredator(unittest.TestCase):
             'opponent_agent_group_config': self.opponent_agent_group_config,
             'opp_obs_queue_len': 5
         }
-        self.wrapper = AdversarialPursuitPredator(**kwargs)
+        self.wrapper = AdversarialPursuitPredator(env=adversarial_pursuit_v4.parallel_env(), **kwargs)
         self.n_agent = 25
         self.n_oppo = 50
         
@@ -51,17 +49,17 @@ class TestAdversarialPursuitPredator(unittest.TestCase):
 
     def test_state(self):
         state = self.wrapper.state()
-        self.assertTrue(np.array_equal(state, self.wrapper._env.state()))
+        self.assertTrue(np.array_equal(state, self.wrapper.env.state()))
 
     def test_observation_space(self):
         agent = 'predator_0'
         obs_space = self.wrapper.observation_space(agent)
-        self.assertEqual(obs_space, self.wrapper._env.observation_space(agent))
+        self.assertEqual(obs_space, self.wrapper.env.observation_space(agent))
 
     def test_action_space(self):
         agent = 'predator_0'
         act_space = self.wrapper.action_space(agent)
-        self.assertEqual(act_space, self.wrapper._env.action_space(agent))
+        self.assertEqual(act_space, self.wrapper.env.action_space(agent))
 
 
 class TestAdversarialPursuitPrey(unittest.TestCase):
@@ -77,7 +75,7 @@ class TestAdversarialPursuitPrey(unittest.TestCase):
             'opponent_agent_group_config': self.opponent_agent_group_config,
             'opp_obs_queue_len': 5
         }
-        self.wrapper = AdversarialPursuitPrey(**kwargs)
+        self.wrapper = AdversarialPursuitPrey(env=adversarial_pursuit_v4.parallel_env(), **kwargs)
         self.n_agent = 50
         self.n_oppo = 25
         
@@ -109,17 +107,17 @@ class TestAdversarialPursuitPrey(unittest.TestCase):
 
     def test_state(self):
         state = self.wrapper.state()
-        self.assertTrue(np.array_equal(state, self.wrapper._env.state()))
+        self.assertTrue(np.array_equal(state, self.wrapper.env.state()))
 
     def test_observation_space(self):
         agent = 'prey_0'
         obs_space = self.wrapper.observation_space(agent)
-        self.assertEqual(obs_space, self.wrapper._env.observation_space(agent))
+        self.assertEqual(obs_space, self.wrapper.env.observation_space(agent))
 
     def test_action_space(self):
         agent = 'prey_0'
         act_space = self.wrapper.action_space(agent)
-        self.assertEqual(act_space, self.wrapper._env.action_space(agent))
+        self.assertEqual(act_space, self.wrapper.env.action_space(agent))
 
 if __name__ == '__main__':
     unittest.main()

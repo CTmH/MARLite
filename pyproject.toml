@@ -2,6 +2,7 @@
 name = "MARLite"
 version = "0.1.0"
 description = "Add your description here"
+license = "BSD-2-Clause"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
@@ -17,7 +18,7 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = [
+develop = [
     "pytest>=8.3.5",
     "pytest-xdist>=3.8.0",
 ]

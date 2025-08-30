@@ -1,14 +1,19 @@
 import unittest
+import yaml
 import numpy as np
 from src.environment.smac_wrapper import SMACWrapper
-from smac_pettingzoo import smacv2_pettingzoo_v1
+from src.environment.env_config import EnvConfig
 
 
 class TestSMACv2Wrapper(unittest.TestCase):
 
     def setUp(self):
-        env = smacv2_pettingzoo_v1.parallel_env("10gen_protoss_20_vs_23")
-        self.wrapper = SMACWrapper(env)
+        self.config_path = 'test/config/msg_aggr_smac.yaml'
+        with open(self.config_path, 'r') as file:
+            self.config = yaml.safe_load(file)
+        env_config = self.config['env_config']
+        self.env_config = EnvConfig(**env_config)
+        self.wrapper = self.env_config.create_env()
         self.n_agent = 20
 
     def test_init(self):
@@ -52,12 +57,12 @@ class TestSMACv2Wrapper(unittest.TestCase):
     def test_observation_space(self):
         agent = self.wrapper.agents[0]
         obs_space = self.wrapper.observation_space(agent)
-        self.assertEqual(obs_space, self.wrapper._env.observation_space(agent))
+        self.assertEqual(obs_space, self.wrapper.env.observation_space(agent))
 
     def test_action_space(self):
         agent = self.wrapper.agents[0]
         act_space = self.wrapper.action_space(agent)
-        self.assertEqual(act_space, self.wrapper._env.action_space(agent))
+        self.assertEqual(act_space, self.wrapper.env.action_space(agent))
 
 if __name__ == '__main__':
     unittest.main()

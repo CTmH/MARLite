@@ -9,39 +9,42 @@ class TestMagentPreyAgentGroup(unittest.TestCase):
     def setUp(self):
         yaml_conf = """
             env_config:
-                module_name: "custom"
-                env_name: "adversarial_pursuit_prey"
-                tag_penalty: 0.0
-                extra_features: false
-                opponent_agent_group_config:
-                    type: "Random"
-                    agent_list:
-                        predator_0: model1
-                        predator_1: model1
-                        predator_2: model1
-                        predator_3: model1
-                        predator_4: model1
-                        predator_5: model1
-                        predator_6: model1
-                        predator_7: model1
-                        predator_8: model1
-                        predator_9: model1
-                        predator_10: model1
-                        predator_11: model1
-                        predator_12: model1
-                        predator_13: model1
-                        predator_14: model1
-                        predator_15: model1
-                        predator_16: model1
-                        predator_17: model1
-                        predator_18: model1
-                        predator_19: model1
-                        predator_20: model1
-                        predator_21: model1
-                        predator_22: model1
-                        predator_23: model1
-                        predator_24: model1
-                opp_obs_queue_len: 5
+                module_name: "magent2.environments"
+                env_name: "adversarial_pursuit_v4"
+                env_config:
+                    tag_penalty: -0.01
+                    extra_features: true
+                wrapper_config:
+                    type: adversarial_pursuit_prey
+                    opponent_agent_group_config:
+                        type: "Random"
+                        agent_list:
+                            predator_0: model1
+                            predator_1: model1
+                            predator_2: model1
+                            predator_3: model1
+                            predator_4: model1
+                            predator_5: model1
+                            predator_6: model1
+                            predator_7: model1
+                            predator_8: model1
+                            predator_9: model1
+                            predator_10: model1
+                            predator_11: model1
+                            predator_12: model1
+                            predator_13: model1
+                            predator_14: model1
+                            predator_15: model1
+                            predator_16: model1
+                            predator_17: model1
+                            predator_18: model1
+                            predator_19: model1
+                            predator_20: model1
+                            predator_21: model1
+                            predator_22: model1
+                            predator_23: model1
+                            predator_24: model1
+                    opp_obs_queue_len: 5
         """
         conf_dict = yaml.safe_load(yaml_conf)
         conf_dict = conf_dict['env_config']
