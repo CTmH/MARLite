@@ -3,9 +3,10 @@ from typing import List, Any, Callable
 from concurrent.futures import ProcessPoolExecutor
 from ..algorithm.agents.agent_group import AgentGroup
 from ..environment.env_config import EnvConfig
+from .rolloutmanager import RolloutManager
 from tqdm import tqdm
 
-class MultiProcessRolloutManager:
+class MultiProcessRolloutManager(RolloutManager):
     def __init__(self,
                  worker_func: Callable,
                  env_config: EnvConfig,

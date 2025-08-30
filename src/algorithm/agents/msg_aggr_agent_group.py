@@ -86,7 +86,7 @@ class MsgAggrAgentGroup(AgentGroup):
 
         # Aggregate message
         aggregated_msg = self.aggr_model(msg) # (B, N, F) -> (B, F)
-        aggregated_msg_stack = torch.stack([aggregated_msg for i in range(n_agents)]).to(self.device) # (N, B, F)
+        aggregated_msg_stack = torch.stack([aggregated_msg for i in range(len(self.agent_model_dict))]).to(self.device) # (N, B, F)
         aggregated_msg_stack = torch.permute(aggregated_msg_stack, (1, 0, 2))  # (B, N, F)
 
         hidden_states = torch.cat((local_obs, aggregated_msg_stack), dim=-1)  # (B, N, Hidden Size(F_local_obs + F_aggregated_msg))
@@ -144,7 +144,7 @@ class MsgAggrAgentGroup(AgentGroup):
             action_masks = np.array([avail_actions[agent_id] for agent_id in self.agent_model_dict.keys()])
             
             # Apply action masks to Q-values
-            masked_q_values = q_values * action_masks + (1 - action_masks) * (-np.inf)
+            masked_q_values = np.where(action_masks == 1, q_values, -np.inf)
             
             # Get optimal actions
             optimal_actions = np.argmax(masked_q_values, axis=-1).astype(np.int64)

@@ -79,7 +79,7 @@ class GraphAgentGroup(AgentGroup):
             action_masks = np.array([avail_actions[agent_id] for agent_id in self.agent_model_dict.keys()])
             
             # Apply action masks to Q-values
-            masked_q_values = q_values * action_masks + (1 - action_masks) * (-np.inf)
+            masked_q_values = np.where(action_masks == 1, q_values, -np.inf)
             
             # Get optimal actions
             optimal_actions = np.argmax(masked_q_values, axis=-1).astype(np.int64)

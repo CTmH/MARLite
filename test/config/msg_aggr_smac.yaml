@@ -152,7 +152,7 @@ sample_ratio_scheduler:
 
 critic_config:
   type: "QMIX"
-  state_shape: 22340
+  state_shape: 256
   input_dim: 20
   qmix_hidden_dim: 128
   hypernet_layers: 2
@@ -160,7 +160,10 @@ critic_config:
   feature_extractor:
     model_type: "Custom"
     layers:
-      - type: Flatten
+      - type: Linear
+        in_features: 22340
+        out_features: 256
+      - type: ELU
   optimizer:
     type: "Adam"
     lr: 0.0002
@@ -187,7 +190,7 @@ trainer_config:
   gamma: 0.95
   eval_epsilon: 0.01
   workdir: "/home/ctmh/exp/test_msg_aggr_smac"
-  train_device: "cuda:0"
+  train_device: "cpu"
   eval_device: "cpu"
   n_workers: 2
 

@@ -84,7 +84,7 @@ def multiprocess_rollout(env_config: EnvConfig,
                 break
 
         if use_action_mask:
-            avail_actions = {agent: infos[agent]['action_mask'] for agent in env.agents}
+            avail_actions = {agent: np.array(infos[agent]['action_mask'], dtype=np.int8) for agent in env.agents}
         else:
             avail_actions = {agent: env.action_space(agent) for agent in env.agents}
         processed_obs = _obs_preprocess(
