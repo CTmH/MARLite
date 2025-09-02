@@ -16,8 +16,9 @@ class MultiProcessRolloutManager(RolloutManager):
                  traj_len: int,
                  episode_limit: int,
                  epsilon: float,
-                 device: str):
-        
+                 device: str,
+                 check_victory: Callable):
+
         self.worker_func = worker_func
         self.env_config = env_config
         self.agent_group = agent_group
@@ -27,6 +28,7 @@ class MultiProcessRolloutManager(RolloutManager):
         self.episode_limit = episode_limit
         self.epsilon = epsilon
         self.device = device
+        self.check_victory = check_victory
 
     def generate_episodes(self) -> List[Any]:
         mp.set_start_method('spawn', force=True)
@@ -39,9 +41,11 @@ class MultiProcessRolloutManager(RolloutManager):
                 [self.traj_len] * self.n_episodes,
                 [self.episode_limit] * self.n_episodes,
                 [self.epsilon] * self.n_episodes,
-                [self.device] * self.n_episodes
+                [self.device] * self.n_episodes,
+                [self.check_victory] * self.n_episodes
             ), total=self.n_episodes, desc="Generating Episodes"))
+        episodes = [e for e in episodes if e]
         return episodes
-    
+
     def cleanup(self): # For compatibility
         return self

@@ -1,58 +1,21 @@
 import numpy as np
 from copy import deepcopy
+from typing import Callable
+import time
 from ..environment.env_config import EnvConfig
 from ..algorithm.agents import AgentGroup
 from ..algorithm.agents.graph_agent_group import GraphAgentGroup
-from ..algorithm.model import TimeSeqModel
-
-def _obs_preprocess(observations: list, agent_model_dict: dict, models: dict, rnn_traj_len: int):
-        agents = agent_model_dict.keys()
-        processed_obs = {agent_id : [] for agent_id in agents}
-        for agent_id, model_name in agent_model_dict.items():
-            if isinstance(models[model_name], TimeSeqModel):
-                obs_len = len(observations)
-                if obs_len < rnn_traj_len:
-                    padding_length = rnn_traj_len - obs_len
-                    obs_padding = [np.zeros_like(observations[-1][agent_id]) for _ in range(padding_length)]
-                    obs = obs_padding + [o[agent_id] for o in observations[-rnn_traj_len:]]
-                else:
-                    obs = [o[agent_id] for o in observations[-rnn_traj_len:]]
-            else:
-                obs = [observations[-1].get(agent_id)]
-            processed_obs[agent_id] = np.array(obs)
-        return processed_obs
-
-def _ensure_all_agents_present(data_dict: dict, default_values: dict) -> dict:
-    """
-    Ensure that the dictionary contains all possible agents.
-    If any agent is missing, add it with the corresponding default value.
-    Maintains the order of possible_agents.
-    """
-
-    result = {}
-    for agent in default_values.keys():
-        if agent in data_dict:
-            result[agent] = data_dict[agent]
-        elif agent in default_values:
-            result[agent] = default_values[agent]
-        else:
-            # Fallback: use first available value as template
-            if data_dict:
-                first_value = next(iter(data_dict.values()))
-                result[agent] = np.zeros_like(first_value)
-            elif default_values:
-                first_default = next(iter(default_values.values()))
-                result[agent] = np.zeros_like(first_default)
-    return result
+from src.util.env_util import obs_preprocess, ensure_all_agents_present
 
 def multiprocess_rollout(env_config: EnvConfig,
             agent_group: AgentGroup,
             rnn_traj_len=5,
             episode_limit=100,
             epsilon=0.5,
-            device='cpu'):
+            device='cpu',
+            check_victory: Callable = None):
     """Execute a rollout using multiprocess environment.
-    
+
     Args:
         env_config: Environment configuration
         agent_group: Agent group for acting
@@ -60,7 +23,8 @@ def multiprocess_rollout(env_config: EnvConfig,
         episode_limit: Maximum steps per episode
         epsilon: Exploration rate
         device: Device to run the model on
-    
+        check_victory: Optional function that takes (env, infos) and returns whether the game was won
+
     Returns:
         Episode data dictionary
     """
@@ -91,34 +55,52 @@ def multiprocess_rollout(env_config: EnvConfig,
     # Initialize tracking variables
     win_tag = False
     episode_reward = 0
-    
+
     # Initialize variables for default observations and available actions
-    possible_agents = None
     default_observations = {}
     default_avail_actions = {}
+    default_rewards = {agent: 0 for agent in possible_agents}
+    default_terminations = {agent: True for agent in possible_agents}
+    default_truncations = {agent: True for agent in possible_agents}
     use_action_mask = False
 
     for i in range(episode_limit + 1):
          # Reset environment
         if i == 0:
-            observations, infos = env.reset()
+            # Generate random seed based on current time
+            seed = int(time.time() * 1000) % (2**32 - 1)
+
+            # Reset environment with retry logic
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    observations, infos = env.reset(seed=seed)
+                    break
+                except Exception as e:
+                    if attempt == max_retries - 1:
+                        # TODO Need log support
+                        return None
+                    # Recreate environment and try again
+                    env.close()
+                    env = env_config.create_env()
+                    print(f"Reset failed, attempt {attempt + 1}/{max_retries}: {e}")
 
             # Determine if action masking is used
             info_item = next(iter(infos.values()), None)
             if isinstance(info_item, dict) and isinstance(info_item.get('action_mask'), np.ndarray):
                 use_action_mask = True
-            
+
             # Create default observations for each possible agent
-            for agent in env.possible_agents:
+            for agent in possible_agents:
                 if agent in observations:
                     default_observations[agent] = np.zeros_like(observations[agent])
                 else:
                     # If agent not present in initial observations, use first available observation as template
                     first_obs = next(iter(observations.values()))
                     default_observations[agent] = np.zeros_like(first_obs)
-            
+
             # Create default available actions for each possible agent
-            for agent in env.possible_agents:
+            for agent in possible_agents:
                 if use_action_mask:
                     if agent in infos and 'action_mask' in infos[agent]:
                         default_avail_actions[agent] = np.ones_like(infos[agent]['action_mask'], dtype=np.int8)
@@ -143,7 +125,14 @@ def multiprocess_rollout(env_config: EnvConfig,
             episode['avail_actions'].append(avail_actions)
 
             # Step environment
-            observations, rewards, terminations, truncations, infos = env.step(actions)
+            actual_actions = {agent:actions[agent] for agent in env.agents}
+            observations, rewards, terminations, truncations, infos = env.step(actual_actions)
+
+            # Ensure all possible agents are present in observations and rewards
+            observations = ensure_all_agents_present(observations, default_observations)
+            rewards = ensure_all_agents_present(rewards, default_rewards)
+            terminations = ensure_all_agents_present(terminations, default_terminations)
+            truncations = ensure_all_agents_present(truncations, default_truncations)
 
             # Store post-step data
             episode['rewards'].append(rewards)
@@ -151,21 +140,14 @@ def multiprocess_rollout(env_config: EnvConfig,
             episode['terminations'].append(terminations)
             episode['next_states'].append(env.state())
             episode['next_observations'].append(observations)
-            
+
             # Update episode reward
-            all_agents_rewards = [value for _, value in rewards.items()]
-            episode['all_agents_sum_rewards'].append(sum(all_agents_rewards))
-            episode_reward += np.sum(np.array([rewards[agent] for agent in rewards.keys()]))
+            agent_reward_sum = sum(rewards.values())
+            episode['all_agents_sum_rewards'].append(agent_reward_sum)
+            episode_reward += agent_reward_sum
 
-            # TODO win tag logic here
-            # TODO logic for lost units
-            # TODO reward of the last state and the second last state
-            # Check termination conditions
-            if True in terminations.values() or True in truncations.values():
+            if not env.agents:  # Game has ended
                 break
-
-        # Ensure all possible agents are present in observations and available actions
-        observations = _ensure_all_agents_present(observations, default_observations)
 
         # Create available actions dictionary
         if use_action_mask:
@@ -177,10 +159,10 @@ def multiprocess_rollout(env_config: EnvConfig,
         else:
             # Create available actions from action spaces
             current_avail_actions = {agent: env.action_space(agent) for agent in env.agents}
-        avail_actions = _ensure_all_agents_present(current_avail_actions, default_avail_actions)
+        avail_actions = ensure_all_agents_present(current_avail_actions, default_avail_actions)
 
         # Get actions from agent
-        processed_obs = _obs_preprocess(
+        processed_obs = obs_preprocess(
             observations=episode['observations'] + [observations],
             agent_model_dict=agent_group.agent_model_dict,
             models=agent_group.models,
@@ -193,9 +175,16 @@ def multiprocess_rollout(env_config: EnvConfig,
         actions = ret['actions']
         edge_indices = ret.get('edge_indices', None)
 
+    # TODO win tag logic here
+    # TODO logic for lost units
+    # TODO reward of the last state and the second last state
+
+    # Check if the game was won using the provided function
+    if check_victory is not None:
+        win_tag = check_victory(env, infos)
+    episode['win_tag'] = win_tag
     episode['episode_length'] = len(episode['observations'])
     episode['episode_reward'] = episode_reward
-    episode['win_tag'] = win_tag
 
     env.close()
     return episode

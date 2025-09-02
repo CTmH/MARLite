@@ -1,6 +1,7 @@
 import unittest
 import yaml
 from src.rollout.multiprocess_rolloutmanager import MultiProcessRolloutManager
+from src.rollout.victory_checker import always_lose
 from src.rollout.rollout_func import multiprocess_rollout
 from src.environment.env_config import EnvConfig
 from src.algorithm.agents.agent_group_config import AgentGroupConfig
@@ -65,7 +66,8 @@ class TestRolloutManager(unittest.TestCase):
                                                   traj_len=self.traj_len,
                                                   episode_limit=self.episode_limit,
                                                   epsilon=0.9,
-                                                  device='cpu')
+                                                  device='cpu',
+                                                  check_victory=always_lose)
 
     def test_generate_episodes(self):
         episodes = self.manager.generate_episodes()

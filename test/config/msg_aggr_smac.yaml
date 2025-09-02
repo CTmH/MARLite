@@ -178,6 +178,7 @@ rollout_config:
   traj_len: 5
   episode_limit: 200
   device: "cpu"
+  victory_checker: smac
 
 replaybuffer_config:
   type: "Prioritized"
