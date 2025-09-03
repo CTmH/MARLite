@@ -1,10 +1,10 @@
 import numpy as np
 import unittest
 from magent2.environments import adversarial_pursuit_v4
-from src.algorithm.graph_builder import GraphBuilderConfig
+from marlite.algorithm.graph_builder import GraphBuilderConfig
 
 class TestMagentGraphBuilder(unittest.TestCase):
-    
+
     def test_process_batch_normal_case(self):
         config = {
             "type": "Magent",

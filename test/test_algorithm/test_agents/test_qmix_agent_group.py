@@ -5,7 +5,7 @@ import numpy as np
 import tempfile
 from mpe2 import simple_spread_v3
 from torch.nn import DataParallel
-from src.algorithm.agents.agent_group_config import AgentGroupConfig
+from marlite.algorithm.agents import AgentGroupConfig
 
 class TestQMIXAgentGroup(unittest.TestCase):
 

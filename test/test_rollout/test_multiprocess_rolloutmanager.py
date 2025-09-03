@@ -1,12 +1,13 @@
 import unittest
 import yaml
-from src.rollout.multiprocess_rolloutmanager import MultiProcessRolloutManager
-from src.rollout.victory_checker import always_lose
-from src.rollout.rollout_func import multiprocess_rollout
-from src.environment.env_config import EnvConfig
-from src.algorithm.agents.agent_group_config import AgentGroupConfig
 import torch.nn as nn
 import torch.nn.init as init
+from marlite.rollout.multiprocess_rolloutmanager import MultiProcessRolloutManager
+from marlite.rollout.multiprocess_rollout import multiprocess_rollout
+from marlite.rollout.victory_checker import always_lose
+from marlite.environment import EnvConfig
+from marlite.algorithm.agents import AgentGroupConfig
+
 def init_weights(m):
     if isinstance(m, nn.Linear):
         init.constant_(m.weight, 0.5)

@@ -1,8 +1,8 @@
 import unittest
 import yaml
 import numpy as np
-from src.algorithm.agents.magent_agent_group import MagentPreyAgentGroup
-from src.environment.env_config import EnvConfig
+from marlite.algorithm.agents.magent_agent_group import MagentPreyAgentGroup
+from marlite.environment import EnvConfig
 
 class TestMagentPreyAgentGroup(unittest.TestCase):
 

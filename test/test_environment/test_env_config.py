@@ -1,6 +1,6 @@
 import unittest
 import yaml
-from src.environment.env_config import EnvConfig
+from marlite.environment import EnvConfig
 from pettingzoo import ParallelEnv
 
 class TestEnvConfig(unittest.TestCase):

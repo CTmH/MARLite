@@ -1,7 +1,8 @@
 import unittest
 import yaml
-from unittest.mock import MagicMock
-from src.replaybuffer.replaybuffer_config import ReplayBufferConfig, NormalReplayBuffer, PrioritizedReplayBuffer
+from marlite.replaybuffer import ReplayBufferConfig
+from marlite.replaybuffer.normal_replaybuffer import NormalReplayBuffer
+from marlite.replaybuffer.prioritized_replaybuffer import PrioritizedReplayBuffer
 
 class TestReplayBufferConfig(unittest.TestCase):
     def test_create_normal_replaybuffer(self):

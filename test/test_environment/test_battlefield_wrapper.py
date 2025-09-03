@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 from magent2.environments import battlefield_v5
-from src.environment.battlefield_wrapper import BattleFieldWrapper
+from marlite.environment.battlefield_wrapper import BattleFieldWrapper
 
 class TestBattleFieldWrapper(unittest.TestCase):
 

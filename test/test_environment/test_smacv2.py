@@ -1,8 +1,7 @@
 import unittest
 import yaml
 import numpy as np
-from src.environment.smac_wrapper import SMACWrapper
-from src.environment.env_config import EnvConfig
+from marlite.environment import EnvConfig
 
 
 class TestSMACv2Wrapper(unittest.TestCase):

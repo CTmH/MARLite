@@ -5,7 +5,7 @@ from copy import deepcopy
 import tempfile
 import torch
 
-from src.trainer.trainer_config import TrainerConfig
+from marlite.trainer import TrainerConfig
 
 class TestGraphQMIXTrainer(unittest.TestCase):
     def setUp(self):

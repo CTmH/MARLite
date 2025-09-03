@@ -1,7 +1,6 @@
 import unittest
 import torch
-import torch.nn.functional as F
-from src.algorithm.critic.qmix_critic_model import QMIXCriticModel
+from marlite.algorithm.model.qmix_critic_model import QMIXCriticModel
 
 class TestQMIXCritic(unittest.TestCase):
     def setUp(self):

@@ -2,13 +2,13 @@ import unittest
 import numpy as np
 import multiprocessing as mp
 
-from src.replaybuffer.normal_replaybuffer import NormalReplayBuffer
-from src.util.trajectory_dataset import TrajectoryDataLoader
-from src.algorithm.agents import QMIXAgentGroup
-from src.algorithm.model import ModelConfig
-from src.rollout.rollout_func import multiprocess_rollout
-from src.environment.env_config import EnvConfig
-from src.util.optimizer_config import OptimizerConfig
+from marlite.replaybuffer.normal_replaybuffer import NormalReplayBuffer
+from marlite.util.trajectory_dataset import TrajectoryDataLoader
+from marlite.algorithm.agents.qmix_agent_group import QMIXAgentGroup
+from marlite.algorithm.model import ModelConfig
+from marlite.rollout.multiprocess_rollout import multiprocess_rollout
+from marlite.environment import EnvConfig
+from marlite.util.optimizer_config import OptimizerConfig
 
 class TestTrajectoryDataset(unittest.TestCase):
 

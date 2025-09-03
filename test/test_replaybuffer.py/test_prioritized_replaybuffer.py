@@ -1,13 +1,13 @@
 import unittest
 import numpy as np
 
-from src.replaybuffer.prioritized_replaybuffer import PrioritizedReplayBuffer
-from src.util.trajectory_dataset import TrajectoryDataset
-from src.algorithm.agents import QMIXAgentGroup
-from src.rollout.rollout_func import multiprocess_rollout
-from src.algorithm.model import ModelConfig
-from src.environment.env_config import EnvConfig
-from src.util.optimizer_config import OptimizerConfig
+from marlite.replaybuffer.prioritized_replaybuffer import PrioritizedReplayBuffer
+from marlite.util.trajectory_dataset import TrajectoryDataset
+from marlite.algorithm.agents.qmix_agent_group import QMIXAgentGroup
+from marlite.rollout.multiprocess_rollout import multiprocess_rollout
+from marlite.algorithm.model import ModelConfig
+from marlite.environment import EnvConfig
+from marlite.util.optimizer_config import OptimizerConfig
 
 class TestPrioritizedReplayBuffer(unittest.TestCase):
 

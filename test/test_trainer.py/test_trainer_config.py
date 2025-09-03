@@ -1,8 +1,7 @@
 import unittest
 import yaml
 import tempfile
-from src.trainer.trainer_config import TrainerConfig
-from src.trainer.trainer import Trainer
+from marlite.trainer import TrainerConfig, Trainer
 
 class TestTrainerConfig(unittest.TestCase):
     def setUp(self):
@@ -22,7 +21,7 @@ class TestTrainerConfig(unittest.TestCase):
     def test_run(self):
         with open(self.config_path, 'r') as file:
             self.config = yaml.safe_load(file)
-            
+
         with tempfile.TemporaryDirectory() as temp_dir:
             self.config['trainer_config']['train_args']['epochs'] = 2
             self.config['rollout_config']['n_episodes'] = 2
@@ -50,7 +49,7 @@ class TestTrainerConfigWithKAZConfig(unittest.TestCase):
     def test_run(self):
         with open(self.config_path, 'r') as file:
             self.config = yaml.safe_load(file)
-            
+
         with tempfile.TemporaryDirectory() as temp_dir:
             self.config['trainer_config']['train_args']['epochs'] = 2
             self.config['rollout_config']['n_episodes'] = 2
@@ -78,7 +77,7 @@ class TestTrainerConfigWithMagentPredator(unittest.TestCase):
     def test_run(self):
         with open(self.config_path, 'r') as file:
             self.config = yaml.safe_load(file)
-            
+
         with tempfile.TemporaryDirectory() as temp_dir:
             self.config['trainer_config']['train_args']['epochs'] = 2
             self.config['rollout_config']['n_episodes'] = 2
@@ -106,7 +105,7 @@ class TestTrainerConfigWithMagentPrey(unittest.TestCase):
     def test_run(self):
         with open(self.config_path, 'r') as file:
             self.config = yaml.safe_load(file)
-            
+
         with tempfile.TemporaryDirectory() as temp_dir:
             self.config['trainer_config']['train_args']['epochs'] = 2
             self.config['rollout_config']['n_episodes'] = 2
@@ -134,7 +133,7 @@ class TestTrainerConfigWithMagentBattlefield(unittest.TestCase):
     def test_run(self):
         with open(self.config_path, 'r') as file:
             self.config = yaml.safe_load(file)
-            
+
         with tempfile.TemporaryDirectory() as temp_dir:
             self.config['trainer_config']['train_args']['epochs'] = 2
             self.config['rollout_config']['n_episodes'] = 2

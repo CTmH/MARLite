@@ -1,7 +1,7 @@
 import argparse
 import yaml
-from src.trainer.trainer_config import TrainerConfig
-from src.analyzer.analyzer_config import AnalyzerConfig
+from marlite.trainer.trainer_config import TrainerConfig
+from marlite.analyzer.analyzer_config import AnalyzerConfig
 
 def train(config_path):
     with open(config_path, 'r') as file:

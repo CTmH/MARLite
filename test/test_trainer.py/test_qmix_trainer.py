@@ -1,17 +1,12 @@
 import unittest
 import os
 import yaml
-from unittest.mock import MagicMock, patch, call, mock_open
 from copy import deepcopy
 import tempfile
 import torch
 import pygame
 
-from src.trainer.qmix_trainer import QMIXTrainer
-from src.trainer.trainer_config import TrainerConfig
-from src.algorithm.model import ModelConfig
-from src.environment.env_config import EnvConfig
-from src.util.scheduler import Scheduler
+from marlite.trainer import TrainerConfig
 
 class TestQMixTrainer(unittest.TestCase):
     def setUp(self):

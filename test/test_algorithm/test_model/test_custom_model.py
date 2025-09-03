@@ -1,6 +1,6 @@
 import unittest
 import torch
-from src.algorithm.model.custom_model import CustomModel
+from marlite.algorithm.model.custom_model import CustomModel
 
 class TestCustomModel(unittest.TestCase):
     def test_linear_layer(self):

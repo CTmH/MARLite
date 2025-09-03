@@ -1,7 +1,6 @@
 import unittest
 import torch
-from torch import Tensor
-from src.algorithm.model.gnn import GCNModel, GATModel
+from marlite.algorithm.model.gnn import GCNModel, GATModel
 
 class TestGCNModel(unittest.TestCase):
     def setUp(self):
@@ -9,7 +8,7 @@ class TestGCNModel(unittest.TestCase):
         self.hidden_dim = 64
         self.output_dim = 10
         self.model = GCNModel(self.input_dim, self.hidden_dim, self.output_dim)
-        
+
         # Create dummy data
         self.num_nodes = 5
         self.num_edges = 10
@@ -33,7 +32,7 @@ class TestGATModel(unittest.TestCase):
         self.hidden_dim = 64
         self.output_dim = 10
         self.model = GATModel(self.input_dim, self.hidden_dim, self.output_dim)
-        
+
         # Create dummy data
         self.num_nodes = 5
         self.num_edges = 10

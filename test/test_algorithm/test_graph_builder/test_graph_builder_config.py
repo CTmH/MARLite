@@ -1,6 +1,6 @@
 import unittest
-from src.algorithm.graph_builder import GraphBuilderConfig
-from src.algorithm.graph_builder.magent_graph_builder import MagentGraphBuilder
+from marlite.algorithm.graph_builder import GraphBuilderConfig
+from marlite.algorithm.graph_builder.magent_graph_builder import MagentGraphBuilder
 
 class TestGraphBuilderConfig(unittest.TestCase):
 

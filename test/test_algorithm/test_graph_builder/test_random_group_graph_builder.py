@@ -2,7 +2,7 @@ import numpy as np
 import networkx as nx
 import unittest
 from magent2.environments import adversarial_pursuit_v4
-from src.algorithm.graph_builder import GraphBuilderConfig
+from marlite.algorithm.graph_builder import GraphBuilderConfig
 
 class TestRandomGroupGraphBuilder(unittest.TestCase):
 

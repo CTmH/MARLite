@@ -1,17 +1,8 @@
-import sys
-print("In module products sys.path[0], __package__ ==", sys.path[0], __package__)
 import unittest
-import torch
-import numpy as np
 import yaml
-from unittest.mock import MagicMock
 from mpe2 import simple_spread_v3
 
-from src.algorithm.agents.agent_group import AgentGroup
-from src.algorithm.agents.agent_group_config import AgentGroupConfig
-from src.algorithm.model import ModelConfig
-from src.util.optimizer_config import OptimizerConfig
-
+from marlite.algorithm.agents import AgentGroupConfig, AgentGroup
 
 class TestAgentGroupConfig(unittest.TestCase):
 

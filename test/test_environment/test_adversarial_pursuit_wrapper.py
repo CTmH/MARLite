@@ -1,10 +1,10 @@
 import unittest
 import numpy as np
 from magent2.environments import adversarial_pursuit_v4
-from src.environment.adversarial_pursuit_wrapper import AdversarialPursuitPredator, AdversarialPursuitPrey
+from marlite.environment.adversarial_pursuit_wrapper import AdversarialPursuitPredator, AdversarialPursuitPrey
 
 class TestAdversarialPursuitPredator(unittest.TestCase):
-    
+
     def setUp(self):
         opponent_agents = {f'prey_{i}':'random' for i in range(50)}
         self.opponent_agents_with_model = {agent: 'model1' for agent in opponent_agents}
@@ -19,7 +19,7 @@ class TestAdversarialPursuitPredator(unittest.TestCase):
         self.wrapper = AdversarialPursuitPredator(env=adversarial_pursuit_v4.parallel_env(), **kwargs)
         self.n_agent = 25
         self.n_oppo = 50
-        
+
     def test_init(self):
         self.assertEqual(len(self.wrapper.agents), self.n_agent)
         self.assertEqual(self.wrapper.num_agents, self.n_agent)
@@ -43,7 +43,7 @@ class TestAdversarialPursuitPredator(unittest.TestCase):
 
     def test_render(self):
         self.wrapper.render()
-        
+
     def test_close(self):
         self.wrapper.close()
 
@@ -63,7 +63,7 @@ class TestAdversarialPursuitPredator(unittest.TestCase):
 
 
 class TestAdversarialPursuitPrey(unittest.TestCase):
-    
+
     def setUp(self):
         opponent_agents = {f'predator_{i}':'random' for i in range(25)}
         self.opponent_agents_with_model = {agent: 'model1' for agent in opponent_agents}
@@ -78,7 +78,7 @@ class TestAdversarialPursuitPrey(unittest.TestCase):
         self.wrapper = AdversarialPursuitPrey(env=adversarial_pursuit_v4.parallel_env(), **kwargs)
         self.n_agent = 50
         self.n_oppo = 25
-        
+
     def test_init(self):
         self.assertEqual(len(self.wrapper.agents), self.n_agent)
         self.assertEqual(self.wrapper.num_agents, self.n_agent)
@@ -101,7 +101,7 @@ class TestAdversarialPursuitPrey(unittest.TestCase):
 
     def test_render(self):
         self.wrapper.render()
-        
+
     def test_close(self):
         self.wrapper.close()
 

@@ -4,8 +4,8 @@ import yaml
 import numpy as np
 import tempfile
 
-from src.algorithm.agents.agent_group_config import AgentGroupConfig
-from src.environment.env_config import EnvConfig
+from marlite.algorithm.agents import AgentGroupConfig
+from marlite.environment import EnvConfig
 
 
 class TestGNNAgentGroup(unittest.TestCase):
@@ -25,7 +25,7 @@ class TestGNNAgentGroup(unittest.TestCase):
         self.obs_shape = self.env.observation_space(key).shape
         self.obs_shape = self.obs_shape[0]
         self.action_space_shape = self.env.action_space(key).n
-        
+
         # Initialize QMIXAgents
         self.agent_group = self.agent_group_config.get_agent_group()
 
@@ -54,7 +54,7 @@ class TestGNNAgentGroup(unittest.TestCase):
         edge_indices = ret['edge_indices']
         self.assertEqual(len(edge_indices), bs)
         self.assertEqual(edge_indices[0].shape[0], 2)
-        
+
         # Test get_q_values method in training mode
         self.agent_group.train()
         ret = self.agent_group.forward(observations=obs, states=states)

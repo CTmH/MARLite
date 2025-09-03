@@ -4,7 +4,7 @@ import tempfile
 from unittest.mock import patch, mock_open
 import yaml
 import torch
-from src.algorithm.model.model_config import ModelConfig
+from marlite.algorithm.model.model_config import ModelConfig
 
 class TestModelConfig(unittest.TestCase):
 

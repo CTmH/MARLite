@@ -1,7 +1,6 @@
 import unittest
-from unittest.mock import patch, MagicMock
 import numpy as np
-from src.algorithm.agents.random_agent_group import RandomAgentGroup
+from marlite.algorithm.agents.random_agent_group import RandomAgentGroup
 from gymnasium.spaces import Discrete
 
 class TestRandomAgentGroup(unittest.TestCase):
@@ -23,7 +22,7 @@ class TestRandomAgentGroup(unittest.TestCase):
 
         ret = self.random_agent_group.act(obs, avail_actions, 0.1)
         actions = ret["actions"]
-        
+
         # Check if the correct number of actions are returned
         self.assertEqual(len(actions), len(avail_actions))
         for action in actions.values():
