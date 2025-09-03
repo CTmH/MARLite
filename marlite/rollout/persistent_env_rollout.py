@@ -1,3 +1,4 @@
+import signal
 import numpy as np
 from copy import deepcopy
 from typing import Callable, List, Dict, Any
@@ -31,10 +32,26 @@ def persistent_env_rollout(env_config: EnvConfig,
     """
 
     # Setup environment and agent
-    try:
-        env = env_config.create_env()
-    except Exception as e:
-        print("Create environment failed")
+    env = None
+    for attempt in range(3):  # Retry up to 3 times
+        try:
+            def handler(signum, frame):
+                raise TimeoutError("Environment creation timed out")
+
+            signal.signal(signal.SIGALRM, handler)
+            signal.alarm(20)  # Set a 10-second alarm
+
+            env = env_config.create_env()
+            signal.alarm(0)  # Disable the alarm if successful
+            break
+        except TimeoutError as te:
+            print(f"Attempt {attempt + 1} failed with timeout")
+            continue
+        except Exception as e:
+            print(f"Create environment failed with error: {e}")
+            break
+
+    if env is None:
         return []
 
     agent_group = deepcopy(agent_group).reset().eval().to(device)
@@ -44,13 +61,14 @@ def persistent_env_rollout(env_config: EnvConfig,
     for episode_idx in range(n_episodes):
         # Initialize episode data
         episode = {
+            'alive_mask' : [],
             'observations': [],
             'states': [],
             'edge_indices': [],
             'actions': [],
             'rewards': [],
             'avail_actions': [],
-            'truncated': [],
+            'truncations': [],
             'terminations': [],
             'next_states': [],
             'next_observations': [],
@@ -67,6 +85,7 @@ def persistent_env_rollout(env_config: EnvConfig,
         # Initialize variables for default observations and available actions
         default_observations = {}
         default_avail_actions = {}
+        default_alive_mask = {agent: False for agent in env.possible_agents}
         default_rewards = {agent: 0 for agent in env.possible_agents}
         default_terminations = {agent: True for agent in env.possible_agents}
         default_truncations = {agent: True for agent in env.possible_agents}
@@ -80,7 +99,17 @@ def persistent_env_rollout(env_config: EnvConfig,
 
                 # Reset environment
                 try:
+                    def handler(signum, frame):
+                        raise TimeoutError("Environment reset timed out")
+
+                    signal.signal(signal.SIGALRM, handler)
+                    signal.alarm(10)  # Set a 5-second alarm
+
                     observations, infos = env.reset(seed=seed)
+                    signal.alarm(0)  # Disable the alarm if successful
+                except TimeoutError as te:
+                    print(f"Reset timed out, skipping episode {episode_idx}")
+                    break  # Skip this episode if reset fails
                 except Exception as e:
                     print("Reset failed")
                     break  # Skip this episode if reset fails
@@ -118,6 +147,7 @@ def persistent_env_rollout(env_config: EnvConfig,
             # Step environment
             else:
                 # Store transition data
+                episode['alive_mask'].append(alive_mask)
                 episode['observations'].append(observations)
                 episode['states'].append(env.state())
                 episode['edge_indices'].append(edge_indices)
@@ -127,10 +157,25 @@ def persistent_env_rollout(env_config: EnvConfig,
                 # Step environment
                 actual_actions = {agent:actions[agent] for agent in env.agents}
                 try:
+                    def handler(signum, frame):
+                        raise TimeoutError("Environment step timed out")
+
+                    signal.signal(signal.SIGALRM, handler)
+                    signal.alarm(2)  # Set a 5-second alarm
+
                     observations, rewards, terminations, truncations, infos = env.step(actual_actions)
+                    signal.alarm(0)  # Disable the alarm if successful
+                except TimeoutError as te:
+                    print(f"Step timed out, truncating episode {episode_idx}")
+                    # Remove last added items
+                    for key in ['alive_mask', 'observations', 'states', 'edge_indices', 'actions', 'avail_actions']:
+                        episode[key].pop()
+                    break  # Truncate this episode if step times out
                 except Exception as e:
-                    # TODO Need log support
                     print(f"Step failed, skipping episode {episode_idx}")
+                    # Remove last added items
+                    for key in ['alive_mask', 'observations', 'states', 'edge_indices', 'actions', 'avail_actions']:
+                        episode[key].pop()
                     break  # Skip this episode if step fails
 
                 # Ensure all possible agents are present in observations and rewards
@@ -141,7 +186,7 @@ def persistent_env_rollout(env_config: EnvConfig,
 
                 # Store post-step data
                 episode['rewards'].append(rewards)
-                episode['truncated'].append(truncations)
+                episode['truncations'].append(truncations)
                 episode['terminations'].append(terminations)
                 episode['next_states'].append(env.state())
                 episode['next_observations'].append(observations)
@@ -153,6 +198,9 @@ def persistent_env_rollout(env_config: EnvConfig,
 
                 if not env.agents:  # Game has ended
                     break
+
+            # Update Alive agent mask
+            alive_mask = ensure_all_agents_present({agent: True for agent in env.agents}, default_alive_mask)
 
             # Create available actions dictionary
             if use_action_mask:
@@ -181,7 +229,7 @@ def persistent_env_rollout(env_config: EnvConfig,
             edge_indices = ret.get('edge_indices', None)
 
         # Check if the game was won using the provided function
-        if check_victory is not None and 'observations' in locals():
+        if check_victory is not None:
             win_tag = check_victory(env, infos)
         episode['win_tag'] = win_tag
         episode['episode_length'] = len(episode['observations'])

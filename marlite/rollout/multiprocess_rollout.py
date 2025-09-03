@@ -40,13 +40,14 @@ def multiprocess_rollout(env_config: EnvConfig,
 
     # Initialize episode data
     episode = {
+        'alive_mask' : [],
         'observations': [],
         'states': [],
         'edge_indices': [],
         'actions': [],
         'rewards': [],
         'avail_actions': [],
-        'truncated': [],
+        'truncations': [],
         'terminations': [],
         'next_states': [],
         'next_observations': [],
@@ -63,6 +64,7 @@ def multiprocess_rollout(env_config: EnvConfig,
     # Initialize variables for default observations and available actions
     default_observations = {}
     default_avail_actions = {}
+    default_alive_mask = {agent: False for agent in possible_agents}
     default_rewards = {agent: 0 for agent in possible_agents}
     default_terminations = {agent: True for agent in possible_agents}
     default_truncations = {agent: True for agent in possible_agents}
@@ -114,6 +116,7 @@ def multiprocess_rollout(env_config: EnvConfig,
         # Step environment
         else:
             # Store transition data
+            episode['alive_mask'].append(alive_mask)
             episode['observations'].append(observations)
             episode['states'].append(env.state())
             episode['edge_indices'].append(edge_indices)
@@ -137,7 +140,7 @@ def multiprocess_rollout(env_config: EnvConfig,
 
             # Store post-step data
             episode['rewards'].append(rewards)
-            episode['truncated'].append(truncations)
+            episode['truncations'].append(truncations)
             episode['terminations'].append(terminations)
             episode['next_states'].append(env.state())
             episode['next_observations'].append(observations)
@@ -149,6 +152,9 @@ def multiprocess_rollout(env_config: EnvConfig,
 
             if not env.agents:  # Game has ended
                 break
+
+        # Update Alive agent mask
+        alive_mask = ensure_all_agents_present({agent: True for agent in env.agents}, default_alive_mask)
 
         # Create available actions dictionary
         if use_action_mask:

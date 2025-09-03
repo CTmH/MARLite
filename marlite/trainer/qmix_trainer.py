@@ -30,6 +30,7 @@ class QMIXTrainer(Trainer):
                                                   num_workers=self.n_workers)
                 for batch in dataloader:
                     # Extract batch data
+                    alive_mask = batch['alive_mask']
                     observations = batch['observations']
                     states = batch['states']
                     actions = batch['actions']
@@ -37,14 +38,26 @@ class QMIXTrainer(Trainer):
                     next_states = batch['next_states']
                     next_observations = batch['next_observations']
                     terminations = batch['terminations']
+                    truncations = batch['truncations']
                     bs = states.shape[0]  # Actual batch size
+
+                    terminations = torch.tensor(terminations[:,:,-1]).to(self.train_device) # (B, N, T) -> (B, N)
+                    truncations = torch.tensor(truncations[:,:,-1]).to(self.train_device) # (B, N, T) -> (B, N)
+                    alive_mask_next = ~(terminations | truncations)
+                    alive_mask = torch.tensor(alive_mask[:,:,-1]).to(self.train_device) # (B, N, T) -> (B, N)
+
+                    rewards = torch.Tensor(rewards[:,:,-1]).to(self.train_device) # (B, N, T) -> (B, N)
+                    rewards = rewards.sum(dim=1) # (B, N) -> (B) Sum over all agents rewards
+                    terminations = terminations.prod(dim=1) # (B, N) -> (B) if all agents are terminated then game over
+
                     # Compute the Q-tot
                     self.eval_agent_group.train().to(self.train_device)
                     ret = self.eval_agent_group.forward(observations) # obs.shape (B, N, T, F)
                     q_val = ret['q_val']
-                    actions = torch.Tensor(actions[:,:,-1:]).to(device=self.train_device, dtype=torch.int64) # (B, N, T, A)
+                    actions = torch.Tensor(actions[:,:,-1:]).to(device=self.train_device, dtype=torch.int64) # (B, N, T, A) -> (B, N, A)
                     q_val = torch.gather(q_val, dim=-1, index=actions)
                     q_val = q_val.squeeze(-1) # (B, N, 1) -> (B, N)
+                    q_val = q_val * alive_mask
                     states = torch.Tensor(states[:,-1,:]).to(self.train_device) # (B, T, F) -> (B, F) Take only the last state in the sequence
                     self.eval_critic.train().to(self.train_device)
                     ret = self.eval_critic(q_val, states)
@@ -56,17 +69,13 @@ class QMIXTrainer(Trainer):
                         ret_next = self.eval_agent_group.forward(next_observations)
                         q_val_next = ret_next['q_val']
                         q_val_next = q_val_next.max(dim=-1).values
+                        q_val_next = q_val_next * alive_mask_next
                         next_states = torch.Tensor(next_states[:,-1,:]).to(self.train_device) # (B, T, F) -> (B, F) Take only the last state in the sequence
                         self.target_critic.eval().to(self.train_device)
                         ret_next = self.target_critic(q_val_next, next_states)
                         q_tot_next = ret_next['q_tot']
 
                     # Compute the TD target
-                    rewards = torch.Tensor(rewards[:,:,-1]).to(self.train_device) # (B, N, T) -> (B, N)
-                    rewards = rewards.sum(dim=1) # (B, N) -> (B) Sum over all agents rewards
-                    terminations = torch.Tensor(terminations[:,:,-1]).to(self.train_device) # (B, N, T) -> (B, N)
-                    terminations = terminations.prod(dim=1) # (B, N) -> (B) if all agents are terminated then game over
-
                     y_tot = rewards + (1 - terminations) * self.gamma * q_tot_next
 
                     # Compute the critic loss

@@ -7,14 +7,16 @@ class TrajectoryDataset(Dataset):
         self.sample_id_list = sample_id_list
         self.episode_buffer = episode_buffer
         self.traj_len = traj_len
-        self.attr = ['observations',
+        self.attr = ['alive_mask',
+                     'observations',
                      'states',
                      'edge_indices',
                      'next_states',
                      'next_observations',
                      'actions',
                      'rewards',
-                     'terminations']
+                     'terminations',
+                     'truncations']
 
     def __len__(self):
         return len(self.sample_id_list)
@@ -33,7 +35,7 @@ class TrajectoryDataset(Dataset):
             sample[key] += self.episode_buffer[episode_id][key][start:pos+1]
 
         return sample
-    
+
 
 
 class TrajectoryDataLoader(DataLoader):
@@ -45,18 +47,21 @@ class TrajectoryDataLoader(DataLoader):
             num_workers=num_workers,
             collate_fn=self.collate_fn
         )
-        self.attr = ['observations',
+        self.attr = ['alive_mask',
+                     'observations',
                      'states',
                      'edge_indices',
                      'next_states',
                      'next_observations',
                      'actions',
                      'rewards',
-                     'terminations']
+                     'terminations',
+                     'truncations']
 
     @staticmethod
     def collate_fn(batch):
         # Extract necessary components from the trajectory
+        alive_mask = [traj['alive_mask'] for traj in batch]
         observations = [traj['observations'] for traj in batch]
         states = [traj['states'] for traj in batch]
         edge_indices = [traj['edge_indices'] for traj in batch]
@@ -65,33 +70,34 @@ class TrajectoryDataLoader(DataLoader):
         next_state = [traj['next_states'] for traj in batch]
         next_observations = [traj['next_observations'] for traj in batch]
         terminations = [traj['terminations'] for traj in batch]
+        truncations = [traj['truncations'] for traj in batch]
 
         # Format Data
 
         # Observations
         # Nested list convert to numpy array (Batch Size, Time Step, Agent Number, Feature Dimensions) (B, T, N, F) -> (B, N, T, F)
-        observations = [[[value for _, value in dict.items()] for dict in traj] for traj in observations]
-        next_observations = [[[value for _, value in dict.items()] for dict in traj] for traj in next_observations]
-        observations, next_observations = np.array(observations), np.array(next_observations)
+        observations = np.array([[[value for _, value in dict.items()] for dict in traj] for traj in observations])
+        next_observations = np.array([[[value for _, value in dict.items()] for dict in traj] for traj in next_observations])
+
         obs_shape = observations.shape
         n_dim_obs = len(obs_shape)
         transpose_arg = [0, 2, 1] + list(range(3, n_dim_obs))
         observations, next_observations = observations.transpose(transpose_arg), next_observations.transpose(transpose_arg)
-        
+
         # Actions, Rewards, Terminations
         # Nested list convert to numpy array (Batch Size, Time Step, Agent Number) (B, T, N) -> (B, N, T)
-        actions = [[[value for _, value in dict.items()] for dict in traj] for traj in actions]
-        rewards = [[[value for _, value in dict.items()] for dict in traj] for traj in rewards]
-        terminations = [[[value for _, value in dict.items()] for dict in traj] for traj in terminations]
-        actions, rewards, terminations = np.array(actions), np.array(rewards), np.array(terminations)
-        actions, rewards, terminations = actions.transpose(0,2,1), rewards.transpose(0,2,1), terminations.transpose(0,2,1)
-        terminations = terminations.astype(int)  # Convert to int type for termination flags
+        alive_mask = np.array([[[value for _, value in dict.items()] for dict in traj] for traj in alive_mask]).transpose(0,2,1)
+        actions = np.array([[[value for _, value in dict.items()] for dict in traj] for traj in actions]).transpose(0,2,1)
+        rewards = np.array([[[value for _, value in dict.items()] for dict in traj] for traj in rewards]).transpose(0,2,1)
+        terminations = np.array([[[value for _, value in dict.items()] for dict in traj] for traj in terminations]).transpose(0,2,1)
+        truncations = np.array([[[value for _, value in dict.items()] for dict in traj] for traj in truncations]).transpose(0,2,1)
 
         # States (Batch Size, Time Step, Feature Dimensions) (B, T, F)
         states = np.array(states)
         next_state = np.array(next_state)
 
         batch_dict = {
+            'alive_mask': alive_mask,
             'observations': observations,
             'states': states,
             'edge_indices': edge_indices,
@@ -99,7 +105,8 @@ class TrajectoryDataLoader(DataLoader):
             'next_observations': next_observations,
             'actions': actions,
             'rewards': rewards,
-            'terminations': terminations
-        } 
+            'terminations': terminations,
+            'truncations': truncations
+        }
 
         return batch_dict
