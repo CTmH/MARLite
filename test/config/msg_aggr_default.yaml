@@ -31,8 +31,6 @@ agent_group_config:
       feature_extractor:
         model_type: "Custom"
         layers:
-        - type: Permute
-          dims: [0, 3, 1, 2]
         - type: Conv2d
           in_channels: 29
           out_channels: 8
@@ -52,8 +50,6 @@ agent_group_config:
       encoder:
         model_type: "CustomTimeSeq"
         layers:
-        - type: Permute
-          dims: [0, 2, 1]
         - type: Conv1d
           in_channels: 256
           out_channels: 128
@@ -154,6 +150,7 @@ env_config:
         prey_48: random1
         prey_49: random1
     opp_obs_queue_len: 1
+    channel_first: true
 
 epsilon_scheduler:
   type: "linear"
@@ -177,8 +174,6 @@ critic_config:
   feature_extractor:
     model_type: "Custom"
     layers:
-      - type: Permute
-        dims: [0, 3, 1, 2]
       - type: Conv2d
         in_channels: 29
         out_channels: 32

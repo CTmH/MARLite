@@ -5,11 +5,12 @@ from pettingzoo.utils import BaseParallelWrapper
 from marlite.algorithm.agents.agent_group_config import AgentGroupConfig
 
 class AdversarialPursuitPredator(BaseParallelWrapper):
-    def __init__(self, env, opponent_agent_group_config: Dict[str, Any], opp_obs_queue_len: int):
+    def __init__(self, env, opponent_agent_group_config: Dict[str, Any], opp_obs_queue_len: int, channel_first: bool = False):
         self.opponent_agent_group_config = opponent_agent_group_config
         self.opponent_agent_group_config = AgentGroupConfig(**self.opponent_agent_group_config)
         self.opponent_agent_group = self.opponent_agent_group_config.get_agent_group()
         self.opp_obs_queue_len = opp_obs_queue_len
+        self.channel_first = channel_first
         super().__init__(env=env)
 
         self.agents = [f'predator_{i}' for i in range(25)]
@@ -44,12 +45,17 @@ class AdversarialPursuitPredator(BaseParallelWrapper):
         self.opponent_actions = self.opponent_agent_group.act(opp_obs_dict, opponent_avail_actions, epsilon=0.0)
         actions = actions | self.opponent_actions  # Combine actions with opponent's actions
         observations, rewards, terminations, truncations, infos = self.env.step(actions)
-        #observations = self._filter_observations(observations)
 
         self.opponent_observations = {agent: observations[agent] for agent in self.opponent_agents}
         self.opponent_observation_history.append(self.opponent_observations)
 
-        agent_observations = {agent: observations[agent].astype(np.int8) for agent in self.agents}
+        agent_observations = {}
+        for agent in self.agents:
+            obs = observations[agent].astype(np.int8)
+            if self.channel_first:
+                # (H, W, C) -> (C, H, W)
+                obs = np.transpose(obs, (2, 0, 1))
+            agent_observations[agent] = obs
         agent_rewards = {agent: rewards[agent] for agent in self.agents}
         agent_terminations = {agent: terminations[agent] for agent in self.agents}
         agent_truncations = {agent: truncations[agent] for agent in self.agents}
@@ -62,24 +68,28 @@ class AdversarialPursuitPredator(BaseParallelWrapper):
         self.opponent_observations = {agent: observations[agent] for agent in self.opponent_agents}
         self.opponent_observation_history.clear()
         self.opponent_observation_history.append(self.opponent_observations)
-        agent_observations = {agent: observations[agent].astype(np.int8) for agent in self.agents}
+        agent_observations = {}
+        for agent in self.agents:
+            obs = observations[agent].astype(np.int8)
+            if self.channel_first:
+                # (H, W, C) -> (C, H, W)
+                obs = np.transpose(obs, (2, 0, 1))
+            agent_observations[agent] = obs
         agent_info = {agent: info[agent] for agent in self.agents} # For compatibility with other environments
         return agent_observations, agent_info
 
     def state(self) -> np.ndarray:
+        if self.channel_first:
+            return np.transpose(self.env.state().astype(np.int8), (2, 0, 1))
         return self.env.state().astype(np.int8)
 
-    def _filter_observations(self, observations):
-        # Filter out extra features
-        filtered_observations = {key: value[:,:,:5] for key, value in observations.items()}
-        return filtered_observations
-
 class AdversarialPursuitPrey(BaseParallelWrapper):
-    def __init__(self, env, opponent_agent_group_config: Dict[str, Any], opp_obs_queue_len: int):
+    def __init__(self, env, opponent_agent_group_config: Dict[str, Any], opp_obs_queue_len: int, channel_first: bool = False):
         self.opponent_agent_group_config = opponent_agent_group_config
         self.opponent_agent_group_config = AgentGroupConfig(**self.opponent_agent_group_config)
         self.opponent_agent_group = self.opponent_agent_group_config.get_agent_group()
         self.opp_obs_queue_len = opp_obs_queue_len
+        self.channel_first = channel_first
         super().__init__(env=env)
 
         self.agents = [f'prey_{i}' for i in range(50)]
@@ -114,12 +124,17 @@ class AdversarialPursuitPrey(BaseParallelWrapper):
         self.opponent_actions = self.opponent_agent_group.act(opp_obs_dict, opponent_avail_actions, epsilon=0.0)
         actions = self.opponent_actions | actions  # Combine actions with opponent's actions
         observations, rewards, terminations, truncations, infos = self.env.step(actions)
-        #observations = self._filter_observations(observations)
 
         self.opponent_observations = {agent: observations[agent] for agent in self.opponent_agents}
         self.opponent_observation_history.append(self.opponent_observations)
 
-        agent_observations = {agent: observations[agent].astype(np.int8) for agent in self.agents}
+        agent_observations = {}
+        for agent in self.agents:
+            obs = observations[agent].astype(np.int8)
+            if self.channel_first:
+                # (H, W, C) -> (C, H, W)
+                obs = np.transpose(obs, (2, 0, 1))
+            agent_observations[agent] = obs
         agent_rewards = {agent: rewards[agent] for agent in self.agents}
         agent_terminations = {agent: terminations[agent] for agent in self.agents}
         agent_truncations = {agent: truncations[agent] for agent in self.agents}
@@ -132,14 +147,17 @@ class AdversarialPursuitPrey(BaseParallelWrapper):
         self.opponent_observations = {agent: observations[agent] for agent in self.opponent_agents}
         self.opponent_observation_history.clear()
         self.opponent_observation_history.append(self.opponent_observations)
-        agent_observations = {agent: observations[agent].astype(np.int8) for agent in self.agents}
+        agent_observations = {}
+        for agent in self.agents:
+            obs = observations[agent].astype(np.int8)
+            if self.channel_first:
+                # (H, W, C) -> (C, H, W)
+                obs = np.transpose(obs, (2, 0, 1))
+            agent_observations[agent] = obs
         agent_info = {agent: info[agent] for agent in self.agents} # For compatibility with other environments
         return agent_observations, agent_info
 
     def state(self) -> np.ndarray:
+        if self.channel_first:
+            return np.transpose(self.env.state().astype(np.int8), (2, 0, 1))
         return self.env.state().astype(np.int8)
-
-    def _filter_observations(self, observations):
-        # Filter out extra features
-        filtered_observations = {key: value[:,:,:5] for key, value in observations.items()}
-        return filtered_observations

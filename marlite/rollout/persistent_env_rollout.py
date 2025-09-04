@@ -46,10 +46,14 @@ def persistent_env_rollout(env_config: EnvConfig,
             break
         except TimeoutError as te:
             print(f"Attempt {attempt + 1} failed with timeout")
+            env = None
+            time.sleep(0.5)
             continue
         except Exception as e:
             print(f"Create environment failed with error: {e}")
-            break
+            env = None
+            time.sleep(0.5)
+            continue
 
     if env is None:
         return []

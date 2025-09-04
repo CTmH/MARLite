@@ -17,7 +17,8 @@ class MagentGraphBuilder(GraphBuilder):
             distance_metric: str = 'cityblock',
             n_workers: int = 8,
             valid_node_list: Union[list, None] = None, # Suggestion: Add valid_node_list, otherwise isolated nodes will be ignored in the node mapping.
-            update_interval: int = 1):
+            update_interval: int = 1,
+            channel_first: bool = False):
         super().__init__()
         self.binary_agent_id_dim = binary_agent_id_dim
         self.agent_presence_dim = agent_presence_dim
@@ -27,6 +28,7 @@ class MagentGraphBuilder(GraphBuilder):
         self.valid_node_list = valid_node_list
 
         self.update_interval = update_interval
+        self.channel_first = channel_first
         self.step_counter = 0
         self.cached_adj_matrix = None
         self.cached_edge_indices = None
@@ -81,7 +83,8 @@ class MagentGraphBuilder(GraphBuilder):
         return adj_matrix, edge_index
 
     def forward(self, state: ndarray) -> Tuple[ndarray, List[ndarray]]:
-
+        if self.channel_first:
+            state = np.transpose(state, (0, 2, 3, 1))
         bs = state.shape[0]
         if not self.training:
             self.step_counter += 1

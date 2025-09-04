@@ -60,10 +60,11 @@ class MsgAggrAgentGroup(AgentGroup):
                 obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
                 obs_vectorized = obs_vectorized.reshape(bs, n_agents, ts, -1) # (B*N*T, F) -> (B, N, T, F)
                 msg_selected = obs_vectorized[:, :, -1, :] # (B, N, T, F) -> (B, N, F)
-                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B, N, T, F) -> (B*N, T, F)
+                obs_vectorized = obs_vectorized.reshape(bs*n_agents, -1, ts) # (B, N, T, F) -> (B*N, F, T)
                 if isinstance(enc, RNNModel):
+                    obs_vectorized = obs_vectorized.permute(0, 2, 1) # (B*N, F, T) -> (B*N, T, F)
                     enc.train() # cudnn RNN backward can only be called in training mode
-                local_obs_selected = enc(obs_vectorized) # (B*N, T, F) -> (B*N, F)
+                local_obs_selected = enc(obs_vectorized) # (B*N, F, T)/(B*N, T, F) -> (B*N, F)
             else:
                 obs = obs[:,:,-1, :] # (B, N, T, *(obs_shape)) -> (B, N, *(obs_shape))
                 obs = obs.reshape(bs*n_agents, *obs_shape).to(self.device) # (B, N, *(obs_shape)) -> (B*N, *(obs_shape))

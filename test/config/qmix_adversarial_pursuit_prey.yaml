@@ -56,8 +56,6 @@ agent_group_config:
       feature_extractor:
         model_type: "Custom"
         layers:
-          - type: Permute
-            dims: [0, 3, 1, 2]
           - type: Conv2d
             in_channels: 5
             out_channels: 16
@@ -91,7 +89,7 @@ agent_group_config:
         rnn_hidden_dim: 128
         rnn_layers: 1
         output_shape: 9
-      
+
   optimizer:
     type: "Adam"
     lr: 0.0005
@@ -134,6 +132,7 @@ env_config:
         predator_23: random1
         predator_24: random1
     opp_obs_queue_len: 5
+    channel_first: true
 
 epsilon_scheduler:
   type: "logarithmic"
@@ -155,8 +154,6 @@ critic_config:
   feature_extractor:
     model_type: "Custom"
     layers:
-      - type: Permute
-        dims: [0, 3, 1, 2]
       - type: Conv2d
         in_channels: 5
         out_channels: 16
@@ -227,7 +224,7 @@ trainer_config:
   workdir: "./test/results/qmix_default"
   train_device: "cpu"
   eval_device: "cpu"
-  
+
   train_args:
     epochs: 100
     target_reward: 100

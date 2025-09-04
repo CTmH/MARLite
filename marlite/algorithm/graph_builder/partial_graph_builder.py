@@ -20,7 +20,8 @@ class PartialGraphMagentBuilder(GraphBuilder):
             n_workers: int = 8,
             n_subgraphs=2,
             valid_node_list: Union[list, None] = None,
-            update_interval: int = 1):
+            update_interval: int = 1,
+            channel_first: bool = False):
         super().__init__()
         self.binary_agent_id_dim = binary_agent_id_dim
         self.agent_presence_dim = agent_presence_dim
@@ -31,6 +32,7 @@ class PartialGraphMagentBuilder(GraphBuilder):
         self.valid_node_list = valid_node_list
 
         self.update_interval = update_interval
+        self.channel_first = channel_first
         self.step_counter = 0
         self.cached_adj_matrix = None
         self.cached_edge_indices = None
@@ -141,7 +143,8 @@ class PartialGraphMagentBuilder(GraphBuilder):
         return filtered_adj_matrix, filtered_edge_index
 
     def forward(self, state: ndarray) -> Tuple[ndarray, List[ndarray]]:
-
+        if self.channel_first:
+            state = np.transpose(state, (0, 2, 3, 1))
         bs = state.shape[0]
         if not self.training:
             self.step_counter += 1

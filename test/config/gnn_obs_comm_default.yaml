@@ -31,8 +31,6 @@ agent_group_config:
       feature_extractor:
         model_type: "Custom"
         layers:
-        - type: Permute
-          dims: [0, 3, 1, 2]
         - type: Conv2d
           in_channels: 29
           out_channels: 8
@@ -75,6 +73,7 @@ agent_group_config:
     n_subgraphs: 5
     valid_node_list: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24]
     update_interval: 5
+    channel_first: true
   graph_model_config:
     model_type: "GAT"
     input_dim: 64
@@ -147,6 +146,7 @@ env_config:
         prey_48: random1
         prey_49: random1
     opp_obs_queue_len: 1
+    channel_first: true
 
 epsilon_scheduler:
   type: "linear"
@@ -170,8 +170,6 @@ critic_config:
   feature_extractor:
     model_type: "Custom"
     layers:
-      - type: Permute
-        dims: [0, 3, 1, 2]
       - type: Conv2d
         in_channels: 29
         out_channels: 32
