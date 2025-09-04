@@ -69,7 +69,6 @@ trainer_config:
   eval_epsilon: 0.01
   workdir: "./results/qmix_default"
   train_device: "cpu"
-  eval_device: "cpu"
 
   train_args:
     epochs: 100

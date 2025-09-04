@@ -218,7 +218,6 @@ trainer_config:
   eval_epsilon: 0.01
   workdir: "/home/ctmh/exp/partial_gnn_202506051030"
   train_device: "cpu"
-  eval_device: "cpu"
   n_workers: 2
 
   train_args:

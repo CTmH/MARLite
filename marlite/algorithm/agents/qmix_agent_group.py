@@ -33,6 +33,8 @@ class QMIXAgentGroup(AgentGroup):
             self.model_to_agents[model_name].append(agent_name)
             self.model_to_agent_indices[model_name].append(i)
 
+        self.use_data_parallel = False
+
     def forward(self, observations) -> Dict[str, Any]:
         q_val = [None for _ in range(len(self.agent_model_dict))]
         for (model_name, model), (_, fe) in zip(self.models.items(),
@@ -47,19 +49,20 @@ class QMIXAgentGroup(AgentGroup):
             n_agents = len(selected_agents)
             ts = obs.shape[2]
             obs_shape = list(obs.shape[3:])
-            if isinstance(model, TimeSeqModel):
+            if isinstance(model, TimeSeqModel) or (self.use_data_parallel and isinstance(model.module, TimeSeqModel)):
                 # (B, N, T, *(obs_shape)) -> (B*N*T, *(obs_shape))
                 obs = obs.reshape(bs*n_agents*ts, *obs_shape).to(self.device)
                 obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
                 obs_vectorized = obs_vectorized.reshape(bs*n_agents, -1, ts) # (B, N, T, F) -> (B*N, F, T)
                 # cudnn RNN backward can only be called in training mode
-                if isinstance(model, RNNModel):
+                if isinstance(model, RNNModel) or (self.use_data_parallel and isinstance(model.module, RNNModel)):
                     obs_vectorized = obs_vectorized.permute(0, 2, 1) # (B*N, F, T) -> (B*N, T, F)
                     model.train()
             else:
                 obs = obs[:,:,-1, :] # (B, N, T, *(obs_shape)) -> (B, N, *(obs_shape))
                 obs = obs.reshape(bs*n_agents, *obs_shape).to(self.device) # (B, N, *(obs_shape)) -> (B*N, *(obs_shape))
-                obs_vectorized = fe(obs) # (B*N, *(obs_shape)) -> (B*N, F)
+                obs_vectorized = fe(obs) # (B*N, *(obs_shape)) -> (B*N, F) /  if use_data_parallel (D, B/D*N, F)
+                obs_vectorized = obs_vectorized.reshape(bs*n_agents, -1) # if use_data_parallel (D, B/D*N, F) -> (B*N, F)
             q_selected = model(obs_vectorized)
             q_selected = q_selected.reshape(bs, n_agents, -1) # (B, N, Action Space)
             q_selected = q_selected.permute(1, 0, 2)  # (N, B, Action Space)
@@ -198,12 +201,14 @@ class QMIXAgentGroup(AgentGroup):
         for id in self.models.keys():
             self.models[id] = DataParallel(self.models[id])
             self.feature_extractors[id] = DataParallel(self.feature_extractors[id])
+        self.use_data_parallel = True
         return self
 
     def unwrap_data_parallel(self) -> 'AgentGroup':
         for id in self.models.keys():
             self.models[id] = self.models[id].module
             self.feature_extractors[id] = self.feature_extractors[id].module
+        self.use_data_parallel = False
         return self
 
     def save_params(self, path: str) -> 'AgentGroup':

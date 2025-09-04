@@ -25,7 +25,8 @@ class GRUModel(RNNModel):
     def forward(self, inputs):
         batch_size = inputs.size(0)
         x = F.relu(self.fc1(inputs))
-        h_in = zeros(self.rnn_layers, batch_size, self.rnn_dim).to(inputs.device)
+        h_in = zeros(self.rnn_layers, batch_size, self.rnn_dim,
+                    dtype=inputs.dtype, device=inputs.device)
         out, _ = self.rnn(x, h_in)
         q = self.fc2(out)
         return q[:,-1,:] # get the last output of the sequence

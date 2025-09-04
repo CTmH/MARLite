@@ -30,7 +30,6 @@ class Trainer():
                  eval_threshold: float = 0.03,
                  workdir: str = "",
                  train_device: str = 'cpu',
-                 eval_device: str = 'cpu',
                  n_workers = 1,
                  use_data_parallel: bool = False):
 
@@ -84,7 +83,6 @@ class Trainer():
         else:
             self.train_device = train_device
             self.use_data_parallel = False
-        self.eval_device = eval_device
 
         # Metrics
         self.best_mean_reward = -np.inf
@@ -132,7 +130,7 @@ class Trainer():
         """
         Collect experiences using multiple rollout workers.
         """
-        self.eval_agent_group.eval().to(self.eval_device)
+        self.eval_agent_group.eval()
         manager = self.rolloutmanager_config.create_manager(self.eval_agent_group,
                                                            self.env_config,
                                                            epsilon)
@@ -155,7 +153,7 @@ class Trainer():
         return self
 
     def evaluate(self):
-        self.eval_agent_group.eval().to(self.eval_device)
+        self.eval_agent_group.eval()
         manager = self.rolloutmanager_config.create_eval_manager(self.eval_agent_group,
                                                            self.env_config,
                                                            self.eval_epsilon)

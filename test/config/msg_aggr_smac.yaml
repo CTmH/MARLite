@@ -186,7 +186,6 @@ trainer_config:
   eval_epsilon: 0.01
   workdir: "/home/ctmh/exp/test_msg_aggr_smac"
   train_device: "cpu"
-  eval_device: "cpu"
   n_workers: 2
 
   train_args:

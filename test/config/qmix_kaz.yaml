@@ -10,20 +10,36 @@ agent_group_config:
       feature_extractor:
         model_type: "Identity"
       model:
-        model_type: "RNN"
-        input_shape: 135
-        rnn_hidden_dim: 128
-        rnn_layers: 1
-        output_shape: 6
+        model_type: "CustomTimeSeq"
+        layers:
+        - type: Conv1d
+          in_channels: 135
+          out_channels: 16
+          kernel_size: 3
+          stride: 2
+          padding: 0
+        - type: Flatten
+        - type: ELU
+        - type: Linear
+          in_features: 32
+          out_features: 6
     model2:
       feature_extractor:
         model_type: "Identity"
       model:
-        model_type: "RNN"
-        input_shape: 135
-        rnn_hidden_dim: 128
-        rnn_layers: 1
-        output_shape: 6
+        model_type: "CustomTimeSeq"
+        layers:
+        - type: Conv1d
+          in_channels: 135
+          out_channels: 16
+          kernel_size: 3
+          stride: 2
+          padding: 0
+        - type: Flatten
+        - type: ELU
+        - type: Linear
+          in_features: 32
+          out_features: 6
   optimizer:
     type: "Adam"
     lr: 0.0005
@@ -79,8 +95,7 @@ trainer_config:
   eval_epsilon: 0.01
   workdir: "./test/results/qmix_default"
   train_device: "cpu"
-  eval_device: "cpu"
-  
+
   train_args:
     epochs: 100
     target_reward: 100
