@@ -164,9 +164,9 @@ critic_config:
     weight_decay: 0.00005
 
 rollout_config:
-  manager_type: "multi-process"
-  worker_type: "multi-process"
-  n_workers: 8
+  manager_type: "persistent_env"
+  worker_type: "persistent_env"
+  n_workers: 1
   n_episodes: 10
   n_eval_episodes: 50
   traj_len: 5

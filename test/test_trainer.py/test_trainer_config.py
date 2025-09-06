@@ -1,6 +1,7 @@
 import unittest
 import yaml
 import tempfile
+import torch
 from marlite.trainer import TrainerConfig, Trainer
 
 class TestTrainerConfig(unittest.TestCase):
@@ -68,6 +69,9 @@ class TestTrainerConfigWithMagentPredator(unittest.TestCase):
         self.config['rollout_config']['n_episodes'] = 2
         self.config['rollout_config']['episode_limit'] = 3
         self.config['replaybuffer_config']['capacity'] = 5
+        if torch.cuda.is_available():
+            self.config['trainer_config']['train_device'] = 'cuda'
+            self.config['rollout_config']['device'] = 'cpu'
         self.trainer_config = TrainerConfig(self.config)
 
     def test_create_learner(self):
@@ -96,6 +100,9 @@ class TestTrainerConfigWithMagentPrey(unittest.TestCase):
         self.config['rollout_config']['n_episodes'] = 2
         self.config['rollout_config']['episode_limit'] = 3
         self.config['replaybuffer_config']['capacity'] = 5
+        if torch.cuda.is_available():
+            self.config['trainer_config']['train_device'] = 'cuda'
+            self.config['rollout_config']['device'] = 'cpu'
         self.trainer_config = TrainerConfig(self.config)
 
     def test_create_learner(self):
@@ -124,6 +131,9 @@ class TestTrainerConfigWithMagentBattlefield(unittest.TestCase):
         self.config['rollout_config']['n_episodes'] = 2
         self.config['rollout_config']['episode_limit'] = 3
         self.config['replaybuffer_config']['capacity'] = 5
+        if torch.cuda.is_available():
+            self.config['trainer_config']['train_device'] = 'cuda'
+            self.config['rollout_config']['device'] = 'cpu'
         self.trainer_config = TrainerConfig(self.config)
 
     def test_create_learner(self):

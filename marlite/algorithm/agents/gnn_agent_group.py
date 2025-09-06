@@ -46,15 +46,21 @@ class GNNAgentGroup(GraphAgentGroup):
             n_agents = len(selected_agents)
             ts = obs.shape[2]
             obs_shape = list(obs.shape[3:])
-            if isinstance(enc, TimeSeqModel):
+
+            model_class_name = self.model_class_names[model_name]
+            if model_class_name == 'TimeSeqModel':
                 # (B, N, T, *(obs_shape)) -> (B*N*T, *(obs_shape))
                 obs = obs.reshape(bs*n_agents*ts, *obs_shape).to(self.device)
                 obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
-                obs_vectorized = obs_vectorized.reshape(bs*n_agents, -1, ts) # (B, N, T, F) -> (B*N, F, T)
-                if isinstance(enc, RNNModel):
-                    obs_vectorized = obs_vectorized.permute(0, 2, 1) # (B*N, F, T) -> (B*N, T, F)
-                    enc.train() # cudnn RNN backward can only be called in training mode
-                msg_selected = enc(obs_vectorized) # (B*N, F, T)/(B*N, T, F) -> (B*N, F)
+                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B*N*T, F) -> (B*N, T, F)
+                obs_vectorized = obs_vectorized.permute(0, 2, 1) #  (B*N, T, F) -> (B*N, F, T)
+                msg_selected = enc(obs_vectorized) # (B*N, F, T) -> (B*N, F)
+            elif model_class_name == 'RNNModel':
+                obs = obs.reshape(bs*n_agents*ts, *obs_shape).to(self.device)
+                obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
+                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B*N*T, F) -> (B*N, T, F)
+                enc.train() # cudnn RNN backward can only be called in training mode
+                msg_selected = enc(obs_vectorized) # (B*N, T, F) -> (B*N, F)
             else:
                 obs = obs[:,:,-1, :] # (B, N, T, *(obs_shape)) -> (B, N, *(obs_shape))
                 obs = obs.reshape(bs*n_agents, *obs_shape).to(self.device) # (B, N, *(obs_shape)) -> (B*N, *(obs_shape))

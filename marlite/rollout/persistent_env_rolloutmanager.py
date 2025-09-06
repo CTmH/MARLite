@@ -1,6 +1,7 @@
+import torch
 import torch.multiprocessing as mp
 from typing import List, Any, Callable
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from marlite.algorithm.agents import AgentGroup
 from marlite.environment import EnvConfig
 from marlite.rollout.rolloutmanager import RolloutManager
@@ -44,6 +45,19 @@ class PersistentEnvRolloutManager(RolloutManager):
         # Only use as many workers as needed
         n_workers = min(self.n_workers, n_active_workers)
 
+        # Handle CUDA device allocation when device is just "cuda" without device number
+        if self.device == "cuda":
+            if torch.cuda.is_available():
+                num_cuda_devices = torch.cuda.device_count()
+                # Distribute workers evenly across available CUDA devices
+                devices = [f"cuda:{i % num_cuda_devices}" for i in range(n_workers)]
+            else:
+                raise RuntimeError("CUDA is not available on this system")
+        else:
+            # Use the specified device for all workers
+            devices = [self.device for _ in range(n_workers)]
+
+        episodes = []
         with ProcessPoolExecutor(max_workers=n_workers) as executor:
             # Prepare arguments for each worker
             futures = [
@@ -55,17 +69,29 @@ class PersistentEnvRolloutManager(RolloutManager):
                     self.traj_len,
                     self.episode_limit,
                     self.epsilon,
-                    self.device,
+                    devices[i],  # Use the assigned device for this worker
                     self.check_victory
                 )
-                for _, n_episodes in workers_with_episodes[:n_workers]
+                for i, (worker_idx, n_episodes) in enumerate(workers_with_episodes[:n_workers])
             ]
 
             # Collect results with progress bar
-            episodes = []
-            for future in tqdm(futures, total=len(futures), desc="Generating Episodes"):
-                worker_episodes = future.result()
-                episodes.extend(worker_episodes)
+            completed_count = 0
+            pbar = tqdm(total=n_workers, desc="Generating Episodes")
+            for future in as_completed(futures):
+                try:
+                    worker_episodes = future.result()
+                    episodes.extend(worker_episodes)
+                    completed_count += 1
+                except Exception as e:
+                    # Log the error but continue with other workers
+                    print(f"Worker failed with error: {e}")
+                    # Continue with remaining futures
+                    completed_count += 1
+                    continue
+                # Update progress bar
+                pbar.update(completed_count)
+            pbar.close()
 
         return episodes
 

@@ -4,6 +4,7 @@ import os
 from copy import deepcopy
 from typing import Dict, List, Any
 from torch.nn import DataParallel
+from marlite.algorithm.model import TimeSeqModel, RNNModel
 from marlite.algorithm.model.model_config import ModelConfig
 from marlite.algorithm.agents.agent_group import AgentGroup
 from marlite.algorithm.graph_builder import GraphBuilderConfig
@@ -42,6 +43,18 @@ class GraphAgentGroup(AgentGroup):
             assert model_name in self.model_to_agents.keys(), f"Model {model_name} not found in model_configs"
             self.model_to_agents[model_name].append(agent_name)
             self.model_to_agent_indices[model_name].append(i)
+
+        self._use_data_parallel = False
+        self._is_compiled = False
+
+        self.model_class_names = {}
+        for model_name, model in self.encoders.items():
+            if isinstance(model, TimeSeqModel):
+                self.model_class_names[model_name] = 'TimeSeqModel'
+                if isinstance(model, RNNModel):
+                    self.model_class_names[model_name] = 'RNNModel'
+            else:
+                self.model_class_names[model_name] = model.__class__.__name__
 
     def forward(self,
                 observations: Dict[str, np.ndarray],
@@ -210,21 +223,23 @@ class GraphAgentGroup(AgentGroup):
         return self
 
     def wrap_data_parallel(self) -> 'AgentGroup':
-        for id in self.models.keys():
+        for id in self.encoders.keys():
             self.encoders[id] = DataParallel(self.encoders[id])
             self.feature_extractors[id] = DataParallel(self.feature_extractors[id])
             self.decoders[id] = DataParallel(self.decoders[id])
         self.graph_builder = DataParallel(self.graph_builder)
-        self.graph_model = DataParallel(self.graph_model)
+        #self.graph_model = DataParallel(self.graph_model)
+        self._use_data_parallel = True
         return self
 
     def unwrap_data_parallel(self) -> 'AgentGroup':
-        for id in self.models.keys():
+        for id in self.encoders.keys():
             self.encoders[id] = self.encoders[id].module
             self.feature_extractors[id] = self.feature_extractors[id].module
             self.decoders[id] = self.decoders[id].module
         self.graph_builder = self.graph_builder.module
-        self.graph_model = self.graph_model.module
+        #self.graph_model = self.graph_model.module
+        self._use_data_parallel = False
         return self
 
     def save_params(self, path: str) -> 'AgentGroup':
@@ -258,6 +273,16 @@ class GraphAgentGroup(AgentGroup):
                                                     map_location=torch.device('cpu')))
         self.graph_model.load_state_dict(torch.load(os.path.join(path, 'graph_model.pth'),
                                                     map_location=torch.device('cpu')))
+        return self
+
+    def compile_models(self) -> 'AgentGroup':
+        for id in self.encoders.keys():
+            self.encoders[id] = torch.compile(self.encoders[id])
+            self.feature_extractors[id] = torch.compile(self.feature_extractors[id])
+            self.decoders[id] = torch.compile(self.decoders[id])
+        #self.graph_builder = torch.compile(self.graph_builder)
+        self.graph_model = torch.compile(self.graph_model)
+        self._is_compiled = True
         return self
 
     def reset(self) -> 'AgentGroup':

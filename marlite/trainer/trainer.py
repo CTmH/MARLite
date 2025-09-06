@@ -1,9 +1,10 @@
 import os
+import sys
+from absl import logging
 import numpy as np
 import torch
 from copy import deepcopy
 import datetime
-import logging
 import csv
 
 from marlite.environment import EnvConfig
@@ -31,10 +32,10 @@ class Trainer():
                  workdir: str = "",
                  train_device: str = 'cpu',
                  n_workers = 1,
-                 use_data_parallel: bool = False):
+                 use_data_parallel: bool = False,
+                 compile_models: bool = False,):
 
         self.env_config = env_config
-        self.env = env_config.create_env()
         self.critic_config = critic_config
         self.sample_ratio = sample_ratio_scheduler
         self.epsilon = epsilon_scheduler
@@ -68,12 +69,14 @@ class Trainer():
         self.checkpointdir = os.path.join(workdir, 'checkpoints')
 
         self.results = {}
-        self.log = logging.basicConfig(level=logging.INFO,
-                                       format='%(asctime)s - %(levelname)s - %(message)s',
-                                       handlers=[
-                                                 logging.StreamHandler(),
-                                                 #logging.FileHandler(os.path.join(self.logdir, "training.log"))
-                                                 ])
+
+        # Configure absl logging
+        os.makedirs(self.logdir, exist_ok=True)
+        # Set the log file (absl will automatically add timestamps and process info)
+        logging.get_absl_handler().use_absl_log_file('training', self.logdir)
+        # Set log level
+        logging.set_verbosity(logging.INFO)
+        logging.get_absl_handler().python_handler.stream = sys.stdout  # Ensure output to console
 
         # Device
         self.num_gpus = torch.cuda.device_count()
@@ -83,6 +86,15 @@ class Trainer():
         else:
             self.train_device = train_device
             self.use_data_parallel = False
+
+        # torch.compile
+        self.compile_models = compile_models
+        if self.compile_models:
+            logging.info(f"Compiling models...")
+            self.eval_agent_group = self.eval_agent_group.to(self.train_device).compile_models().to('cpu')
+            self.target_agent_group = self.target_agent_group.to(self.train_device).compile_models().to('cpu')
+            self.eval_critic = torch.compile(self.eval_critic.to(self.train_device)).to('cpu')
+            self.target_critic = torch.compile(self.target_critic.to(self.train_device)).to('cpu')
 
         # Metrics
         self.best_mean_reward = -np.inf

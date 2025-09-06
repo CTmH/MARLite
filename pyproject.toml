@@ -10,6 +10,7 @@ dependencies = [
     "torch>=2.8.0",
     "torch-geometric>=2.6.1",
     "tqdm>=4.67.1",
+    "absl-py>=2.3.1",
     "mpe2>=0.0.1",
     "networkx>=3.4.2",
     "pettingzoo[butterfly,mpe]>=1.25.0",

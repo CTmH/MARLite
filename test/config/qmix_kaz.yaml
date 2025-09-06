@@ -8,35 +8,47 @@ agent_group_config:
   model_configs:
     model1:
       feature_extractor:
-        model_type: "Identity"
+        model_type: "Custom"
+        layers:
+        - type: Flatten
+        - type: Linear
+          in_features: 135
+          out_features: 64
+        - type: LeakyReLU
       model:
         model_type: "CustomTimeSeq"
         layers:
         - type: Conv1d
-          in_channels: 135
+          in_channels: 64
           out_channels: 16
           kernel_size: 3
           stride: 2
           padding: 0
         - type: Flatten
-        - type: ELU
+        - type: LeakyReLU
         - type: Linear
           in_features: 32
           out_features: 6
     model2:
       feature_extractor:
-        model_type: "Identity"
+        model_type: "Custom"
+        layers:
+        - type: Flatten
+        - type: Linear
+          in_features: 135
+          out_features: 64
+        - type: LeakyReLU
       model:
         model_type: "CustomTimeSeq"
         layers:
         - type: Conv1d
-          in_channels: 135
+          in_channels: 64
           out_channels: 16
           kernel_size: 3
           stride: 2
           padding: 0
         - type: Flatten
-        - type: ELU
+        - type: LeakyReLU
         - type: Linear
           in_features: 32
           out_features: 6
@@ -48,6 +60,8 @@ agent_group_config:
 env_config:
   module_name: "pettingzoo.butterfly"
   env_name: "knights_archers_zombies_v10"
+  env_config:
+    sequence_space: false
 
 epsilon_scheduler:
   type: "logarithmic"
@@ -76,7 +90,7 @@ critic_config:
 rollout_config:
   manager_type: "multi-process"
   worker_type: "multi-process"
-  n_workers: 8
+  n_workers: 1
   n_episodes: 1000
   n_eval_episodes: 100
   traj_len: 5

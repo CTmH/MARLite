@@ -207,7 +207,7 @@ critic_config:
 rollout_config:
   manager_type: "multi-process"
   worker_type: "multi-process"
-  n_workers: 8
+  n_workers: 2
   n_episodes: 10
   n_eval_episodes: 50
   traj_len: 5

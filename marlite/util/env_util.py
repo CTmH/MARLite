@@ -1,7 +1,7 @@
 import numpy as np
 from typing import Dict, Any
 from marlite.algorithm.model import TimeSeqModel
-
+'''
 def obs_preprocess(observations: list, agent_model_dict: dict, models: dict, rnn_traj_len: int) -> Dict[str, Any]:
         agents = agent_model_dict.keys()
         processed_obs = {agent : [] for agent in agents}
@@ -16,6 +16,20 @@ def obs_preprocess(observations: list, agent_model_dict: dict, models: dict, rnn
                     obs = [o[agent] for o in observations[-rnn_traj_len:]]
             else:
                 obs = [observations[-1].get(agent)]
+            processed_obs[agent] = np.array(obs)
+        return processed_obs
+'''
+def obs_preprocess(observations: list, agent_model_dict: dict, models: dict, rnn_traj_len: int) -> Dict[str, Any]:
+        agents = agent_model_dict.keys()
+        processed_obs = {agent : [] for agent in agents}
+        for agent, model_name in agent_model_dict.items():
+            obs_len = len(observations)
+            if obs_len < rnn_traj_len:
+                padding_length = rnn_traj_len - obs_len
+                obs_padding = [np.zeros_like(observations[-1][agent]) for _ in range(padding_length)]
+                obs = obs_padding + [o[agent] for o in observations[-rnn_traj_len:]]
+            else:
+                obs = [o[agent] for o in observations[-rnn_traj_len:]]
             processed_obs[agent] = np.array(obs)
         return processed_obs
 

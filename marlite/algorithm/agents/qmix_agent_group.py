@@ -33,7 +33,17 @@ class QMIXAgentGroup(AgentGroup):
             self.model_to_agents[model_name].append(agent_name)
             self.model_to_agent_indices[model_name].append(i)
 
-        self.use_data_parallel = False
+        self._use_data_parallel = False
+        self._is_compiled = False
+
+        self.model_class_names = {}
+        for model_name, model in self.models.items():
+            if isinstance(model, TimeSeqModel):
+                self.model_class_names[model_name] = 'TimeSeqModel'
+                if isinstance(model, RNNModel):
+                    self.model_class_names[model_name] = 'RNNModel'
+            else:
+                self.model_class_names[model_name] = model.__class__.__name__
 
     def forward(self, observations) -> Dict[str, Any]:
         q_val = [None for _ in range(len(self.agent_model_dict))]
@@ -49,15 +59,20 @@ class QMIXAgentGroup(AgentGroup):
             n_agents = len(selected_agents)
             ts = obs.shape[2]
             obs_shape = list(obs.shape[3:])
-            if isinstance(model, TimeSeqModel) or (self.use_data_parallel and isinstance(model.module, TimeSeqModel)):
+
+            # Use class name checking instead of isinstance
+            model_class_name = self.model_class_names[model_name]
+            if model_class_name == 'TimeSeqModel':
                 # (B, N, T, *(obs_shape)) -> (B*N*T, *(obs_shape))
                 obs = obs.reshape(bs*n_agents*ts, *obs_shape).to(self.device)
                 obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
-                obs_vectorized = obs_vectorized.reshape(bs*n_agents, -1, ts) # (B, N, T, F) -> (B*N, F, T)
-                # cudnn RNN backward can only be called in training mode
-                if isinstance(model, RNNModel) or (self.use_data_parallel and isinstance(model.module, RNNModel)):
-                    obs_vectorized = obs_vectorized.permute(0, 2, 1) # (B*N, F, T) -> (B*N, T, F)
-                    model.train()
+                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B*N*T, F) -> (B*N, T, F)
+                obs_vectorized = obs_vectorized.permute(0, 2, 1) # (B*N, T, F) -> (B*N, F, T)
+            elif model_class_name == 'RNNModel':
+                obs = obs.reshape(bs*n_agents*ts, *obs_shape).to(self.device)
+                obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
+                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B*N*T, F) -> (B*N, T, F)
+                model.train() # cudnn RNN backward can only be called in training mode
             else:
                 obs = obs[:,:,-1, :] # (B, N, T, *(obs_shape)) -> (B, N, *(obs_shape))
                 obs = obs.reshape(bs*n_agents, *obs_shape).to(self.device) # (B, N, *(obs_shape)) -> (B*N, *(obs_shape))
@@ -201,14 +216,14 @@ class QMIXAgentGroup(AgentGroup):
         for id in self.models.keys():
             self.models[id] = DataParallel(self.models[id])
             self.feature_extractors[id] = DataParallel(self.feature_extractors[id])
-        self.use_data_parallel = True
+        self._use_data_parallel = True
         return self
 
     def unwrap_data_parallel(self) -> 'AgentGroup':
         for id in self.models.keys():
             self.models[id] = self.models[id].module
             self.feature_extractors[id] = self.feature_extractors[id].module
-        self.use_data_parallel = False
+        self._use_data_parallel = False
         return self
 
     def save_params(self, path: str) -> 'AgentGroup':
@@ -229,6 +244,13 @@ class QMIXAgentGroup(AgentGroup):
             model_dir = os.path.join(path, model_name)
             fe.load_state_dict(torch.load(os.path.join(model_dir, 'feature_extractor.pth')))
             model.load_state_dict(torch.load(os.path.join(model_dir, 'model.pth')))
+        return self
+
+    def compile_models(self) -> 'AgentGroup':
+        for id in self.models.keys():
+            self.models[id] = torch.compile(self.models[id])
+            self.feature_extractors[id] = torch.compile(self.feature_extractors[id])
+        self._is_compiled = True
         return self
 
     def reset(self) -> 'AgentGroup':
