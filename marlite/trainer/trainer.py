@@ -174,6 +174,8 @@ class Trainer():
         episodes = manager.generate_episodes()
         manager.cleanup()
         rewards = np.array([episode['episode_reward'] for episode in episodes])
+        win_tags = np.array([episode['win_tag'] for episode in episodes])
+        win_rate = win_tags.mean().item()
 
         sum_total = rewards.sum()
         max_val = rewards.max()
@@ -181,9 +183,10 @@ class Trainer():
         adjusted_sum = sum_total - max_val - min_val
         adjusted_count = len(rewards) - 2
         mean_reward = adjusted_sum / adjusted_count
+        mean_reward = mean_reward.item()
+        std_reward = np.std(rewards).item()
 
-        std_reward = np.std(rewards)
-        logging.info(f"Evaluation results: Mean reward {mean_reward}, Std reward {std_reward}")
+        logging.info(f"Evaluation results: Mean reward {mean_reward:.4f}, Std reward {std_reward:.4f}, Win rate {win_rate:.2f}")
 
         self.eval_agent_group.to("cpu")
         torch.cuda.empty_cache()

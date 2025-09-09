@@ -1943,7 +1943,7 @@ name = "pytorch-triton-rocm"
 version = "3.4.0"
 source = { registry = "https://download.pytorch.org/whl/rocm6.4" }
 dependencies = [
-    { name = "setuptools" },
+    { name = "setuptools", marker = "sys_platform != 'emscripten'" },
 ]
 wheels = [
     { url = "https://download.pytorch.org/whl/pytorch_triton_rocm-3.4.0-cp313-cp313-linux_x86_64.whl", hash = "sha256:1e7ccba3501fcd38e8cd8415f97a654043370e1fdc5a936bb75abe1bebeb94c9" },
