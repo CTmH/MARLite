@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 from torch.nn import DataParallel
 from tqdm import tqdm
@@ -48,6 +49,7 @@ class MsgAggrQMIXTrainer(Trainer):
                     rewards = batch['rewards']
                     next_states = batch['next_states']
                     next_observations = batch['next_observations']
+                    next_avail_actions = batch['next_avail_actions']
                     terminations = batch['terminations']
                     truncations = batch['truncations']
                     bs = states.shape[0]  # Actual batch size
@@ -55,8 +57,14 @@ class MsgAggrQMIXTrainer(Trainer):
                     # Create alive_mask_next from terminations and truncations
                     terminations = torch.tensor(terminations[:,:,-1]).to(self.train_device) # (B, N, T) -> (B, N)
                     truncations = torch.tensor(truncations[:,:,-1]).to(self.train_device) # (B, N, T) -> (B, N)
-                    alive_mask_next = ~(terminations | truncations)
-                    alive_mask = torch.tensor(alive_mask[:,:,-1]).to(self.train_device) # (B, N, T) -> (B, N)
+                    next_alive_mask = ~(terminations | truncations)
+                    alive_mask = torch.tensor(alive_mask[:,:,-1]).to(dtype=torch.bool, device=self.train_device) # (B, N, T) -> (B, N)
+                    if np.issubdtype(next_avail_actions.dtype, np.number):
+                        use_action_mask = True
+                        next_avail_actions = torch.tensor(next_avail_actions[:,:,-1,:])
+                        next_avail_actions = next_avail_actions.to(dtype=torch.bool, device=self.train_device)
+                    else:
+                        use_action_mask = False
 
                     rewards = torch.Tensor(rewards[:,:,-1]).to(self.train_device) # (B, N, T) -> (B, N)
                     rewards = rewards.sum(dim=1) # (B, N) -> (B) Sum over all agents rewards
@@ -83,8 +91,10 @@ class MsgAggrQMIXTrainer(Trainer):
                         ret_next = self.eval_agent_group.forward(next_observations)
                         q_val_next = ret_next['q_val']
                         #aggregated_msg_next = ret_next['aggregated_msg']
+                        if use_action_mask:
+                            q_val_next = torch.masked_fill(q_val_next, ~next_avail_actions, -torch.inf)
                         q_val_next = q_val_next.max(dim=-1).values
-                        q_val_next = q_val_next * alive_mask_next  # Apply next alive mask
+                        q_val_next = q_val_next * next_alive_mask  # Apply next alive mask
                         next_states = torch.Tensor(next_states[:,-1,:]).to(self.train_device) # (B, T, F) -> (B, F) Take only the last state in the sequence
                         self.target_critic.eval()
                         ret_next = self.target_critic(q_val_next, next_states)

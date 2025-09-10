@@ -13,6 +13,7 @@ class TrajectoryDataset(Dataset):
                      'edge_indices',
                      'next_states',
                      'next_observations',
+                     'next_avail_actions',
                      'actions',
                      'rewards',
                      'terminations',
@@ -53,6 +54,7 @@ class TrajectoryDataLoader(DataLoader):
                      'edge_indices',
                      'next_states',
                      'next_observations',
+                     'next_avail_actions',
                      'actions',
                      'rewards',
                      'terminations',
@@ -69,6 +71,7 @@ class TrajectoryDataLoader(DataLoader):
         rewards = [traj['rewards'] for traj in batch]
         next_state = [traj['next_states'] for traj in batch]
         next_observations = [traj['next_observations'] for traj in batch]
+        next_avail_actions = [traj['next_avail_actions'] for traj in batch]
         terminations = [traj['terminations'] for traj in batch]
         truncations = [traj['truncations'] for traj in batch]
 
@@ -92,6 +95,9 @@ class TrajectoryDataLoader(DataLoader):
         terminations = np.array([[[value for _, value in dict.items()] for dict in traj] for traj in terminations]).transpose(0,2,1)
         truncations = np.array([[[value for _, value in dict.items()] for dict in traj] for traj in truncations]).transpose(0,2,1)
 
+        next_avail_actions =  np.array([[[value for _, value in dict.items()] for dict in traj] for traj in next_avail_actions])
+        next_avail_actions = np.transpose(next_avail_actions, [0, 2, 1] if next_avail_actions.ndim == 3 else [0, 2, 1, 3])
+
         # States (Batch Size, Time Step, Feature Dimensions) (B, T, F)
         states = np.array(states)
         next_state = np.array(next_state)
@@ -103,6 +109,7 @@ class TrajectoryDataLoader(DataLoader):
             'edge_indices': edge_indices,
             'next_states': next_state,
             'next_observations': next_observations,
+            'next_avail_actions': next_avail_actions,
             'actions': actions,
             'rewards': rewards,
             'terminations': terminations,

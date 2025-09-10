@@ -51,6 +51,7 @@ def multiprocess_rollout(env_config: EnvConfig,
         'terminations': [],
         'next_states': [],
         'next_observations': [],
+        'next_avail_actions': [],
         'all_agents_sum_rewards': [],
         'episode_reward': 0,
         'win_tag': False,
@@ -167,6 +168,8 @@ def multiprocess_rollout(env_config: EnvConfig,
             # Create available actions from action spaces
             current_avail_actions = {agent: env.action_space(agent) for agent in env.agents}
         avail_actions = ensure_all_agents_present(current_avail_actions, default_avail_actions)
+        if i > 0:
+            episode['next_avail_actions'].append(avail_actions)
 
         # Get actions from agent
         processed_obs = obs_preprocess(
