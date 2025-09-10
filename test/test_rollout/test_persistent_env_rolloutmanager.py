@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.nn.init as init
 from marlite.rollout.persistent_env_rolloutmanager import PersistentEnvRolloutManager
 from marlite.rollout.persistent_env_rollout import persistent_env_rollout
-from marlite.rollout.victory_checker import always_lose
+from marlite.util.victory_checker import always_lose
 from marlite.environment import EnvConfig
 from marlite.algorithm.agents import AgentGroupConfig
 

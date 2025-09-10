@@ -1,7 +1,7 @@
 [project]
 name = "MARLite"
 version = "0.1.0"
-description = "Add your description here"
+description = "A lightweight multi-agent reinforcement learning framework"
 license = "BSD-2-Clause"
 readme = "README.md"
 requires-python = ">=3.13"
@@ -18,7 +18,10 @@ dependencies = [
     "magent2",
 ]
 
-[dependency-groups]
+[project.scripts]
+marlite = "main:main"
+
+[project.optional-dependencies]
 develop = [
     "pytest>=8.3.5",
     "pytest-xdist>=3.8.0",

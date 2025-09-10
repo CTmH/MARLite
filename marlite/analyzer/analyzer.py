@@ -1,6 +1,6 @@
 import os
 import numpy as np
-import logging
+from absl import logging
 from marlite.environment import EnvConfig
 from marlite.rollout import RolloutManagerConfig
 from marlite.algorithm.agents import AgentGroupConfig

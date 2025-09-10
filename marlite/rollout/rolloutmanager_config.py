@@ -4,7 +4,7 @@ from marlite.rollout.persistent_env_rolloutmanager import PersistentEnvRolloutMa
 from marlite.rollout.multiprocess_rolloutmanager import MultiProcessRolloutManager
 from marlite.rollout.persistent_env_rollout import persistent_env_rollout
 from marlite.rollout.multiprocess_rollout import multiprocess_rollout
-from marlite.rollout.victory_checker import *
+from marlite.util.victory_checker import *
 from marlite.environment import EnvConfig
 from marlite.algorithm.agents import AgentGroup
 
