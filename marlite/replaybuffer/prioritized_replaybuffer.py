@@ -29,13 +29,19 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         self.episode_buffer[episode_id] = episode
         # Add new trajectory position to the replay buffer.
         for i in range(episode['episode_length']):
-            priority = episode[self.priority_attr][i]
+            if self.priority_attr == 'episode_reward':
+                priority = episode[self.priority_attr]
+            else:
+                priority = episode[self.priority_attr][i]
             self.buffer.add((priority, episode_id, i))
         return self
 
     def remove_episode(self, episode_id):
         for i in range(self.episode_buffer[episode_id]['episode_length']):
-            priority = self.episode_buffer[episode_id][self.priority_attr][i]
+            if self.priority_attr == 'episode_reward':
+                priority = self.episode_buffer[episode_id][self.priority_attr]
+            else:
+                priority = self.episode_buffer[episode_id][self.priority_attr][i]
             self.buffer.remove((priority, episode_id, i))
         self.episode_buffer[episode_id] = None  # Remove the episode from the episode buffer
         return self
