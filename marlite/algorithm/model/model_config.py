@@ -1,9 +1,11 @@
 import torch
-import logging
+import torch.nn as nn
+from absl import logging
 from marlite.algorithm.model.gnn import GCNModel, GATModel
 from marlite.algorithm.model.custom_model import CustomModel
 from marlite.algorithm.model.time_seq_model import CustomTimeSeqModel, GRUModel
-import torch.nn as nn
+from marlite.algorithm.model.resnet import ResAttentionStateEncoder, ResAttentionObsEncoder
+
 
 REGISTERED_MODELS = {
     "RNN": GRUModel,
@@ -14,6 +16,8 @@ REGISTERED_MODELS = {
     "Flatten": nn.Flatten,
     "Custom": CustomModel,
     "CustomTimeSeq": CustomTimeSeqModel,
+    "ResAttentionStateEncoder": ResAttentionStateEncoder,
+    "ResAttentionObsEncoder": ResAttentionObsEncoder,
 }
 
 class ModelConfig:

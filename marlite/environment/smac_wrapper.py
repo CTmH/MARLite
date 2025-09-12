@@ -38,12 +38,8 @@ class SMACWrapper(BaseParallelWrapper):
         state_dict: Dict[str, np.ndarray] = self.env.state()
         state_dict = ensure_all_agents_present(state_dict, self.default_state_dict)
 
-        # Sort by key alphabetically and concatenate values
-        sorted_keys = sorted(state_dict.keys())
-        sorted_arrays = [state_dict[key] for key in sorted_keys]
+        sorted_arrays = [state_dict[key] for key in self.default_state_dict.keys()]
 
-        # Flatten each array before concatenation to ensure 1D output
         flattened_arrays = [arr.flatten() for arr in sorted_arrays]
 
-        # Concatenate all arrays into a single 1D array
-        return np.concatenate(flattened_arrays, axis=0)
+        return np.array(flattened_arrays)

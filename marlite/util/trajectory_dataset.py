@@ -30,7 +30,12 @@ class TrajectoryDataset(Dataset):
         # if there is not enough elements in the episode before the start position
         while start < 0:
             for key in self.attr:
-                sample[key].append(self.episode_buffer[episode_id][key][0])
+                if key == 'observations':
+                    zero_obs = self.episode_buffer[episode_id][key][0]
+                    zero_obs = {agent: np.zeros_like(o) for agent, o in zero_obs.items()}
+                    sample[key].append(zero_obs)
+                else:
+                    sample[key].append(self.episode_buffer[episode_id][key][0])
             start += 1
         for key in self.attr:
             sample[key] += self.episode_buffer[episode_id][key][start:pos+1]

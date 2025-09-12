@@ -152,6 +152,7 @@ def multiprocess_rollout(env_config: EnvConfig,
             episode_reward += agent_reward_sum
 
             if not env.agents:  # Game has ended
+                episode['next_avail_actions'].append(default_avail_actions)
                 break
 
         # Update Alive agent mask

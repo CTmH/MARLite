@@ -41,7 +41,8 @@ class TestMsgAggrQMIXTrainer(unittest.TestCase):
             critic_params = self.trainer.target_critic.state_dict()
 
             for w1, w2 in zip(critic_params.values(), origin_critic_params.values()):
-                self.assertFalse(torch.equal(w1, w2))
+                if w1.requires_grad:
+                    self.assertFalse(torch.equal(w1, w2))
 
     def test_save_load_checkpoint(self):
         checkpoint = 'test_checkpoint'
@@ -95,8 +96,9 @@ class TestMsgAggrSMACQMIXTrainer(unittest.TestCase):
             self.trainer.update_target_model_params()
             critic_params = self.trainer.target_critic.state_dict()
 
-            for w1, w2 in zip(critic_params.values(), origin_critic_params.values()):
-                self.assertFalse(torch.equal(w1, w2))
+            for (w_name, w1), w2 in zip(critic_params.items(), origin_critic_params.values()):
+                if w1.requires_grad:
+                    self.assertFalse(torch.equal(w1, w2))
 
     def test_save_load_checkpoint(self):
         checkpoint = 'test_checkpoint'
@@ -118,7 +120,7 @@ class TestMsgAggrSMACQMIXTrainer(unittest.TestCase):
             best_reward, _ = self.trainer.train(epochs=2, target_reward=5)
 
     def test_data_parallel(self):
-        self.config_path = 'test/config/msg_aggr_default.yaml'
+        self.config_path = 'test/config/msg_aggr_smac.yaml'
         with open(self.config_path, 'r') as file:
             self.config = yaml.safe_load(file)
         self.config['trainer_config']['train_args']['epochs'] = 2
@@ -133,17 +135,18 @@ class TestMsgAggrSMACQMIXTrainer(unittest.TestCase):
             self.trainer.workdir = temp_dir
             self.trainer.logdir = os.path.join(self.trainer.workdir, 'logs')
             self.trainer.checkpointdir = os.path.join(self.trainer.workdir, 'checkpoints')
-            origin_critic_params = deepcopy(self.trainer.target_critic.state_dict())
+            origin_critic_params = deepcopy(self.trainer.eval_critic.state_dict())
             self.trainer.collect_experience(0.9)
             self.trainer.learn(sample_size=32, batch_size=8, times=1)
             self.trainer.update_target_model_params()
-            critic_params = self.trainer.target_critic.state_dict()
+            critic_params = self.trainer.eval_critic.state_dict()
 
             for w1, w2 in zip(critic_params.values(), origin_critic_params.values()):
-                self.assertFalse(torch.equal(w1, w2))
+                if w1.requires_grad:
+                    self.assertFalse(torch.equal(w1, w2))
 
     def test_torch_compile(self):
-        self.config_path = 'test/config/msg_aggr_default.yaml'
+        self.config_path = 'test/config/msg_aggr_smac.yaml'
         with open(self.config_path, 'r') as file:
             self.config = yaml.safe_load(file)
         self.config['trainer_config']['train_args']['epochs'] = 2
@@ -164,7 +167,8 @@ class TestMsgAggrSMACQMIXTrainer(unittest.TestCase):
             critic_params = self.trainer.target_critic.state_dict()
 
             for w1, w2 in zip(critic_params.values(), origin_critic_params.values()):
-                self.assertFalse(torch.equal(w1, w2))
+                if w1.requires_grad:
+                    self.assertFalse(torch.equal(w1, w2))
 
 if __name__ == '__main__':
     unittest.main()

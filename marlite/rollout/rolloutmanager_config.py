@@ -11,12 +11,12 @@ from marlite.algorithm.agents import AgentGroup
 
 # Module-level constants for registries
 _MANAGER_REGISTRY = {
-    "persistent_env": PersistentEnvRolloutManager,
+    "persistent-env": PersistentEnvRolloutManager,
     "multi-process": MultiProcessRolloutManager,
 }
 
 _WORKER_REGISTRY = {
-    "persistent_env": persistent_env_rollout,
+    "persistent-env": persistent_env_rollout,
     "multi-process": multiprocess_rollout,
 }
 

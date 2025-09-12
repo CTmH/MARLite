@@ -72,10 +72,9 @@ class QMIXTrainer(Trainer):
                     actions = torch.Tensor(actions[:,:,-1:]).to(device=self.train_device, dtype=torch.int64) # (B, N, T, A) -> (B, N, A)
                     q_val = torch.gather(q_val, dim=-1, index=actions)
                     q_val = q_val.squeeze(-1) # (B, N, 1) -> (B, N)
-                    q_val = q_val * alive_mask
                     states = torch.Tensor(states[:,-1,:]).to(self.train_device) # (B, T, F) -> (B, F) Take only the last state in the sequence
                     self.eval_critic.train()
-                    ret = self.eval_critic(q_val, states)
+                    ret = self.eval_critic(q_val, states, alive_mask)
                     q_tot = ret['q_tot']
 
                     # Compute TD targets
@@ -86,10 +85,9 @@ class QMIXTrainer(Trainer):
                         if use_action_mask:
                             q_val_next = torch.masked_fill(q_val_next, ~next_avail_actions, -torch.inf)
                         q_val_next = q_val_next.max(dim=-1).values
-                        q_val_next = q_val_next * next_alive_mask
                         next_states = torch.Tensor(next_states[:,-1,:]).to(self.train_device) # (B, T, F) -> (B, F) Take only the last state in the sequence
                         self.target_critic.eval()
-                        ret_next = self.target_critic(q_val_next, next_states)
+                        ret_next = self.target_critic(q_val_next, next_states, next_alive_mask)
                         q_tot_next = ret_next['q_tot']
 
                     # Compute the TD target

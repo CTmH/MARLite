@@ -1,114 +1,72 @@
 agent_group_config:
   type: "MsgAggr"
   agent_list:
-    colossus_0: model_0
-    colossus_1: model_0
-    colossus_2: model_0
-    stalker_0: model_1
-    stalker_1: model_1
-    stalker_2: model_1
-    stalker_3: model_1
-    stalker_4: model_1
-    stalker_5: model_1
-    stalker_6: model_1
-    stalker_7: model_1
-    zealot_0: model_2
-    zealot_1: model_2
-    zealot_2: model_2
-    zealot_3: model_2
-    zealot_4: model_2
-    zealot_5: model_2
-    zealot_6: model_2
-    zealot_7: model_2
-    zealot_8: model_2
+    stalker_0: model_0
+    stalker_1: model_0
+    zealot_0: model_1
+    zealot_1: model_1
+    zealot_2: model_1
   model_configs:
     model_0:
       feature_extractor:
         model_type: "Custom"
         layers:
         - type: Linear
-          in_features: 989
-          out_features: 256
+          in_features: 144
+          out_features: 64
       encoder:
         model_type: "CustomTimeSeq"
         layers:
         - type: Conv1d
-          in_channels: 256
-          out_channels: 128
-          kernel_size: 3
-          stride: 2
+          in_channels: 64
+          out_channels: 64
+          kernel_size: 5
+          stride: 1
           padding: 0
         - type: Flatten
         - type: Linear
-          in_features: 256
-          out_features: 256
+          in_features: 64
+          out_features: 64
         - type: ELU
       decoder:
         model_type: "Custom"
         layers:
         - type: Linear
-          in_features: 512
-          out_features: 29
+          in_features: 128
+          out_features: 11
     model_1:
       feature_extractor:
         model_type: "Custom"
         layers:
         - type: Linear
-          in_features: 989
-          out_features: 256
+          in_features: 144
+          out_features: 64
       encoder:
         model_type: "CustomTimeSeq"
         layers:
         - type: Conv1d
-          in_channels: 256
-          out_channels: 128
-          kernel_size: 3
-          stride: 2
+          in_channels: 64
+          out_channels: 64
+          kernel_size: 5
+          stride: 1
           padding: 0
         - type: Flatten
         - type: Linear
-          in_features: 256
-          out_features: 256
+          in_features: 64
+          out_features: 64
         - type: ELU
       decoder:
         model_type: "Custom"
         layers:
         - type: Linear
-          in_features: 512
-          out_features: 29
-    model_2:
-      feature_extractor:
-        model_type: "Custom"
-        layers:
-        - type: Linear
-          in_features: 989
-          out_features: 256
-      encoder:
-        model_type: "CustomTimeSeq"
-        layers:
-        - type: Conv1d
-          in_channels: 256
-          out_channels: 128
-          kernel_size: 3
-          stride: 2
-          padding: 0
-        - type: Flatten
-        - type: Linear
-          in_features: 256
-          out_features: 256
-        - type: ELU
-      decoder:
-        model_type: "Custom"
-        layers:
-        - type: Linear
-          in_features: 512
-          out_features: 29
+          in_features: 128
+          out_features: 11
   aggr_model_config:
     model_type: "Custom"
     layers:
         - type: SelfAttention
-          embed_dim: 256
-          num_heads: 8
+          embed_dim: 64
+          num_heads: 4
           batch_first: true
         - type: Permute
           dims: [0, 2, 1]
@@ -116,19 +74,19 @@ agent_group_config:
           output_size: 1
         - type: Flatten
         - type: Linear
-          in_features: 256
-          out_features: 256
+          in_features: 64
+          out_features: 64
         - type: ELU
   optimizer:
     type: "Adam"
-    lr: 0.0002
+    lr: 0.0005
     weight_decay: 0.00005
 
 env_config:
   module_name: "smac_pettingzoo"
-  env_name: "smacv2_pettingzoo_v1"
+  env_name: "smacv1_pettingzoo_v1"
   env_config:
-    map_name: 10gen_protoss_20_vs_23
+    map_name: "2s3z"
   wrapper_config:
     type: smac
 
@@ -146,26 +104,26 @@ sample_ratio_scheduler:
 
 critic_config:
   type: "QMIX"
-  state_shape: 256
-  input_dim: 20
-  qmix_hidden_dim: 128
+  state_shape: 64
+  input_dim: 5
+  qmix_hidden_dim: 64
   hypernet_layers: 2
-  hyper_hidden_dim: 256
+  hyper_hidden_dim: 128
   feature_extractor:
-    model_type: "Custom"
-    layers:
-      - type: Linear
-        in_features: 22340
-        out_features: 256
-      - type: ELU
+    model_type: "ResAttentionStateEncoder"
+    input_dim: 173
+    embed_dim: 64
+    num_heads: 8
+    max_seq_len: 5
+    dropout: 0.25
   optimizer:
     type: "Adam"
-    lr: 0.0002
+    lr: 0.0005
     weight_decay: 0.00005
 
 rollout_config:
-  manager_type: "persistent_env"
-  worker_type: "persistent_env"
+  manager_type: "persistent-env"
+  worker_type: "persistent-env"
   n_workers: 1
   n_episodes: 10
   n_eval_episodes: 50

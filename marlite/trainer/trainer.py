@@ -208,7 +208,7 @@ class Trainer():
             # Learn and update eval model
             logging.info(f"Epoch {epoch}: Learning with batch size {batch_size} and learning {learning_times_per_epoch} times per epoch")
             loss = self.learn(sample_size=sample_size, batch_size=batch_size, times=learning_times_per_epoch)
-            logging.info(f"Epoch {epoch}: Loss {loss}")
+            logging.info(f"Epoch {epoch}: Loss {loss:.4f}")
 
             # Save checkpoint
             checkpoint_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -225,7 +225,7 @@ class Trainer():
                 best_loss = loss
                 self.best_agent_group_params = self.eval_agent_group.get_agent_group_params()
                 self.best_critic_params = deepcopy(self.eval_critic.state_dict())
-                logging.info(f"Epoch {epoch}: New best mean reward {self.best_mean_reward}")
+                logging.info(f"Epoch {epoch}: New best mean reward {self.best_mean_reward:.4f}")
 
             if mean_reward >= self.best_mean_reward * (1 - self.eval_threshold):
                 self._cached_agent_group_params = self.eval_agent_group.get_agent_group_params()
@@ -233,7 +233,7 @@ class Trainer():
                 logging.info(f"Epoch {epoch}: Cached parameters updated with current parameters.")
 
             if mean_reward >= target_reward:
-                logging.info(f"Epoch {epoch}: Target reward reached: {mean_reward} >= {target_reward}")
+                logging.info(f"Epoch {epoch}: Target reward reached: {mean_reward:.4f} >= {target_reward:.4f}")
                 break
 
             if epoch % eval_interval == 0:
@@ -254,7 +254,7 @@ class Trainer():
             'mean_reward': mean_reward,
             'reward_std': reward_std
         }
-        logging.info(f"Intermediate results saved for epoch {epoch}: Loss {loss}, Mean reward {mean_reward}, Std reward {reward_std}")
+        logging.info(f"Intermediate results saved for epoch {epoch}: Loss {loss:.4f}, Mean reward {mean_reward:.4f}, Std reward {reward_std:.4f}")
 
     def save_results_to_csv(self):
         os.makedirs(self.logdir, exist_ok=True)

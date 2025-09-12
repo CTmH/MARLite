@@ -35,20 +35,8 @@ def persistent_env_rollout(env_config: EnvConfig,
     env = None
     for attempt in range(3):  # Retry up to 3 times
         try:
-            def handler(signum, frame):
-                raise TimeoutError("Environment creation timed out")
-
-            signal.signal(signal.SIGALRM, handler)
-            signal.alarm(20)  # Set a 20-second alarm
-
             env = env_config.create_env()
-            signal.alarm(0)  # Disable the alarm if successful
             break
-        except TimeoutError as te:
-            print(f"Attempt {attempt + 1} failed with timeout")
-            env = None
-            time.sleep(0.5)
-            continue
         except Exception as e:
             print(f"Create environment failed with error: {e}")
             env = None
@@ -105,23 +93,11 @@ def persistent_env_rollout(env_config: EnvConfig,
 
                 # Reset environment
                 try:
-                    def handler(signum, frame):
-                        raise TimeoutError("Environment reset timed out")
-
-                    signal.signal(signal.SIGALRM, handler)
-                    signal.alarm(10)  # Set a 10-second alarm
-
                     observations, infos = env.reset(seed=seed)
-                    signal.alarm(0)  # Disable the alarm if successful
-                except TimeoutError as te:
-                    print(f"Reset timed out, skipping episode {episode_idx}")
-                    # Close environment and return collected episodes
-                    env.close()
-                    return episodes  # Return any collected episodes
                 except Exception as e:
                     print(f"Reset failed: {e}")
                     # Close environment and return collected episodes
-                    env.close()
+                    #env.close()
                     return episodes  # Return any collected episodes
 
                 # Determine if action masking is used
@@ -167,21 +143,7 @@ def persistent_env_rollout(env_config: EnvConfig,
                 # Step environment
                 actual_actions = {agent:actions[agent] for agent in env.agents}
                 try:
-                    def handler(signum, frame):
-                        raise TimeoutError("Environment step timed out")
-
-                    signal.signal(signal.SIGALRM, handler)
-                    signal.alarm(2)  # Set a 2-second alarm
-
                     observations, rewards, terminations, truncations, infos = env.step(actual_actions)
-                    signal.alarm(0)  # Disable the alarm if successful
-                except TimeoutError as te:
-                    print(f"Step timed out, truncating episode {episode_idx}")
-                    # Remove last added items
-                    for key in ['alive_mask', 'observations', 'states', 'edge_indices', 'actions', 'avail_actions']:
-                        if episode[key]:
-                            episode[key].pop()
-                    break  # Truncate this episode if step times out
                 except Exception as e:
                     print(f"Step failed: {e}")
                     # Remove last added items
@@ -209,6 +171,7 @@ def persistent_env_rollout(env_config: EnvConfig,
                 episode_reward += agent_reward_sum
 
                 if not env.agents:  # Game has ended
+                    episode['next_avail_actions'].append(default_avail_actions)
                     break
 
             # Update Alive agent mask
