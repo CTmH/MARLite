@@ -27,8 +27,8 @@ class TestQMIXAgentGroup(unittest.TestCase):
         self.agent_group = self.agent_group_config.get_agent_group()
 
         observations = {agent: [] for agent in self.env.agents}
-        seq_length = 5
-        for i in range(seq_length):
+        self.seq_length = 5
+        for i in range(self.seq_length):
             actions = {agent: self.env.action_space(agent).sample() for agent in self.env.agents}
             obs, rewards, terminations, truncations, infos = self.env.step(actions)
             for agent in self.env.agents:
@@ -36,36 +36,43 @@ class TestQMIXAgentGroup(unittest.TestCase):
         self.observations = {key: np.array(value) for key, value in observations.items()}
 
     def test_forward(self):
+        bs = 5
         obs = [self.observations[ag] for ag in self.agent_group.agent_model_dict.keys()]
         obs = np.stack(obs)
-        obs = np.expand_dims(obs, axis=0)
+        obs = np.stack([obs for _ in range(bs)])
         obs = torch.Tensor(obs)
+        states = np.stack([self.env.state() for _ in range(bs)])
+        traj_padding_mask = torch.ones((bs, self.seq_length))
+        alive_mask = torch.ones((bs, len(self.env.agents)))
+
         # Test get_q_values method in evaluation mode
-        ret = self.agent_group.forward(observations=obs)
+        ret = self.agent_group.forward(observations=obs, states=states, traj_padding_mask=traj_padding_mask, alive_mask=alive_mask)
         q_values = ret['q_val']
         q_values = q_values.detach().cpu().numpy().squeeze()
-        self.assertEqual(q_values.shape, (len(self.env.agents), self.action_space_shape))
+        self.assertEqual(q_values.shape, (bs, len(self.env.agents), self.action_space_shape))
 
         # Test get_q_values method in training mode
         self.agent_group.train()
-        ret = self.agent_group.forward(observations=obs)
+        ret = self.agent_group.forward(observations=obs, states=states, traj_padding_mask=traj_padding_mask, alive_mask=alive_mask)
         q_values = ret['q_val']
         q_values = q_values.detach().cpu().numpy().squeeze()
-        self.assertEqual(q_values.shape, (len(self.env.agents), self.action_space_shape))
+        self.assertEqual(q_values.shape, (bs, len(self.env.agents), self.action_space_shape))
 
     def test_act(self):
         # Test act method with epsilon = 0 (greedy policy)
-        ret = self.agent_group.act(self.observations, self.env.action_spaces, epsilon=0)
+        traj_padding_mask = np.ones(self.seq_length)
+        state = self.env.state()
+        ret = self.agent_group.act(self.observations, state, self.env.action_spaces, traj_padding_mask, self.env.agents, epsilon=0)
         actions = ret['actions']
         self.assertEqual(len(actions), len(self.env.agents))
 
         # Test act method with epsilon = 1 (random policy)
-        ret = self.agent_group.act(self.observations, self.env.action_spaces, epsilon=1)
+        ret = self.agent_group.act(self.observations, state, self.env.action_spaces, traj_padding_mask, self.env.agents, epsilon=1)
         actions = ret['actions']
         self.assertEqual(len(actions), len(self.env.agents))
 
         # Test act method with epsilon = 0.5
-        ret = self.agent_group.act(self.observations, self.env.action_spaces, epsilon=0.5)
+        ret = self.agent_group.act(self.observations, state, self.env.action_spaces, traj_padding_mask, self.env.agents, epsilon=0.5)
         actions = ret['actions']
         self.assertEqual(len(actions), len(self.env.agents))
 

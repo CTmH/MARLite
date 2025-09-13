@@ -1,77 +1,178 @@
-from abc import abstractmethod
+# src/marlite/algorithm/agents/agent_group.py
+from typing import Dict, List, Any, Optional
 import numpy as np
-from typing import Dict, List, Any
+import torch
+
 
 class AgentGroup(object):
+    """Base class for managing a group of agents in a multi-agent reinforcement learning system."""
 
-    @abstractmethod
-    def forward(self, observations: Dict[str, np.ndarray]) -> Dict[str, Any]:
+    def forward(self, observations: Dict[str, np.ndarray], traj_padding_mask: torch.Tensor,
+                alive_mask: torch.Tensor) -> Dict[str, Any]:
+        """
+        Forward pass for agent group.
+
+        Args:
+            observations: Dictionary of agent observations
+            traj_padding_mask: Padding mask for trajectory processing
+            alive_mask: Mask indicating which agents are alive
+
+        Returns:
+            Dictionary containing forward pass results
+        """
         raise NotImplementedError
 
-    @abstractmethod
-    def forward(self, observations: Dict[str, np.ndarray], states: np.ndarray, edge_indices: List[np.ndarray] | None = None) -> Dict[str, Any]:
+    def act(self, observations: Dict[str, np.ndarray], state: np.ndarray, avail_actions: Dict[str, Any],
+            traj_padding_mask: np.ndarray, alive_agents: List[str], epsilon: float) -> Dict[str, Any]:
+        """
+        Generate actions for the agent group.
+
+        Args:
+            observations: Dictionary of agent observations
+            state: Global state information for generating communication graph.
+            avail_actions: Available actions for each agent
+            traj_padding_mask: Padding mask for trajectory processing
+            alive_agents: List indicating which agents are alive
+            epsilon: Exploration rate
+
+        Returns:
+            Dictionary containing actions and other relevant information
+        """
         raise NotImplementedError
 
-    @abstractmethod
-    def act(self, observations: Dict[str, np.ndarray], avail_actions: Dict[str, Any], epsilon: float) -> Dict[str, Any]:
+    def set_agent_group_params(self, model_params: Dict[str, dict],
+                              feature_extractor_params: Dict[str, dict]) -> None:
+        """
+        Set parameters for the agent group.
+
+        Args:
+            model_params: Parameters for the main model
+            feature_extractor_params: Parameters for the feature extractor
+        """
         raise NotImplementedError
 
-    @abstractmethod
-    def act(self, observations: Dict[str, np.ndarray], state: np.ndarray, avail_actions: Dict[str, Any], epsilon: float) -> Dict[str, Any]:
-        raise NotImplementedError
-
-    @abstractmethod
-    def set_agent_group_params(self, model_params: Dict[str, dict], feature_extractor_params: Dict[str, dict]):
-        raise NotImplementedError
-
-    @abstractmethod
     def get_agent_group_params(self) -> Dict[str, dict]:
+        """
+        Get current parameters of the agent group.
+
+        Returns:
+            Dictionary containing model and feature extractor parameters
+        """
         raise NotImplementedError
 
-    @abstractmethod
     def zero_grad(self) -> 'AgentGroup':
+        """
+        Zero gradients for all parameters in the agent group.
+
+        Returns:
+            Self reference for method chaining
+        """
         raise NotImplementedError
 
-    @abstractmethod
     def step(self) -> 'AgentGroup':
+        """
+        Perform one training step.
+
+        Returns:
+            Self reference for method chaining
+        """
         raise NotImplementedError
 
-    @abstractmethod
     def to_device(self, device) -> 'AgentGroup':
+        """
+        Move all tensors to specified device.
+
+        Args:
+            device: Target device (e.g., 'cuda', 'cpu')
+
+        Returns:
+            Self reference for method chaining
+        """
         raise NotImplementedError
 
-    @abstractmethod
     def eval(self) -> 'AgentGroup':
+        """
+        Set the agent group to evaluation mode.
+
+        Returns:
+            Self reference for method chaining
+        """
         raise NotImplementedError
 
-    @abstractmethod
     def train(self) -> 'AgentGroup':
+        """
+        Set the agent group to training mode.
+
+        Returns:
+            Self reference for method chaining
+        """
         raise NotImplementedError
 
-    @abstractmethod
     def share_memory(self) -> 'AgentGroup':
+        """
+        Share memory between processes.
+
+        Returns:
+            Self reference for method chaining
+        """
         raise NotImplementedError
 
-    @abstractmethod
     def wrap_data_parallel(self) -> 'AgentGroup':
+        """
+        Wrap the agent group in data parallelism.
+
+        Returns:
+            Self reference for method chaining
+        """
         raise NotImplementedError
 
-    @abstractmethod
     def unwrap_data_parallel(self) -> 'AgentGroup':
+        """
+        Unwrap the agent group from data parallelism.
+
+        Returns:
+            Self reference for method chaining
+        """
         raise NotImplementedError
 
-    @abstractmethod
     def save_params(self, path: str) -> 'AgentGroup':
+        """
+        Save agent group parameters to disk.
+
+        Args:
+            path: Path to save parameters
+
+        Returns:
+            Self reference for method chaining
+        """
         raise NotImplementedError
 
-    @abstractmethod
     def load_params(self, path: str) -> 'AgentGroup':
+        """
+        Load agent group parameters from disk.
+
+        Args:
+            path: Path to load parameters from
+
+        Returns:
+            Self reference for method chaining
+        """
         raise NotImplementedError
 
-    @abstractmethod
     def compile_models(self) -> 'AgentGroup':
+        """
+        Compile models for improved performance.
+
+        Returns:
+            Self reference for method chaining
+        """
         raise NotImplementedError
 
-    @abstractmethod
     def reset(self) -> 'AgentGroup':
+        """
+        Reset the agent group state.
+
+        Returns:
+            Self reference for method chaining
+        """
         raise NotImplementedError

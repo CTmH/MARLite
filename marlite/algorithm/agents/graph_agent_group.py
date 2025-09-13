@@ -59,16 +59,27 @@ class GraphAgentGroup(AgentGroup):
     def forward(self,
                 observations: Dict[str, np.ndarray],
                 states: np.ndarray,
-                edge_indices: List[np.ndarray] | None = None) -> Dict[str, Any]:
+                traj_padding_mask: torch.Tensor,
+                alive_mask: torch.Tensor,
+                edge_indices: List[np.ndarray] | None = None
+        ) -> Dict[str, Any]:
         raise NotImplementedError
 
-    def act(self, observations: Dict[str, np.ndarray], state: np.ndarray, avail_actions: Dict[str, Any], epsilon: float = .0):
+    def act(
+            self,
+            observations: Dict[str, np.ndarray],
+            state: np.ndarray,
+            avail_actions: Dict[str, Any],
+            traj_padding_mask: np.ndarray,
+            alive_agents: List[str],
+            epsilon: float = .0
+        ) -> Dict[str, Any]:
         """
         Select actions based on Q-values and exploration with action masking.
 
         Args:
             observations (dict): Dictionary mapping agent IDs to observation arrays.
-            state (numpy array): Global state information.
+            state (numpy array): Global state information for generating communication graph.
             avail_actions (dict): Dictionary mapping agent IDs to either action masks (numpy arrays)
                                 or action spaces (gymnasium.spaces.Space). Each mask is a 1D array where 1
                                 indicates available actions, and 0 indicates unavailable actions.
@@ -77,12 +88,19 @@ class GraphAgentGroup(AgentGroup):
         Returns:
             dict: Selected actions for each agent, with action mask applied, and edge indices.
         """
-        obs = [observations[ag] for ag in self.agent_model_dict.keys()]
+        # Convert observations to tensor format
+        obs = [observations[agent] for agent in self.agent_model_dict.keys()]
         obs = np.stack(obs)
-        obs = np.expand_dims(obs, axis=0)
+        obs = torch.tensor(obs).unsqueeze(0).to(self.device)
+
+        padding_mask = torch.tensor(traj_padding_mask)
+        padding_mask = padding_mask.unsqueeze(0).to(self.device)
+
+        alive_mask = torch.tensor([agent in set(alive_agents) for agent in self.agent_model_dict.keys()])
+        alive_mask = alive_mask.unsqueeze(0).to(self.device)
 
         with torch.no_grad():
-            ret = self.forward(obs, np.expand_dims(state, axis=0))
+            ret = self.forward(obs, np.expand_dims(state, axis=0), padding_mask, alive_mask)
             q_values = ret['q_val']  # (1, num_agents, num_actions)
             q_values = q_values.detach().cpu().numpy().squeeze()
 
@@ -112,9 +130,12 @@ class GraphAgentGroup(AgentGroup):
         random_choices = np.random.binomial(1, epsilon, len(self.agent_model_dict)).astype(np.int64)
         actions = random_choices * random_actions + (1 - random_choices) * optimal_actions
         actions = actions.astype(np.int64).tolist()
-        actions = {agent_id: action for agent_id, action in zip(self.agent_model_dict.keys(), actions)}
 
-        return {'actions': actions, 'edge_indices': ret['edge_indices'][0]}
+        # Create action dictionary
+        all_actions = {agent: action for agent, action in zip(self.agent_model_dict.keys(), actions)}
+        actual_actions = {agent: all_actions[agent] for agent in alive_agents}
+
+        return {'actions': actual_actions, 'all_actions': all_actions, 'edge_indices': ret['edge_indices'][0]}
 
     def set_agent_group_params(self, params: Dict[str, dict]) -> 'AgentGroup':
         feature_extractor_params = params.get("feature_extractor", {})

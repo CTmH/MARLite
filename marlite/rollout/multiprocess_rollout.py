@@ -173,16 +173,14 @@ def multiprocess_rollout(env_config: EnvConfig,
             episode['next_avail_actions'].append(avail_actions)
 
         # Get actions from agent
-        processed_obs = obs_preprocess(
+        processed_obs, traj_padding_mask = obs_preprocess(
             observations=episode['observations'] + [observations],
             agent_model_dict=agent_group.agent_model_dict,
             models=agent_group.models,
             rnn_traj_len=rnn_traj_len
         )
-        if isinstance(agent_group, GraphAgentGroup):
-            ret = agent_group.act(processed_obs, env.state(), avail_actions, epsilon)
-        else:
-            ret = agent_group.act(processed_obs, avail_actions, epsilon)
+
+        ret = agent_group.act(processed_obs, env.state(), avail_actions, traj_padding_mask, env.agents, epsilon)
         actions = ret['actions']
         edge_indices = ret.get('edge_indices', None)
 

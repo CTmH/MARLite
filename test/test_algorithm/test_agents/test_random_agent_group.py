@@ -14,13 +14,16 @@ class TestRandomAgentGroup(unittest.TestCase):
 
     def test_act_random_actions(self):
 
+        traj_padding_mask = np.array([])
+        state = np.array([])
+
         avail_actions = {
             "agent1": Discrete(5),
             "agent2": Discrete(5)
         }
         obs = {agent: np.zeros(10) for agent in avail_actions.keys()}
 
-        ret = self.random_agent_group.act(obs, avail_actions, 0.1)
+        ret = self.random_agent_group.act(obs, state, avail_actions, traj_padding_mask, self.agents, 0.1)
         actions = ret["actions"]
 
         # Check if the correct number of actions are returned
@@ -28,11 +31,6 @@ class TestRandomAgentGroup(unittest.TestCase):
         for action in actions.values():
             # Check if the action is within the available actions
             self.assertIn(action, range(5))
-
-    def test_get_q_values_returns_self(self):
-        ret = self.random_agent_group.forward({})
-        result = ret['q_val']
-        self.assertIs(result, None)
 
 if __name__ == '__main__':
     unittest.main()

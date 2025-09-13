@@ -33,7 +33,10 @@ class GNNAgentGroup(GraphAgentGroup):
     def forward(self,
                 observations: Dict[str, np.ndarray],
                 states: np.ndarray,
-                edge_indices: List[np.ndarray] | None = None) -> Dict[str, Any]:
+                traj_padding_mask: torch.Tensor,
+                alive_mask: torch.Tensor,
+                edge_indices: List[np.ndarray] | None = None
+        ) -> Dict[str, Any]:
         msg = [None for _ in range(len(self.agent_model_dict))]
         for (model_name, fe), (_, enc) in zip(self.feature_extractors.items(),
                                                 self.encoders.items()):

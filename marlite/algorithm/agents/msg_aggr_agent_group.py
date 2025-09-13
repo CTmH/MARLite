@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import os
 from copy import deepcopy
-from typing import Dict, Any
+from typing import Dict, Any, List
 from torch.nn import DataParallel
 from marlite.algorithm.model.model_config import ModelConfig
 from marlite.algorithm.model import TimeSeqModel, RNNModel
@@ -52,7 +52,7 @@ class MsgAggrAgentGroup(AgentGroup):
             else:
                 self.model_class_names[model_name] = model.__class__.__name__
 
-    def forward(self, observations: Dict[str, np.ndarray],) -> Dict[str, Any]:
+    def forward(self, observations: torch.Tensor, traj_padding_mask: torch.Tensor, alive_mask: torch.Tensor) -> Dict[str, Any]:
         msg = [None for _ in range(len(self.agent_model_dict))]
         local_obs = [None for _ in range(len(self.agent_model_dict))]
         for (model_name, fe), (_, enc) in zip(self.feature_extractors.items(),
@@ -60,8 +60,7 @@ class MsgAggrAgentGroup(AgentGroup):
             selected_agents = self.model_to_agents[model_name]
             idx = self.model_to_agent_indices[model_name]
             # observation shape: (Batch Size, Agent Number, Time Step, Feature Dimensions) (B, N, T, F)
-            obs = observations[:,idx]
-            obs = torch.Tensor(obs) # (B, N, T, *(obs_shape))
+            obs = observations[:,idx] # (B, N, T, *(obs_shape))
             bs = obs.shape[0]
             n_agents = len(selected_agents)
             ts = obs.shape[2]
@@ -134,28 +133,54 @@ class MsgAggrAgentGroup(AgentGroup):
 
         return {'q_val': q_val, 'aggregated_msg': aggregated_msg}
 
-    def act(self, observations: Dict[str , np.ndarray], avail_actions: Dict[str, Any], epsilon=.0) -> Dict[str, Any]:
+    def act(
+            self,
+            observations: Dict[str, np.ndarray],
+            state: np.ndarray,
+            avail_actions: Dict[str, Any],
+            traj_padding_mask: np.ndarray,
+            alive_agents: List[str],
+            epsilon: float = .0
+        ) -> Dict[str, Any]:
         """
         Select actions based on Q-values and exploration with action masking.
 
         Args:
             observations (dict): Dictionary mapping agent IDs to observation arrays.
+                Each observation array should have shape compatible with the agent's observation space.
+            state (numpy array): Global state information for generating communication graph.
             avail_actions (dict): Dictionary mapping agent IDs to either action masks (numpy arrays)
-                                 or action spaces (gymnasium.spaces.Space). Each mask is a 1D array where 1
-                                 indicates available actions, and 0 indicates unavailable actions.
+                                or action spaces (gymnasium.spaces.Space). Each mask is a 1D array where 1
+                                indicates available actions, and 0 indicates unavailable actions.
+            traj_padding_mask (numpy array): Padding mask for trajectory processing.
+                This is used to handle variable-length trajectories by indicating which positions
+                contain valid data vs padding.
+            alive_agents (list): List of agent IDs that are currently alive/active in the environment.
+                Only these agents will have their actions returned in the output.
             epsilon (float): Exploration rate.
+                - 0.0: Always choose optimal actions (greedy)
+                - 1.0: Always choose random actions (pure exploration)
+                - Values between 0.0 and 1.0: Mix of exploration and exploitation
 
         Returns:
-            dict: Selected actions for each agent, with action mask applied.
+            dict: Selected actions for each agent, with action mask applied, and edge indices.
+                - 'actions': Dictionary mapping only alive agents to their selected actions
+                - 'all_actions': Dictionary mapping all agents to their selected actions (including dead ones)
         """
         # Convert observations to tensor format
-        obs = [observations[ag] for ag in self.agent_model_dict.keys()]
+        obs = [observations[agent] for agent in self.agent_model_dict.keys()]
         obs = np.stack(obs)
-        obs = np.expand_dims(obs, axis=0)
+        obs = torch.tensor(obs).unsqueeze(0).to(self.device)
+
+        padding_mask = torch.tensor(traj_padding_mask)
+        padding_mask = padding_mask.unsqueeze(0).to(self.device)
+
+        alive_mask = torch.tensor([agent in set(alive_agents) for agent in self.agent_model_dict.keys()])
+        alive_mask = alive_mask.unsqueeze(0).to(self.device)
 
         # Get Q-values
         with torch.no_grad():
-            ret = self.forward(obs)
+            ret = self.forward(obs, padding_mask, alive_mask)
             q_values = ret['q_val']
             q_values = q_values.detach().cpu().numpy().squeeze()
 
@@ -187,9 +212,10 @@ class MsgAggrAgentGroup(AgentGroup):
         actions = actions.astype(np.int64).tolist()
 
         # Create action dictionary
-        actions = {agent_id: action for agent_id, action in zip(self.agent_model_dict.keys(), actions)}
+        all_actions = {agent: action for agent, action in zip(self.agent_model_dict.keys(), actions)}
+        actual_actions = {agent: all_actions[agent] for agent in alive_agents}
 
-        return {'actions': actions}
+        return {'actions': actual_actions, 'all_actions': all_actions}
 
     def set_agent_group_params(self, params: Dict[str, dict]) -> 'AgentGroup':
         feature_extractor_params = params.get("feature_extractor", {})

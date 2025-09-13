@@ -55,17 +55,13 @@ class TestMagentPreyAgentGroup(unittest.TestCase):
         self.magent_prey_agent_group = MagentPreyAgentGroup(self.agents)
 
     def test_act(self):
+        traj_padding_mask = np.array([])
         env = self.env_conf.create_env()
         obs, _ = env.reset()
         obs = {key: np.expand_dims(value, axis=0) for key, value in obs.items()} # Add Time Dim
-        ret = self.magent_prey_agent_group.act(obs, self.avail_actions, 0)
+        ret = self.magent_prey_agent_group.act(obs, env.state(), self.avail_actions, traj_padding_mask, env.agents, 0)
         actions = ret['actions']
         env.step(actions)
-
-    def test_get_q_values_returns_self(self):
-        ret = self.magent_prey_agent_group.forward({})
-        result = ret['q_val']
-        self.assertIs(result, None)
 
 if __name__ == '__main__':
     unittest.main()

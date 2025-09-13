@@ -30,8 +30,8 @@ class TestGNNAgentGroup(unittest.TestCase):
         self.agent_group = self.agent_group_config.get_agent_group()
 
         observations = {agent: [] for agent in self.env.agents}
-        seq_length = 5
-        for i in range(seq_length):
+        self.seq_length = 5
+        for i in range(self.seq_length):
             actions = {agent: self.env.action_space(agent).sample() for agent in self.env.agents}
             obs, rewards, terminations, truncations, infos = self.env.step(actions)
             for agent in self.env.agents:
@@ -45,9 +45,11 @@ class TestGNNAgentGroup(unittest.TestCase):
         obs = np.stack([obs for _ in range(bs)])
         obs = torch.Tensor(obs)
         states = np.stack([self.env.state() for _ in range(bs)])
+        traj_padding_mask = torch.ones((bs, self.seq_length))
+        alive_mask = torch.ones((bs, len(self.env.agents)))
 
         # Test get_q_values method in evaluation mode
-        ret = self.agent_group.forward(observations=obs, states=states)
+        ret = self.agent_group.forward(observations=obs, states=states, traj_padding_mask=traj_padding_mask, alive_mask=alive_mask)
         q_values = ret['q_val']
         q_values = q_values.detach().cpu().numpy().squeeze()
         self.assertEqual(q_values.shape, (bs, len(self.env.agents), self.action_space_shape))
@@ -64,8 +66,9 @@ class TestGNNAgentGroup(unittest.TestCase):
 
     def test_act(self):
         # Test act method with epsilon = 0 (greedy policy)
+        traj_padding_mask = np.ones(self.seq_length)
         state = self.env.state()
-        ret = self.agent_group.act(self.observations, state, self.env.action_spaces, epsilon=0)
+        ret = self.agent_group.act(self.observations, state, self.env.action_spaces, traj_padding_mask, self.env.agents, epsilon=0)
         actions = ret['actions']
         self.assertEqual(len(actions), len(self.env.agents))
         edge_indices = ret['edge_indices']
