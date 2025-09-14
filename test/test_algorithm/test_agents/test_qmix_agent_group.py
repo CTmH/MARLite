@@ -46,14 +46,14 @@ class TestQMIXAgentGroup(unittest.TestCase):
         alive_mask = torch.ones((bs, len(self.env.agents)))
 
         # Test get_q_values method in evaluation mode
-        ret = self.agent_group.forward(observations=obs, states=states, traj_padding_mask=traj_padding_mask, alive_mask=alive_mask)
+        ret = self.agent_group.forward(observations=obs, traj_padding_mask=traj_padding_mask, alive_mask=alive_mask)
         q_values = ret['q_val']
         q_values = q_values.detach().cpu().numpy().squeeze()
         self.assertEqual(q_values.shape, (bs, len(self.env.agents), self.action_space_shape))
 
         # Test get_q_values method in training mode
         self.agent_group.train()
-        ret = self.agent_group.forward(observations=obs, states=states, traj_padding_mask=traj_padding_mask, alive_mask=alive_mask)
+        ret = self.agent_group.forward(observations=obs, traj_padding_mask=traj_padding_mask, alive_mask=alive_mask)
         q_values = ret['q_val']
         q_values = q_values.detach().cpu().numpy().squeeze()
         self.assertEqual(q_values.shape, (bs, len(self.env.agents), self.action_space_shape))

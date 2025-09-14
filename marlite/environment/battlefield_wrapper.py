@@ -3,6 +3,7 @@ import numpy as np
 from collections import deque
 from pettingzoo.utils import BaseParallelWrapper
 from marlite.algorithm.agents.agent_group_config import AgentGroupConfig
+from marlite.util.env_util import obs_preprocess
 
 class BattleFieldWrapper(BaseParallelWrapper):
     def __init__(self, env, opponent_agent_group_config: Dict[str, Any], opp_obs_queue_len: int, channel_first: bool = False):
@@ -36,9 +37,15 @@ class BattleFieldWrapper(BaseParallelWrapper):
     def step(self, actions: Dict) -> tuple:
         opponent_avail_actions = {agent: self.env.action_spaces[agent] for agent in self.opponent_agents}
         opp_obs = list(self.opponent_observation_history)
-        opp_obs_dict = {agent: [opp_obs[i][agent] for i in range(len(opp_obs))] for agent in self.opponent_agents}
-        self.opponent_actions = self.opponent_agent_group.act(opp_obs_dict, opponent_avail_actions, epsilon=0.0)
-        actions = {**actions, **self.opponent_actions}  # Combine actions with opponent's actions
+        opp_obs, traj_padding_mask = obs_preprocess(opp_obs, self.opponent_agents, self.opp_obs_queue_len)
+        alive_opponent = [agent for agent in self.opponent_agents if agent in set(self.env.agents)]
+        self.opponent_actions = self.opponent_agent_group.act(opp_obs,
+                                                              self.env.state(),
+                                                              opponent_avail_actions,
+                                                              traj_padding_mask,
+                                                              alive_opponent,
+                                                              epsilon=0.0)
+        actions = actions | self.opponent_actions  # Combine actions with opponent's actions
         observations, rewards, terminations, truncations, infos = self.env.step(actions)
 
         self.opponent_observations = {agent: observations[agent] for agent in self.opponent_agents}

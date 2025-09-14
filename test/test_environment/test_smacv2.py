@@ -13,7 +13,7 @@ class TestSMACv2Wrapper(unittest.TestCase):
         env_config = self.config['env_config']
         self.env_config = EnvConfig(**env_config)
         self.wrapper = self.env_config.create_env()
-        self.n_agent = 20
+        self.n_agent = self.wrapper.max_num_agents
 
     def test_init(self):
         self.assertEqual(len(self.wrapper.agents), self.n_agent)

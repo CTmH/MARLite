@@ -5,7 +5,7 @@ from copy import deepcopy
 from typing import Dict, Any, List
 from torch.nn import DataParallel
 from marlite.algorithm.model.model_config import ModelConfig
-from marlite.algorithm.model import TimeSeqModel, RNNModel
+from marlite.algorithm.model import TimeSeqModel, RNNModel, Conv1DModel, AttentionModel
 from marlite.algorithm.agents.agent_group import AgentGroup
 from marlite.util.optimizer_config import OptimizerConfig
 
@@ -45,10 +45,12 @@ class MsgAggrAgentGroup(AgentGroup):
 
         self.model_class_names = {}
         for model_name, model in self.encoders.items():
-            if isinstance(model, TimeSeqModel):
-                self.model_class_names[model_name] = 'TimeSeqModel'
-                if isinstance(model, RNNModel):
-                    self.model_class_names[model_name] = 'RNNModel'
+            if isinstance(model, RNNModel):
+                self.model_class_names[model_name] = 'RNNModel'
+            elif isinstance(model, Conv1DModel):
+                self.model_class_names[model_name] = 'Conv1DModel'
+            elif isinstance(model, AttentionModel):
+                self.model_class_names[model_name] = 'AttentionModel'
             else:
                 self.model_class_names[model_name] = model.__class__.__name__
 
@@ -67,7 +69,7 @@ class MsgAggrAgentGroup(AgentGroup):
             obs_shape = list(obs.shape[3:])
             # Use class name checking instead of isinstance
             model_class_name = self.model_class_names[model_name]
-            if model_class_name == 'TimeSeqModel':
+            if model_class_name == 'Conv1DModel':
                 # (B, N, T, *(obs_shape)) -> (B*N*T, *(obs_shape))
                 obs = obs.reshape(bs*n_agents*ts, *obs_shape).to(self.device)
                 obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
@@ -84,6 +86,15 @@ class MsgAggrAgentGroup(AgentGroup):
                 obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B, N, T, F) -> (B*N, T, F)
                 enc.train() # cudnn RNN backward can only be called in training mode
                 local_obs_selected = enc(obs_vectorized) # (B*N, T, F) -> (B*N, F)
+            elif model_class_name == 'AttentionModel':
+                obs = obs.reshape(bs*n_agents*ts, *obs_shape).to(self.device)
+                obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
+                obs_vectorized = obs_vectorized.reshape(bs, n_agents, ts, -1) # (B*N*T, F) -> (B, N, T, F)
+                msg_selected = obs_vectorized[:, :, -1, :] # (B, N, T, F) -> (B, N, F)
+                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B, N, T, F) -> (B*N, T, F)
+                mask = traj_padding_mask[:,idx]
+                mask = mask.reshape(bs*n_agents, ts)
+                local_obs_selected = enc(obs_vectorized, mask) # (B*N, T, F) -> (B*N, F)
             else:
                 obs = obs[:,:,-1, :] # (B, N, T, *(obs_shape)) -> (B, N, *(obs_shape))
                 obs = obs.reshape(bs*n_agents, *obs_shape).to(self.device) # (B, N, *(obs_shape)) -> (B*N, *(obs_shape))
@@ -170,10 +181,11 @@ class MsgAggrAgentGroup(AgentGroup):
         # Convert observations to tensor format
         obs = [observations[agent] for agent in self.agent_model_dict.keys()]
         obs = np.stack(obs)
-        obs = torch.tensor(obs).unsqueeze(0).to(self.device)
+        obs = torch.tensor(obs).unsqueeze(0).to(dtype=torch.float, device=self.device)
 
-        padding_mask = torch.tensor(traj_padding_mask)
-        padding_mask = padding_mask.unsqueeze(0).to(self.device)
+        padding_mask = torch.tensor(traj_padding_mask, dtype=torch.bool) # (T)
+        padding_mask = torch.stack([padding_mask] * len(self.agent_model_dict), dim=0) # (N, T)
+        padding_mask = padding_mask.unsqueeze(0).to(self.device) # (1, N, T)
 
         alive_mask = torch.tensor([agent in set(alive_agents) for agent in self.agent_model_dict.keys()])
         alive_mask = alive_mask.unsqueeze(0).to(self.device)

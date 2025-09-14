@@ -121,13 +121,12 @@ def multiprocess_rollout(env_config: EnvConfig,
             episode['observations'].append(observations)
             episode['states'].append(env.state())
             episode['edge_indices'].append(edge_indices)
-            episode['actions'].append(actions)
+            episode['actions'].append(all_actions)
             episode['avail_actions'].append(avail_actions)
 
             # Step environment
-            actual_actions = {agent:actions[agent] for agent in env.agents}
             try:
-                observations, rewards, terminations, truncations, infos = env.step(actual_actions)
+                observations, rewards, terminations, truncations, infos = env.step(actions)
             except Exception as e:
                 # TODO Need log support
                 print(f"Step failed, Return None")
@@ -175,13 +174,12 @@ def multiprocess_rollout(env_config: EnvConfig,
         # Get actions from agent
         processed_obs, traj_padding_mask = obs_preprocess(
             observations=episode['observations'] + [observations],
-            agent_model_dict=agent_group.agent_model_dict,
-            models=agent_group.models,
+            agents=agent_group.agent_model_dict.keys(),
             rnn_traj_len=rnn_traj_len
         )
 
         ret = agent_group.act(processed_obs, env.state(), avail_actions, traj_padding_mask, env.agents, epsilon)
-        actions = ret['actions']
+        actions, all_actions = ret['actions'], ret['all_actions']
         edge_indices = ret.get('edge_indices', None)
 
     # TODO win tag logic here

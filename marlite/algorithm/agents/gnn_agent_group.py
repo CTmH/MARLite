@@ -4,7 +4,6 @@ from typing import Dict, List, Any
 from torch_geometric.data import Batch, Data
 from torch_geometric.utils import unbatch
 from marlite.algorithm.model.model_config import ModelConfig
-from marlite.algorithm.model import TimeSeqModel, RNNModel
 from marlite.algorithm.agents.graph_agent_group import GraphAgentGroup
 from marlite.algorithm.graph_builder import GraphBuilderConfig
 from marlite.util.optimizer_config import OptimizerConfig
@@ -51,7 +50,7 @@ class GNNAgentGroup(GraphAgentGroup):
             obs_shape = list(obs.shape[3:])
 
             model_class_name = self.model_class_names[model_name]
-            if model_class_name == 'TimeSeqModel':
+            if model_class_name == 'Conv1DModel':
                 # (B, N, T, *(obs_shape)) -> (B*N*T, *(obs_shape))
                 obs = obs.reshape(bs*n_agents*ts, *obs_shape).to(self.device)
                 obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
@@ -64,6 +63,13 @@ class GNNAgentGroup(GraphAgentGroup):
                 obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B*N*T, F) -> (B*N, T, F)
                 enc.train() # cudnn RNN backward can only be called in training mode
                 msg_selected = enc(obs_vectorized) # (B*N, T, F) -> (B*N, F)
+            elif model_class_name == 'AttentionModel':
+                obs = obs.reshape(bs*n_agents*ts, *obs_shape).to(self.device)
+                obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
+                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B*N*T, F) -> (B*N, T, F)
+                mask = traj_padding_mask[:,idx]
+                mask = mask.reshape(bs*n_agents, ts)
+                msg_selected = enc(obs_vectorized, mask) # (B*N, T, F) -> (B*N, F)
             else:
                 obs = obs[:,:,-1, :] # (B, N, T, *(obs_shape)) -> (B, N, *(obs_shape))
                 obs = obs.reshape(bs*n_agents, *obs_shape).to(self.device) # (B, N, *(obs_shape)) -> (B*N, *(obs_shape))

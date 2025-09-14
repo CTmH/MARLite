@@ -32,8 +32,8 @@ class TestAdversarialPursuitPredator(unittest.TestCase):
         self.assertEqual(len(info), self.n_agent)
 
     def test_step(self):
-        key = 'predator_0'
         actions = {agent: action_space.sample() for agent, action_space in self.wrapper.action_spaces.items()}
+        self.wrapper.reset()
         observations, rewards, terminations, truncations, infos = self.wrapper.step(actions)
         self.assertEqual(len(observations), self.n_agent)
         self.assertEqual(len(rewards), self.n_agent)
@@ -92,6 +92,7 @@ class TestAdversarialPursuitPrey(unittest.TestCase):
 
     def test_step(self):
         actions = {agent: action_space.sample() for agent, action_space in self.wrapper.action_spaces.items()}
+        self.wrapper.reset()
         observations, rewards, terminations, truncations, infos = self.wrapper.step(actions)
         self.assertEqual(len(observations), self.n_agent)
         self.assertEqual(len(rewards), self.n_agent)

@@ -11,6 +11,14 @@ class RNNModel(TimeSeqModel):
     def __init__(self, *args, **kwargs):
         super().__init__()
 
+class Conv1DModel(TimeSeqModel):
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+
+class AttentionModel(TimeSeqModel):
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+
 class GRUModel(RNNModel):
     def __init__(self, input_shape, output_shape, rnn_hidden_dim, rnn_layers=1):
         super(GRUModel, self).__init__()
@@ -31,7 +39,7 @@ class GRUModel(RNNModel):
         q = self.fc2(out)
         return q[:,-1,:] # get the last output of the sequence
 
-class CustomTimeSeqModel(TimeSeqModel):
+class CustomTimeSeqModel(Conv1DModel):
     def __init__(self, **kwargs):
         super().__init__(self, **kwargs)
         self.model = CustomModel(**kwargs)

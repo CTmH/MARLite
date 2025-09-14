@@ -59,7 +59,7 @@ class TestGNNAgentGroup(unittest.TestCase):
 
         # Test get_q_values method in training mode
         self.agent_group.train()
-        ret = self.agent_group.forward(observations=obs, states=states)
+        ret = self.agent_group.forward(observations=obs, states=states, traj_padding_mask=traj_padding_mask, alive_mask=alive_mask)
         q_values = ret['q_val']
         q_values = q_values.detach().cpu().numpy().squeeze()
         self.assertEqual(q_values.shape, (bs, len(self.env.agents), self.action_space_shape))
@@ -75,12 +75,12 @@ class TestGNNAgentGroup(unittest.TestCase):
         self.assertEqual(edge_indices.shape[0], 2)
 
         # Test act method with epsilon = 1 (random policy)
-        ret = self.agent_group.act(self.observations, state, self.env.action_spaces, epsilon=1)
+        ret = self.agent_group.act(self.observations, state, self.env.action_spaces, traj_padding_mask, self.env.agents, epsilon=1)
         actions = ret['actions']
         self.assertEqual(len(actions), len(self.env.agents))
 
         # Test act method with epsilon = 0.5
-        ret = self.agent_group.act(self.observations, state, self.env.action_spaces, epsilon=0.5)
+        ret = self.agent_group.act(self.observations, state, self.env.action_spaces, traj_padding_mask, self.env.agents, epsilon=0.5)
         actions = ret['actions']
         self.assertEqual(len(actions), len(self.env.agents))
 

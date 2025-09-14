@@ -15,19 +15,13 @@ agent_group_config:
           in_features: 144
           out_features: 64
       encoder:
-        model_type: "CustomTimeSeq"
-        layers:
-        - type: Conv1d
-          in_channels: 64
-          out_channels: 64
-          kernel_size: 5
-          stride: 1
-          padding: 0
-        - type: Flatten
-        - type: Linear
-          in_features: 64
-          out_features: 64
-        - type: ELU
+        model_type: "ResAttentionObsEncoder"
+        input_dim: 64
+        embed_dim: 64
+        output_dim: 64
+        num_heads: 4
+        max_seq_len: 5
+        dropout: 0.25
       decoder:
         model_type: "Custom"
         layers:

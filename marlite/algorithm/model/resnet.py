@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from marlite.algorithm.model.masked_model import MaskedModel
 from marlite.algorithm.model.self_attention import SelfAttentionLearnablePE, SelfAttentionFixedPE
-from marlite.algorithm.model import RNNModel
+from marlite.algorithm.model import AttentionModel
 
 class ResAttentionStateEncoder(MaskedModel):
     def __init__(self, input_dim, embed_dim, num_heads, max_seq_len, dropout=0.1):
@@ -65,7 +65,7 @@ class ResAttentionStateEncoder(MaskedModel):
         return x
 
 
-class ResAttentionObsEncoder(RNNModel):
+class ResAttentionObsEncoder(AttentionModel):
 
     def __init__(self, input_dim, output_dim, embed_dim, num_heads, max_seq_len, dropout=0.1):
         super(ResAttentionObsEncoder, self).__init__()
@@ -89,7 +89,7 @@ class ResAttentionObsEncoder(RNNModel):
 
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x: torch.Tensor, alive_mask:torch.Tensor=None):
+    def forward(self, x: torch.Tensor, padding_mask:torch.Tensor=None):
         """
         Args:
             x: Input tensor of shape [batch_size, seq_len(n_agents), input_dim]
@@ -100,18 +100,19 @@ class ResAttentionObsEncoder(RNNModel):
             Global embedding of shape [batch_size, embed_dim]
         """
         # When all agents are dead, to avoid undefined results from Softmax.
-        if alive_mask != None:
-            all_false_rows = ~alive_mask.any(dim=1)
-            not_alive_mask = ~torch.where(all_false_rows.unsqueeze(1), True, alive_mask)
+        """
+        if padding_mask != None:
+            all_false_rows = ~padding_mask.any(dim=1)
+            not_alive_mask = ~torch.where(all_false_rows.unsqueeze(1), True, padding_mask)
         else:
             #not_alive_mask = torch.zeros((x.size(0),x.size(1)), dtype=torch.bool, device=x.device)
             not_alive_mask = create_key_padding_mask(x).to(x.device)
-
+        """
         x = self.linear1(x)  # [B, N, D]
 
         # Self-attention block (Pre-LN)
         x_norm = self.norm1(x)
-        attn_out = self.attention(x_norm, key_padding_mask=not_alive_mask)
+        attn_out = self.attention(x_norm, key_padding_mask=padding_mask)
         x = x + self.dropout(attn_out)
 
         # FFN block (Pre-LN)
@@ -121,7 +122,7 @@ class ResAttentionObsEncoder(RNNModel):
 
         # Weighted pooling with learned attention
         weights = self.attention_weights(self.norm3(attn_out)).squeeze(-1)  # [B, N]
-        weights = weights.masked_fill(not_alive_mask, -torch.inf)
+        weights = weights.masked_fill(padding_mask, -torch.inf)
         weights = torch.softmax(weights, dim=-1)  # [B, N]
         x = torch.sum(x * weights.unsqueeze(-1), dim=1)  # [B, D]
 

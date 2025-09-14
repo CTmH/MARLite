@@ -18,6 +18,7 @@ class TrajectoryDataset(Dataset):
                      'rewards',
                      'terminations',
                      'truncations']
+        self.padding_attr = ['obs_padding_mask', 'next_obs_padding_mask']
 
     def __len__(self):
         return len(self.sample_id_list)
@@ -25,6 +26,7 @@ class TrajectoryDataset(Dataset):
     def __getitem__(self, idx):
         episode_id, pos = self.sample_id_list[idx]
         sample = {key: [] for key in self.attr}
+        sample = sample | {key: [] for key in self.padding_attr}
         start = pos - self.traj_len + 1
         # Padding with the first element of the episode
         # if there is not enough elements in the episode before the start position
@@ -36,9 +38,13 @@ class TrajectoryDataset(Dataset):
                     sample[key].append(zero_obs)
                 else:
                     sample[key].append(self.episode_buffer[episode_id][key][0])
+            for key in self.padding_attr:
+                sample[key].append(True)
             start += 1
         for key in self.attr:
             sample[key] += self.episode_buffer[episode_id][key][start:pos+1]
+        for key in self.padding_attr:
+            sample[key] += [False] * (pos - start +1)
 
         return sample
 
@@ -55,10 +61,12 @@ class TrajectoryDataLoader(DataLoader):
         )
         self.attr = ['alive_mask',
                      'observations',
+                     'obs_padding_mask',
                      'states',
                      'edge_indices',
                      'next_states',
                      'next_observations',
+                     'next_obs_padding_mask',
                      'next_avail_actions',
                      'actions',
                      'rewards',
@@ -70,12 +78,14 @@ class TrajectoryDataLoader(DataLoader):
         # Extract necessary components from the trajectory
         alive_mask = [traj['alive_mask'] for traj in batch]
         observations = [traj['observations'] for traj in batch]
+        obs_padding_mask = [traj['obs_padding_mask'] for traj in batch]
         states = [traj['states'] for traj in batch]
         edge_indices = [traj['edge_indices'] for traj in batch]
         actions = [traj['actions'] for traj in batch]
         rewards = [traj['rewards'] for traj in batch]
         next_state = [traj['next_states'] for traj in batch]
         next_observations = [traj['next_observations'] for traj in batch]
+        next_obs_padding_mask = [traj['next_obs_padding_mask'] for traj in batch]
         next_avail_actions = [traj['next_avail_actions'] for traj in batch]
         terminations = [traj['terminations'] for traj in batch]
         truncations = [traj['truncations'] for traj in batch]
@@ -107,13 +117,18 @@ class TrajectoryDataLoader(DataLoader):
         states = np.array(states)
         next_state = np.array(next_state)
 
+        obs_padding_mask = np.array(obs_padding_mask, dtype=np.bool)
+        next_obs_padding_mask = np.array(next_obs_padding_mask, dtype=np.bool)
+
         batch_dict = {
             'alive_mask': alive_mask,
             'observations': observations,
+            'obs_padding_mask': obs_padding_mask,
             'states': states,
             'edge_indices': edge_indices,
             'next_states': next_state,
             'next_observations': next_observations,
+            'next_obs_padding_mask': next_obs_padding_mask,
             'next_avail_actions': next_avail_actions,
             'actions': actions,
             'rewards': rewards,

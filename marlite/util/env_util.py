@@ -19,22 +19,25 @@ def obs_preprocess(observations: list, agent_model_dict: dict, models: dict, rnn
             processed_obs[agent] = np.array(obs)
         return processed_obs
 '''
-def obs_preprocess(observations: list, agent_model_dict: dict, models: dict, rnn_traj_len: int) -> Tuple[Dict[str, Any], np.ndarray]:
-        agents = agent_model_dict.keys()
+def obs_preprocess(observations: list, agents: list, rnn_traj_len: int) -> Tuple[Dict[str, Any], np.ndarray]:
         processed_obs = {agent : [] for agent in agents}
-        traj_padding_mask = {agent: [] for agent in agents}
-        for agent, _ in agent_model_dict.items():
-            obs_len = len(observations)
+        obs_len = len(observations)
+        for agent in agents:
             if obs_len < rnn_traj_len:
                 padding_length = rnn_traj_len - obs_len
                 obs_padding = [np.zeros_like(observations[-1][agent]) for _ in range(padding_length)]
                 obs = obs_padding + [o[agent] for o in observations[-rnn_traj_len:]]
-                traj_padding_mask = np.array([False] * padding_length
-                                + [True] * len(observations[-rnn_traj_len:]), dtype=np.bool)
             else:
                 obs = [o[agent] for o in observations[-rnn_traj_len:]]
-                traj_padding_mask = np.ones(rnn_traj_len, dtype=np.bool)
+
             processed_obs[agent] = np.array(obs)
+        if obs_len < rnn_traj_len:
+            padding_length = rnn_traj_len - obs_len
+            traj_padding_mask = np.array([True] * padding_length
+                                         + [False] * len(observations[-rnn_traj_len:]), dtype=np.bool)
+        else:
+            traj_padding_mask = np.zeros(rnn_traj_len, dtype=np.bool)
+
         return processed_obs, traj_padding_mask
 
 def ensure_all_agents_present(data_dict: dict, default_values: dict) -> Dict[str, Any]:

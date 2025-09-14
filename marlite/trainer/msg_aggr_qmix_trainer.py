@@ -44,15 +44,18 @@ class MsgAggrQMIXTrainer(Trainer):
                     # Extract batch data
                     alive_mask = batch['alive_mask']
                     observations = batch['observations']
+                    obs_padding_mask = batch['obs_padding_mask']
                     states = batch['states']
                     actions = batch['actions']
                     rewards = batch['rewards']
                     next_states = batch['next_states']
                     next_observations = batch['next_observations']
+                    next_obs_padding_mask = batch['next_obs_padding_mask']
                     next_avail_actions = batch['next_avail_actions']
                     terminations = batch['terminations']
                     truncations = batch['truncations']
                     bs = states.shape[0]  # Actual batch size
+                    n_agents = rewards.shape[1]
 
                     # Create alive_mask_next from terminations and truncations
                     terminations = torch.tensor(terminations[:,:,-1]).to(self.train_device) # (B, N, T) -> (B, N)
@@ -70,9 +73,17 @@ class MsgAggrQMIXTrainer(Trainer):
                     rewards = rewards.sum(dim=1) # (B, N) -> (B) Sum over all agents rewards
                     terminations = terminations.prod(dim=1) # (B, N) -> (B) if all agents are terminated then game over
 
+                    obs_padding_mask = torch.tensor(obs_padding_mask, dtype=torch.bool) # (B, T)
+                    obs_padding_mask = obs_padding_mask.unsqueeze(1) # (B, 1, T)
+                    obs_padding_mask = torch.stack([obs_padding_mask] * n_agents, dim=1) # (B, N, T)
+                    next_obs_padding_mask = torch.tensor(next_obs_padding_mask, dtype=torch.bool)
+                    next_obs_padding_mask = next_obs_padding_mask.unsqueeze(1)
+                    next_obs_padding_mask = torch.stack([next_obs_padding_mask] * n_agents, dim=1)
+
                     # Compute the Q-tot
                     self.eval_agent_group.train()
-                    ret = self.eval_agent_group.forward(observations) # obs.shape (B, N, T, F)
+                    observations = torch.tensor(observations, dtype=torch.float, device=self.train_device)
+                    ret = self.eval_agent_group.forward(observations, obs_padding_mask, alive_mask) # obs.shape (B, N, T, F)
                     q_val = ret['q_val']
                     aggregated_msg = ret['aggregated_msg']
                     actions = torch.Tensor(actions[:,:,-1:]).to(device=self.train_device, dtype=torch.int64) # (B, N, T, A)
@@ -87,7 +98,8 @@ class MsgAggrQMIXTrainer(Trainer):
                     # Compute TD targets
                     with torch.no_grad():
                         self.target_agent_group.eval()
-                        ret_next = self.eval_agent_group.forward(next_observations)
+                        next_observations = torch.tensor(next_observations, dtype=torch.float, device=self.train_device)
+                        ret_next = self.eval_agent_group.forward(next_observations, next_obs_padding_mask, next_alive_mask)
                         q_val_next = ret_next['q_val']
                         #aggregated_msg_next = ret_next['aggregated_msg']
                         if use_action_mask:

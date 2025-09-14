@@ -40,16 +40,19 @@ class GraphQMIXTrainer(Trainer):
                     # Extract batch data
                     alive_mask = batch['alive_mask']
                     observations = batch['observations']
+                    obs_padding_mask = batch['obs_padding_mask']
                     states = batch['states']
                     edge_indices = batch['edge_indices']
                     actions = batch['actions']
                     rewards = batch['rewards']
                     next_states = batch['next_states']
                     next_observations = batch['next_observations']
+                    next_obs_padding_mask = batch['next_obs_padding_mask']
                     next_avail_actions = batch['next_avail_actions']
                     terminations = batch['terminations']
                     truncations = batch['truncations']
                     bs = states.shape[0]  # Actual batch size
+                    n_agents = rewards.shape[1]
 
                     # Create alive_mask_next from terminations and truncations
                     terminations = torch.tensor(terminations[:,:,-1]).to(self.train_device) # (B, N, T) -> (B, N)
@@ -68,11 +71,19 @@ class GraphQMIXTrainer(Trainer):
                     rewards = rewards.sum(dim=1) # (B, N) -> (B) Sum over all agents rewards
                     terminations = terminations.prod(dim=1) # (B, N) -> (B) if all agents are terminated then game over
 
+                    obs_padding_mask = torch.tensor(obs_padding_mask, dtype=torch.bool) # (B, T)
+                    obs_padding_mask = obs_padding_mask.unsqueeze(1) # (B, 1, T)
+                    obs_padding_mask = torch.stack([obs_padding_mask] * n_agents, dim=1) # (B, N, T)
+                    next_obs_padding_mask = torch.tensor(next_obs_padding_mask, dtype=torch.bool)
+                    next_obs_padding_mask = next_obs_padding_mask.unsqueeze(1)
+                    next_obs_padding_mask = torch.stack([next_obs_padding_mask] * n_agents, dim=1)
+
                     # Compute the Q-tot
                     states = states[:,-1,:] # (B, T, F) -> (B, F) Take only the last state in the sequence
                     edge_indices = [edge_indices[i][-1] for i in range(bs)] # (B, T, 2, N) -> (B, 2, N) Take only the last edge indices
+                    observations = torch.tensor(observations, dtype=torch.float, device=self.train_device)
                     self.eval_agent_group.reset().train() # Reset Graph Builder intervals
-                    ret = self.eval_agent_group.forward(observations, states, edge_indices) # obs.shape (B, N, T, F)
+                    ret = self.eval_agent_group.forward(observations, states, obs_padding_mask, alive_mask, edge_indices) # obs.shape (B, N, T, F)
                     q_val = ret['q_val']
                     actions = torch.Tensor(actions[:,:,-1:]).to(device=self.train_device, dtype=torch.int64) # (B, N, T, A)
                     q_val = torch.gather(q_val, dim=-1, index=actions)
@@ -86,8 +97,9 @@ class GraphQMIXTrainer(Trainer):
                     # Double Q-learning, we use eval agent group to choose actions,and use target critic to compute q_target
                     with torch.no_grad():
                         next_states = next_states[:,-1,:] # (B, T, F) -> (B, F) Take only the last state in the sequence
+                        next_observations = torch.tensor(next_observations, dtype=torch.float, device=self.train_device)
                         self.target_agent_group.reset().eval() # Reset Graph Builder intervals
-                        ret_next = self.eval_agent_group.forward(next_observations, next_states, edge_indices)
+                        ret_next = self.eval_agent_group.forward(next_observations, next_states, next_obs_padding_mask, next_alive_mask, edge_indices)
                         q_val_next = ret_next['q_val']
                         if use_action_mask:
                             q_val_next = torch.masked_fill(q_val_next, ~next_avail_actions, -torch.inf)
