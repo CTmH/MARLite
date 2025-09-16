@@ -8,7 +8,7 @@ class RandomAgentGroup(AgentGroup):
     model_configs: Dict[model_name(str), ModelConfig]
     '''
     def __init__(self, agents: Dict[str, str]) -> None:
-        self.agents = agents
+        self.agents = list(agents.keys())
 
     def forward(self, observations: Dict[str, np.ndarray]) -> Dict[str, Any]:
         return {'q_val': None}

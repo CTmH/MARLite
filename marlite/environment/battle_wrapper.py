@@ -15,14 +15,14 @@ class BattleWrapper(BaseParallelWrapper):
         self.channel_first = channel_first
         super().__init__(env=env)
 
-        self.agents = [f'predator_{i}' for i in range(25)]
+        self.agents = [f'red_{i}' for i in range(80)]
         self.possible_agents = self.agents[:]
         self.observation_spaces = {agent: self.env.observation_space(agent) for agent in self.agents}
         self.action_spaces = {agent: self.env.action_space(agent) for agent in self.agents}
 
         self.opponent_observations = None
         self.opponent_actions = None
-        self.opponent_agents = [f'prey_{i}' for i in range(50)]
+        self.opponent_agents = [f'blue_{i}' for i in range(80)]
         self.opponent_observation_history = deque(maxlen=self.opp_obs_queue_len)  # Queue to store opponent's observationss
 
     @property

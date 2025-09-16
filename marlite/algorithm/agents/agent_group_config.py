@@ -4,7 +4,7 @@ from marlite.algorithm.agents.agent_group import AgentGroup
 from marlite.algorithm.agents.qmix_agent_group import QMIXAgentGroup
 from marlite.algorithm.agents.gnn_agent_group import GNNAgentGroup
 from marlite.algorithm.agents.random_agent_group import RandomAgentGroup
-from marlite.algorithm.agents.magent_agent_group import MagentPreyAgentGroup
+from marlite.algorithm.agents.magent_agent_group import MagentPreyAgentGroup, MagentBattleAgentGroup
 from marlite.algorithm.agents.msg_aggr_agent_group import MsgAggrAgentGroup
 from marlite.algorithm.agents.gnn_obs_comm_agent_group import GNNObsCommAgentGroup
 from marlite.algorithm.model import ModelConfig
@@ -95,13 +95,18 @@ def get_magent_prey_agent_group(agent_group_config: Dict[str, Any]) -> AgentGrou
     agents = agent_group_config["agent_list"]
     return MagentPreyAgentGroup(agents)
 
+def get_magent_battle_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
+    agents = agent_group_config["agent_list"]
+    return MagentBattleAgentGroup(agents)
+
 registered_agent_groups = {
     "QMIX": get_qmix_agent_group,
     "MsgAggr": get_msg_aggr_agent_group,
     "GNN": get_gnn_agent_group,
     "GNNObsComm": get_gnn_obs_comm_agent_group,
     "Random": get_random_agent_group,
-    "MagentPrey": get_magent_prey_agent_group
+    "MagentPrey": get_magent_prey_agent_group,
+    "MagentBattle": get_magent_battle_agent_group
 }
 
 class AgentGroupConfig(object):
