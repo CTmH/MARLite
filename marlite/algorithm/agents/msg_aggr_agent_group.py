@@ -8,6 +8,7 @@ from marlite.algorithm.model.model_config import ModelConfig
 from marlite.algorithm.model import TimeSeqModel, RNNModel, Conv1DModel, AttentionModel
 from marlite.algorithm.agents.agent_group import AgentGroup
 from marlite.util.optimizer_config import OptimizerConfig
+from marlite.util.lr_scheduler_config import LRSchedulerConfig
 
 class MsgAggrAgentGroup(AgentGroup):
     def __init__(self,
@@ -17,6 +18,7 @@ class MsgAggrAgentGroup(AgentGroup):
                 decoder_configs: Dict[str, ModelConfig],
                 aggr_model_config: ModelConfig,
                 optimizer_config: OptimizerConfig,
+                lr_scheduler_config: LRSchedulerConfig=None,
                 device = 'cpu') -> None:
         super().__init__()
         self.device = device
@@ -31,6 +33,9 @@ class MsgAggrAgentGroup(AgentGroup):
         self.params_to_optimize += [{'params': decoder.parameters()} for decoder in self.decoders.values()]
         self.params_to_optimize += [{'params': self.aggr_model.parameters()}]
         self.optimizer = optimizer_config.get_optimizer(self.params_to_optimize)
+        self.lr_scheduler = None
+        if lr_scheduler_config:
+            self.lr_scheduler = lr_scheduler_config.get_lr_scheduler(self.optimizer)
 
         # Initialize model_to_agent dictionary and model_to_agent_indices dictionary
         self.model_to_agents = {model_name:[] for model_name in encoder_configs.keys()}
@@ -280,6 +285,15 @@ class MsgAggrAgentGroup(AgentGroup):
                 max_norm=5.0
             )
         self.optimizer.step()
+        return self
+
+    def lr_scheduler_step(self, reward, epoch) -> 'AgentGroup':
+        if not self.lr_scheduler:
+            return self
+        if isinstance(self.lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+            self.lr_scheduler.step(reward, epoch)
+        else:
+            self.lr_scheduler.step(epoch)
         return self
 
     def to(self, device: str) -> 'AgentGroup':

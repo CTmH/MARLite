@@ -1,4 +1,5 @@
 from copy import deepcopy
+from typing import Dict
 import numpy as np
 from marlite.algorithm.agents import AgentGroupConfig
 from marlite.algorithm.critic import CriticConfig
@@ -7,21 +8,26 @@ from marlite.rollout import RolloutManagerConfig
 from marlite.replaybuffer import ReplayBufferConfig
 from marlite.util.scheduler import Scheduler
 from marlite.util.optimizer_config import OptimizerConfig
-from marlite.util.optimizer_config import OptimizerConfig
+from marlite.util.lr_scheduler_config import LRSchedulerConfig
 from marlite.trainer.trainer import Trainer
 from marlite.trainer.qmix_trainer import QMIXTrainer
 from marlite.trainer.graph_qmix_trainer import GraphQMIXTrainer
 from marlite.trainer.msg_aggr_qmix_trainer import MsgAggrQMIXTrainer
 
 class TrainerConfig:
-    def __init__(self, config_dict: dict):
+    def __init__(self, config_dict: Dict[str, Dict]):
         self.config = deepcopy(config_dict)
         self.agent_group_config = AgentGroupConfig(**self.config['agent_group_config'])
         self.env_config = EnvConfig(**self.config['env_config'])
         critic_conf = self.config['critic_config']
         critic_optimizer_conf = critic_conf.pop('optimizer')
-        self.critic_config = CriticConfig(**critic_conf)
         self.critic_optimizer_config = OptimizerConfig(**critic_optimizer_conf)
+        if 'lr_scheduler' in critic_conf.keys():
+            lr_scheduler_conf = critic_conf.pop('lr_scheduler')
+            self.lr_scheduler_conf = LRSchedulerConfig(**lr_scheduler_conf)
+        else:
+            self.lr_scheduler_conf = None
+        self.critic_config = CriticConfig(**critic_conf)
         self.rolloutmanager_config = RolloutManagerConfig(**self.config['rollout_config'])
         self.replaybuffer_config = ReplayBufferConfig(**self.config['replaybuffer_config'])
 
@@ -51,6 +57,7 @@ class TrainerConfig:
                 epsilon_scheduler = self.epsilon_scheduler,
                 sample_ratio_scheduler = self.sample_ratio_scheduler,
                 critic_optimizer_config = self.critic_optimizer_config,
+                lr_scheduler_conf = self.lr_scheduler_conf,
                 rolloutmanager_config = self.rolloutmanager_config,
                 replaybuffer_config = self.replaybuffer_config,
                 **self.trainer_config

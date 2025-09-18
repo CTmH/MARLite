@@ -78,6 +78,21 @@ class AgentGroup(object):
         """
         raise NotImplementedError
 
+    def lr_scheduler_step(self, reward, epoch) -> 'AgentGroup':
+        """
+        Perform a learning rate scheduler step based on epoch and reward.
+
+        This method is typically called at the end of each training epoch to adjust
+        the learning rate according to a predefined schedule or performance metric.
+
+        Args:
+            epoch: Current training epoch number
+            reward: Reward signal used for adjusting the learning rate, often representing
+                   the performance of the agent group in the current epoch
+
+        """
+        raise NotImplementedError
+
     def to_device(self, device) -> 'AgentGroup':
         """
         Move all tensors to specified device.

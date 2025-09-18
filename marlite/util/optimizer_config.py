@@ -17,8 +17,3 @@ class OptimizerConfig:
             return optim_class(params_dict, **self.optimizer_kwargs)
         else:
             raise ValueError(f"Unsupported optimizer type: {self.optimizer_type}")
-
-# Example usage:
-# optimizer_config = OptimizerConfig(optimizer_type='Adam', lr=0.001, betas=(0.9, 0.999))
-# model_params = {'params': model.parameters()}
-# optimizer = optimizer_config.get_optimizer(model_params)

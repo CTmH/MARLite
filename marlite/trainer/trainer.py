@@ -14,6 +14,7 @@ from marlite.algorithm.agents import AgentGroupConfig
 from marlite.algorithm.critic import CriticConfig
 from marlite.rollout import RolloutManagerConfig
 from marlite.util.optimizer_config import OptimizerConfig
+from marlite.util.lr_scheduler_config import LRSchedulerConfig
 from marlite.util.scheduler import Scheduler
 
 class Trainer():
@@ -24,6 +25,7 @@ class Trainer():
                  epsilon_scheduler: Scheduler,
                  sample_ratio_scheduler: Scheduler,
                  critic_optimizer_config: OptimizerConfig,
+                 lr_scheduler_conf: LRSchedulerConfig,
                  rolloutmanager_config: RolloutManagerConfig,
                  replaybuffer_config: ReplayBufferConfig,
                  gamma: float = 0.9,
@@ -62,13 +64,17 @@ class Trainer():
         self._cached_critic_params = self.best_critic_params
 
         self.optimizer = critic_optimizer_config.get_optimizer(self.eval_critic.parameters())
+        if lr_scheduler_conf:
+            self.lr_scheduler = lr_scheduler_conf.get_lr_scheduler(self.optimizer)
+        else:
+            self.lr_scheduler = None
 
         # Work directory
         self.workdir = workdir
         self.logdir = os.path.join(workdir, 'logs')
         self.checkpointdir = os.path.join(workdir, 'checkpoints')
 
-        self.results = {}
+        self.training_history = {}
 
         # Configure absl logging
         os.makedirs(self.logdir, exist_ok=True)
@@ -99,6 +105,7 @@ class Trainer():
         # Metrics
         self.best_mean_reward = -np.inf
         self.best_reward_std = np.inf
+        self.best_win_rate = .0
 
     def learn(self, sample_size, batch_size: int, times: int):
         raise NotImplementedError
@@ -116,9 +123,10 @@ class Trainer():
         torch.save(critic_params, os.path.join(critic_path, "critic.pth"))
         return self
 
-    def load_checkpoint(self, checkpoint: str, checkpoint_mean_reward = -np.inf, checkpoint_reward_std = np.inf):
+    def load_checkpoint(self, checkpoint: str, checkpoint_mean_reward = -np.inf, checkpoint_reward_std = np.inf, checkpoint_win_rate = .0):
         self.best_mean_reward = checkpoint_mean_reward
         self.best_reward_std = checkpoint_reward_std
+        self.best_win_rate = checkpoint_win_rate
         agent_path = os.path.join(self.checkpointdir, checkpoint, "agent")
         self.eval_agent_group.to("cpu")
         self.eval_critic.to("cpu")
@@ -147,7 +155,6 @@ class Trainer():
                                                            self.env_config,
                                                            epsilon)
         episodes = manager.generate_episodes()
-        manager.cleanup()
 
         for episode in episodes:
             self.replaybuffer.add_episode(episode)
@@ -186,12 +193,15 @@ class Trainer():
         mean_reward = mean_reward.item()
         std_reward = np.std(rewards).item()
 
-        logging.info(f"Evaluation results: Mean reward {mean_reward:.4f}, Std reward {std_reward:.4f}, Win rate {win_rate:.2f}")
+        logging.info(f"Evaluation results: Mean reward {mean_reward:.4f}, Std reward {std_reward:.4f}, Win rate {win_rate:.4f}")
 
         self.eval_agent_group.to("cpu")
         torch.cuda.empty_cache()
 
-        return mean_reward, std_reward
+        for episode in episodes:
+            self.replaybuffer.add_episode(episode)
+
+        return mean_reward, std_reward, win_rate
 
     def train(self, epochs, target_reward, eval_interval=1, batch_size=64, learning_times_per_epoch=1):
 
@@ -206,7 +216,10 @@ class Trainer():
             sample_size = round(sample_size)
 
             # Learn and update eval model
-            logging.info(f"Epoch {epoch}: Learning with batch size {batch_size} and learning {learning_times_per_epoch} times per epoch")
+            agent_group_lr = self.eval_agent_group.optimizer.param_groups[0]['lr']
+            critic_lr = self.optimizer.param_groups[0]['lr']
+            logging.info(f"Epoch {epoch}: Batch size: {batch_size}, Critic learning rate: {critic_lr:.8f}, Agent learning rate: {agent_group_lr:.8f}")
+            logging.info(f"Epoch {epoch}: Learning {learning_times_per_epoch} times per epoch ...")
             loss = self.learn(sample_size=sample_size, batch_size=batch_size, times=learning_times_per_epoch)
             logging.info(f"Epoch {epoch}: Loss {loss:.4f}")
 
@@ -216,12 +229,19 @@ class Trainer():
             self.save_current_model(checkpoint_name)
             logging.info(f"Checkpoint saved at {checkpoint_name}")
 
-            mean_reward, reward_std = self.evaluate()
-            self.save_intermediate_results(epoch, loss, mean_reward, reward_std)
+            mean_reward, reward_std, win_rate = self.evaluate()
+            self.save_intermediate_results(epoch, loss, mean_reward, reward_std, win_rate)
 
-            if mean_reward >= self.best_mean_reward:
+            if isinstance(self.lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                self.lr_scheduler.step(mean_reward, epoch)
+            elif isinstance(self.lr_scheduler, torch.optim.lr_scheduler.LRScheduler):
+                self.lr_scheduler.step(epoch)
+            self.eval_agent_group.lr_scheduler_step(mean_reward, epoch)
+
+            if mean_reward >= self.best_mean_reward or win_rate > self.best_win_rate:
                 self.best_mean_reward = mean_reward
                 self.best_reward_std = reward_std
+                self.best_win_rate = win_rate
                 best_loss = loss
                 self.best_agent_group_params = self.eval_agent_group.get_agent_group_params()
                 self.best_critic_params = deepcopy(self.eval_critic.state_dict())
@@ -243,25 +263,27 @@ class Trainer():
                 self.update_target_model_params()
                 logging.info(f"Epoch {epoch}: Target model updated with eval model parameters.")
 
-        self.save_intermediate_results('best', best_loss, self.best_mean_reward, self.best_reward_std)
+        self.save_intermediate_results('best', best_loss, self.best_mean_reward, self.best_reward_std, self.best_win_rate)
         self.save_results_to_csv()
         self.save_best_model()
         return self.best_mean_reward, self.best_reward_std
 
-    def save_intermediate_results(self, epoch, loss, mean_reward, reward_std):
-        self.results[epoch] = {
+    def save_intermediate_results(self, epoch, loss, mean_reward, reward_std, win_rate):
+        self.training_history[epoch] = {
             'loss': loss,
             'mean_reward': mean_reward,
-            'reward_std': reward_std
+            'reward_std': reward_std,
+            'win_rate': win_rate,
         }
-        logging.info(f"Intermediate results saved for epoch {epoch}: Loss {loss:.4f}, Mean reward {mean_reward:.4f}, Std reward {reward_std:.4f}")
+        logging.info(f"Intermediate results saved for epoch {epoch}: Loss {loss:.4f}, " +
+                     f"Mean reward {mean_reward:.4f}, Std reward {reward_std:.4f}, Win rate {win_rate:.2f}")
 
     def save_results_to_csv(self):
         os.makedirs(self.logdir, exist_ok=True)
         csv_path = os.path.join(self.logdir, 'results.csv')
         with open(csv_path, 'w', newline='') as file:
             writer = csv.writer(file)
-            writer.writerow(['Epoch', 'Mean Reward', 'Reward Std'])
-            for epoch, result in self.results.items():
-                writer.writerow([epoch, result['mean_reward'], result['reward_std']])
+            writer.writerow(['Epoch', 'Mean_Reward', 'Reward_Std', 'Win_Rate'])
+            for epoch, result in self.training_history.items():
+                writer.writerow([epoch, result['mean_reward'], result['reward_std'], result['win_rate']])
         logging.info(f"Results saved to {csv_path}")

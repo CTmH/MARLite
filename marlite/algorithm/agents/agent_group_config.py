@@ -10,6 +10,7 @@ from marlite.algorithm.agents.gnn_obs_comm_agent_group import GNNObsCommAgentGro
 from marlite.algorithm.model import ModelConfig
 from marlite.algorithm.graph_builder import GraphBuilderConfig
 from marlite.util.optimizer_config import OptimizerConfig
+from marlite.util.lr_scheduler_config import LRSchedulerConfig
 
 def get_qmix_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
     agents = agent_group_config["agent_list"]
@@ -21,7 +22,10 @@ def get_qmix_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
         model_configs[model_id] = ModelConfig(**conf['model'])
     optimizer_config = agent_group_config["optimizer"]
     optimizer_config = OptimizerConfig(**optimizer_config)
-    return QMIXAgentGroup(agents, model_configs, feature_extractor_configs, optimizer_config)
+    lr_scheduler_config = agent_group_config.get("lr_scheduler", None)
+    if lr_scheduler_config:
+        lr_scheduler_config = LRSchedulerConfig(**lr_scheduler_config)
+    return QMIXAgentGroup(agents, model_configs, feature_extractor_configs, optimizer_config, lr_scheduler_config)
 
 def get_msg_aggr_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
     agents = agent_group_config["agent_list"]
@@ -35,13 +39,17 @@ def get_msg_aggr_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
         decoder_configs[model_id] = ModelConfig(**conf['decoder'])
     aggr_model_config = ModelConfig(**agent_group_config["aggr_model_config"])
     optimizer_config = OptimizerConfig(**agent_group_config["optimizer"])
+    lr_scheduler_config = agent_group_config.get("lr_scheduler", None)
+    if lr_scheduler_config:
+        lr_scheduler_config = LRSchedulerConfig(**lr_scheduler_config)
     return MsgAggrAgentGroup(
                         agents,
                         feature_extractor_configs,
                         encoder_configs,
                         decoder_configs,
                         aggr_model_config,
-                        optimizer_config)
+                        optimizer_config,
+                        lr_scheduler_config)
 
 def get_gnn_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
     agents = agent_group_config["agent_list"]
@@ -56,6 +64,9 @@ def get_gnn_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
     graph_model_config = ModelConfig(**agent_group_config["graph_model_config"])
     graph_builder_config = GraphBuilderConfig(**agent_group_config["graph_builder_config"])
     optimizer_config = OptimizerConfig(**agent_group_config["optimizer"])
+    lr_scheduler_config = agent_group_config.get("lr_scheduler", None)
+    if lr_scheduler_config:
+        lr_scheduler_config = LRSchedulerConfig(**lr_scheduler_config)
     return GNNAgentGroup(
                         agents,
                         feature_extractor_configs,
@@ -63,7 +74,8 @@ def get_gnn_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
                         decoder_configs,
                         graph_builder_config,
                         graph_model_config,
-                        optimizer_config)
+                        optimizer_config,
+                        lr_scheduler_config)
 
 def get_gnn_obs_comm_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
     agents = agent_group_config["agent_list"]
@@ -78,6 +90,9 @@ def get_gnn_obs_comm_agent_group(agent_group_config: Dict[str, Any]) -> AgentGro
     graph_model_config = ModelConfig(**agent_group_config["graph_model_config"])
     graph_builder_config = GraphBuilderConfig(**agent_group_config["graph_builder_config"])
     optimizer_config = OptimizerConfig(**agent_group_config["optimizer"])
+    lr_scheduler_config = agent_group_config.get("lr_scheduler", None)
+    if lr_scheduler_config:
+        lr_scheduler_config = LRSchedulerConfig(**lr_scheduler_config)
     return GNNObsCommAgentGroup(
                         agents,
                         feature_extractor_configs,
@@ -85,7 +100,8 @@ def get_gnn_obs_comm_agent_group(agent_group_config: Dict[str, Any]) -> AgentGro
                         decoder_configs,
                         graph_builder_config,
                         graph_model_config,
-                        optimizer_config)
+                        optimizer_config,
+                        lr_scheduler_config)
 
 def get_random_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
     agents = agent_group_config["agent_list"]

@@ -7,6 +7,7 @@ from marlite.algorithm.model.model_config import ModelConfig
 from marlite.algorithm.agents.graph_agent_group import GraphAgentGroup
 from marlite.algorithm.graph_builder import GraphBuilderConfig
 from marlite.util.optimizer_config import OptimizerConfig
+from marlite.util.lr_scheduler_config import LRSchedulerConfig
 
 class GNNAgentGroup(GraphAgentGroup):
     def __init__(self,
@@ -17,6 +18,7 @@ class GNNAgentGroup(GraphAgentGroup):
                 graph_builder_config: GraphBuilderConfig,
                 graph_model_config: ModelConfig,
                 optimizer_config: OptimizerConfig,
+                lr_scheduler_config: LRSchedulerConfig=None,
                 device = 'cpu') -> None:
         super().__init__(
             agent_model_dict,
@@ -26,6 +28,7 @@ class GNNAgentGroup(GraphAgentGroup):
             graph_builder_config,
             graph_model_config,
             optimizer_config,
+            lr_scheduler_config,
             device=device,
         )
 

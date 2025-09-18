@@ -86,6 +86,10 @@ agent_group_config:
     type: "Adam"
     lr: 0.0002
     weight_decay: 0.00005
+  lr_scheduler:
+    type: "ReduceLROnPlateau"
+    mode: 'max'
+    patience: 3
 
 env_config:
   module_name: "magent2.environments"
@@ -198,6 +202,10 @@ critic_config:
     type: "Adam"
     lr: 0.0002
     weight_decay: 0.00005
+  lr_scheduler:
+    type: "ReduceLROnPlateau"
+    mode: 'max'
+    patience: 3
 
 rollout_config:
   manager_type: "multi-process"
