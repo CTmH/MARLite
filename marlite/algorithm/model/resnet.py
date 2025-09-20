@@ -15,7 +15,6 @@ class ResAttentionStateEncoder(MaskedModel):
         # Layer normalization for stability
         self.norm1 = nn.LayerNorm(embed_dim)
         self.norm2 = nn.LayerNorm(embed_dim)
-        self.norm3 = nn.LayerNorm(embed_dim)
 
         # Feed-forward network
         self.ffn = nn.Sequential(
@@ -57,7 +56,7 @@ class ResAttentionStateEncoder(MaskedModel):
         x = x + self.dropout(ffn_out)
 
         # Weighted pooling with learned attention
-        weights = self.attention_weights(self.norm3(attn_out)).squeeze(-1)  # [B, N]
+        weights = self.attention_weights(x_norm).squeeze(-1)  # [B, N]
         weights = weights.masked_fill(not_alive_mask, -torch.inf)
         weights = torch.softmax(weights, dim=-1)  # [B, N]
         x = torch.sum(x * weights.unsqueeze(-1), dim=1)  # [B, D]
@@ -77,7 +76,6 @@ class ResAttentionObsEncoder(AttentionModel):
         # Layer normalization for stability
         self.norm1 = nn.LayerNorm(embed_dim)
         self.norm2 = nn.LayerNorm(embed_dim)
-        self.norm3 = nn.LayerNorm(embed_dim)
 
         # Feed-forward network
         self.ffn = nn.Sequential(
@@ -121,7 +119,7 @@ class ResAttentionObsEncoder(AttentionModel):
         x = x + self.dropout(ffn_out)
 
         # Weighted pooling with learned attention
-        weights = self.attention_weights(self.norm3(attn_out)).squeeze(-1)  # [B, N]
+        weights = self.attention_weights(x_norm).squeeze(-1)  # [B, N]
         weights = weights.masked_fill(padding_mask, -torch.inf)
         weights = torch.softmax(weights, dim=-1)  # [B, N]
         x = torch.sum(x * weights.unsqueeze(-1), dim=1)  # [B, D]
@@ -158,3 +156,46 @@ def create_key_padding_mask(tensor: torch.Tensor):
         key_padding_mask[all_zeros_in_batch, -1] = False
 
     return key_padding_mask
+
+class SimpleAttentionObsEncoder(AttentionModel):
+
+    def __init__(self, input_dim, output_dim, embed_dim, num_heads, max_seq_len, dropout=0.1):
+        super(SimpleAttentionObsEncoder, self).__init__()
+        self.linear1 = nn.Linear(input_dim, embed_dim)
+        self.linear2 = nn.Linear(embed_dim, output_dim)
+        self.attention = SelfAttentionFixedPE(embed_dim, num_heads, max_seq_len=max_seq_len, dropout=dropout, batch_first=True)
+        self.attention_weights = nn.Linear(embed_dim, 1)
+
+        # Layer normalization for stability
+        self.norm1 = nn.LayerNorm(embed_dim)
+        self.norm2 = nn.LayerNorm(embed_dim)
+
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x: torch.Tensor, padding_mask:torch.Tensor=None):
+        """
+        Args:
+            x: Input tensor of shape [batch_size, seq_len(n_agents), input_dim]
+            attn_mask: Attention mask for causal masking [batch_size, seq_len(n_agents)]
+            key_padding_mask: Mask for padding tokens
+
+        Returns:
+            Global embedding of shape [batch_size, embed_dim]
+        """
+        x = self.linear1(x)  # [B, N, D]
+
+        # Self-attention block (Pre-LN)
+        x_norm = self.norm1(x)
+        attn_out = self.attention(x_norm, key_padding_mask=padding_mask)
+        x = x + self.dropout(attn_out)
+        x = self.norm2(x)
+
+        # Weighted pooling with learned attention
+        weights = self.attention_weights(x).squeeze(-1)  # [B, N]
+        weights = weights.masked_fill(padding_mask, -torch.inf)
+        weights = torch.softmax(weights, dim=-1)  # [B, N]
+        x = torch.sum(x * weights.unsqueeze(-1), dim=1)  # [B, D]
+
+        x = self.linear2(F.gelu(x))
+
+        return x

@@ -114,7 +114,7 @@ class TestGNNAgentGroup(unittest.TestCase):
             self.agent_group.load_params(tmpdirname)
 
     def test_lr_scheduler_step(self):
-        self.agent_group.lr_scheduler_step(0, 1)
+        self.agent_group.lr_scheduler_step(0)
         self.assertIsNotNone(self.agent_group.lr_scheduler)
 if __name__ == '__main__':
     unittest.main()

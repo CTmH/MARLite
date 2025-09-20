@@ -61,7 +61,7 @@ class TestMsgAggrQMIXTrainer(unittest.TestCase):
             self.trainer.workdir = temp_dir
             self.trainer.logdir = os.path.join(self.trainer.workdir, 'logs')
             self.trainer.checkpointdir = os.path.join(self.trainer.workdir, 'checkpoints')
-            reward, _ = self.trainer.evaluate()
+            reward, _, _ = self.trainer.evaluate()
             best_reward, _ = self.trainer.train(epochs=2, target_reward=5)
 
 class TestMsgAggrSMACQMIXTrainer(unittest.TestCase):

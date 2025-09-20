@@ -1,4 +1,5 @@
 import torch.multiprocessing as mp
+import torch
 from typing import List, Any, Callable
 from concurrent.futures import ProcessPoolExecutor
 from marlite.algorithm.agents.agent_group import AgentGroup
@@ -33,6 +34,19 @@ class MultiProcessRolloutManager(RolloutManager):
     def generate_episodes(self) -> List[Any]:
         mp.set_start_method('spawn', force=True)
         n_workers = min(self.n_workers, self.n_episodes)
+
+        # Handle CUDA device allocation when device is just "cuda" without device number
+        if self.device == "cuda":
+            if torch.cuda.is_available():
+                num_cuda_devices = torch.cuda.device_count()
+                # Distribute workers evenly across available CUDA devices
+                devices = [f"cuda:{i % num_cuda_devices}" for i in range(self.n_episodes)]
+            else:
+                raise RuntimeError("CUDA is not available on this system")
+        else:
+            # Use the specified device for all workers
+            devices = [self.device for _ in range(self.n_episodes)]
+
         with ProcessPoolExecutor(max_workers=n_workers) as executor:
             episodes = list(tqdm(executor.map(
                 self.worker_func,
@@ -41,7 +55,7 @@ class MultiProcessRolloutManager(RolloutManager):
                 [self.traj_len] * self.n_episodes,
                 [self.episode_limit] * self.n_episodes,
                 [self.epsilon] * self.n_episodes,
-                [self.device] * self.n_episodes,
+                devices,
                 [self.check_victory] * self.n_episodes
             ), total=self.n_episodes, desc="Generating Episodes"))
         episodes = [e for e in episodes if e]

@@ -78,7 +78,7 @@ class AgentGroup(object):
         """
         raise NotImplementedError
 
-    def lr_scheduler_step(self, reward, epoch) -> 'AgentGroup':
+    def lr_scheduler_step(self, reward) -> 'AgentGroup':
         """
         Perform a learning rate scheduler step based on epoch and reward.
 

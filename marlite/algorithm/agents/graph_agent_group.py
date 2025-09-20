@@ -202,13 +202,13 @@ class GraphAgentGroup(AgentGroup):
         self.optimizer.step()
         return self
 
-    def lr_scheduler_step(self, reward, epoch) -> 'AgentGroup':
+    def lr_scheduler_step(self, reward) -> 'AgentGroup':
         if not self.lr_scheduler:
             return self
         if isinstance(self.lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
-            self.lr_scheduler.step(reward, epoch)
+            self.lr_scheduler.step(reward)
         else:
-            self.lr_scheduler.step(epoch)
+            self.lr_scheduler.step()
         return self
 
     def to(self, device: str) -> 'AgentGroup':

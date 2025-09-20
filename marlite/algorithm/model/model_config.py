@@ -4,7 +4,7 @@ from absl import logging
 from marlite.algorithm.model.gnn import GCNModel, GATModel
 from marlite.algorithm.model.custom_model import CustomModel
 from marlite.algorithm.model.time_seq_model import CustomTimeSeqModel, GRUModel
-from marlite.algorithm.model.resnet import ResAttentionStateEncoder, ResAttentionObsEncoder
+from marlite.algorithm.model.resnet import ResAttentionStateEncoder, ResAttentionObsEncoder, SimpleAttentionObsEncoder
 
 
 REGISTERED_MODELS = {
@@ -18,6 +18,7 @@ REGISTERED_MODELS = {
     "CustomTimeSeq": CustomTimeSeqModel,
     "ResAttentionStateEncoder": ResAttentionStateEncoder,
     "ResAttentionObsEncoder": ResAttentionObsEncoder,
+    "SimpleAttentionObsEncoder": SimpleAttentionObsEncoder,
 }
 
 class ModelConfig:

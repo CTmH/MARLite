@@ -233,10 +233,10 @@ class Trainer():
             self.save_intermediate_results(epoch, loss, mean_reward, reward_std, win_rate)
 
             if isinstance(self.lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
-                self.lr_scheduler.step(mean_reward, epoch)
+                self.lr_scheduler.step(mean_reward)
             elif isinstance(self.lr_scheduler, torch.optim.lr_scheduler.LRScheduler):
-                self.lr_scheduler.step(epoch)
-            self.eval_agent_group.lr_scheduler_step(mean_reward, epoch)
+                self.lr_scheduler.step()
+            self.eval_agent_group.lr_scheduler_step(mean_reward)
 
             if mean_reward >= self.best_mean_reward or win_rate > self.best_win_rate:
                 self.best_mean_reward = mean_reward

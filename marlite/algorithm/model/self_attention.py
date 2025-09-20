@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-from marlite.algorithm.model.masked_model import MaskedModel
 
 class SelfAttention(nn.Module):
     def __init__(self, embed_dim, num_heads, dropout=0.1, batch_first=True):
@@ -13,7 +12,7 @@ class SelfAttention(nn.Module):
                                                           key_padding_mask=key_padding_mask)
         return attn_output
 
-class SelfAttentionLearnablePE(MaskedModel):
+class SelfAttentionLearnablePE(nn.Module):
     def __init__(self, embed_dim, num_heads, max_seq_len=100, dropout=0.1, batch_first=True):
         super().__init__()
         self.embed_dim = embed_dim
