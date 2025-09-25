@@ -3,10 +3,12 @@ from copy import deepcopy
 from marlite.algorithm.model.permute import Permute
 from marlite.algorithm.model.channel_selector import ChannelSelector
 from marlite.algorithm.model.self_attention import SelfAttention, SelfAttentionFixedPE, SelfAttentionLearnablePE
+from marlite.algorithm.model.resnet import ResidualMLP
 
 REGISTERED_MODULES = {
     "Permute": Permute,
     "ChannelSelector": ChannelSelector,
+    "ResidualMLP": ResidualMLP,
     "SelfAttention": SelfAttention,
     "SelfAttentionFixedPE": SelfAttentionFixedPE,
     "SelfAttentionLearnablePE": SelfAttentionLearnablePE

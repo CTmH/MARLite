@@ -49,7 +49,7 @@ agent_group_config:
         - type: LeakyReLU
         - type: Flatten
       encoder:
-        model_type: "CustomTimeSeq"
+        model_type: "CustomConv1D"
         layers:
         - type: Conv1d
           in_channels: 64

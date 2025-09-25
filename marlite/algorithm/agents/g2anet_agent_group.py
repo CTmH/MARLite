@@ -9,7 +9,7 @@ from marlite.algorithm.graph_builder import GraphBuilderConfig
 from marlite.util.optimizer_config import OptimizerConfig
 from marlite.util.lr_scheduler_config import LRSchedulerConfig
 
-class GNNObsCommAgentGroup(GraphAgentGroup):
+class G2ANetAgentGroup(GraphAgentGroup):
     def __init__(self,
                 agent_model_dict: Dict[str, str],
                 feature_extractor_configs: Dict[str, ModelConfig],
@@ -91,20 +91,10 @@ class GNNObsCommAgentGroup(GraphAgentGroup):
 
         # Build Graph
         if edge_indices is None:  # If edge_indices are not provided
-            adj_matrix, edge_indices = self.graph_builder(states)
+            adj_matrix, edge_indices = self.graph_builder(msg)
 
         # Communication between agents using the graph model.
-        batch_data = [None for i in range(bs)]
-        for i in range(bs):
-            batch_data[i] = Data(
-                x = msg[i],
-                edge_index = torch.Tensor(edge_indices[i]).to(device=self.device, dtype=torch.int)
-            )
-        batch_data = Batch.from_data_list(batch_data)
-        x, e, batch = batch_data.x, batch_data.edge_index, batch_data.batch
-        batch_h = self.graph_model(x, e)
-        hidden_states = unbatch(batch_h, batch) # (B, N, Hidden Size)
-        hidden_states = torch.stack(hidden_states)
+        hidden_states = self.graph_model(msg, adj_matrix) # (B, N, Hidden Size)
 
         q_val = [None for _ in range(len(self.agent_model_dict))]
         emb_size = hidden_states.shape[-1] + local_obs.shape[-1]

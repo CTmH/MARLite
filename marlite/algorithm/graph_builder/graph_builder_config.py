@@ -4,12 +4,14 @@ from marlite.algorithm.graph_builder.fullconn_graph_builder import FullConnGraph
 from marlite.algorithm.graph_builder.magent_graph_builder import MagentGraphBuilder
 from marlite.algorithm.graph_builder.partial_graph_builder import PartialGraphMagentBuilder
 from marlite.algorithm.graph_builder.random_group_graph_builder import RandomGroupGraphBuilder
+from marlite.algorithm.graph_builder.g2anet_graph_builder import G2ANetGraphBuilder
 
 registered_graph_builder_models = {
     "FullConn": FullConnGraphBuilder,
     "RandomGroup": RandomGroupGraphBuilder,
     "Magent": MagentGraphBuilder,
-    "PartialMagent": PartialGraphMagentBuilder
+    "PartialMagent": PartialGraphMagentBuilder,
+    "G2ANet": G2ANetGraphBuilder,
 }
 class GraphBuilderConfig:
 

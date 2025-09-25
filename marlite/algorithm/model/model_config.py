@@ -2,20 +2,24 @@ import torch
 import torch.nn as nn
 from absl import logging
 from marlite.algorithm.model.gnn import GCNModel, GATModel
+from marlite.algorithm.model.matrix_gnn import MatrixGCNModel
 from marlite.algorithm.model.custom_model import CustomModel
-from marlite.algorithm.model.time_seq_model import CustomTimeSeqModel, GRUModel
+from marlite.algorithm.model.rnn import GRUModel
+from marlite.algorithm.model.conv1d_model import CustomConv1DModel
 from marlite.algorithm.model.resnet import ResAttentionStateEncoder, ResAttentionObsEncoder, SimpleAttentionObsEncoder
 
 
 REGISTERED_MODELS = {
-    "RNN": GRUModel,
+    "RNN": GRUModel, # For compatibility
     "GRU": GRUModel,
     "GCN": GCNModel,
     "GAT": GATModel,
+    "MatrixGCN": MatrixGCNModel,
     "Identity": nn.Identity,
     "Flatten": nn.Flatten,
     "Custom": CustomModel,
-    "CustomTimeSeq": CustomTimeSeqModel,
+    "CustomTimeSeq": CustomConv1DModel, # For compatibility
+    "CustomConv1D": CustomConv1DModel,
     "ResAttentionStateEncoder": ResAttentionStateEncoder,
     "ResAttentionObsEncoder": ResAttentionObsEncoder,
     "SimpleAttentionObsEncoder": SimpleAttentionObsEncoder,

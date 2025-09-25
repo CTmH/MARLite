@@ -16,7 +16,7 @@ agent_group_config:
           out_features: 64
         - type: LeakyReLU
       model:
-        model_type: "CustomTimeSeq"
+        model_type: "CustomConv1D"
         layers:
         - type: Conv1d
           in_channels: 64
@@ -39,7 +39,7 @@ agent_group_config:
           out_features: 64
         - type: LeakyReLU
       model:
-        model_type: "CustomTimeSeq"
+        model_type: "CustomConv1D"
         layers:
         - type: Conv1d
           in_channels: 64

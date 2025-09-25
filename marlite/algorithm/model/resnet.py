@@ -5,6 +5,18 @@ from marlite.algorithm.model.masked_model import MaskedModel
 from marlite.algorithm.model.self_attention import SelfAttentionLearnablePE, SelfAttentionFixedPE
 from marlite.algorithm.model import AttentionModel
 
+class ResidualMLP(nn.Module):
+    def __init__(self, input_dim: int, hidden_dim: int = 64):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, input_dim)
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x + self.net(x)  # 残差连接
+
 class ResAttentionStateEncoder(MaskedModel):
     def __init__(self, input_dim, embed_dim, num_heads, max_seq_len, dropout=0.1):
         super(ResAttentionStateEncoder, self).__init__()

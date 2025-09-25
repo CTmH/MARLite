@@ -6,7 +6,7 @@ def binary_to_decimal(binary_list):
     length = len(binary_list)
     y = [2**i  for i in range(length)]
     y = np.array(y)
-    decimal_number = np.dot(binary_list, y)  # dot product to get decimal number. 
+    decimal_number = np.dot(binary_list, y)  # dot product to get decimal number.
     return decimal_number
 
 def build_graph_from_map_2d(A: np.array, threshold: int, distance_metric: str = 'cityblock'):
@@ -20,14 +20,14 @@ def build_graph_from_map_2d(A: np.array, threshold: int, distance_metric: str = 
     sorted_ids = sorted(valid_elements.keys())
     sorted_ids = np.array(sorted_ids, dtype=np.int64)
     coords = np.array([valid_elements[k] for k in sorted_ids], dtype=np.int64)
-    
+
     # Vectorized Manhattan distance calculation
     distances = cdist(coords, coords, metric=distance_metric)
 
     # Generate valid edge pairs within threshold (upper triangular matrix)
     mask = (distances <= threshold) & (np.triu(np.ones_like(distances, dtype=bool), k=1))
     rows, cols = np.where(mask)
-    
+
     # Build adjacency matrix
     max_id = A.max() if A.size > 0 else -1
     n = max_id + 1 if max_id >= 0 else 0
@@ -36,9 +36,9 @@ def build_graph_from_map_2d(A: np.array, threshold: int, distance_metric: str = 
     adj_matrix[sorted_ids[cols], sorted_ids[rows]] = 1  # Symmetric connections
 
     # Generate edge_index in COO format
-    edge_index = np.vstack([sorted_ids[rows], sorted_ids[cols]]).astype(np.int64)
-    
-    return adj_matrix, edge_index
+    edge_indices = np.vstack([sorted_ids[rows], sorted_ids[cols]]).astype(np.int64)
+
+    return adj_matrix, edge_indices
 
 def build_graph_from_state_with_binary_agent_id(
     state,
@@ -49,10 +49,10 @@ def build_graph_from_state_with_binary_agent_id(
 ):
     """
     Construct a graph from observations.
-    
+
     Args:
         state (Tensor): Observations tensor of shape (Batch Size, Agent Number, Time Step, Feature Dimensions).
-    
+
     Returns:
         Data: A PyG Data object representing the graph.
     """
@@ -62,7 +62,7 @@ def build_graph_from_state_with_binary_agent_id(
     agent_presence = agent_presence.astype(np.int64)
     agent_presence = agent_presence.sum(axis=-1)  # Sum across the last dimension to get a single value per team.
     agent_positions = agent_positions + agent_presence - 1  # Adjust agent positions based on presence, -1 means no agent is present.
-    
+
     return build_graph_from_map_2d(agent_positions, threshold, distance_metric)
 
 def filter_edge_index(edge_index: list, node_ids: list):
@@ -76,7 +76,7 @@ def filter_edge_index(edge_index: list, node_ids: list):
     filtered_edge_index = np.array(filtered_edge_index).T.astype(np.int64)  # Convert back to original shape. Each column is an edge.
     return filtered_edge_index
 
-def build_team_graph_batch(states, team_indices, binary_agent_id_dim, 
+def build_team_graph_batch(states, team_indices, binary_agent_id_dim,
                           agent_presence_dim, comm_distance, distance_metric: str = 'cityblock'):
     adj_batch = []
     edge_batch = []

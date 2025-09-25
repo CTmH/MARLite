@@ -35,10 +35,6 @@ class Analyzer:
         # Load best model
         self.load_best_model()
 
-        logging.basicConfig(level=logging.INFO,
-                           format='%(asctime)s - %(levelname)s - %(message)s',
-                           handlers=[logging.StreamHandler()])
-
     def load_best_model(self):
         """Load the best model parameters from the work directory"""
         agent_path = os.path.join(self.checkpointdir, 'best', 'agent')

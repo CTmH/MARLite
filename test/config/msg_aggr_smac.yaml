@@ -36,7 +36,7 @@ agent_group_config:
           in_features: 144
           out_features: 64
       encoder:
-        model_type: "CustomTimeSeq"
+        model_type: "CustomConv1D"
         layers:
         - type: Conv1d
           in_channels: 64
