@@ -203,7 +203,7 @@ class Trainer():
 
         return mean_reward, std_reward, win_rate
 
-    def train(self, epochs, target_reward, eval_interval=1, batch_size=64, learning_times_per_epoch=1):
+    def train(self, epochs, target_reward, eval_interval=1, update_target_interval=1, batch_size=64, learning_times_per_epoch=1):
 
         best_loss = np.inf
         # Training loop
@@ -259,7 +259,10 @@ class Trainer():
             if epoch % eval_interval == 0:
                 self.eval_agent_group.set_agent_group_params(self._cached_agent_group_params)
                 self.eval_critic.load_state_dict(self._cached_critic_params)
-                logging.info(f"Epoch {epoch}: Eval model updated with cached parameters.")
+                self.update_target_model_params()
+                logging.info(f"Epoch {epoch}: Eval model and Target model updated with cached parameters.")
+
+            if epoch % update_target_interval == 0:
                 self.update_target_model_params()
                 logging.info(f"Epoch {epoch}: Target model updated with eval model parameters.")
 

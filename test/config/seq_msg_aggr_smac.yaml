@@ -1,0 +1,160 @@
+agent_group_config:
+  type: "SeqMsgAggr"
+  agent_list:
+    stalker_0: model_0
+    stalker_1: model_0
+    zealot_0: model_1
+    zealot_1: model_1
+    zealot_2: model_1
+  model_configs:
+    model_0:
+      feature_extractor:
+        model_type: "Custom"
+        layers:
+        - type: Flatten
+      encoder:
+        model_type: "ResAttentionObsEncoder"
+        input_dim: 144
+        embed_dim: 64
+        output_dim: 64
+        num_heads: 4
+        max_seq_len: 5
+        dropout: 0.25
+      decoder:
+        model_type: "Custom"
+        layers:
+        - type: Linear
+          in_features: 128
+          out_features: 11
+    model_1:
+      feature_extractor:
+        model_type: "Custom"
+        layers:
+        - type: Flatten
+      encoder:
+        model_type: "CustomConv1D"
+        layers:
+        - type: Conv1d
+          in_channels: 144
+          out_channels: 64
+          kernel_size: 5
+          stride: 1
+          padding: 0
+        - type: Flatten
+        - type: Linear
+          in_features: 64
+          out_features: 64
+        - type: ELU
+      decoder:
+        model_type: "Custom"
+        layers:
+        - type: Linear
+          in_features: 128
+          out_features: 11
+  aggr_model_config:
+    model_type: "Custom"
+    layers:
+        - type: SelfAttention
+          embed_dim: 64
+          num_heads: 4
+          batch_first: true
+        - type: Permute
+          dims: [0, 2, 1]
+        - type: AdaptiveAvgPool1d
+          output_size: 1
+        - type: Flatten
+        - type: Linear
+          in_features: 64
+          out_features: 64
+        - type: ELU
+  optimizer:
+    type: "Adam"
+    lr: 0.0005
+    weight_decay: 0.00005
+  lr_scheduler:
+    type: "ReduceLROnPlateau"
+    mode: 'max'
+    patience: 3
+
+env_config:
+  module_name: "smac_pettingzoo"
+  env_name: "smacv1_pettingzoo_v1"
+  env_config:
+    map_name: "2s3z"
+  wrapper_config:
+    type: smac
+
+epsilon_scheduler:
+  type: "linear"
+  start_value: 1.0
+  end_value: 0.1
+  decay_steps: 100
+
+sample_ratio_scheduler:
+  type: "linear"
+  start_value: 0.7
+  end_value: 0.3
+  decay_steps: 40
+
+critic_config:
+  type: "QMIX"
+  state_shape: 64
+  input_dim: 5
+  qmix_hidden_dim: 64
+  hypernet_layers: 2
+  hyper_hidden_dim: 128
+  feature_extractor:
+    model_type: "ResAttentionStateEncoder"
+    input_dim: 173
+    embed_dim: 64
+    num_heads: 4
+    max_seq_len: 5
+    dropout: 0.25
+  seq_model:
+    model_type: "ResAttentionObsEncoder"
+    input_dim: 64
+    embed_dim: 64
+    output_dim: 64
+    num_heads: 4
+    max_seq_len: 5
+    dropout: 0.25
+  optimizer:
+    type: "Adam"
+    lr: 0.0005
+    weight_decay: 0.00005
+  lr_scheduler:
+    type: "ReduceLROnPlateau"
+    mode: 'max'
+    patience: 3
+
+rollout_config:
+  manager_type: "persistent-env"
+  worker_type: "persistent-env"
+  n_workers: 1
+  n_episodes: 10
+  n_eval_episodes: 50
+  traj_len: 5
+  episode_limit: 200
+  device: "cpu"
+  victory_checker: smac
+
+replaybuffer_config:
+  type: "Prioritized"
+  capacity: 2000
+  traj_len: 5
+  priority_attr: "all_agents_sum_rewards"
+
+trainer_config:
+  type: "MsgAggr"
+  gamma: 0.95
+  eval_epsilon: 0.01
+  workdir: "/home/ctmh/exp/test_msg_aggr_smac"
+  train_device: "cpu"
+  n_workers: 2
+
+  train_args:
+    epochs: 2
+    target_reward: 1000
+    eval_interval: 4
+    batch_size: 1024
+    learning_times_per_epoch: 1
