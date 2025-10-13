@@ -179,7 +179,7 @@ class QMIXAgentGroup(AgentGroup):
         else:
             # Action space sampling case
             optimal_actions = np.argmax(q_values, axis=-1).astype(np.int64)
-            random_actions = np.array([avail_actions[key].sample() for key in avail_actions.keys()]).astype(np.int64)
+            random_actions = np.array([avail_actions[agent].sample() for agent in self.agent_model_dict.keys()]).astype(np.int64)
 
         # Epsilon-greedy action selection
         random_choices = np.random.binomial(1, epsilon, len(self.agent_model_dict)).astype(np.int64)

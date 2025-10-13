@@ -3,11 +3,11 @@ import unittest
 from magent2.environments import adversarial_pursuit_v4
 from marlite.algorithm.graph_builder import GraphBuilderConfig
 
-class TestMagentGraphBuilder(unittest.TestCase):
+class TestMAgentGraphBuilder(unittest.TestCase):
 
     def test_process_batch_normal_case(self):
         config = {
-            "type": "Magent",
+            "type": "MAgent",
             "binary_agent_id_dim": [5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
             "agent_presence_dim": [1],
             "comm_distance": 3,

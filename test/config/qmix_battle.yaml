@@ -1,0 +1,198 @@
+agent_group_config:
+  type: "QMIX"
+  agent_list:
+    red_0: model_0
+    red_1: model_0
+    red_2: model_0
+    red_3: model_0
+    red_4: model_0
+    red_5: model_0
+    red_6: model_0
+    red_7: model_0
+    red_8: model_0
+    red_9: model_0
+    red_10: model_0
+    red_11: model_0
+    red_12: model_0
+    red_13: model_0
+    red_14: model_0
+    red_15: model_0
+    red_16: model_0
+    red_17: model_0
+    red_18: model_0
+    red_19: model_0
+    red_20: model_0
+    red_21: model_0
+    red_22: model_0
+    red_23: model_0
+    red_24: model_0
+    red_25: model_0
+    red_26: model_0
+    red_27: model_0
+    red_28: model_0
+    red_29: model_0
+    red_30: model_0
+    red_31: model_0
+    red_32: model_0
+    red_33: model_0
+    red_34: model_0
+    red_35: model_0
+  model_configs:
+    model_0:
+      feature_extractor:
+        model_type: "Custom"
+        layers:
+        - type: Conv2d
+          in_channels: 37
+          out_channels: 16
+          kernel_size: 1
+          stride: 1
+          padding: 0
+        - type: BatchNorm2d
+          num_features: 16
+        - type: GELU
+        - type: Conv2d
+          in_channels: 16
+          out_channels: 8
+          kernel_size: 1
+          stride: 1
+          padding: 0
+        - type: BatchNorm2d
+          num_features: 8
+        - type: GELU
+        - type: Flatten
+      model:
+        model_type: "SimpleResAttSeqEnc"
+        input_dim: 1352
+        embed_dim: 64
+        output_dim: 21
+        num_heads: 4
+        max_seq_len: 8
+        dropout: 0.25
+  optimizer:
+    type: "Adam"
+    lr: 0.0005
+    weight_decay: 0.0001
+
+env_config:
+  module_name: "magent2.environments"
+  env_name: "battle_v4"
+  env_config:
+    map_size: 32
+    step_reward: -0.001
+    dead_penalty: -0.1
+    attack_penalty: -0.01
+    attack_opponent_reward: 0.5
+    extra_features: true
+  wrapper_config:
+    type: battle
+    opp_obs_queue_len: 1
+    channel_first: true
+    vector_state: true
+    opponent_agent_group_config:
+      type: "MAgentBattle"
+      agent_list:
+        blue_0: policy
+        blue_1: policy
+        blue_2: policy
+        blue_3: policy
+        blue_4: policy
+        blue_5: policy
+        blue_6: policy
+        blue_7: policy
+        blue_8: policy
+        blue_9: policy
+        blue_10: policy
+        blue_11: policy
+        blue_12: policy
+        blue_13: policy
+        blue_14: policy
+        blue_15: policy
+        blue_16: policy
+        blue_17: policy
+        blue_18: policy
+        blue_19: policy
+        blue_20: policy
+        blue_21: policy
+        blue_22: policy
+        blue_23: policy
+        blue_24: policy
+        blue_25: policy
+        blue_26: policy
+        blue_27: policy
+        blue_28: policy
+        blue_29: policy
+        blue_30: policy
+        blue_31: policy
+        blue_32: policy
+        blue_33: policy
+        blue_34: policy
+        blue_35: policy
+
+epsilon_scheduler:
+  type: "logarithmic"
+  start_value: 1.0
+  end_value: 0.05
+  decay_steps: 100
+
+sample_ratio_scheduler:
+  type: "linear"
+  start_value: 1.0
+  end_value: 0.3
+  decay_steps: 100
+
+critic_config:
+  type: "QMIX"
+  state_shape: 128
+  input_dim: 36
+  qmix_hidden_dim: 128
+  hypernet_layers: 2
+  hyper_hidden_dim: 256
+  feature_extractor:
+    model_type: "ResAttStateEnc"
+    input_dim: 62
+    embed_dim: 64
+    num_heads: 4
+    max_seq_len: 72
+    dropout: 0.0
+  seq_model:
+    model_type: "ResAttSeqEnc"
+    input_dim: 64
+    embed_dim: 128
+    output_dim: 128
+    num_heads: 4
+    max_seq_len: 8
+    dropout: 0.0
+  optimizer:
+    type: "Adam"
+    lr: 0.0005
+    weight_decay: 0.0001
+
+rollout_config:
+  manager_type: "multi-process"
+  worker_type: "multi-process"
+  n_workers: 8
+  n_episodes: 1000
+  n_eval_episodes: 100
+  traj_len: 8
+  episode_limit: 500
+  device: "cpu"
+
+replaybuffer_config:
+  type: "Normal"
+  capacity: 50000
+  traj_len: 8
+
+trainer_config:
+  type: "QMIX"
+  gamma: 0.95
+  eval_epsilon: 0.01
+  workdir: "./test/results/qmix_default"
+  train_device: "cpu"
+
+  train_args:
+    epochs: 100
+    target_reward: 100
+    eval_interval: 1
+    batch_size: 128
+    learning_times_per_epoch: 1

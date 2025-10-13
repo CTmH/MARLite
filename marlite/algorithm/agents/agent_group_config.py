@@ -4,7 +4,7 @@ from marlite.algorithm.agents.agent_group import AgentGroup
 from marlite.algorithm.agents.qmix_agent_group import QMIXAgentGroup
 from marlite.algorithm.agents.gnn_agent_group import GNNAgentGroup
 from marlite.algorithm.agents.random_agent_group import RandomAgentGroup
-from marlite.algorithm.agents.magent_agent_group import MagentPreyAgentGroup, MagentBattleAgentGroup
+from marlite.algorithm.agents.magent_agent_group import MAgentPreyAgentGroup, MAgentBattleAgentGroup
 from marlite.algorithm.agents.msg_aggr_agent_group import MsgAggrAgentGroup, SeqMsgAggrAgentGroup
 from marlite.algorithm.agents.gnn_obs_comm_agent_group import GNNObsCommAgentGroup
 from marlite.algorithm.agents.g2anet_agent_group import G2ANetAgentGroup
@@ -166,11 +166,11 @@ def get_random_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
 
 def get_magent_prey_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
     agents = agent_group_config["agent_list"]
-    return MagentPreyAgentGroup(agents)
+    return MAgentPreyAgentGroup(agents)
 
 def get_magent_battle_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
     agents = agent_group_config["agent_list"]
-    return MagentBattleAgentGroup(agents)
+    return MAgentBattleAgentGroup(agents)
 
 registered_agent_groups = {
     "QMIX": get_qmix_agent_group,
@@ -180,8 +180,8 @@ registered_agent_groups = {
     "GNNObsComm": get_gnn_obs_comm_agent_group,
     "G2ANet": get_g2anet_agent_group,
     "Random": get_random_agent_group,
-    "MagentPrey": get_magent_prey_agent_group,
-    "MagentBattle": get_magent_battle_agent_group
+    "MAgentPrey": get_magent_prey_agent_group,
+    "MAgentBattle": get_magent_battle_agent_group
 }
 
 class AgentGroupConfig(object):

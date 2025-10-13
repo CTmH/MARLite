@@ -62,3 +62,12 @@ def ensure_all_agents_present(data_dict: dict, default_values: dict) -> Dict[str
                 first_default = next(iter(default_values.values()))
                 result[agent] = np.zeros_like(first_default)
     return result
+
+def precompute_manhattan_offsets(dist: int):
+        """Precompute offsets for positions with Manhattan distance."""
+        offsets = []
+        for dx in range(-dist, dist+1):
+            for dy in range(-dist, dist+1):
+                if abs(dx) + abs(dy) <= dist and (dx != 0 or dy != 0):
+                    offsets.append((dx, dy))
+        return np.array(offsets, dtype=int)

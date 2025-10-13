@@ -9,7 +9,7 @@ from marlite.algorithm.graph_builder.graph_builder import GraphBuilder
 from marlite.algorithm.graph_builder.build_graph import binary_to_decimal
 from concurrent.futures import ProcessPoolExecutor
 
-class PartialGraphMagentBuilder(GraphBuilder):
+class PartialGraphMAgentBuilder(GraphBuilder):
 
     def __init__(
             self,

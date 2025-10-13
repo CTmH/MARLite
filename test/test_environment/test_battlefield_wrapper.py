@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 from magent2.environments import battlefield_v5
-from marlite.environment.battlefield_wrapper import BattleFieldWrapper
+from marlite.environment.magent_wrapper import BattleWrapper
 
 class TestBattleFieldWrapper(unittest.TestCase):
 
@@ -16,7 +16,7 @@ class TestBattleFieldWrapper(unittest.TestCase):
             'opponent_agent_group_config': self.opponent_agent_group_config,
             'opp_obs_queue_len': 5
         }
-        self.wrapper = BattleFieldWrapper(env=battlefield_v5.parallel_env(), **kwargs)
+        self.wrapper = BattleWrapper(env=battlefield_v5.parallel_env(), **kwargs)
         self.n_agent = 12
         self.n_oppo = 12
 
@@ -60,6 +60,115 @@ class TestBattleFieldWrapper(unittest.TestCase):
         agent = 'red_0'
         act_space = self.wrapper.action_space(agent)
         self.assertEqual(act_space, self.wrapper.env.action_space(agent))
+
+    def test_vector_state(self):
+        """Test the vector state conversion functionality"""
+
+        # Create a mock state with shape (L, L, 36)
+        L = 10  # Map size
+        state = np.zeros((L, L, 37), dtype=np.int8)
+
+        # Define channel indices
+        OBSTACLE_CHANNEL = 0
+        TEAM_0_PRESENCE_CHANNEL = 1
+        TEAM_0_HP_CHANNEL = 2
+        TEAM_1_PRESENCE_CHANNEL = 3
+        TEAM_1_HP_CHANNEL = 4
+        BINARY_AGENT_ID_START = 5
+        ONE_HOT_ACTION_START = 15
+        LAST_REWARD_CHANNEL = 36
+
+        # Add some obstacles
+        state[0, 0, OBSTACLE_CHANNEL] = 1
+        state[9, 9, OBSTACLE_CHANNEL] = 1
+
+        # Add team 0 agents
+        state[2, 2, TEAM_0_PRESENCE_CHANNEL] = 1
+        state[2, 2, TEAM_0_HP_CHANNEL] = 100
+        # Set binary agent ID for agent at (2,2) - agent ID 1
+        state[2, 2, BINARY_AGENT_ID_START] = 0  # binary: 0000000000
+        # Set one-hot action (action 0)
+        state[2, 2, ONE_HOT_ACTION_START] = 1
+        state[2, 2, LAST_REWARD_CHANNEL] = 1
+
+        state[3, 3, TEAM_0_PRESENCE_CHANNEL] = 1
+        state[3, 3, TEAM_0_HP_CHANNEL] = 80
+        # Set binary agent ID for agent at (3,3) - agent ID 2
+        state[3, 3, BINARY_AGENT_ID_START+1] = 1  # binary: 0000000010
+        # Set one-hot action (action 1)
+        state[3, 3, ONE_HOT_ACTION_START+1] = 1
+        state[3, 3, LAST_REWARD_CHANNEL] = 0
+
+        # Add team 1 agents
+        state[7, 7, TEAM_1_PRESENCE_CHANNEL] = 1
+        state[7, 7, TEAM_1_HP_CHANNEL] = 90
+        # Set binary agent ID for agent at (7,7) - agent ID 3
+        state[7, 7, BINARY_AGENT_ID_START] = 1
+        state[7, 7, BINARY_AGENT_ID_START+1] = 1  # binary: 0000000011
+        # Set one-hot action (action 2)
+        state[7, 7, ONE_HOT_ACTION_START+2] = 1
+        state[7, 7, LAST_REWARD_CHANNEL] = -1
+
+        # Create a mock environment
+        class MockEnv:
+            def __init__(self):
+                self.agents = [f'red_{i}' for i in range(12)] + [f'blue_{i}' for i in range(12)]
+                self.possible_agents = self.agents[:]
+                self.observation_spaces = {agent: (5, 5) for agent in self.possible_agents}
+                self.action_spaces = {agent: (0, 5) for agent in self.possible_agents}
+            def state(self):
+                return state
+            def observation_space(self, key):
+                return self.observation_spaces[key]
+            def action_space(self, key):
+                return self.action_spaces[key]
+
+        kwargs = {
+            'opponent_agent_group_config': self.opponent_agent_group_config,
+            'opp_obs_queue_len': 5,
+            'vector_state': True
+        }
+
+        # Test the vector state conversion
+        wrapper = BattleWrapper(env=MockEnv(), **kwargs)
+
+        # Get vector state
+        vector_state = wrapper.state()
+
+        # Verify feature dimensions
+        expected_feature_dim = 1 + 1 + 1 + 2 + 21 + 12 * 3 # hp + team + last_reward + coords + action + nearby
+        self.assertEqual(vector_state.shape[1], expected_feature_dim, f"Expected {expected_feature_dim} features, got {vector_state.shape[1]}")
+
+        # Verify number of agents
+        self.assertEqual(vector_state.shape[0], 24, f"Expected 24 agents, got {vector_state.shape[0]}")
+
+        # Verify agent positions
+        self.assertEqual(vector_state[0, 3], 2 / L)  # x position of first agent
+        self.assertEqual(vector_state[0, 4], 2 / L)  # y position of first agent
+        self.assertEqual(vector_state[2, 3], 3 / L)  # x position of second agent
+        self.assertEqual(vector_state[2, 4], 3 / L)  # y position of second agent
+        self.assertEqual(vector_state[3, 3], 7 / L)  # x position of third agent
+        self.assertEqual(vector_state[3, 4], 7 / L)  # y position of third agent
+
+        # Verify HP values
+        self.assertEqual(vector_state[0, 0], 100)  # HP of first agent
+        self.assertEqual(vector_state[2, 0], 80)   # HP of second agent
+        self.assertEqual(vector_state[3, 0], 90)   # HP of third agent
+
+        # Verify Team values
+        self.assertEqual(vector_state[0, 1], 0)  # Team of first agent
+        self.assertEqual(vector_state[2, 1], 0)   # Team of second agent
+        self.assertEqual(vector_state[3, 1], 1)   # Team of third agent
+
+        # Verify rewards
+        self.assertEqual(vector_state[0, 2], 1)  # Reward for first agent
+        self.assertEqual(vector_state[2, 2], 0)  # Reward for second agent
+        self.assertEqual(vector_state[3, 2], -1) # Reward for third agent
+
+        # Verify actions
+        self.assertEqual(vector_state[0, 5], 1)  # Action 0 for first agent
+        self.assertEqual(vector_state[2, 6], 1)  # Action 1 for second agent
+        self.assertEqual(vector_state[3, 7], 1)  # Action 2 for third agent
 
 if __name__ == '__main__':
     unittest.main()

@@ -7,7 +7,7 @@ from copy import deepcopy
 from marlite.algorithm.graph_builder.graph_builder import GraphBuilder
 from marlite.algorithm.graph_builder.build_graph import binary_to_decimal
 
-class MagentGraphBuilder(GraphBuilder):
+class MAgentGraphBuilder(GraphBuilder):
 
     def __init__(
             self,

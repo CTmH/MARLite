@@ -1,10 +1,10 @@
 import unittest
 import yaml
 import numpy as np
-from marlite.algorithm.agents.magent_agent_group import MagentPreyAgentGroup, MagentBattleAgentGroup
+from marlite.algorithm.agents.magent_agent_group import MAgentPreyAgentGroup, MAgentBattleAgentGroup
 from marlite.environment import EnvConfig
 
-class TestMagentPreyAgentGroup(unittest.TestCase):
+class TestMAgentPreyAgentGroup(unittest.TestCase):
 
     def setUp(self):
         yaml_conf = """
@@ -53,7 +53,7 @@ class TestMagentPreyAgentGroup(unittest.TestCase):
         env = self.env_conf.create_env()
         self.agents = {f'prey_{i}': 'policy' for i in range(50)}
         self.avail_actions = {}
-        self.magent_prey_agent_group = MagentPreyAgentGroup(self.agents)
+        self.magent_prey_agent_group = MAgentPreyAgentGroup(self.agents)
 
     def test_act(self):
         traj_padding_mask = np.array([])
@@ -73,94 +73,54 @@ class TestBattleAgentGroup(unittest.TestCase):
                 module_name: "magent2.environments"
                 env_name: "battle_v4"
                 env_config:
+                    map_size: 32
+                    step_reward: -0.001
+                    dead_penalty: -0.1
                     attack_penalty: -0.01
+                    attack_opponent_reward: 0.5
                     extra_features: true
                 wrapper_config:
                     type: battle
-                    opp_obs_queue_len: 5
+                    opp_obs_queue_len: 1
                     opponent_agent_group_config:
-                        type: "Random"
+                        type: "MAgentBattle"
                         agent_list:
-                            red_0: policy
-                            red_1: policy
-                            red_2: policy
-                            red_3: policy
-                            red_4: policy
-                            red_5: policy
-                            red_6: policy
-                            red_7: policy
-                            red_8: policy
-                            red_9: policy
-                            red_10: policy
-                            red_11: policy
-                            red_12: policy
-                            red_13: policy
-                            red_14: policy
-                            red_15: policy
-                            red_16: policy
-                            red_17: policy
-                            red_18: policy
-                            red_19: policy
-                            red_20: policy
-                            red_21: policy
-                            red_22: policy
-                            red_23: policy
-                            red_24: policy
-                            red_25: policy
-                            red_26: policy
-                            red_27: policy
-                            red_28: policy
-                            red_29: policy
-                            red_30: policy
-                            red_31: policy
-                            red_32: policy
-                            red_33: policy
-                            red_34: policy
-                            red_35: policy
-                            red_36: policy
-                            red_37: policy
-                            red_38: policy
-                            red_39: policy
-                            red_40: policy
-                            red_41: policy
-                            red_42: policy
-                            red_43: policy
-                            red_44: policy
-                            red_45: policy
-                            red_46: policy
-                            red_47: policy
-                            red_48: policy
-                            red_49: policy
-                            red_50: policy
-                            red_51: policy
-                            red_52: policy
-                            red_53: policy
-                            red_54: policy
-                            red_55: policy
-                            red_56: policy
-                            red_57: policy
-                            red_58: policy
-                            red_59: policy
-                            red_60: policy
-                            red_61: policy
-                            red_62: policy
-                            red_63: policy
-                            red_64: policy
-                            red_65: policy
-                            red_66: policy
-                            red_67: policy
-                            red_68: policy
-                            red_69: policy
-                            red_70: policy
-                            red_71: policy
-                            red_72: policy
-                            red_73: policy
-                            red_74: policy
-                            red_75: policy
-                            red_76: policy
-                            red_77: policy
-                            red_78: policy
-                            red_79: policy
+                            blue_0: policy
+                            blue_1: policy
+                            blue_2: policy
+                            blue_3: policy
+                            blue_4: policy
+                            blue_5: policy
+                            blue_6: policy
+                            blue_7: policy
+                            blue_8: policy
+                            blue_9: policy
+                            blue_10: policy
+                            blue_11: policy
+                            blue_12: policy
+                            blue_13: policy
+                            blue_14: policy
+                            blue_15: policy
+                            blue_16: policy
+                            blue_17: policy
+                            blue_18: policy
+                            blue_19: policy
+                            blue_20: policy
+                            blue_21: policy
+                            blue_22: policy
+                            blue_23: policy
+                            blue_24: policy
+                            blue_25: policy
+                            blue_26: policy
+                            blue_27: policy
+                            blue_28: policy
+                            blue_29: policy
+                            blue_30: policy
+                            blue_31: policy
+                            blue_32: policy
+                            blue_33: policy
+                            blue_34: policy
+                            blue_35: policy
         """
         conf_dict = yaml.safe_load(yaml_conf)
         conf_dict = conf_dict['env_config']
@@ -168,7 +128,7 @@ class TestBattleAgentGroup(unittest.TestCase):
         env = self.env_conf.create_env()
         self.agents = {f'red_{i}': 'policy' for i in range(50)}
         self.avail_actions = {}
-        self.magent_battle_agent_group = MagentBattleAgentGroup(self.agents)
+        self.magent_battle_agent_group = MAgentBattleAgentGroup(self.agents)
 
     def test_act(self):
         traj_padding_mask = np.array([])

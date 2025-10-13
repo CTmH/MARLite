@@ -2,7 +2,7 @@ import numpy as np
 from typing import Dict, Any, List
 from marlite.algorithm.agents.agent_group import AgentGroup
 
-class MagentPreyAgentGroup(AgentGroup):
+class MAgentPreyAgentGroup(AgentGroup):
     '''
     agents: Dict[(agent_name(str), model_name(str))]
     model_configs: Dict[model_name(str), ModelConfig]
@@ -82,7 +82,7 @@ class MagentPreyAgentGroup(AgentGroup):
         return {'actions': actual_actions, 'all_actions': all_actions}
 
 
-class MagentBattleAgentGroup(AgentGroup):
+class MAgentBattleAgentGroup(AgentGroup):
     '''
     Agent group for the battle environment that handles enemy agent actions.
     Implements attack_8 (8 directions) and move_12 (12 positions within Manhattan distance 3)

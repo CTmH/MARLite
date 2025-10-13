@@ -64,7 +64,7 @@ class TestTrainerConfigWithKAZConfig(unittest.TestCase):
             self.trainer_config = TrainerConfig(self.config)
             best_reward, _ = self.trainer_config.run()
 
-class TestTrainerConfigWithMagentPredator(unittest.TestCase):
+class TestTrainerConfigWithMAgentPredator(unittest.TestCase):
     def setUp(self):
         self.config_path = 'test/config/qmix_adversarial_pursuit_predator.yaml'
         with open(self.config_path, 'r') as file:
@@ -97,7 +97,7 @@ class TestTrainerConfigWithMagentPredator(unittest.TestCase):
             self.trainer_config = TrainerConfig(self.config)
             best_reward, _ = self.trainer_config.run()
 
-class TestTrainerConfigWithMagentPrey(unittest.TestCase):
+class TestTrainerConfigWithMAgentPrey(unittest.TestCase):
     def setUp(self):
         self.config_path = 'test/config/qmix_adversarial_pursuit_prey.yaml'
         with open(self.config_path, 'r') as file:
@@ -130,7 +130,7 @@ class TestTrainerConfigWithMagentPrey(unittest.TestCase):
             self.trainer_config = TrainerConfig(self.config)
             best_reward, _ = self.trainer_config.run()
 
-class TestTrainerConfigWithMagentBattlefield(unittest.TestCase):
+class TestTrainerConfigWithMAgentBattlefield(unittest.TestCase):
     def setUp(self):
         self.config_path = 'test/config/qmix_adversarial_pursuit_prey.yaml'
         with open(self.config_path, 'r') as file:

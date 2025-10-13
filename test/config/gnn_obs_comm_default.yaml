@@ -64,7 +64,7 @@ agent_group_config:
           in_features: 128
           out_features: 13
   graph_builder_config:
-    type: "PartialMagent"
+    type: "PartialMAgent"
     binary_agent_id_dim: [5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
     agent_presence_dim: [1, 3] # Predator: 1, Prey: 3
     comm_distance: 20
@@ -93,7 +93,7 @@ env_config:
   wrapper_config:
     type: adversarial_pursuit_predator
     opponent_agent_group_config:
-      type: "MagentPrey"
+      type: "MAgentPrey"
       agent_list:
         prey_0: random1
         prey_1: random1

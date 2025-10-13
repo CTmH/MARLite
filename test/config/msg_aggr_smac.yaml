@@ -15,7 +15,7 @@ agent_group_config:
           in_features: 144
           out_features: 64
       encoder:
-        model_type: "ResAttentionObsEncoder"
+        model_type: "ResAttSeqEnc"
         input_dim: 64
         embed_dim: 64
         output_dim: 64
@@ -108,7 +108,7 @@ critic_config:
   hypernet_layers: 2
   hyper_hidden_dim: 128
   feature_extractor:
-    model_type: "ResAttentionStateEncoder"
+    model_type: "ResAttMaskedStateEnc"
     input_dim: 173
     embed_dim: 64
     num_heads: 8

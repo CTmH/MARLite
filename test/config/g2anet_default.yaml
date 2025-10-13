@@ -88,7 +88,7 @@ env_config:
   wrapper_config:
     type: adversarial_pursuit_predator
     opponent_agent_group_config:
-      type: "MagentPrey"
+      type: "MAgentPrey"
       agent_list:
         prey_0: random1
         prey_1: random1

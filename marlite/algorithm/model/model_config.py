@@ -6,7 +6,7 @@ from marlite.algorithm.model.matrix_gnn import MatrixGCNModel
 from marlite.algorithm.model.custom_model import CustomModel
 from marlite.algorithm.model.rnn import GRUModel
 from marlite.algorithm.model.conv1d_model import CustomConv1DModel
-from marlite.algorithm.model.resnet import ResAttentionStateEncoder, ResAttentionObsEncoder, SimpleAttentionObsEncoder
+from marlite.algorithm.model.resnet import ResAttMaskedStateEnc, ResAttStateEnc, ResAttSeqEnc, SimpleResAttSeqEnc
 
 
 REGISTERED_MODELS = {
@@ -20,9 +20,10 @@ REGISTERED_MODELS = {
     "Custom": CustomModel,
     "CustomTimeSeq": CustomConv1DModel, # For compatibility
     "CustomConv1D": CustomConv1DModel,
-    "ResAttentionStateEncoder": ResAttentionStateEncoder,
-    "ResAttentionObsEncoder": ResAttentionObsEncoder,
-    "SimpleAttentionObsEncoder": SimpleAttentionObsEncoder,
+    "ResAttStateEnc": ResAttStateEnc,
+    "ResAttMaskedStateEnc": ResAttMaskedStateEnc,
+    "ResAttSeqEnc": ResAttSeqEnc,
+    "SimpleResAttSeqEnc": SimpleResAttSeqEnc,
 }
 
 class ModelConfig:

@@ -2,16 +2,14 @@ from typing import Dict, Any
 from pettingzoo import ParallelEnv
 import importlib
 
-from marlite.environment.adversarial_pursuit_wrapper import AdversarialPursuitPredator, AdversarialPursuitPrey
-from marlite.environment.battle_wrapper import BattleWrapper
-from marlite.environment.battlefield_wrapper import BattleFieldWrapper
+from marlite.environment.magent_wrapper import AdversarialPursuitPredator, AdversarialPursuitPrey, BattleWrapper
 from marlite.environment.smac_wrapper import SMACWrapper
 
 REGISTERED_WRAPPERS = {
     'adversarial_pursuit_predator': AdversarialPursuitPredator,
     'adversarial_pursuit_prey': AdversarialPursuitPrey,
     'battle': BattleWrapper,
-    'battlefield': BattleFieldWrapper,
+    'battlefield': BattleWrapper,
     'smac': SMACWrapper,
 }
 

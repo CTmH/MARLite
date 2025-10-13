@@ -7,7 +7,7 @@ def binary_to_decimal(binary_list):
     y = [2**i  for i in range(length)]
     y = np.array(y)
     decimal_number = np.dot(binary_list, y)  # dot product to get decimal number.
-    return decimal_number
+    return int(decimal_number)
 
 def build_graph_from_map_2d(A: np.array, threshold: int, distance_metric: str = 'cityblock'):
     """

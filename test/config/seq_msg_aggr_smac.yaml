@@ -13,7 +13,7 @@ agent_group_config:
         layers:
         - type: Flatten
       encoder:
-        model_type: "ResAttentionObsEncoder"
+        model_type: "ResAttSeqEnc"
         input_dim: 144
         embed_dim: 64
         output_dim: 64
@@ -104,14 +104,14 @@ critic_config:
   hypernet_layers: 2
   hyper_hidden_dim: 128
   feature_extractor:
-    model_type: "ResAttentionStateEncoder"
+    model_type: "ResAttMaskedStateEnc"
     input_dim: 173
     embed_dim: 64
     num_heads: 4
     max_seq_len: 5
     dropout: 0.25
   seq_model:
-    model_type: "ResAttentionObsEncoder"
+    model_type: "ResAttSeqEnc"
     input_dim: 64
     embed_dim: 64
     output_dim: 64
