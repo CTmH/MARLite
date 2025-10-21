@@ -22,6 +22,7 @@ _WORKER_REGISTRY = {
 
 _VICTORY_CHECKER_REGISTRY = {
     "smac": check_smac_victory,
+    "battle_wrapper": check_battle_wrapper_victory,
     "default": always_lose,
 }
 

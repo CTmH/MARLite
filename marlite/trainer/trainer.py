@@ -1,12 +1,12 @@
 import os
 import sys
+import csv
+import torch
+import random
+import datetime
+from copy import deepcopy
 from absl import logging
 import numpy as np
-import torch
-from copy import deepcopy
-import datetime
-import csv
-
 from marlite.environment import EnvConfig
 from marlite.rollout import RolloutManagerConfig
 from marlite.replaybuffer import ReplayBufferConfig
@@ -31,6 +31,7 @@ class Trainer():
                  gamma: float = 0.9,
                  eval_epsilon: float = 0.01,
                  eval_threshold: float = 0.03,
+                 eval_episodes_to_replay_ratio: float = 0.25,
                  workdir: str = "",
                  train_device: str = 'cpu',
                  n_workers = 1,
@@ -43,6 +44,7 @@ class Trainer():
         self.epsilon = epsilon_scheduler
         self.eval_epsilon = eval_epsilon
         self.eval_threshold = eval_threshold
+        self.eval_episodes_to_replay_ratio = eval_episodes_to_replay_ratio
         self.gamma = gamma
         self.n_workers = n_workers
 
@@ -198,8 +200,13 @@ class Trainer():
         self.eval_agent_group.to("cpu")
         torch.cuda.empty_cache()
 
-        for episode in episodes:
-            self.replaybuffer.add_episode(episode)
+        # Sample episodes based on eval_episodes_to_replay_ratio
+        num_episodes_to_add = int(len(episodes) * self.eval_episodes_to_replay_ratio)
+        if num_episodes_to_add > 0:
+            # Randomly sample episodes
+            sampled_indices = random.sample(range(len(episodes)), num_episodes_to_add)
+            for i in sampled_indices:
+                self.replaybuffer.add_episode(episodes[i])
 
         return mean_reward, std_reward, win_rate
 

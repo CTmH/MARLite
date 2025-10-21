@@ -78,9 +78,9 @@ class MsgAggrQMIXTrainer(Trainer):
                     terminations = terminations.prod(dim=1) # (B, N) -> (B) if all agents are terminated then game over
 
                     obs_padding_mask = torch.tensor(obs_padding_mask, dtype=torch.bool) # (B, T)
-                    obs_padding_mask = torch.stack([obs_padding_mask] * n_agents, dim=1) # (B, N, T)
+                    obs_padding_mask = torch.stack([obs_padding_mask] * n_agents, dim=1).to(self.train_device)  # (B, N, T)
                     next_obs_padding_mask = torch.tensor(next_obs_padding_mask, dtype=torch.bool)
-                    next_obs_padding_mask = torch.stack([next_obs_padding_mask] * n_agents, dim=1)
+                    next_obs_padding_mask = torch.stack([next_obs_padding_mask] * n_agents, dim=1).to(self.train_device)
 
                     # Compute the Q-tot
                     self.eval_agent_group.train()

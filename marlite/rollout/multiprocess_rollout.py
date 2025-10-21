@@ -150,9 +150,15 @@ def multiprocess_rollout(env_config: EnvConfig,
             episode['all_agents_sum_rewards'].append(agent_reward_sum)
             episode_reward += agent_reward_sum
 
-            if not env.agents:  # Game has ended
+            # Check if the game was won using the provided function
+            if check_victory is not None:
+                win_tag = check_victory(env, infos)
+            if win_tag or not env.agents:
                 episode['next_avail_actions'].append(default_avail_actions)
                 break
+            #if not env.agents:  # Game has ended
+            #    episode['next_avail_actions'].append(default_avail_actions)
+            #    break
 
         # Update Alive agent mask
         alive_mask = ensure_all_agents_present({agent: True for agent in env.agents}, default_alive_mask)
@@ -187,8 +193,8 @@ def multiprocess_rollout(env_config: EnvConfig,
     # TODO reward of the last state and the second last state
 
     # Check if the game was won using the provided function
-    if check_victory is not None:
-        win_tag = check_victory(env, infos)
+    #if check_victory is not None:
+    #    win_tag = check_victory(env, infos)
     episode['win_tag'] = win_tag
     episode['episode_length'] = len(episode['observations'])
     episode['episode_reward'] = episode_reward

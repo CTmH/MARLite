@@ -1,7 +1,6 @@
 import torch.nn as nn
 import torch
-from marlite.algorithm.model import RNNModel, Conv1DModel, AttentionModel
-from marlite.algorithm.model.masked_model import MaskedModel
+from marlite.algorithm.model import RNNModel, Conv1DModel, AttentionModel, MaskedModel
 
 class Critic(nn.Module):
     """

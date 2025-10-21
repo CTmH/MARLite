@@ -1,8 +1,7 @@
 import numpy as np
 import torch
 from typing import Dict, List, Any
-from torch_geometric.data import Batch, Data
-from torch_geometric.utils import unbatch
+from torch.nn import DataParallel
 from marlite.algorithm.model.model_config import ModelConfig
 from marlite.algorithm.agents.graph_agent_group import GraphAgentGroup
 from marlite.algorithm.graph_builder import GraphBuilderConfig
@@ -90,8 +89,7 @@ class G2ANetAgentGroup(GraphAgentGroup):
         local_obs = msg
 
         # Build Graph
-        if edge_indices is None:  # If edge_indices are not provided
-            adj_matrix, edge_indices = self.graph_builder(msg)
+        adj_matrix, edge_indices = self.graph_builder(msg)
 
         # Communication between agents using the graph model.
         hidden_states = self.graph_model(msg, adj_matrix) # (B, N, Hidden Size)
@@ -119,3 +117,33 @@ class G2ANetAgentGroup(GraphAgentGroup):
         q_val = q_val.permute(1, 0, 2)  # (B, N, F)
 
         return {'q_val': q_val, 'edge_indices': edge_indices}
+
+    def wrap_data_parallel(self) -> 'GraphAgentGroup':
+        for id in self.encoders.keys():
+            self.encoders[id] = DataParallel(self.encoders[id])
+            self.feature_extractors[id] = DataParallel(self.feature_extractors[id])
+            self.decoders[id] = DataParallel(self.decoders[id])
+        #self.graph_builder = DataParallel(self.graph_builder)
+        self.graph_model = DataParallel(self.graph_model)
+        self._use_data_parallel = True
+        return self
+
+    def unwrap_data_parallel(self) -> 'GraphAgentGroup':
+        for id in self.encoders.keys():
+            self.encoders[id] = self.encoders[id].module
+            self.feature_extractors[id] = self.feature_extractors[id].module
+            self.decoders[id] = self.decoders[id].module
+        #self.graph_builder = self.graph_builder.module
+        self.graph_model = self.graph_model.module
+        self._use_data_parallel = False
+        return self
+
+    def compile_models(self) -> 'GraphAgentGroup':
+        for id in self.encoders.keys():
+            self.encoders[id] = torch.compile(self.encoders[id])
+            self.feature_extractors[id] = torch.compile(self.feature_extractors[id])
+            self.decoders[id] = torch.compile(self.decoders[id])
+        self.graph_builder = torch.compile(self.graph_builder)
+        self.graph_model = torch.compile(self.graph_model)
+        self._is_compiled = True
+        return self

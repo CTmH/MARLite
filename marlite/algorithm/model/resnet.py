@@ -1,9 +1,10 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from marlite.algorithm.model.masked_model import MaskedModel
 from marlite.algorithm.model.self_attention import SelfAttentionLearnablePE, SelfAttentionFixedPE
-from marlite.algorithm.model import AttentionModel
+from marlite.algorithm.model.attention_model import AttentionModel
+from marlite.algorithm.model.masked_model import MaskedModel
+
 
 class ResidualMLP(nn.Module):
     def __init__(self, input_dim: int, hidden_dim: int = 64):
@@ -16,6 +17,7 @@ class ResidualMLP(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return x + self.net(x)  # 残差连接
+
 
 class ResAttMaskedStateEnc(MaskedModel):
     def __init__(self, input_dim, embed_dim, num_heads, max_seq_len, dropout=0.1):
@@ -36,6 +38,7 @@ class ResAttMaskedStateEnc(MaskedModel):
         not_alive_mask = ~torch.where(all_false_rows.unsqueeze(1), True, alive_mask)
         return self.res_att_enc(x, key_padding_mask=not_alive_mask)
 
+
 class ResAttStateEnc(nn.Module):
     def __init__(self, input_dim, embed_dim, num_heads, max_seq_len, dropout=0.1):
         super(ResAttStateEnc, self).__init__()
@@ -51,6 +54,7 @@ class ResAttStateEnc(nn.Module):
         """
         key_padding_mask = torch.zeros((x.size(0),x.size(1)), dtype=torch.bool, device=x.device)
         return self.res_att_enc(x, key_padding_mask=key_padding_mask)
+
 
 class ResAttSeqEnc(AttentionModel):
 
@@ -71,6 +75,7 @@ class ResAttSeqEnc(AttentionModel):
         h = self.res_att_enc(x, padding_mask)
         output = self.linear(F.gelu(h))
         return output
+
 
 class ResAttEnc(nn.Module):
     def __init__(self, input_dim, embed_dim, num_heads, max_seq_len, dropout=0.1):
@@ -124,22 +129,78 @@ class ResAttEnc(nn.Module):
 
         return output
 
+
+class SimpleResAttMaskedStateEnc(MaskedModel):
+    def __init__(self, input_dim, embed_dim, num_heads, max_seq_len, dropout=0.1):
+        super(SimpleResAttMaskedStateEnc, self).__init__()
+        self.res_att_enc = SimpleResAttEnc(input_dim, embed_dim, num_heads, max_seq_len, dropout)
+
+    def forward(self, x: torch.Tensor, alive_mask: torch.Tensor):
+        """
+        Args:
+            x: Input tensor of shape [batch_size, n_agents, input_dim]
+            alive_mask: Mask for active agents [batch_size, n_agents]
+
+        Returns:
+            Global embedding of shape [batch_size, embed_dim]
+        """
+        # When all agents are dead, to avoid undefined results from Softmax, append rows of True.
+        all_false_rows = ~alive_mask.any(dim=1)
+        not_alive_mask = ~torch.where(all_false_rows.unsqueeze(1), True, alive_mask)
+        return self.res_att_enc(x, key_padding_mask=not_alive_mask)
+
+class SimpleResAttStateEnc(nn.Module):
+    def __init__(self, input_dim, embed_dim, num_heads, max_seq_len, dropout=0.1):
+        super(SimpleResAttStateEnc, self).__init__()
+        self.res_att_enc = SimpleResAttEnc(input_dim, embed_dim, num_heads, max_seq_len, dropout)
+
+    def forward(self, x: torch.Tensor):
+        """
+        Args:
+            x: Input tensor of shape [batch_size, seq_len(n_agents), input_dim]
+
+        Returns:
+            Global embedding of shape [batch_size, embed_dim]
+        """
+        key_padding_mask = torch.zeros((x.size(0),x.size(1)), dtype=torch.bool, device=x.device)
+        return self.res_att_enc(x, key_padding_mask=key_padding_mask)
+
 class SimpleResAttSeqEnc(AttentionModel):
 
     def __init__(self, input_dim, output_dim, embed_dim, num_heads, max_seq_len, dropout=0.1):
         super(SimpleResAttSeqEnc, self).__init__()
+        self.res_att_enc = SimpleResAttEnc(input_dim, embed_dim, num_heads, max_seq_len, dropout)
+        self.linear = nn.Linear(embed_dim, output_dim)
+
+    def forward(self, x: torch.Tensor, padding_mask:torch.Tensor=None):
+        """
+        Args:
+            x: Input tensor of shape [batch_size, seq_len(n_agents), input_dim]
+            padding_mask: Mask for padding tokens [batch_size, seq_len]
+
+        Returns:
+            Global embedding of shape [batch_size, output_dim]
+        """
+        h = self.res_att_enc(x, key_padding_mask=padding_mask)
+        output = self.linear(F.gelu(h))
+        return output
+
+class SimpleResAttEnc(nn.Module):
+
+    def __init__(self, input_dim, embed_dim, num_heads, max_seq_len, dropout=0.1):
+        super(SimpleResAttEnc, self).__init__()
         self.linear1 = nn.Linear(input_dim, embed_dim)
-        self.linear2 = nn.Linear(embed_dim, output_dim)
         self.attention = SelfAttentionFixedPE(embed_dim, num_heads, max_seq_len=max_seq_len, dropout=dropout, batch_first=True)
         self.attention_weights = nn.Linear(embed_dim, 1)
 
         # Layer normalization for stability
         self.norm1 = nn.LayerNorm(embed_dim)
         self.norm2 = nn.LayerNorm(embed_dim)
+        self.norm3 = nn.LayerNorm(embed_dim)
 
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x: torch.Tensor, padding_mask:torch.Tensor=None):
+    def forward(self, x: torch.Tensor, key_padding_mask:torch.Tensor=None):
         """
         Args:
             x: Input tensor of shape [batch_size, seq_len(n_agents), input_dim]
@@ -153,19 +214,18 @@ class SimpleResAttSeqEnc(AttentionModel):
 
         # Self-attention block (Pre-LN)
         x_norm = self.norm1(x)
-        attn_out = self.attention(x_norm, key_padding_mask=padding_mask)
+        attn_out = self.attention(x_norm, key_padding_mask=key_padding_mask)
         x = x + self.dropout(attn_out)
         x = self.norm2(x)
 
         # Weighted pooling with learned attention
         weights = self.attention_weights(x).squeeze(-1)  # [B, N]
-        weights = weights.masked_fill(padding_mask, -torch.inf)
+        weights = weights.masked_fill(key_padding_mask, -torch.inf)
         weights = torch.softmax(weights, dim=-1)  # [B, N]
         x = torch.sum(x * weights.unsqueeze(-1), dim=1)  # [B, D]
+        output = self.norm3(x)
 
-        x = self.linear2(F.gelu(x))
-
-        return x
+        return output
 '''
 def create_key_padding_mask(tensor: torch.Tensor):
     """
