@@ -83,37 +83,47 @@ class MsgAggrAgentGroup(AgentGroup):
                 # (B, N, T, *(obs_shape)) -> (B*N*T, *(obs_shape))
                 obs = obs.reshape(bs*n_agents*ts, *obs_shape).to(self.device)
                 obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
-                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B*N*T, F) -> (B*N, T, F)
+                obs_vectorized = obs_vectorized.reshape(bs, n_agents, ts, -1) # (B*N*T, F) -> (B, N, T, F)
+                msg_selected = obs_vectorized[:, :, -1, :] # (B, N, T, F) -> (B, N, F)
+                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B, N, T, F) -> (B*N, T, F)
                 obs_vectorized = obs_vectorized.permute(0, 2, 1) # (B*N, T, F) -> (B*N, F, T)
-                msg_selected = enc(obs_vectorized) # (B*N, F, T) -> (B*N, F)
+                local_obs_selected = enc(obs_vectorized) # (B*N, F, T) -> (B*N, F)
             elif model_class_name == 'RNNModel':
                 obs = obs.reshape(bs*n_agents*ts, *obs_shape).to(self.device)
                 obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
-                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B*N*T, F) -> (B*N, T, F)
+                obs_vectorized = obs_vectorized.reshape(bs, n_agents, ts, -1) # (B*N*T, F) -> (B, N, T, F)
+                msg_selected = obs_vectorized[:, :, -1, :] # (B, N, T, F) -> (B, N, F)
+                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B, N, T, F) -> (B*N, T, F)
                 enc.train() # cudnn RNN backward can only be called in training mode
-                msg_selected = enc(obs_vectorized) # (B*N, T, F) -> (B*N, F)
+                local_obs_selected = enc(obs_vectorized) # (B*N, T, F) -> (B*N, F)
             elif model_class_name == 'AttentionModel':
                 obs = obs.reshape(bs*n_agents*ts, *obs_shape).to(self.device)
                 obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
-                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B*N*T, F) -> (B*N, T, F)
+                obs_vectorized = obs_vectorized.reshape(bs, n_agents, ts, -1) # (B*N*T, F) -> (B, N, T, F)
+                msg_selected = obs_vectorized[:, :, -1, :] # (B, N, T, F) -> (B, N, F)
+                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B, N, T, F) -> (B*N, T, F)
                 mask = traj_padding_mask[:,idx]
                 mask = mask.reshape(bs*n_agents, ts)
-                msg_selected = enc(obs_vectorized, mask) # (B*N, T, F) -> (B*N, F)
+                local_obs_selected = enc(obs_vectorized, mask) # (B*N, T, F) -> (B*N, F)
             else:
                 obs = obs[:,:,-1, :] # (B, N, T, *(obs_shape)) -> (B, N, *(obs_shape))
                 obs = obs.reshape(bs*n_agents, *obs_shape).to(self.device) # (B, N, *(obs_shape)) -> (B*N, *(obs_shape))
                 obs_vectorized = fe(obs) # (B*N, *(obs_shape)) -> (B*N, F)
-                msg_selected = enc(obs_vectorized) # (B*N, F) -> (B*N, F)
+                msg_selected = obs_vectorized.reshape(bs, n_agents, -1) # (B*N, F) -> (B, N, F)
+                local_obs_selected = enc(obs_vectorized) # (B*N, F) -> (B*N, F)
 
-            msg_selected = msg_selected.reshape(bs, n_agents, -1) # (B, N, F)
+            local_obs_selected = local_obs_selected.reshape(bs, n_agents, -1) # (B, N, F)
+            local_obs_selected = local_obs_selected.permute(1, 0, 2)  # (N, B, F)
             msg_selected = msg_selected.permute(1, 0, 2)  # (N, B, F)
 
-            for i, m in zip(idx, msg_selected):
+            for i, m, lo in zip(idx, msg_selected, local_obs_selected):
                 msg[i] = m
+                local_obs[i] = lo
 
         msg = torch.stack(msg).to(self.device) # (N, B, F)
         msg = msg.permute(1, 0, 2)  # (B, N, F)
-        local_obs = msg
+        local_obs = torch.stack(local_obs).to(self.device) # (N, B, F)
+        local_obs = local_obs.permute(1, 0, 2)  # (B, N, F)
 
         # Aggregate message
         if self.aggr_model_class_name == 'MaskedModel':
@@ -423,7 +433,7 @@ class SeqMsgAggrAgentGroup(MsgAggrAgentGroup):
         )
 
     def forward(self, observations: torch.Tensor, traj_padding_mask: torch.Tensor, alive_mask: torch.Tensor) -> Dict[str, Any]:
-        local_obs = [None for _ in range(len(self.agent_model_dict))]
+        msg = [None for _ in range(len(self.agent_model_dict))]
         for (model_name, fe), (_, enc) in zip(self.feature_extractors.items(),
                                                 self.encoders.items()):
             selected_agents = self.model_to_agents[model_name]
@@ -440,43 +450,43 @@ class SeqMsgAggrAgentGroup(MsgAggrAgentGroup):
                 # (B, N, T, *(obs_shape)) -> (B*N*T, *(obs_shape))
                 obs = obs.reshape(bs*n_agents*ts, *obs_shape).to(self.device)
                 obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
-                obs_vectorized = obs_vectorized.reshape(bs, n_agents, ts, -1) # (B*N*T, F) -> (B, N, T, F)
-                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B, N, T, F) -> (B*N, T, F)
+                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B*N*T, F) -> (B*N, T, F)
                 obs_vectorized = obs_vectorized.permute(0, 2, 1) # (B*N, T, F) -> (B*N, F, T)
-                local_obs_selected = enc(obs_vectorized) # (B*N, F, T) -> (B*N, F)
+                msg_selected = enc(obs_vectorized) # (B*N, F, T) -> (B*N, F)
             elif model_class_name == 'RNNModel':
                 obs = obs.reshape(bs*n_agents*ts, *obs_shape).to(self.device)
                 obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
-                obs_vectorized = obs_vectorized.reshape(bs, n_agents, ts, -1) # (B*N*T, F) -> (B, N, T, F)
-                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B, N, T, F) -> (B*N, T, F)
+                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B*N*T, F) -> (B*N, T, F)
                 enc.train() # cudnn RNN backward can only be called in training mode
-                local_obs_selected = enc(obs_vectorized) # (B*N, T, F) -> (B*N, F)
+                msg_selected = enc(obs_vectorized) # (B*N, T, F) -> (B*N, F)
             elif model_class_name == 'AttentionModel':
                 obs = obs.reshape(bs*n_agents*ts, *obs_shape).to(self.device)
                 obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
-                obs_vectorized = obs_vectorized.reshape(bs, n_agents, ts, -1) # (B*N*T, F) -> (B, N, T, F)
-                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B, N, T, F) -> (B*N, T, F)
+                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B*N*T, F) -> (B*N, T, F)
                 mask = traj_padding_mask[:,idx]
                 mask = mask.reshape(bs*n_agents, ts)
-                local_obs_selected = enc(obs_vectorized, mask) # (B*N, T, F) -> (B*N, F)
+                msg_selected = enc(obs_vectorized, mask) # (B*N, T, F) -> (B*N, F)
             else:
                 obs = obs[:,:,-1, :] # (B, N, T, *(obs_shape)) -> (B, N, *(obs_shape))
                 obs = obs.reshape(bs*n_agents, *obs_shape).to(self.device) # (B, N, *(obs_shape)) -> (B*N, *(obs_shape))
                 obs_vectorized = fe(obs) # (B*N, *(obs_shape)) -> (B*N, F)
-                local_obs_selected = enc(obs_vectorized) # (B*N, F) -> (B*N, F)
+                msg_selected = enc(obs_vectorized) # (B*N, F) -> (B*N, F)
 
-            local_obs_selected = local_obs_selected.reshape(bs, n_agents, -1) # (B, N, F)
-            local_obs_selected = local_obs_selected.permute(1, 0, 2)  # (N, B, F)
+            msg_selected = msg_selected.reshape(bs, n_agents, -1) # (B, N, F)
+            msg_selected = msg_selected.permute(1, 0, 2)  # (N, B, F)
 
-            for i, lo in zip(idx, local_obs_selected):
-                local_obs[i] = lo
+            for i, m in zip(idx, msg_selected):
+                msg[i] = m
 
-        local_obs = torch.stack(local_obs).to(self.device) # (N, B, F)
-        local_obs = local_obs.permute(1, 0, 2)  # (B, N, F)
-        msg = local_obs
+        msg = torch.stack(msg).to(self.device) # (N, B, F)
+        msg = msg.permute(1, 0, 2)  # (B, N, F)
+        local_obs = msg
 
         # Aggregate message
-        aggregated_msg = self.aggr_model(msg) # (B, N, F) -> (B, F)
+        if self.aggr_model_class_name == 'MaskedModel':
+            aggregated_msg = self.aggr_model(msg, alive_mask) # (B, N, F) -> (B, F)
+        else:
+            aggregated_msg = self.aggr_model(msg) # (B, N, F) -> (B, F)
         aggregated_msg_stack = torch.stack([aggregated_msg for i in range(len(self.agent_model_dict))]).to(self.device) # (N, B, F)
         aggregated_msg_stack = torch.permute(aggregated_msg_stack, (1, 0, 2))  # (B, N, F)
 
