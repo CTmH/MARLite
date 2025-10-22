@@ -67,11 +67,12 @@ class SeqCritic(nn.Module):
         feature_extractor: A module that extracts state representation from raw states
     """
 
-    def __init__(self, critic_model: nn.Module, feature_extractor: nn.Module, seq_model: nn.Module):
+    def __init__(self, critic_model: nn.Module, feature_extractor: nn.Module, seq_model: nn.Module, state_features_type: str = "Seq"):
         super(SeqCritic, self).__init__()
         self.critic_model = critic_model
         self.feature_extractor = feature_extractor
         self.seq_model = seq_model
+        self.state_features_type = state_features_type
 
         if isinstance(self.feature_extractor, MaskedModel):
             self.fe_class_name = 'MaskedModel'
@@ -119,6 +120,7 @@ class SeqCritic(nn.Module):
             encoded_states = self.feature_extractor(states)
 
         encoded_states = encoded_states.reshape(bs, ts, -1)
+        last_encoded_states = encoded_states[:, -1, :]
 
         if self.seq_model_class_name == 'Conv1DModel':
             encoded_states = encoded_states.permute(0, 2, 1) # (B, T, F) -> (B, F, T)
@@ -135,7 +137,11 @@ class SeqCritic(nn.Module):
         # Compute total Q-value
         q_tot = self.critic_model(masked_q_values, hidden_states)
 
+        if self.state_features_type == 'State':
+            state_features = last_encoded_states
+        else:
+            state_features = hidden_states
         return {
             "q_tot": q_tot,
-            "state_features": hidden_states
+            "state_features": state_features
         }
