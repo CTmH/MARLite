@@ -1,4 +1,6 @@
 from marlite.algorithm.model.time_seq_model import TimeSeqModel
+from torch import nn, zeros
+from torch.functional import F
 
 class RNNModel(TimeSeqModel):
     def __init__(self, *args, **kwargs):

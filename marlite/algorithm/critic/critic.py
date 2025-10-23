@@ -1,5 +1,6 @@
 import torch.nn as nn
 import torch
+from typing import Dict
 from marlite.algorithm.model import RNNModel, Conv1DModel, AttentionModel, MaskedModel
 
 class Critic(nn.Module):
@@ -26,7 +27,7 @@ class Critic(nn.Module):
         states: torch.Tensor,
         alive_mask: torch.Tensor,
         padding_mask: torch.Tensor,
-    ) -> dict:
+    ) -> Dict[str, torch.Tensor]:
         """
         Forward pass of the critic network.
 
@@ -67,12 +68,12 @@ class SeqCritic(nn.Module):
         feature_extractor: A module that extracts state representation from raw states
     """
 
-    def __init__(self, critic_model: nn.Module, feature_extractor: nn.Module, seq_model: nn.Module, state_features_type: str = "Seq"):
+    def __init__(self, critic_model: nn.Module, feature_extractor: nn.Module, seq_model: nn.Module, state_feature_type: str = "Seq"):
         super(SeqCritic, self).__init__()
         self.critic_model = critic_model
         self.feature_extractor = feature_extractor
         self.seq_model = seq_model
-        self.state_features_type = state_features_type
+        self.state_feature_type = state_feature_type
 
         if isinstance(self.feature_extractor, MaskedModel):
             self.fe_class_name = 'MaskedModel'
@@ -94,7 +95,7 @@ class SeqCritic(nn.Module):
         states: torch.Tensor,
         alive_mask: torch.Tensor,
         padding_mask: torch.Tensor,
-    ) -> dict:
+    ) -> Dict[str, torch.Tensor]:
         """
         Forward pass of the critic network.
 
@@ -137,10 +138,12 @@ class SeqCritic(nn.Module):
         # Compute total Q-value
         q_tot = self.critic_model(masked_q_values, hidden_states)
 
-        if self.state_features_type == 'State':
+        if self.state_feature_type == 'State':
             state_features = last_encoded_states
-        else:
+        elif self.state_feature_type == 'Seq':
             state_features = hidden_states
+        else:
+            state_features = None
         return {
             "q_tot": q_tot,
             "state_features": state_features

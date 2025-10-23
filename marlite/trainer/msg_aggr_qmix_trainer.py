@@ -119,9 +119,9 @@ class MsgAggrQMIXTrainer(Trainer):
                     # TD error
                     td_error = torch.nn.functional.mse_loss(q_tot, y_tot.detach())
                     # Message aggregation loss
-                    indices = torch.randperm(bs).to(state_features.device)
+                    indices = torch.randperm(bs).to(aggregated_msg.device)
                     negatives = aggregated_msg[indices]
-                    msg_aggr_loss = self.triplet_loss(state_features, aggregated_msg, negatives)
+                    msg_aggr_loss = self.triplet_loss(aggregated_msg, state_features.detach(), negatives)
 
                     self.pit_loss.to(self.train_device)
                     critic_loss = self.pit_loss(torch.stack([td_error, msg_aggr_loss]))

@@ -13,7 +13,7 @@ registered_critic_models = {
 class CriticConfig:
     def __init__(self, **kwargs):
         self.critic_type = kwargs.pop("type")
-        self.state_features_type = kwargs.pop("state_features_type", 'Seq')
+        self.state_feature_type = kwargs.pop("state_feature_type", 'Seq')
         if self.critic_type not in registered_critic_models:
             raise ValueError(f"Critic type {self.critic_type} not registered.")
 
@@ -42,7 +42,7 @@ class CriticConfig:
                 self.critic_model_class(**self.model_config),
                 self.critic_fe_config.get_model(),
                 self.critic_seq_model_conf.get_model(),
-                self.state_features_type
+                self.state_feature_type
             )
         else:
             critic = Critic(
