@@ -101,12 +101,14 @@ sample_ratio_scheduler:
   decay_steps: 40
 
 critic_config:
-  type: "QMIX"
-  state_shape: 64
-  input_dim: 5
-  qmix_hidden_dim: 64
-  hypernet_layers: 2
-  hyper_hidden_dim: 128
+  type: "QMixer"
+  model:
+    model_type: QMixModel
+    state_shape: 64
+    input_dim: 5
+    qmix_hidden_dim: 64
+    hypernet_layers: 2
+    hyper_hidden_dim: 128
   feature_extractor:
     model_type: "ResAttMaskedStateEnc"
     input_dim: 173
@@ -144,7 +146,7 @@ trainer_config:
   type: "MsgAggr"
   gamma: 0.95
   eval_epsilon: 0.01
-  workdir: "/home/ctmh/exp/test_msg_aggr_smac"
+  workdir: "./test/result/test_msg_aggr_smac"
   train_device: "cpu"
   n_workers: 2
 

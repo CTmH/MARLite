@@ -6,11 +6,13 @@ from marlite.algorithm.model.matrix_gnn import MatrixGCNModel
 from marlite.algorithm.model.custom_model import CustomModel
 from marlite.algorithm.model.rnn import GRUModel
 from marlite.algorithm.model.conv1d_model import CustomConv1DModel
-from marlite.algorithm.model.resnet import ResAttMaskedStateEnc, ResAttStateEnc, ResAttSeqEnc
+from marlite.algorithm.model.resnet import ResAttMaskedProbEnc, ResAttMaskedStateEnc, ResAttStateEnc, ResAttSeqEnc
 from marlite.algorithm.model.resnet import SimpleResAttMaskedStateEnc, SimpleResAttStateEnc, SimpleResAttSeqEnc
+from marlite.algorithm.model.qmix_critic_model import QMixModel
+from marlite.algorithm.model.graphmix_critic_model import GraphMixModel
 
 
-REGISTERED_MODELS = {
+registered_models = {
     "RNN": GRUModel, # For compatibility
     "GRU": GRUModel,
     "GCN": GCNModel,
@@ -24,9 +26,12 @@ REGISTERED_MODELS = {
     "ResAttStateEnc": ResAttStateEnc,
     "ResAttMaskedStateEnc": ResAttMaskedStateEnc,
     "ResAttSeqEnc": ResAttSeqEnc,
+    "ResAttMaskedProbEnc": ResAttMaskedProbEnc,
     "SimpleResAttStateEnc": SimpleResAttStateEnc,
     "SimpleResAttMaskedStateEnc": SimpleResAttMaskedStateEnc,
     "SimpleResAttSeqEnc": SimpleResAttSeqEnc,
+    "QMixModel": QMixModel,
+    "GraphMixModel": GraphMixModel,
 }
 
 class ModelConfig:
@@ -34,7 +39,7 @@ class ModelConfig:
         self.model_type = kwargs.pop("model_type")
         self.pretrained_params_path = kwargs.pop("pretrained_params_path", None)
         self.model_config = kwargs
-        if self.model_type not in REGISTERED_MODELS:
+        if self.model_type not in registered_models:
             raise ValueError(f"Model type {self.model_type} not registered.")
 
     def __str__(self):
@@ -44,8 +49,8 @@ class ModelConfig:
         return discr + "}"
 
     def get_model(self) -> nn.Module:
-        if self.model_type in REGISTERED_MODELS:
-            model_class = REGISTERED_MODELS[self.model_type]
+        if self.model_type in registered_models:
+            model_class = registered_models[self.model_type]
             model = model_class(**self.model_config)
             if self.pretrained_params_path is not None:
                 try:

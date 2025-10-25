@@ -2,10 +2,10 @@ import torch.nn as nn
 import torch
 import torch.nn.functional as F
 
-# TODO: add hidden layer configuration for the critic network. 
-class GraphMIXCriticModel(nn.Module):
+# TODO: add hidden layer configuration for the critic network.
+class GraphMixModel(nn.Module):
     def __init__(self, state_shape, input_dim, qmix_hidden_dim, hypernet_layers=1, hyper_hidden_dim=256):
-        super(GraphMIXCriticModel, self).__init__()
+        super(GraphMixModel, self).__init__()
         self.state_shape = state_shape
         self.input_dim = input_dim
         self.qmix_hidden_dim = qmix_hidden_dim

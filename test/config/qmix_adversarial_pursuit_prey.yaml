@@ -147,10 +147,12 @@ sample_ratio_scheduler:
   decay_steps: 100
 
 critic_config:
-  type: "QMIX"
-  state_shape: 256
-  input_dim: 50
-  qmix_hidden_dim: 1024
+  type: "QMixer"
+  model:
+    model_type: QMixModel
+    state_shape: 256
+    input_dim: 50
+    qmix_hidden_dim: 1024
   feature_extractor:
     model_type: "Custom"
     layers:

@@ -12,7 +12,7 @@ from marlite.util.lr_scheduler_config import LRSchedulerConfig
 from marlite.trainer.trainer import Trainer
 from marlite.trainer.qmix_trainer import QMIXTrainer
 from marlite.trainer.graph_qmix_trainer import GraphQMIXTrainer
-from marlite.trainer.msg_aggr_qmix_trainer import MsgAggrQMIXTrainer
+from marlite.trainer.msg_aggr_qmix_trainer import MsgAggrQMIXTrainer, ProbMsgAggrQMIXTrainer
 
 class TrainerConfig:
     def __init__(self, config_dict: Dict[str, Dict]):
@@ -45,6 +45,7 @@ class TrainerConfig:
             'QMIX': QMIXTrainer,
             'GraphQMIX': GraphQMIXTrainer,
             'MsgAggr': MsgAggrQMIXTrainer,
+            'ProbMsgAggr': ProbMsgAggrQMIXTrainer,
         }
 
     def create_trainer(self) -> Trainer:

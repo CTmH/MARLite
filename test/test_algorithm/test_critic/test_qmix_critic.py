@@ -1,6 +1,6 @@
 import unittest
 import torch
-from marlite.algorithm.model.qmix_critic_model import QMIXCriticModel
+from marlite.algorithm.model.qmix_critic_model import QMixModel
 
 class TestQMIXCritic(unittest.TestCase):
     def setUp(self):
@@ -8,7 +8,7 @@ class TestQMIXCritic(unittest.TestCase):
         state_shape = 32
         input_dim = 5
         qmix_hidden_dim = 128
-        self.critic = QMIXCriticModel(state_shape, input_dim, qmix_hidden_dim)
+        self.critic = QMixModel(state_shape, input_dim, qmix_hidden_dim)
 
     def test_forward_pass(self):
         # Create dummy input data
@@ -38,6 +38,3 @@ class TestQMIXCritic(unittest.TestCase):
         self.assertEqual(b1.shape, (batch_size, self.critic.qmix_hidden_dim))
         self.assertEqual(w2.shape, (batch_size, self.critic.qmix_hidden_dim))
         self.assertEqual(b2.shape, (batch_size, 1))
-
-if __name__ == '__main__':
-    unittest.main()

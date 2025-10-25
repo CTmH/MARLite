@@ -19,6 +19,43 @@ class ResidualMLP(nn.Module):
         return x + self.net(x)  # 残差连接
 
 
+class ResAttMaskedProbEnc(MaskedModel):
+
+    def __init__(self, input_dim, output_dim, embed_dim, num_heads, max_seq_len, dropout=0.1):
+        super(ResAttMaskedProbEnc, self).__init__()
+        self.res_att_enc = SimpleResAttEnc(input_dim, embed_dim, num_heads, max_seq_len, dropout)
+        self.linear = nn.Linear(embed_dim, output_dim)
+
+    def forward(self, x: torch.Tensor, padding_mask:torch.Tensor=None):
+        """
+        Args:
+            x: Input tensor of shape [batch_size, seq_len(n_agents), input_dim]
+            padding_mask: Mask for padding tokens [batch_size, seq_len]
+
+        Returns:
+            Global embedding of shape [batch_size, output_dim]
+        """
+        h = self.res_att_enc(x, key_padding_mask=padding_mask)
+        output = self.linear(F.gelu(h))
+        return output
+
+    def forward(self, x: torch.Tensor, alive_mask: torch.Tensor):
+        """
+        Args:
+            x: Input tensor of shape [batch_size, n_agents, input_dim]
+            alive_mask: Mask for active agents [batch_size, n_agents]
+
+        Returns:
+            Global embedding of shape [batch_size, embed_dim]
+        """
+        # When all agents are dead, to avoid undefined results from Softmax, append rows of True.
+        all_false_rows = ~alive_mask.any(dim=1)
+        not_alive_mask = ~torch.where(all_false_rows.unsqueeze(1), True, alive_mask)
+        h = self.res_att_enc(x, key_padding_mask=not_alive_mask)
+        output = self.linear(F.gelu(h))
+        return output
+
+
 class ResAttMaskedStateEnc(MaskedModel):
     def __init__(self, input_dim, embed_dim, num_heads, max_seq_len, dropout=0.1):
         super(ResAttMaskedStateEnc, self).__init__()

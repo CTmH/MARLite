@@ -61,9 +61,9 @@ class Trainer():
         # Critic
         self.eval_critic = critic_config.get_critic()
         self.target_critic = critic_config.get_critic()
+        self.target_critic.load_state_dict(self.eval_critic.state_dict())
         self.best_critic_params = deepcopy(self.eval_critic.state_dict())
-        self.target_critic.load_state_dict(self.best_critic_params)
-        self._cached_critic_params = self.best_critic_params
+        self._cached_critic_params = deepcopy(self.eval_critic.state_dict())
 
         self.optimizer = critic_optimizer_config.get_optimizer(self.eval_critic.parameters())
         if lr_scheduler_conf:

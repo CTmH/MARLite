@@ -1,5 +1,5 @@
 agent_group_config:
-  type: "SeqMsgAggr"
+  type: "ProbSeqMsgAggr"
   agent_list:
     stalker_0: model_0
     stalker_1: model_0
@@ -11,10 +11,12 @@ agent_group_config:
       feature_extractor:
         model_type: "Custom"
         layers:
-        - type: Flatten
+        - type: Linear
+          in_features: 144
+          out_features: 64
       encoder:
         model_type: "ResAttSeqEnc"
-        input_dim: 144
+        input_dim: 64
         embed_dim: 64
         output_dim: 64
         num_heads: 4
@@ -30,12 +32,14 @@ agent_group_config:
       feature_extractor:
         model_type: "Custom"
         layers:
-        - type: Flatten
+        - type: Linear
+          in_features: 144
+          out_features: 64
       encoder:
         model_type: "CustomConv1D"
         layers:
         - type: Conv1d
-          in_channels: 144
+          in_channels: 64
           out_channels: 64
           kernel_size: 5
           stride: 1
@@ -65,7 +69,7 @@ agent_group_config:
         - type: Flatten
         - type: Linear
           in_features: 64
-          out_features: 64
+          out_features: 128
         - type: ELU
   optimizer:
     type: "Adam"
@@ -97,7 +101,7 @@ sample_ratio_scheduler:
   decay_steps: 40
 
 critic_config:
-  type: "SeqQMixer"
+  type: "ProbSeqQMixer"
   model:
     model_type: QMixModel
     state_shape: 64
@@ -105,19 +109,19 @@ critic_config:
     qmix_hidden_dim: 64
     hypernet_layers: 2
     hyper_hidden_dim: 128
+  seq_model:
+    model_type: "ResAttSeqEnc"
+    input_dim: 64
+    embed_dim: 128
+    output_dim: 128
+    num_heads: 4
+    max_seq_len: 8
+    dropout: 0.0
   feature_extractor:
     model_type: "ResAttMaskedStateEnc"
     input_dim: 173
     embed_dim: 64
-    num_heads: 4
-    max_seq_len: 5
-    dropout: 0.25
-  seq_model:
-    model_type: "ResAttSeqEnc"
-    input_dim: 64
-    embed_dim: 64
-    output_dim: 64
-    num_heads: 4
+    num_heads: 8
     max_seq_len: 5
     dropout: 0.25
   optimizer:
@@ -147,10 +151,10 @@ replaybuffer_config:
   priority_attr: "all_agents_sum_rewards"
 
 trainer_config:
-  type: "MsgAggr"
+  type: "ProbMsgAggr"
   gamma: 0.95
   eval_epsilon: 0.01
-  workdir: "/home/ctmh/exp/test_msg_aggr_smac"
+  workdir: "./test/result/test_msg_aggr_smac"
   train_device: "cpu"
   n_workers: 2
 
