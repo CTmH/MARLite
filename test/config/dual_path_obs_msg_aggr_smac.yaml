@@ -1,5 +1,5 @@
 agent_group_config:
-  type: "MsgAggr"
+  type: "DualPathObsMsgAggr"
   agent_list:
     stalker_0: model_0
     stalker_1: model_0
@@ -14,8 +14,14 @@ agent_group_config:
         - type: Linear
           in_features: 144
           out_features: 64
+      msg_feature_extractor:
+        model_type: "Custom"
+        layers:
+        - type: Linear
+          in_features: 144
+          out_features: 64
       encoder:
-        model_type: "ResAttSeqEnc"
+        model_type: "SimpleResAttSeqEnc"
         input_dim: 64
         embed_dim: 64
         output_dim: 64
@@ -30,6 +36,12 @@ agent_group_config:
           out_features: 11
     model_1:
       feature_extractor:
+        model_type: "Custom"
+        layers:
+        - type: Linear
+          in_features: 144
+          out_features: 64
+      msg_feature_extractor:
         model_type: "Custom"
         layers:
         - type: Linear
@@ -70,7 +82,6 @@ agent_group_config:
         - type: Linear
           in_features: 64
           out_features: 64
-        - type: ELU
   optimizer:
     type: "Adam"
     lr: 0.0005
@@ -126,8 +137,8 @@ critic_config:
     patience: 3
 
 rollout_config:
-  manager_type: "persistent-env"
-  worker_type: "persistent-env"
+  manager_type: "multi-process"
+  worker_type: "multi-process"
   n_workers: 1
   n_episodes: 10
   n_eval_episodes: 50

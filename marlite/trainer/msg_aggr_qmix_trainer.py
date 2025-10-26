@@ -12,9 +12,14 @@ class MsgAggrQMIXTrainer(Trainer):
     def __init__(self, **kwargs):
         margin = kwargs.pop('triplet_loss_margin', 1.0)
         pit_loss_alpha = kwargs.pop('pit_loss_alpha', 0.9)
+        cosine_margin = kwargs.pop('cosine_margin', 0.5)
         super().__init__(**kwargs)
         self.triplet_loss = torch.nn.TripletMarginLoss(margin=margin)
         self.pit_loss = PITLoss(num_tasks=2, alpha=pit_loss_alpha)
+        self.cosine_embedding_loss = torch.nn.CosineEmbeddingLoss(
+            margin=cosine_margin,
+            reduction='mean'
+        )
 
     def learn(self, sample_size, batch_size: int, times: int = 1):
         total_loss = 0.0
@@ -96,7 +101,11 @@ class MsgAggrQMIXTrainer(Trainer):
                     self.eval_critic.train()
                     ret = self.eval_critic(q_val, states, alive_mask, obs_padding_mask[:,0,:])
                     q_tot = ret['q_tot']
-                    state_features = ret['state_features']
+                    # Use target model for stablity
+                    with torch.no_grad():
+                        self.target_critic.eval()
+                        ret = self.target_critic(q_val, states, alive_mask, obs_padding_mask[:,0,:])
+                        state_features = ret['state_features']
 
                     # Compute TD targets
                     with torch.no_grad():
@@ -119,15 +128,21 @@ class MsgAggrQMIXTrainer(Trainer):
 
                     # TD error
                     td_error = torch.nn.functional.mse_loss(q_tot, y_tot.detach())
+
                     # Message aggregation loss
-                    indices = torch.randperm(bs).to(aggregated_msg.device)
-                    negatives = aggregated_msg[indices]
-                    msg_aggr_loss = self.triplet_loss(aggregated_msg, state_features.detach(), negatives)
+                    target = torch.ones(bs, device=self.train_device)
+                    msg_aggr_loss = self.cosine_embedding_loss(
+                        aggregated_msg,
+                        state_features.detach(),
+                        target
+                    )
+                    #indices = torch.randperm(bs).to(aggregated_msg.device)
+                    #negatives = aggregated_msg[indices]
+                    #msg_aggr_loss = self.triplet_loss(aggregated_msg, state_features.detach(), negatives)
 
                     self.pit_loss.to(self.train_device)
-                    #critic_loss = self.pit_loss(torch.stack([td_error, msg_aggr_loss]))
+                    critic_loss = self.pit_loss(torch.stack([td_error, msg_aggr_loss]))
                     #print(f'msg_aggr_loss={msg_aggr_loss.item():.4f}, td_error={td_error.item():.4f}')
-                    critic_loss = td_error + msg_aggr_loss
                     if self.use_data_parallel:
                         critic_loss = torch.mean(critic_loss) # Reduce across all GPUs
 

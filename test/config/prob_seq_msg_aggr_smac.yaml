@@ -154,7 +154,7 @@ trainer_config:
   type: "ProbMsgAggr"
   gamma: 0.95
   eval_epsilon: 0.01
-  workdir: "./test/result/test_msg_aggr_smac"
+  workdir: "./test/results/test_msg_aggr_smac"
   train_device: "cpu"
   n_workers: 2
 

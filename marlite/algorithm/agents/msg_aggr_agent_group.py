@@ -696,3 +696,209 @@ class ProbSeqMsgAggrAgentGroup(MsgAggrAgentGroup):
         q_val = q_val.permute(1, 0, 2)  # (B, N, F)
 
         return {'q_val': q_val, 'aggregated_msg': aggregated_msg, 'mu': mu, 'std': std}
+
+
+class DualPathObsMsgAggrAgentGroup(MsgAggrAgentGroup):
+    """
+    Agent group with separate feature extractors and encoders for
+    observation processing and message generation.
+
+    This dual-path architecture allows specialized representation learning:
+    - One path for local observation encoding (used in Q-value computation)
+    - One path for message generation (used in communication)
+    """
+
+    def __init__(self,
+                agent_model_dict: Dict[str, str],
+                feature_extractor_configs: Dict[str, ModelConfig],  # For observation processing
+                msg_feature_extractor_configs: Dict[str, ModelConfig],  # For message generation
+                encoder_configs: Dict[str, ModelConfig],
+                decoder_configs: Dict[str, ModelConfig],
+                aggr_model_config: ModelConfig,
+                optimizer_config: OptimizerConfig,
+                lr_scheduler_config: LRSchedulerConfig=None,
+                device = 'cpu') -> None:
+        super().__init__(
+            agent_model_dict=agent_model_dict,
+            feature_extractor_configs=feature_extractor_configs,
+            encoder_configs=encoder_configs,
+            decoder_configs=decoder_configs,
+            aggr_model_config=aggr_model_config,
+            optimizer_config=optimizer_config,
+            lr_scheduler_config=lr_scheduler_config,
+            device=device
+        )
+
+        # Separate feature extractors for message generation
+        self.msg_feature_extractors = {model_name: config.get_model()
+                                     for model_name, config in msg_feature_extractor_configs.items()}
+
+        # Add message feature extractors to parameters to optimize
+        self.params_to_optimize += [{'params': extractor.parameters()}
+                                   for extractor in self.msg_feature_extractors.values()]
+
+        # Recreate optimizer with all parameters
+        self.optimizer = optimizer_config.get_optimizer(self.params_to_optimize)
+        self.lr_scheduler = None
+        if lr_scheduler_config:
+            self.lr_scheduler = lr_scheduler_config.get_lr_scheduler(self.optimizer)
+
+    def forward(self, observations: torch.Tensor, traj_padding_mask: torch.Tensor, alive_mask: torch.Tensor) -> Dict[str, Any]:
+        """
+        Forward pass with dual-path architecture:
+        - Observation path: processes observations for Q-value computation
+        - Message path: processes observations for message generation
+        """
+        # Process through observation path (for Q-value computation)
+        msg = [None for _ in range(len(self.agent_model_dict))]
+        local_obs = [None for _ in range(len(self.agent_model_dict))]
+
+        for model_name in self.feature_extractors.keys():
+            enc = self.encoders[model_name]
+            fe = self.feature_extractors[model_name]
+            msg_fe = self.msg_feature_extractors[model_name]
+            selected_agents = self.model_to_agents[model_name]
+            idx = self.model_to_agent_indices[model_name]
+            # observation shape: (Batch Size, Agent Number, Time Step, Feature Dimensions) (B, N, T, F)
+            obs = observations[:,idx] # (B, N, T, *(obs_shape))
+            bs = obs.shape[0]
+            n_agents = len(selected_agents)
+            ts = obs.shape[2]
+            obs_shape = list(obs.shape[3:])
+
+            last_obs = obs[:, :, -1, :]
+            last_obs = last_obs.reshape(bs*n_agents, *obs_shape).to(self.device)
+            msg_selected = msg_fe(last_obs) # (B*N, F)
+            msg_selected = msg_selected.reshape(bs, n_agents, -1)
+            msg_selected = msg_selected.permute(1, 0, 2)  # (N, B, F)
+
+            # Use class name checking instead of isinstance
+            model_class_name = self.model_class_names[model_name]
+            if model_class_name == 'Conv1DModel':
+                obs = obs.reshape(bs*n_agents*ts, *obs_shape).to(self.device) # (B, N, T, *(obs_shape)) -> (B*N*T, *(obs_shape))
+                obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
+                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B*N*T, F) -> (B*N, T, F)
+                obs_vectorized = obs_vectorized.permute(0, 2, 1) # (B*N, T, F) -> (B*N, F, T)
+                local_obs_selected = enc(obs_vectorized) # (B*N, F, T) -> (B*N, F)
+            elif model_class_name == 'RNNModel':
+                obs = obs.reshape(bs*n_agents*ts, *obs_shape).to(self.device)
+                obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
+                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B*N*T, F) -> (B*N, T, F)
+                enc.train() # cudnn RNN backward can only be called in training mode
+                local_obs_selected = enc(obs_vectorized) # (B*N, T, F) -> (B*N, F)
+            elif model_class_name == 'AttentionModel':
+                obs = obs.reshape(bs*n_agents*ts, *obs_shape).to(self.device)
+                obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
+                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B*N*T, F) -> (B*N, T, F)
+                mask = traj_padding_mask[:,idx]
+                mask = mask.reshape(bs*n_agents, ts)
+                local_obs_selected = enc(obs_vectorized, mask) # (B*N, T, F) -> (B*N, F)
+            else:
+                obs = obs[:,:,-1, :] # (B, N, T, *(obs_shape)) -> (B, N, *(obs_shape))
+                obs = obs.reshape(bs*n_agents, *obs_shape).to(self.device) # (B, N, *(obs_shape)) -> (B*N, *(obs_shape))
+                obs_vectorized = fe(obs) # (B*N, *(obs_shape)) -> (B*N, F)
+                local_obs_selected = enc(obs_vectorized) # (B*N, F) -> (B*N, F)
+
+            local_obs_selected = local_obs_selected.reshape(bs, n_agents, -1) # (B, N, F)
+            local_obs_selected = local_obs_selected.permute(1, 0, 2)  # (N, B, F)
+
+            for i, m, lo in zip(idx, msg_selected, local_obs_selected):
+                msg[i] = m
+                local_obs[i] = lo
+
+        msg = torch.stack(msg).to(self.device) # (N, B, F)
+        msg = msg.permute(1, 0, 2)  # (B, N, F)
+        local_obs = torch.stack(local_obs).to(self.device) # (N, B, F)
+        local_obs = local_obs.permute(1, 0, 2)  # (B, N, F)
+
+        # Aggregate message
+        if self.aggr_model_class_name == 'MaskedModel':
+            aggregated_msg = self.aggr_model(msg, alive_mask) # (B, N, F) -> (B, F)
+        else:
+            aggregated_msg = self.aggr_model(msg) # (B, N, F) -> (B, F)
+        aggregated_msg_expand = aggregated_msg.unsqueeze(1).expand(-1, len(self.agent_model_dict), -1).detach() # (B, N, F)
+
+        hidden_states = torch.cat((local_obs, aggregated_msg_expand), dim=-1)  # (B, N, Hidden Size(F_local_obs + F_aggregated_msg))
+
+        q_val = [None for _ in range(len(self.agent_model_dict))]
+        for model_name, dec in self.decoders.items():
+            selected_agents = self.model_to_agents[model_name]
+            idx = self.model_to_agent_indices[model_name]
+            h = hidden_states[:,idx]
+            h = torch.Tensor(h) # (B, N, Hidden Size)
+            bs = h.shape[0]
+            n_agents = len(selected_agents)
+            hidden_size = h.shape[-1]
+            h = h.reshape(bs*n_agents, hidden_size) # (B*N, Hidden Size)
+            q_selected = dec(h)
+            q_selected = q_selected.reshape(bs, n_agents, -1) # (B, N, Action)
+            q_selected = q_selected.permute(1, 0, 2)  # (N, B, Action)
+
+            for i, m in zip(idx, q_selected):
+                q_val[i] = m
+
+        q_val = torch.stack(q_val).to(self.device) # (N, B, F)
+        q_val = q_val.permute(1, 0, 2)  # (B, N, F)
+
+        return {'q_val': q_val, 'aggregated_msg': aggregated_msg}
+
+    def set_agent_group_params(self, params: Dict[str, dict]) -> 'AgentGroup':
+        """Override to handle message feature extractors"""
+        super().set_agent_group_params(params)
+
+        msg_feature_extractor_params = params.get("msg_feature_extractor", {})
+        for model_name, fe in self.msg_feature_extractors.items():
+            if model_name in msg_feature_extractor_params:
+                fe.load_state_dict(msg_feature_extractor_params[model_name])
+
+        return self
+
+    def get_agent_group_params(self) -> Dict[str, dict]:
+        """Override to include message feature extractors"""
+        params = super().get_agent_group_params()
+        msg_feature_extractor_params = {
+            model_name: deepcopy(fe.state_dict())
+            for model_name, fe in self.msg_feature_extractors.items()
+        }
+        params["msg_feature_extractor"] = msg_feature_extractor_params
+        return params
+
+    def to(self, device: str) -> 'AgentGroup':
+        """Move all components to device"""
+        super().to(device)
+        for _, fe in self.msg_feature_extractors.items():
+            fe.to(device)
+        return self
+
+    def eval(self) -> 'AgentGroup':
+        """Set all components to evaluation mode"""
+        super().eval()
+        for _, fe in self.msg_feature_extractors.items():
+            fe.eval()
+        return self
+
+    def train(self) -> 'AgentGroup':
+        """Set all components to training mode"""
+        super().train()
+        for _, fe in self.msg_feature_extractors.items():
+            fe.train()
+        return self
+
+    def save_params(self, path: str) -> 'AgentGroup':
+        """Save all parameters including message feature extractors"""
+        super().save_params(path)
+        os.makedirs(path, exist_ok=True)
+        for model_name, fe in self.msg_feature_extractors.items():
+            model_dir = os.path.join(path, model_name)
+            os.makedirs(model_dir, exist_ok=True)
+            torch.save(fe.state_dict(), os.path.join(model_dir, 'msg_feature_extractor.pth'))
+        return self
+
+    def load_params(self, path: str) -> 'AgentGroup':
+        """Load all parameters including message feature extractors"""
+        super().load_params(path)
+        for model_name, fe in self.msg_feature_extractors.items():
+            model_dir = os.path.join(path, model_name)
+            fe.load_state_dict(torch.load(os.path.join(model_dir, 'msg_feature_extractor.pth'),
+                                          map_location=torch.device('cpu')))
+        return self

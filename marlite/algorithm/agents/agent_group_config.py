@@ -7,6 +7,7 @@ from marlite.algorithm.agents.random_agent_group import RandomAgentGroup
 from marlite.algorithm.agents.magent_agent_group import MAgentPreyAgentGroup, MAgentBattleAgentGroup
 from marlite.algorithm.agents.msg_aggr_agent_group import ObsMsgAggrAgentGroup, SeqMsgAggrAgentGroup
 from marlite.algorithm.agents.msg_aggr_agent_group import ProbMsgAggrAgentGroup, ProbSeqMsgAggrAgentGroup
+from marlite.algorithm.agents.msg_aggr_agent_group import DualPathObsMsgAggrAgentGroup
 from marlite.algorithm.agents.gnn_obs_comm_agent_group import GNNObsCommAgentGroup
 from marlite.algorithm.agents.g2anet_agent_group import G2ANetAgentGroup
 from marlite.algorithm.model import ModelConfig
@@ -152,6 +153,39 @@ def _create_msg_agent_group(
         lr_scheduler_config
     )
 
+def create_dual_path_obs_msg_aggr_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
+    agents = agent_group_config["agent_list"]
+    text_model_configs = agent_group_config["model_configs"]
+
+    feature_extractor_configs = {}
+    msg_feature_extractor_configs = {}
+    encoder_configs = {}
+    decoder_configs = {}
+
+    for model_id, conf in text_model_configs.items():
+        feature_extractor_configs[model_id] = ModelConfig(**conf['feature_extractor'])
+        msg_feature_extractor_configs[model_id] = ModelConfig(**conf['msg_feature_extractor'])
+        encoder_configs[model_id] = ModelConfig(**conf['encoder'])
+        decoder_configs[model_id] = ModelConfig(**conf['decoder'])
+
+    aggr_model_config = ModelConfig(**agent_group_config["aggr_model_config"])
+    optimizer_config = OptimizerConfig(**agent_group_config["optimizer"])
+
+    lr_scheduler_config = agent_group_config.get("lr_scheduler", None)
+    if lr_scheduler_config:
+        lr_scheduler_config = LRSchedulerConfig(**lr_scheduler_config)
+
+    return DualPathObsMsgAggrAgentGroup(
+        agents,
+        feature_extractor_configs,
+        msg_feature_extractor_configs,
+        encoder_configs,
+        decoder_configs,
+        aggr_model_config,
+        optimizer_config,
+        lr_scheduler_config
+    )
+
 def create_random_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
     agents = agent_group_config["agent_list"]
     return RandomAgentGroup(agents)
@@ -171,6 +205,7 @@ registered_agent_groups = {
     "SeqMsgAggr": create_seq_msg_aggr_agent_group,
     "ProbMsgAggr": create_prob_msg_aggr_agent_group,
     "ProbSeqMsgAggr": create_prob_seq_msg_aggr_agent_group,
+    "DualPathObsMsgAggr": create_dual_path_obs_msg_aggr_agent_group,
     "GNN": create_gnn_agent_group,
     "GNNObsComm": create_gnn_obs_comm_agent_group,
     "G2ANet": create_g2anet_agent_group,
