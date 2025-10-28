@@ -13,6 +13,7 @@ class MsgAggrQMIXTrainer(Trainer):
         margin = kwargs.pop('triplet_loss_margin', 1.0)
         pit_loss_alpha = kwargs.pop('pit_loss_alpha', 0.9)
         cosine_margin = kwargs.pop('cosine_margin', 0.5)
+        self.warmup_epochs = kwargs.pop('warmup_epochs', 0)
         super().__init__(**kwargs)
         self.triplet_loss = torch.nn.TripletMarginLoss(margin=margin)
         self.pit_loss = PITLoss(num_tasks=2, alpha=pit_loss_alpha)
@@ -129,20 +130,22 @@ class MsgAggrQMIXTrainer(Trainer):
                     # TD error
                     td_error = torch.nn.functional.mse_loss(q_tot, y_tot.detach())
 
-                    # Message aggregation loss
-                    target = torch.ones(bs, device=self.train_device)
-                    msg_aggr_loss = self.cosine_embedding_loss(
-                        aggregated_msg,
-                        state_features.detach(),
-                        target
-                    )
-                    #indices = torch.randperm(bs).to(aggregated_msg.device)
-                    #negatives = aggregated_msg[indices]
-                    #msg_aggr_loss = self.triplet_loss(aggregated_msg, state_features.detach(), negatives)
+                    # Only compute message aggregation losses after warmup period
+                    if self.current_epoch >= self.warmup_epochs:
+                        # Message aggregation loss
+                        target = torch.ones(bs, device=self.train_device)
+                        msg_aggr_loss = self.cosine_embedding_loss(
+                            aggregated_msg,
+                            state_features.detach(),
+                            target
+                        )
 
-                    self.pit_loss.to(self.train_device)
-                    critic_loss = self.pit_loss(torch.stack([td_error, msg_aggr_loss]))
-                    #print(f'msg_aggr_loss={msg_aggr_loss.item():.4f}, td_error={td_error.item():.4f}')
+                        self.pit_loss.to(self.train_device)
+                        critic_loss = self.pit_loss(torch.stack([td_error, msg_aggr_loss]))
+                    else:
+                        # Before warmup period: only use TD error
+                        critic_loss = td_error
+
                     if self.use_data_parallel:
                         critic_loss = torch.mean(critic_loss) # Reduce across all GPUs
 

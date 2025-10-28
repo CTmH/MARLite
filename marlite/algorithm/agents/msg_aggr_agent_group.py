@@ -816,7 +816,7 @@ class DualPathObsMsgAggrAgentGroup(MsgAggrAgentGroup):
             aggregated_msg = self.aggr_model(msg, alive_mask) # (B, N, F) -> (B, F)
         else:
             aggregated_msg = self.aggr_model(msg) # (B, N, F) -> (B, F)
-        aggregated_msg_expand = aggregated_msg.unsqueeze(1).expand(-1, len(self.agent_model_dict), -1).detach() # (B, N, F)
+        aggregated_msg_expand = aggregated_msg.unsqueeze(1).expand(-1, len(self.agent_model_dict), -1) # (B, N, F)
 
         hidden_states = torch.cat((local_obs, aggregated_msg_expand), dim=-1)  # (B, N, Hidden Size(F_local_obs + F_aggregated_msg))
 

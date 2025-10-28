@@ -36,14 +36,31 @@ class TestMsgAggrQMIXTrainer(unittest.TestCase):
             self.trainer.logdir = os.path.join(self.trainer.workdir, 'logs')
             self.trainer.checkpointdir = os.path.join(self.trainer.workdir, 'checkpoints')
             origin_critic_params = deepcopy(self.trainer.target_critic.state_dict())
+            origin_agent_group_params = deepcopy(self.trainer.target_agent_group.get_agent_group_params())
             self.trainer.collect_experience(0.9)
-            self.trainer.learn(sample_size=32, batch_size=8, times=1)
+            self.trainer.learn(sample_size=32, batch_size=8, times=2)
             self.trainer.update_target_model_params()
             critic_params = self.trainer.target_critic.state_dict()
+            agent_group_params = self.trainer.target_agent_group.get_agent_group_params()
 
-            for w1, w2 in zip(critic_params.values(), origin_critic_params.values()):
+            # Check if critic parameters have changed
+            for (w_name, w1), w2 in zip(critic_params.items(), origin_critic_params.values()):
                 if w1.requires_grad:
                     self.assertFalse(torch.equal(w1, w2))
+
+            # Check if agent_group parameters have changed
+            for param_type in ['encoder', 'feature_extractor', 'decoder', 'aggr_model']:
+                if param_type in agent_group_params:
+                    for model_name, params in agent_group_params[param_type].items():
+                        if model_name in origin_agent_group_params[param_type]:
+                            orig_params = origin_agent_group_params[param_type][model_name]
+                            if isinstance(params, torch.Tensor):
+                                self.assertFalse(torch.equal(params, orig_params))
+                            else:
+                                for param_name, param in params.items():
+                                    if param.requires_grad:
+                                        self.assertFalse(torch.equal(param, orig_params[param_name]),
+                                                    f"{param_type} {model_name} {param_name} did not change")
 
     def test_save_load_checkpoint(self):
         checkpoint = 'test_checkpoint'
@@ -93,14 +110,31 @@ class TestMsgAggrSMACQMIXTrainer(unittest.TestCase):
             self.trainer.logdir = os.path.join(self.trainer.workdir, 'logs')
             self.trainer.checkpointdir = os.path.join(self.trainer.workdir, 'checkpoints')
             origin_critic_params = deepcopy(self.trainer.target_critic.state_dict())
+            origin_agent_group_params = deepcopy(self.trainer.target_agent_group.get_agent_group_params())
             self.trainer.collect_experience(0.9)
             self.trainer.learn(sample_size=32, batch_size=8, times=2)
             self.trainer.update_target_model_params()
             critic_params = self.trainer.target_critic.state_dict()
+            agent_group_params = self.trainer.target_agent_group.get_agent_group_params()
 
+            # Check if critic parameters have changed
             for (w_name, w1), w2 in zip(critic_params.items(), origin_critic_params.values()):
                 if w1.requires_grad:
                     self.assertFalse(torch.equal(w1, w2))
+
+            # Check if agent_group parameters have changed
+            for param_type in ['encoder', 'feature_extractor', 'decoder', 'aggr_model']:
+                if param_type in agent_group_params:
+                    for model_name, params in agent_group_params[param_type].items():
+                        if model_name in origin_agent_group_params[param_type]:
+                            orig_params = origin_agent_group_params[param_type][model_name]
+                            if isinstance(params, torch.Tensor):
+                                self.assertFalse(torch.equal(params, orig_params))
+                            else:
+                                for param_name, param in params.items():
+                                    if param.requires_grad:
+                                        self.assertFalse(torch.equal(param, orig_params[param_name]),
+                                                    f"{param_type} {model_name} {param_name} did not change")
 
     def test_save_load_checkpoint(self):
         checkpoint = 'test_checkpoint'
@@ -203,14 +237,31 @@ class TestSeqMsgAggrSMACQMIXTrainer(unittest.TestCase):
             self.trainer.logdir = os.path.join(self.trainer.workdir, 'logs')
             self.trainer.checkpointdir = os.path.join(self.trainer.workdir, 'checkpoints')
             origin_critic_params = deepcopy(self.trainer.target_critic.state_dict())
+            origin_agent_group_params = deepcopy(self.trainer.target_agent_group.get_agent_group_params())
             self.trainer.collect_experience(0.9)
             self.trainer.learn(sample_size=32, batch_size=8, times=2)
             self.trainer.update_target_model_params()
             critic_params = self.trainer.target_critic.state_dict()
+            agent_group_params = self.trainer.target_agent_group.get_agent_group_params()
 
+            # Check if critic parameters have changed
             for (w_name, w1), w2 in zip(critic_params.items(), origin_critic_params.values()):
                 if w1.requires_grad:
                     self.assertFalse(torch.equal(w1, w2))
+
+            # Check if agent_group parameters have changed
+            for param_type in ['encoder', 'feature_extractor', 'decoder', 'aggr_model']:
+                if param_type in agent_group_params:
+                    for model_name, params in agent_group_params[param_type].items():
+                        if model_name in origin_agent_group_params[param_type]:
+                            orig_params = origin_agent_group_params[param_type][model_name]
+                            if isinstance(params, torch.Tensor):
+                                self.assertFalse(torch.equal(params, orig_params))
+                            else:
+                                for param_name, param in params.items():
+                                    if param.requires_grad:
+                                        self.assertFalse(torch.equal(param, orig_params[param_name]),
+                                                    f"{param_type} {model_name} {param_name} did not change")
 
     def test_save_load_checkpoint(self):
         checkpoint = 'test_checkpoint'
@@ -313,14 +364,31 @@ class TestProbSeqMsgAggrSMACQMIXTrainer(unittest.TestCase):
             self.trainer.logdir = os.path.join(self.trainer.workdir, 'logs')
             self.trainer.checkpointdir = os.path.join(self.trainer.workdir, 'checkpoints')
             origin_critic_params = deepcopy(self.trainer.target_critic.state_dict())
+            origin_agent_group_params = deepcopy(self.trainer.target_agent_group.get_agent_group_params())
             self.trainer.collect_experience(0.9)
             self.trainer.learn(sample_size=32, batch_size=8, times=2)
             self.trainer.update_target_model_params()
             critic_params = self.trainer.target_critic.state_dict()
+            agent_group_params = self.trainer.target_agent_group.get_agent_group_params()
 
+            # Check if critic parameters have changed
             for (w_name, w1), w2 in zip(critic_params.items(), origin_critic_params.values()):
                 if w1.requires_grad:
                     self.assertFalse(torch.equal(w1, w2))
+
+            # Check if agent_group parameters have changed
+            for param_type in ['encoder', 'feature_extractor', 'decoder', 'aggr_model']:
+                if param_type in agent_group_params:
+                    for model_name, params in agent_group_params[param_type].items():
+                        if model_name in origin_agent_group_params[param_type]:
+                            orig_params = origin_agent_group_params[param_type][model_name]
+                            if isinstance(params, torch.Tensor):
+                                self.assertFalse(torch.equal(params, orig_params))
+                            else:
+                                for param_name, param in params.items():
+                                    if param.requires_grad:
+                                        self.assertFalse(torch.equal(param, orig_params[param_name]),
+                                                    f"{param_type} {model_name} {param_name} did not change")
 
     def test_save_load_checkpoint(self):
         checkpoint = 'test_checkpoint'
@@ -423,14 +491,31 @@ class TestDualPathObsMsgAggrSMACQMIXTrainer(unittest.TestCase):
             self.trainer.logdir = os.path.join(self.trainer.workdir, 'logs')
             self.trainer.checkpointdir = os.path.join(self.trainer.workdir, 'checkpoints')
             origin_critic_params = deepcopy(self.trainer.target_critic.state_dict())
+            origin_agent_group_params = deepcopy(self.trainer.target_agent_group.get_agent_group_params())
             self.trainer.collect_experience(0.9)
             self.trainer.learn(sample_size=32, batch_size=8, times=2)
             self.trainer.update_target_model_params()
             critic_params = self.trainer.target_critic.state_dict()
+            agent_group_params = self.trainer.target_agent_group.get_agent_group_params()
 
+            # Check if critic parameters have changed
             for (w_name, w1), w2 in zip(critic_params.items(), origin_critic_params.values()):
                 if w1.requires_grad:
                     self.assertFalse(torch.equal(w1, w2))
+
+            # Check if agent_group parameters have changed
+            for param_type in ['encoder', 'feature_extractor', 'decoder', 'aggr_model']:
+                if param_type in agent_group_params:
+                    for model_name, params in agent_group_params[param_type].items():
+                        if model_name in origin_agent_group_params[param_type]:
+                            orig_params = origin_agent_group_params[param_type][model_name]
+                            if isinstance(params, torch.Tensor):
+                                self.assertFalse(torch.equal(params, orig_params))
+                            else:
+                                for param_name, param in params.items():
+                                    if param.requires_grad:
+                                        self.assertFalse(torch.equal(param, orig_params[param_name]),
+                                                    f"{param_type} {model_name} {param_name} did not change")
 
     def test_save_load_checkpoint(self):
         checkpoint = 'test_checkpoint'

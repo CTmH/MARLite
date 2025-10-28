@@ -109,6 +109,8 @@ class Trainer():
         self.best_reward_std = np.inf
         self.best_win_rate = .0
 
+        self.current_epoch = 0
+
     def learn(self, sample_size, batch_size: int, times: int):
         raise NotImplementedError
 
@@ -215,6 +217,7 @@ class Trainer():
         best_loss = np.inf
         # Training loop
         for epoch in range(epochs):
+            self.current_epoch = epoch
 
             logging.info(f"Epoch {epoch}: Collecting experiences")
             self.collect_experience(epsilon=self.epsilon.get_value(epoch))

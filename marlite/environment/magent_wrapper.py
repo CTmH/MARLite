@@ -6,8 +6,8 @@ import numpy as np
 from collections import deque
 from pettingzoo.utils import BaseParallelWrapper
 from marlite.algorithm.agents.agent_group_config import AgentGroupConfig
-from marlite.util.env_util import obs_preprocess, precompute_manhattan_offsets
-from marlite.algorithm.graph_builder.build_graph import binary_to_decimal
+from marlite.util.env_util import obs_preprocess, precompute_manhattan_offsets, ensure_all_agents_present
+from marlite.algorithm.graph_builder.graph_util import binary_to_decimal
 
 
 class MAgentWrapper(BaseParallelWrapper):
@@ -58,6 +58,9 @@ class MAgentWrapper(BaseParallelWrapper):
 
         self._n_env_possible_agents = len(self.env.possible_agents)
         self.manhattan_offsets = precompute_manhattan_offsets(2)
+
+        self.opponent_avail_actions = {}
+        self.default_opponent_obs = {}
 
     @property
     def agents(self) -> List[str]:
@@ -111,33 +114,35 @@ class MAgentWrapper(BaseParallelWrapper):
                 - Truncations for agents
                 - Additional info
         """
-        opponent_avail_actions = {agent: self.env.action_spaces[agent] for agent in self.possible_opponent_agents}
         opp_obs = list(self.opponent_observation_history)
         opp_obs, traj_padding_mask = obs_preprocess(opp_obs, self.possible_opponent_agents, self.opp_obs_queue_len)
         alive_opponent = self.opponent_agents
         self.opponent_actions = self.opponent_agent_group.act(opp_obs,
                                                               self.env.state(),
-                                                              opponent_avail_actions,
+                                                              self.opponent_avail_actions,
                                                               traj_padding_mask,
                                                               alive_opponent,
                                                               epsilon=0.0)
         combined_actions = self._concat_action_dict(actions, self.opponent_actions)  # Combine actions with opponent's actions
         observations, rewards, terminations, truncations, infos = self.env.step(combined_actions)
 
-        self.opponent_observations = {agent: observations[agent] for agent in self.possible_opponent_agents}
+        self.opponent_observations = {agent: observations[agent] for agent in observations.keys() if agent in self.possible_opponent_agents}
+        self.opponent_observations = ensure_all_agents_present(self.opponent_observations, self.default_opponent_obs)
         self.opponent_observation_history.append(self.opponent_observations)
 
         agent_observations = {}
-        for agent in self.possible_agents:
-            obs = observations[agent].astype(np.int8)
-            if self.channel_first:
-                # (H, W, C) -> (C, H, W)
-                obs = np.transpose(obs, (2, 0, 1))
-            agent_observations[agent] = obs
-        agent_rewards = {agent: rewards[agent] for agent in self.possible_agents}
-        agent_terminations = {agent: terminations[agent] for agent in self.possible_agents}
-        agent_truncations = {agent: truncations[agent] for agent in self.possible_agents}
-        agent_infos = {agent: infos[agent] for agent in self.possible_agents}
+        possible_agents_set = set(self.possible_agents)
+        for agent in observations.keys():
+            if agent in possible_agents_set:
+                obs = observations[agent].astype(np.int8)
+                if self.channel_first:
+                    # (H, W, C) -> (C, H, W)
+                    obs = np.transpose(obs, (2, 0, 1))
+                agent_observations[agent] = obs
+        agent_rewards = {agent: rewards[agent] for agent in rewards.keys() if agent in possible_agents_set}
+        agent_terminations = {agent: terminations[agent] for agent in terminations.keys() if agent in possible_agents_set}
+        agent_truncations = {agent: truncations[agent] for agent in truncations.keys() if agent in possible_agents_set}
+        agent_infos = {agent: infos[agent] for agent in infos.keys() if agent in possible_agents_set}
 
         return agent_observations, agent_rewards, agent_terminations, agent_truncations, agent_infos
 
@@ -288,6 +293,8 @@ class AdversarialPursuitPredator(MAgentWrapper):
         self.observation_spaces = {agent: self.env.observation_space(agent) for agent in self.possible_agents}
         self.action_spaces = {agent: self.env.action_space(agent) for agent in self.possible_agents}
         self.possible_opponent_agents = [agent for agent in self.env.possible_agents if agent.startswith('prey_')]
+        self.opponent_avail_actions = {agent: self.env.action_spaces[agent] for agent in self.possible_opponent_agents}
+        self.default_opponent_obs = {agent: np.zeros(self.env.observation_space(agent).shape, dtype=np.int8) for agent in self.possible_opponent_agents}
 
 
 class AdversarialPursuitPrey(MAgentWrapper):
@@ -316,6 +323,8 @@ class AdversarialPursuitPrey(MAgentWrapper):
         self.observation_spaces = {agent: self.env.observation_space(agent) for agent in self.possible_agents}
         self.action_spaces = {agent: self.env.action_space(agent) for agent in self.possible_agents}
         self.possible_opponent_agents = [agent for agent in self.env.possible_agents if agent.startswith('predator_')]
+        self.opponent_avail_actions = {agent: self.env.action_spaces[agent] for agent in self.possible_opponent_agents}
+        self.default_opponent_obs = {agent: np.zeros(self.env.observation_space(agent).shape, dtype=np.int8) for agent in self.possible_opponent_agents}
 
 
 class BattleWrapper(MAgentWrapper):
@@ -340,3 +349,5 @@ class BattleWrapper(MAgentWrapper):
         self.observation_spaces = {agent: self.env.observation_space(agent) for agent in self.possible_agents}
         self.action_spaces = {agent: self.env.action_space(agent) for agent in self.possible_agents}
         self.possible_opponent_agents = [agent for agent in self.env.possible_agents if agent.startswith('blue_')]
+        self.opponent_avail_actions = {agent: self.env.action_spaces[agent] for agent in self.possible_opponent_agents}
+        self.default_opponent_obs = {agent: np.zeros(self.env.observation_space(agent).shape, dtype=np.int8) for agent in self.possible_opponent_agents}
