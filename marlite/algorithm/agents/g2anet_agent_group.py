@@ -101,7 +101,6 @@ class G2ANetAgentGroup(GraphAgentGroup):
             idx = self.model_to_agent_indices[model_name]
             h = hidden_states[:,idx]
             lo = local_obs[:,idx] # (B, N, F)
-            h = torch.Tensor(h) # (B, N, Hidden Size)
             bs = h.shape[0]
             n_agents = len(selected_agents)
             emb = torch.cat((h, lo), dim=-1)

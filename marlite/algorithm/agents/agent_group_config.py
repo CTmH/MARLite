@@ -8,7 +8,7 @@ from marlite.algorithm.agents.magent_agent_group import MAgentPreyAgentGroup, MA
 from marlite.algorithm.agents.msg_aggr_agent_group import ObsMsgAggrAgentGroup, SeqMsgAggrAgentGroup
 from marlite.algorithm.agents.msg_aggr_agent_group import ProbMsgAggrAgentGroup, ProbSeqMsgAggrAgentGroup
 from marlite.algorithm.agents.msg_aggr_agent_group import DualPathObsMsgAggrAgentGroup
-from marlite.algorithm.agents.gnn_obs_comm_agent_group import GNNObsCommAgentGroup
+from marlite.algorithm.agents.gnn_comm_agent_group import ObsGNNCommAgentGroup, SeqGNNCommAgentGroup
 from marlite.algorithm.agents.g2anet_agent_group import G2ANetAgentGroup
 from marlite.algorithm.model import ModelConfig
 from marlite.algorithm.graph_builder import GraphBuilderConfig
@@ -56,7 +56,13 @@ def create_gnn_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
                         optimizer_config,
                         lr_scheduler_config)
 
-def create_gnn_obs_comm_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
+def create_obs_gnn_comm_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
+    return _create_gnn_comm_agent_group(ObsGNNCommAgentGroup, agent_group_config)
+
+def create_seq_gnn_comm_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
+    return _create_gnn_comm_agent_group(SeqGNNCommAgentGroup, agent_group_config)
+
+def _create_gnn_comm_agent_group(agent_group_class: Type[AgentGroup], agent_group_config: Dict[str, Any]) -> AgentGroup:
     agents = agent_group_config["agent_list"]
     text_model_configs = agent_group_config["model_configs"]
     encoder_configs = {}
@@ -72,7 +78,7 @@ def create_gnn_obs_comm_agent_group(agent_group_config: Dict[str, Any]) -> Agent
     lr_scheduler_config = agent_group_config.get("lr_scheduler", None)
     if lr_scheduler_config:
         lr_scheduler_config = LRSchedulerConfig(**lr_scheduler_config)
-    return GNNObsCommAgentGroup(
+    return agent_group_class(
                         agents,
                         feature_extractor_configs,
                         encoder_configs,
@@ -207,7 +213,8 @@ registered_agent_groups = {
     "ProbSeqMsgAggr": create_prob_seq_msg_aggr_agent_group,
     "DualPathObsMsgAggr": create_dual_path_obs_msg_aggr_agent_group,
     "GNN": create_gnn_agent_group,
-    "GNNObsComm": create_gnn_obs_comm_agent_group,
+    "ObsGNNComm": create_obs_gnn_comm_agent_group,
+    "SeqGNNComm": create_seq_gnn_comm_agent_group,
     "G2ANet": create_g2anet_agent_group,
     "Random": create_random_agent_group,
     "MAgentPrey": create_magent_prey_agent_group,

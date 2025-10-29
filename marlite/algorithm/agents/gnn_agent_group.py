@@ -110,7 +110,6 @@ class GNNAgentGroup(GraphAgentGroup):
             selected_agents = self.model_to_agents[model_name]
             idx = self.model_to_agent_indices[model_name]
             h = hidden_states[:,idx]
-            h = torch.Tensor(h) # (B, N, Hidden Size)
             bs = h.shape[0]
             n_agents = len(selected_agents)
             hidden_size = h.shape[-1]

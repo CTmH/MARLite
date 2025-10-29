@@ -398,7 +398,6 @@ class ObsMsgAggrAgentGroup(MsgAggrAgentGroup):
             selected_agents = self.model_to_agents[model_name]
             idx = self.model_to_agent_indices[model_name]
             h = hidden_states[:,idx]
-            h = torch.Tensor(h) # (B, N, Hidden Size)
             bs = h.shape[0]
             n_agents = len(selected_agents)
             hidden_size = h.shape[-1]
@@ -483,7 +482,6 @@ class SeqMsgAggrAgentGroup(MsgAggrAgentGroup):
             selected_agents = self.model_to_agents[model_name]
             idx = self.model_to_agent_indices[model_name]
             h = hidden_states[:,idx]
-            h = torch.Tensor(h) # (B, N, Hidden Size)
             bs = h.shape[0]
             n_agents = len(selected_agents)
             hidden_size = h.shape[-1]
@@ -587,7 +585,6 @@ class ProbMsgAggrAgentGroup(MsgAggrAgentGroup):
             selected_agents = self.model_to_agents[model_name]
             idx = self.model_to_agent_indices[model_name]
             h = hidden_states[:,idx]
-            h = torch.Tensor(h) # (B, N, Hidden Size)
             bs = h.shape[0]
             n_agents = len(selected_agents)
             hidden_size = h.shape[-1]
@@ -680,7 +677,6 @@ class ProbSeqMsgAggrAgentGroup(MsgAggrAgentGroup):
             selected_agents = self.model_to_agents[model_name]
             idx = self.model_to_agent_indices[model_name]
             h = hidden_states[:,idx]
-            h = torch.Tensor(h) # (B, N, Hidden Size)
             bs = h.shape[0]
             n_agents = len(selected_agents)
             hidden_size = h.shape[-1]
@@ -825,7 +821,6 @@ class DualPathObsMsgAggrAgentGroup(MsgAggrAgentGroup):
             selected_agents = self.model_to_agents[model_name]
             idx = self.model_to_agent_indices[model_name]
             h = hidden_states[:,idx]
-            h = torch.Tensor(h) # (B, N, Hidden Size)
             bs = h.shape[0]
             n_agents = len(selected_agents)
             hidden_size = h.shape[-1]
