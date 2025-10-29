@@ -248,6 +248,12 @@ class Trainer():
                 self.lr_scheduler.step()
             self.eval_agent_group.lr_scheduler_step(mean_reward)
 
+            #if mean_reward >= self.best_mean_reward * (1 - self.eval_threshold):
+            if (mean_reward - self.best_mean_reward) / max(abs(self.best_mean_reward), 1) >= -self.eval_threshold:
+                self._cached_agent_group_params = self.eval_agent_group.get_agent_group_params()
+                self._cached_critic_params = deepcopy(self.eval_critic.state_dict())
+                logging.info(f"Epoch {epoch}: Cached parameters updated with current parameters.")
+
             if mean_reward >= self.best_mean_reward or win_rate > self.best_win_rate:
                 self.best_mean_reward = mean_reward
                 self.best_reward_std = reward_std
@@ -256,11 +262,6 @@ class Trainer():
                 self.best_agent_group_params = self.eval_agent_group.get_agent_group_params()
                 self.best_critic_params = deepcopy(self.eval_critic.state_dict())
                 logging.info(f"Epoch {epoch}: New best mean reward {self.best_mean_reward:.4f}")
-
-            if mean_reward >= self.best_mean_reward * (1 - self.eval_threshold):
-                self._cached_agent_group_params = self.eval_agent_group.get_agent_group_params()
-                self._cached_critic_params = deepcopy(self.eval_critic.state_dict())
-                logging.info(f"Epoch {epoch}: Cached parameters updated with current parameters.")
 
             if mean_reward >= target_reward:
                 logging.info(f"Epoch {epoch}: Target reward reached: {mean_reward:.4f} >= {target_reward:.4f}")
