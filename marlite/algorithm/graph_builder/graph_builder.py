@@ -6,7 +6,7 @@ class GraphBuilder(nn.Module):
     def __init__(self):
         super().__init__()
 
-    def forward(self, state) -> Tuple[ndarray, List[ndarray]]:
+    def forward(self, states) -> Tuple[ndarray, List[ndarray]]:
         raise NotImplementedError
 
     def reset(self) -> nn.Module:

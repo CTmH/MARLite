@@ -82,10 +82,10 @@ class MAgentGraphBuilder(GraphBuilder):
 
         return adj_matrix, edge_index
 
-    def forward(self, state: ndarray) -> Tuple[ndarray, List[ndarray]]:
+    def forward(self, states: ndarray) -> Tuple[ndarray, List[ndarray]]:
         if self.channel_first:
-            state = np.transpose(state, (0, 2, 3, 1))
-        bs = state.shape[0]
+            states = np.transpose(states, (0, 2, 3, 1))
+        bs = states.shape[0]
         if not self.training:
             self.step_counter += 1
             if (self.step_counter % self.update_interval != 0
@@ -97,7 +97,7 @@ class MAgentGraphBuilder(GraphBuilder):
         with ProcessPoolExecutor(max_workers=self.n_workers) as executor:
             results = list(executor.map(
                 self._process_batch,
-                [state[b] for b in range(bs)],
+                [states[b] for b in range(bs)],
                 [self.binary_agent_id_dim] * bs,
                 [self.agent_presence_dim] * bs,
                 [self.comm_distance] * bs,

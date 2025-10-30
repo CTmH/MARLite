@@ -1,9 +1,100 @@
 import numpy as np
 import networkx as nx
-from typing import Union
+from typing import Union, List
 from networkx.algorithms.community import greedy_modularity_communities
 from scipy.spatial.distance import cdist
 
+def extract_agent_positions_batch(states: np.ndarray,
+                                binary_agent_id_dim: list,
+                                agent_presence_dim: list) -> List[np.ndarray]:
+    """Extract agent positions from batched states using vectorized numpy operations.
+
+    This function efficiently extracts agent positions from batched state tensors
+    using numpy's vectorized operations, avoiding explicit loops for better performance.
+
+    Args:
+        states: Input states with shape (batch_size, height, width, channels)
+        binary_agent_id_dim: List of channel indices that contain binary agent ID
+        agent_presence_dim: List of channel indices that indicate agent presence
+
+    Returns:
+        List of agent positions arrays with shape (n_agents, 3) where each entry contains
+        [agent_id, y_coord, x_coord]. The length of list is batch_size. The n_agents
+        dimension is number of present agents.
+    """
+    batch_size, height, width, channels = states.shape
+
+    # Extract presence channels and determine if agent is present at each position
+    # Shape: (batch_size, height, width)
+    presence_data = states[:, :, :, agent_presence_dim]
+    agent_present = np.any(presence_data > 0, axis=-1)  # Agent present if any presence channel > 0
+
+    # Extract binary ID channels
+    # Shape: (batch_size, height, width, len(binary_agent_id_dim))
+    binary_id_data = states[:, :, :, binary_agent_id_dim]
+
+    # Create coordinate grids
+    # Shape: (height, width)
+    y_coords, x_coords = np.mgrid[0:height, 0:width]
+
+    # Tile coordinates for batch processing
+    # Shape: (batch_size, height, width)
+    y_grid = np.tile(y_coords[None, :, :], (batch_size, 1, 1))
+    x_grid = np.tile(x_coords[None, :, :], (batch_size, 1, 1))
+
+    # Reshape data for processing
+    # Flatten spatial dimensions for easier indexing
+    flat_presence = agent_present.reshape(batch_size, -1)  # (batch_size, height*width)
+    flat_binary_ids = binary_id_data.reshape(batch_size, -1, len(binary_agent_id_dim))  # (batch_size, h*w, n_bits)
+    flat_y = y_grid.reshape(batch_size, -1)  # (batch_size, h*w)
+    flat_x = x_grid.reshape(batch_size, -1)  # (batch_size, h*w)
+
+    # Convert binary IDs to decimal using matrix multiplication
+    # Create powers of 2 for binary to decimal conversion
+    powers_of_2 = 2 ** np.arange(len(binary_agent_id_dim))  # small-endian
+    powers_of_2 = powers_of_2.astype(flat_binary_ids.dtype)
+
+    # Matrix multiply to convert binary to decimal
+    # Shape: (batch_size, height*width)
+    agent_ids_flat = np.einsum('bij,j->bi', flat_binary_ids, powers_of_2)
+
+    # Filter only positions where agents are present
+    # Use boolean indexing to get only valid agent positions
+    agent_positions = []
+    max_agents = 0
+
+    for b in range(batch_size):
+        # Get indices where agents are present
+        present_mask = flat_presence[b]
+        if np.any(present_mask):
+            # Extract data for present agents
+            valid_ids = agent_ids_flat[b][present_mask]
+            valid_y = flat_y[b][present_mask]
+            valid_x = flat_x[b][present_mask]
+
+            # Stack into (n_valid_agents, 3) array [id, y, x]
+            positions = np.stack([valid_ids, valid_y, valid_x], axis=1)
+            agent_positions.append(positions)
+            max_agents = max(max_agents, len(valid_ids))
+        else:
+            # No agents present in this batch item
+            agent_positions.append(np.zeros((0, 3)))
+
+    return agent_positions
+'''
+    # Pad all agent position arrays to the same length
+    padded_positions = []
+    for pos in agent_positions:
+        if len(pos) < max_agents:
+            padding = np.zeros((max_agents - len(pos), 3))
+            pos = np.vstack([pos, padding])
+        padded_positions.append(pos)
+
+    # Stack into final array
+    result = np.stack(padded_positions)  # (batch_size, max_agents, 3)
+
+    return result
+'''
 
 def binary_to_decimal(binary_list):
     decimal_number = 0
@@ -92,8 +183,11 @@ def build_partial_graph(
         valid_node_list=alive_node_list
     )
 
+    if edge_index.shape[1] <= 0 or len(edge_index) <= 0: # Empty
+        return np.zeros(valid_node_list, valid_node_list), np.zeros(2, 0)
+
     # Apply community detection for subgraph generation if needed
-    if n_subgraphs > 1 and edge_index.shape[1] > 0:
+    if n_subgraphs > 1:
         # Get valid indices and coordinates for distance calculation
         if valid_node_list is not None:
             valid_indices = np.array(valid_node_list)

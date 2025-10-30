@@ -17,8 +17,8 @@ class RandomGroupGraphBuilder(GraphBuilder):
         self.add_self_loop = add_self_loop
         self.num_groups = num_groups
 
-    def forward(self, state: np.ndarray) -> Tuple[ndarray, List[ndarray]]:
-        bs = state.shape[0]
+    def forward(self, states: np.ndarray) -> Tuple[ndarray, List[ndarray]]:
+        bs = states.shape[0]
         num_nodes = len(self.valid_node_list)
         groups = np.random.randint(0, self.num_groups, size=len(self.valid_node_list))
 

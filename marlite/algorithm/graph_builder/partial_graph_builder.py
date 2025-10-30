@@ -8,7 +8,7 @@ from scipy.spatial.distance import cdist
 from concurrent.futures import ProcessPoolExecutor
 
 from marlite.algorithm.graph_builder.graph_builder import GraphBuilder
-from marlite.algorithm.graph_builder.graph_util import binary_to_decimal, build_partial_graph
+from marlite.algorithm.graph_builder.graph_util import extract_agent_positions_batch, binary_to_decimal, build_partial_graph
 
 class PartialGraphMAgentBuilder(GraphBuilder):
 
@@ -131,8 +131,13 @@ class PartialGraphMAgentBuilder(GraphBuilder):
         valid_edge_mask = np.isin(edge_index, filtered_sorted_ids).all(axis=0)
         filtered_edge_index = edge_index[:, valid_edge_mask]
 
-        # Remap edge_index to use the new compact IDs
-        filtered_edge_index = np.vectorize(old_to_new_id_map.get)(filtered_edge_index)
+       # Only remap if we have edges
+        if filtered_edge_index.size > 0:
+            # Remap edge_index to use the new compact IDs
+            filtered_edge_index = np.vectorize(old_to_new_id_map.get)(filtered_edge_index)
+        else:
+            # Keep as empty array with same shape
+            filtered_edge_index = np.zeros((2, 0), dtype=np.int64)
 
         # Build the new adjacency matrix based on the filtered and remapped edges
         n_valid_nodes = len(filtered_sorted_ids)
@@ -154,18 +159,33 @@ class PartialGraphMAgentBuilder(GraphBuilder):
                 and self.cached_edge_indices is not None):
                 return deepcopy(self.cached_adj_matrix), deepcopy(self.cached_edge_indices)
 
-        n_workers = min(bs, self.n_workers)
-        with ProcessPoolExecutor(max_workers=n_workers) as executor:
-            results = list(executor.map(
-                self._process_batch,
-                [state[b] for b in range(bs)],
-                [self.binary_agent_id_dim] * bs,
-                [self.agent_presence_dim] * bs,
-                [self.comm_distance] * bs,
-                [self.distance_metric] * bs,
-                [self.n_subgraphs] * bs,
-                [self.valid_node_list] * bs
-            ))
+        # Use multiprocessing only if n_workers > 1
+        if self.n_workers > 1:
+            n_workers = min(bs, self.n_workers)
+            with ProcessPoolExecutor(max_workers=n_workers) as executor:
+                results = list(executor.map(
+                    self._process_batch,
+                    [state[b] for b in range(bs)],
+                    [self.binary_agent_id_dim] * bs,
+                    [self.agent_presence_dim] * bs,
+                    [self.comm_distance] * bs,
+                    [self.distance_metric] * bs,
+                    [self.n_subgraphs] * bs,
+                    [self.valid_node_list] * bs
+                ))
+        else:
+            # Sequential processing for n_workers == 1
+            results = [
+                self._process_batch(
+                    state[b],
+                    self.binary_agent_id_dim,
+                    self.agent_presence_dim,
+                    self.comm_distance,
+                    self.distance_metric,
+                    self.n_subgraphs,
+                    self.valid_node_list
+                ) for b in range(bs)
+            ]
 
         batch_adj_matrix, batch_edge_indices = zip(*results)
         batch_adj_matrix = np.array(batch_adj_matrix)
@@ -212,10 +232,10 @@ class TODOPartialGraphMAgentBuilder(GraphBuilder):
         self.cached_adj_matrix = None
         self.cached_edge_indices = None
 
-    def forward(self, state: ndarray) -> Tuple[ndarray, List[ndarray]]:
+    def forward(self, states: ndarray) -> Tuple[ndarray, List[ndarray]]:
         if self.channel_first:
-            state = np.transpose(state, (0, 2, 3, 1))
-        bs = state.shape[0]
+            states = np.transpose(states, (0, 2, 3, 1))
+        bs = states.shape[0]
         if not self.training:
             self.step_counter += 1
             if (self.step_counter % self.update_interval != 0
@@ -223,12 +243,28 @@ class TODOPartialGraphMAgentBuilder(GraphBuilder):
                 and self.cached_edge_indices is not None):
                 return deepcopy(self.cached_adj_matrix), deepcopy(self.cached_edge_indices)
 
-        n_workers = min(bs, self.n_workers)
-        with ProcessPoolExecutor(max_workers=n_workers) as executor:
-            results = list(executor.map(
-                self._process_single_batch,
-                [state[b] for b in range(bs)]
-            ))
+        batched_coords_with_id = extract_agent_positions_batch(states, self.binary_agent_id_dim, self.agent_presence_dim)
+        batched_coords = batched_coords_with_id[:, :, (1,2)]
+        batched_coords = []
+        for e in batched_coords_with_id:
+            if len(e) > 0:
+                coords = e[:, (1,2)]
+            else:  # Empty
+                coords = np.zeros((0, 2))
+            batched_coords.append(coords)
+
+        use_multi_process = bs > 1 and self.n_workers > 1
+        if use_multi_process:
+            with ProcessPoolExecutor(max_workers=self.n_workers) as executor:
+                results = list(executor.map(
+                    self._process_single_graph,
+                    batched_coords
+                ))
+        else:
+            results = []
+            for coords in batched_coords:
+                result = self._process_single_graph(coords)
+                results.append(result)
 
         batch_adj_matrix, batch_edge_indices = zip(*results)
         batch_adj_matrix = np.array(batch_adj_matrix)
@@ -240,25 +276,18 @@ class TODOPartialGraphMAgentBuilder(GraphBuilder):
 
         return batch_adj_matrix, batch_edge_indices
 
-    def _process_single_batch(self, batch_state: np.ndarray):
-        """Process a single batch item for PartialGraphMAgentBuilder"""
-        binary_agent_id = batch_state[:, self.binary_agent_id_dim]
-        agent_positions = np.apply_along_axis(binary_to_decimal, -1, binary_agent_id).astype(np.int64)
-        agent_presence = batch_state[:, self.agent_presence_dim]
-        agent_presence = agent_presence.astype(np.int64)
-        agent_presence = agent_presence.sum(axis=-1)
-        agent_positions = agent_positions * agent_presence + agent_presence - np.ones_like(agent_presence)
-
-        # Convert to coordinates format expected by _process_batch
-        coords = agent_positions
-
-        return build_partial_graph(
-            coords=coords,
-            comm_distance=self.comm_distance,
-            distance_metric=self.distance_metric,
-            n_subgraphs=self.n_subgraphs,
-            valid_node_list=self.valid_node_list
-        )
+    def _process_single_graph(self, coords_with_id: np.ndarray):
+        """Process a single batch item for PartialGraphVectorBuilder"""
+        if len(coords_with_id) > 0:
+            coords = coords_with_id[:, (1,2)]
+            return build_partial_graph(
+                coords=coords,
+                comm_distance=self.comm_distance,
+                distance_metric=self.distance_metric,
+                n_subgraphs=self.n_subgraphs,
+                valid_node_list=self.valid_node_list
+            )
+        return np.zeros(self.valid_node_list, self.valid_node_list), np.zeros(2, 0)
 
     def reset(self):
         self.step_counter = 0
@@ -309,7 +338,7 @@ class PartialGraphVectorBuilder(GraphBuilder):
         self.cached_adj_matrix = None
         self.cached_edge_indices = None
 
-    def forward(self, state: ndarray) -> Tuple[ndarray, List[ndarray]]:
+    def forward(self, states: ndarray) -> Tuple[ndarray, List[ndarray]]:
         """
         Build graphs from vectorized state.
 
@@ -319,7 +348,7 @@ class PartialGraphVectorBuilder(GraphBuilder):
         Returns:
             Tuple of (batch_adjacency_matrix, list_of_edge_indices)
         """
-        bs = state.shape[0]
+        bs = states.shape[0]
         if not self.training:
             self.step_counter += 1
             if (self.step_counter % self.update_interval != 0
@@ -331,7 +360,7 @@ class PartialGraphVectorBuilder(GraphBuilder):
         with ProcessPoolExecutor(max_workers=n_workers) as executor:
             results = list(executor.map(
                 self._process_single_batch,
-                [state[b] for b in range(bs)]
+                [states[b] for b in range(bs)]
             ))
 
         batch_adj_matrix, batch_edge_indices = zip(*results)
