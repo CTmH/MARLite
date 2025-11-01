@@ -1,6 +1,6 @@
 import numpy as np
 import networkx as nx
-from typing import Union, List
+from typing import Tuple, List
 from networkx.algorithms.community import greedy_modularity_communities
 from scipy.spatial.distance import cdist
 
@@ -74,11 +74,11 @@ def extract_agent_positions_batch(states: np.ndarray,
 
             # Stack into (n_valid_agents, 3) array [id, y, x]
             positions = np.stack([valid_ids, valid_y, valid_x], axis=1)
-            agent_positions.append(positions)
+            agent_positions.append(positions.astype(int))
             max_agents = max(max_agents, len(valid_ids))
         else:
             # No agents present in this batch item
-            agent_positions.append(np.zeros((0, 3)))
+            agent_positions.append(np.zeros((0, 3), dtype=int))
 
     return agent_positions
 '''
@@ -106,134 +106,142 @@ def binary_to_decimal(binary_list):
 
 
 def build_communication_graph(
-    coords: np.ndarray,
-    comm_distance: int,
+    coords_with_id: np.ndarray,
+    comm_distance: float,
     distance_metric: str,
-    valid_node_list: Union[list, None] = None,
-):
+    valid_node_list: List[int],
+) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Build communication graph based on coordinates and communication distance.
+    Build communication graph based on agent coordinates with IDs and communication distance.
 
     Args:
-        coords: Array of agent coordinates with shape (num_agents, 2)
+        coords_with_id: Array of agent positions with shape (n_agents, 3), each row is [agent_id, y_coord, x_coord]
         comm_distance: Communication distance threshold
         distance_metric: Distance metric for calculating distances between agents
         valid_node_list: List of valid node IDs to include in the result graph
 
     Returns:
         Tuple of (adjacency_matrix, edge_index)
+        - adjacency_matrix: Binary matrix of shape (max_node_id+1, max_node_id+1), zero-padded for missing nodes
+        - edge_index: Edge index array of shape (2, num_edges), using original agent IDs
     """
-    # Filter nodes based on valid_node_list
-    if valid_node_list is not None:
-        valid_indices = np.array(valid_node_list)
-        valid_coords = coords[valid_indices]
-    else:
-        valid_coords = coords
-        valid_indices = np.arange(len(coords))
-
-    if len(valid_coords) == 0:
-        # No valid agents, return empty graphs
-        adj_matrix = np.zeros((0, 0), dtype=np.int64)
+    if len(coords_with_id) == 0 or not valid_node_list:
+        max_node_id = max(valid_node_list) if valid_node_list else 0
+        adj_matrix = np.zeros((max_node_id + 1, max_node_id + 1), dtype=np.int8)
         edge_index = np.zeros((2, 0), dtype=np.int64)
         return adj_matrix, edge_index
 
-    # Calculate distance matrix
-    distances = cdist(valid_coords, valid_coords, metric=distance_metric)
+    max_node_id = max(valid_node_list)
+
+    # Filter coords: only keep rows where agent_id is in valid_node_list
+    mask = np.isin(coords_with_id[:, 0].astype(int), np.array(valid_node_list, dtype=int))
+    filtered_coords_with_id = coords_with_id[mask]
+
+    # Extract agent IDs and coordinates
+    agent_ids = filtered_coords_with_id[:, 0].astype(int)
+    coords = filtered_coords_with_id[:, 1:3]  # shape: (num_valid_agents, 2)
+
+    if len(coords) == 0:
+        adj_matrix = np.zeros((max_node_id + 1, max_node_id + 1), dtype=np.int8)
+        edge_index = np.zeros((2, 0), dtype=np.int64)
+        return adj_matrix, edge_index
+
+    # Calculate pairwise distance matrix
+    distances = cdist(coords, coords, metric=distance_metric)
+    # Create upper triangular mask, excluding diagonal (no self-loops)
     mask = (distances <= comm_distance) & np.triu(np.ones_like(distances, dtype=bool), k=1)
     rows, cols = np.where(mask)
 
-    # Build adjacency matrix
-    n_nodes = len(valid_indices)
-    adj_matrix = np.zeros((n_nodes, n_nodes), dtype=np.int64)
-    adj_matrix[rows, cols] = 1
-    adj_matrix[cols, rows] = 1  # Symmetric connections
+    # Map local indices to original agent IDs
+    node_ids = agent_ids  # local index i corresponds to agent id = node_ids[i]
+    edge_index = np.vstack([node_ids[rows], node_ids[cols]]).astype(int)
 
-    # Generate edge index in COO format using original node indices
-    edge_index = np.vstack([valid_indices[rows], valid_indices[cols]]).astype(np.int64)
+    # Build adjacency matrix with actual distances (symmetric)
+    adj_matrix = np.zeros((max_node_id + 1, max_node_id + 1), dtype=np.float32)
+    # Fill both directions (symmetric matrix)
+    adj_matrix[edge_index[0], edge_index[1]] = distances[rows, cols]
+    adj_matrix[edge_index[1], edge_index[0]] = distances[rows, cols]
 
     return adj_matrix, edge_index
 
 
 def build_partial_graph(
-    coords: np.ndarray,
+    coords_with_id: np.ndarray,
     comm_distance: int,
     distance_metric: str,
     n_subgraphs: int,
-    alive_node_list: Union[list, None] = None,
-    valid_node_list: Union[list, None] = None
+    valid_node_list: List[int],
+    target_node_list: List[int]
 ):
     """
     Process a single batch item to build partial graph with community detection.
 
     Args:
-        coords: Array of agent coordinates with shape (num_agents, 2)
-        comm_distance: Communication distance threshold
-        distance_metric: Distance metric for calculating distances between agents
-        n_subgraphs: Number of subgraphs for community detection
-        valid_node_list: List of valid node IDs to include in the result graph
+        coords_with_id: Array of agent positions with shape (n_agents, 3),
+                        each row is [agent_id, y_coord, x_coord].
+        comm_distance: Communication distance threshold.
+        distance_metric: Distance metric for calculating distances between agents.
+        n_subgraphs: Number of subgraphs for community detection.
+        valid_node_list: List of valid node IDs to include in the result graph.
+        target_node_list: List of target node IDs to include in the initial graph.
 
     Returns:
         Tuple of (adjacency_matrix, edge_index)
     """
-    # First build graph with agent and target
-    adj_matrix, edge_index = build_communication_graph(
-        coords=coords,
+    # Build full communication graph (with distances in adj_matrix)
+    adj_matrix_full, edge_index_full = build_communication_graph(
+        coords_with_id=coords_with_id,
         comm_distance=comm_distance,
         distance_metric=distance_metric,
-        valid_node_list=alive_node_list
+        valid_node_list=valid_node_list + target_node_list
     )
+    max_node_id = max(valid_node_list)
 
-    if edge_index.shape[1] <= 0 or len(edge_index) <= 0: # Empty
-        return np.zeros(valid_node_list, valid_node_list), np.zeros(2, 0)
+    if edge_index_full.shape[1] <= 0:
+        return np.zeros((max_node_id + 1, max_node_id + 1), dtype=np.float32), np.zeros((2, 0), dtype=np.int64)
 
-    # Apply community detection for subgraph generation if needed
-    if n_subgraphs > 1:
-        # Get valid indices and coordinates for distance calculation
-        if valid_node_list is not None:
-            valid_indices = np.array(valid_node_list)
-            valid_coords = coords[valid_indices]
-        else:
-            valid_coords = coords
-            valid_indices = np.arange(len(coords))
+    # Extract valid indices used in the graph
+    valid_indices = np.array(valid_node_list + target_node_list)
 
-        # Calculate distances for edge weights
-        distances = cdist(valid_coords, valid_coords, metric=distance_metric)
-        mask = (distances <= comm_distance) & np.triu(np.ones_like(distances, dtype=bool), k=1)
-        rows, cols = np.where(mask)
+    # Build networkx graph using existing distances from adj_matrix_full
+    G = nx.Graph()
+    edges_with_weight = []
+    for u, v in edge_index_full.T.astype(int):
+        dist = adj_matrix_full[u, v]
+        if dist > 0:  # Should always be true, but safe check
+            edges_with_weight.append((u, v, 1.0 / dist)) # shorter distance → higher weight
 
-        G = nx.Graph()
-        edge_weights = 1.0 / distances[rows, cols]
-        G.add_weighted_edges_from(zip(
-            valid_indices[rows],
-            valid_indices[cols],
-            edge_weights
-        ))
+    G.add_weighted_edges_from(edges_with_weight)
 
-        # Run the greedy modularity community detection algorithm
-        communities = list(greedy_modularity_communities(
-            G=G,
-            best_n=n_subgraphs,
-            weight='weight'
-        ))
+    # Run greedy modularity community detection
+    communities = list(greedy_modularity_communities(
+        G=G,
+        best_n=n_subgraphs,
+        weight='weight'
+    ))
 
-        # Create a mapping from nodes to their communities
-        node_community_map = {}
-        for comm_id, comm in enumerate(communities):
-            for node in comm:
-                node_community_map[node] = comm_id
+    # Map nodes to their community
+    node_community_map = {}
+    for comm_id, comm in enumerate(communities):
+        for node in comm:
+            node_community_map[node] = comm_id
 
-        # Filter edges that connect nodes within the same community
-        intra_edges = []
-        for u, v in edge_index.T:
-            if node_community_map.get(u) == node_community_map.get(v):
-                intra_edges.append([u, v])
+    # Filter edges: only keep those within same community AND both endpoints in valid_node_list
+    filtered_edges = []
+    valid_node_set = set(valid_node_list)
+    for u, v in edge_index_full.T.astype(int):
+        if (u in valid_node_set and v in valid_node_set and
+            node_community_map.get(u) == node_community_map.get(v)):
+            filtered_edges.append([u, v])
 
-        # Update the adjacency matrix and edge index with only intra-community connections
-        edge_index = np.array(intra_edges).T if intra_edges else np.zeros((2,0), dtype=np.int64)
-        adj_matrix = np.zeros_like(adj_matrix)
-        if edge_index.size > 0:
-            adj_matrix[edge_index[0], edge_index[1]] = 1
-            adj_matrix[edge_index[1], edge_index[0]] = 1  # Maintain symmetry
+    # Rebuild binary or distance-based adjacency matrix from filtered edges
+    adj_matrix = np.zeros((max_node_id + 1, max_node_id + 1), dtype=np.float32)
+    edge_index = np.array(filtered_edges, dtype=int).T if filtered_edges else np.zeros((2, 0), dtype=int)
+
+    if edge_index.size > 0:
+        # Fill symmetric adjacency matrix with actual distances from original graph
+        adj_matrix[edge_index[0], edge_index[1]] = adj_matrix_full[edge_index[0], edge_index[1]]
+        adj_matrix[edge_index[1], edge_index[0]] = adj_matrix_full[edge_index[1], edge_index[0]]
 
     return adj_matrix, edge_index
 

@@ -10,6 +10,7 @@ from concurrent.futures import ProcessPoolExecutor
 from marlite.algorithm.graph_builder.graph_builder import GraphBuilder
 from marlite.algorithm.graph_builder.graph_util import extract_agent_positions_batch, binary_to_decimal, build_partial_graph
 
+'''
 class PartialGraphMAgentBuilder(GraphBuilder):
 
     def __init__(
@@ -202,19 +203,20 @@ class PartialGraphMAgentBuilder(GraphBuilder):
         self.cached_adj_matrix = None
         self.cached_edge_indices = None
         return self
-
+'''
 # TODO
-class TODOPartialGraphMAgentBuilder(GraphBuilder):
+class PartialGraphMAgentBuilder(GraphBuilder):
 
     def __init__(
             self,
-            binary_agent_id_dim: list,
-            agent_presence_dim: list,
+            binary_agent_id_dim: List[int],
+            agent_presence_dim: List[int],
             comm_distance: int,
+            valid_node_list: List[int],
+            target_node_list: List[int],
             distance_metric: str = 'cityblock',
             n_workers: int = 8,
             n_subgraphs=2,
-            valid_node_list: Union[list, None] = None,
             update_interval: int = 1,
             channel_first: bool = False):
         super().__init__()
@@ -225,6 +227,7 @@ class TODOPartialGraphMAgentBuilder(GraphBuilder):
         self.n_workers = n_workers
         self.n_subgraphs = n_subgraphs
         self.valid_node_list = valid_node_list
+        self.target_node_list = target_node_list
 
         self.update_interval = update_interval
         self.channel_first = channel_first
@@ -235,34 +238,27 @@ class TODOPartialGraphMAgentBuilder(GraphBuilder):
     def forward(self, states: ndarray) -> Tuple[ndarray, List[ndarray]]:
         if self.channel_first:
             states = np.transpose(states, (0, 2, 3, 1))
-        bs = states.shape[0]
+
         if not self.training:
-            self.step_counter += 1
             if (self.step_counter % self.update_interval != 0
                 and self.cached_adj_matrix is not None
                 and self.cached_edge_indices is not None):
+                self.step_counter += 1
                 return deepcopy(self.cached_adj_matrix), deepcopy(self.cached_edge_indices)
 
         batched_coords_with_id = extract_agent_positions_batch(states, self.binary_agent_id_dim, self.agent_presence_dim)
-        batched_coords = batched_coords_with_id[:, :, (1,2)]
-        batched_coords = []
-        for e in batched_coords_with_id:
-            if len(e) > 0:
-                coords = e[:, (1,2)]
-            else:  # Empty
-                coords = np.zeros((0, 2))
-            batched_coords.append(coords)
 
+        bs = states.shape[0]
         use_multi_process = bs > 1 and self.n_workers > 1
         if use_multi_process:
             with ProcessPoolExecutor(max_workers=self.n_workers) as executor:
                 results = list(executor.map(
                     self._process_single_graph,
-                    batched_coords
+                    batched_coords_with_id
                 ))
         else:
             results = []
-            for coords in batched_coords:
+            for coords in batched_coords_with_id:
                 result = self._process_single_graph(coords)
                 results.append(result)
 
@@ -274,20 +270,19 @@ class TODOPartialGraphMAgentBuilder(GraphBuilder):
             self.cached_adj_matrix = batch_adj_matrix
             self.cached_edge_indices = batch_edge_indices
 
+        self.step_counter += 1
         return batch_adj_matrix, batch_edge_indices
 
     def _process_single_graph(self, coords_with_id: np.ndarray):
         """Process a single batch item for PartialGraphVectorBuilder"""
-        if len(coords_with_id) > 0:
-            coords = coords_with_id[:, (1,2)]
-            return build_partial_graph(
-                coords=coords,
-                comm_distance=self.comm_distance,
-                distance_metric=self.distance_metric,
-                n_subgraphs=self.n_subgraphs,
-                valid_node_list=self.valid_node_list
-            )
-        return np.zeros(self.valid_node_list, self.valid_node_list), np.zeros(2, 0)
+        return build_partial_graph(
+            coords_with_id=coords_with_id,
+            comm_distance=self.comm_distance,
+            distance_metric=self.distance_metric,
+            n_subgraphs=self.n_subgraphs,
+            valid_node_list=self.valid_node_list,
+            target_node_list = self.target_node_list,
+        )
 
     def reset(self):
         self.step_counter = 0
@@ -296,7 +291,7 @@ class TODOPartialGraphMAgentBuilder(GraphBuilder):
         return self
 
 # TODO
-class PartialGraphVectorBuilder(GraphBuilder):
+class PartialGraphVectorStateBuilder(GraphBuilder):
     """
     Graph builder for vectorized states with shape (batch_size, num_agents, feature_dim).
     Extracts agent coordinates from specified positions in the feature dimension.
@@ -304,26 +299,15 @@ class PartialGraphVectorBuilder(GraphBuilder):
 
     def __init__(
             self,
-            coord_dim: Tuple[int, int],
+            coord_dim: List[int],
             hp_dim: int,
             comm_distance: int,
+            valid_node_list: List[int],
+            target_node_list: List[int],
             distance_metric: str = 'cityblock',
             n_workers: int = 8,
             n_subgraphs=2,
-            valid_node_list: Union[list, None] = None,
             update_interval: int = 1):
-        """
-        Initialize the PartialGraphVectorBuilder.
-
-        Args:
-            coord_dim: 2-tuple specifying the positions in feature_dim that represent agent coordinates
-            comm_distance: Communication distance threshold
-            distance_metric: Distance metric for calculating distances between agents
-            n_workers: Number of parallel workers for batch processing
-            n_subgraphs: Number of subgraphs for community detection
-            valid_node_list: List of valid node IDs to include in the graph
-            update_interval: Interval for updating cached graphs during inference
-        """
         super().__init__()
         self.coord_dim = coord_dim
         self.hp_dim = hp_dim
@@ -332,6 +316,7 @@ class PartialGraphVectorBuilder(GraphBuilder):
         self.n_workers = n_workers
         self.n_subgraphs = n_subgraphs
         self.valid_node_list = valid_node_list
+        self.target_node_list = target_node_list
 
         self.update_interval = update_interval
         self.step_counter = 0
@@ -339,29 +324,34 @@ class PartialGraphVectorBuilder(GraphBuilder):
         self.cached_edge_indices = None
 
     def forward(self, states: ndarray) -> Tuple[ndarray, List[ndarray]]:
-        """
-        Build graphs from vectorized state.
 
-        Args:
-            state: Input state with shape (batch_size, num_agents, feature_dim)
-
-        Returns:
-            Tuple of (batch_adjacency_matrix, list_of_edge_indices)
-        """
-        bs = states.shape[0]
         if not self.training:
-            self.step_counter += 1
             if (self.step_counter % self.update_interval != 0
                 and self.cached_adj_matrix is not None
                 and self.cached_edge_indices is not None):
+                self.step_counter += 1
                 return deepcopy(self.cached_adj_matrix), deepcopy(self.cached_edge_indices)
 
-        n_workers = min(bs, self.n_workers)
-        with ProcessPoolExecutor(max_workers=n_workers) as executor:
-            results = list(executor.map(
-                self._process_single_batch,
-                [states[b] for b in range(bs)]
-            ))
+        batched_coords_with_id = []
+        bs = states.shape[0]
+        for state in states:
+            coords_with_id = []
+            for i, col in enumerate(state):
+                if col[self.hp_dim] > 0:
+                    coords_with_id.append([i, col[self.coord_dim[0]], col[self.coord_dim[1]]])
+            batched_coords_with_id.append(np.array(coords_with_id))
+        use_multi_process = bs > 1 and self.n_workers > 1
+        if use_multi_process:
+            with ProcessPoolExecutor(max_workers=self.n_workers) as executor:
+                results = list(executor.map(
+                    self._process_single_graph,
+                    batched_coords_with_id
+                ))
+        else:
+            results = []
+            for coords in batched_coords_with_id:
+                result = self._process_single_graph(coords)
+                results.append(result)
 
         batch_adj_matrix, batch_edge_indices = zip(*results)
         batch_adj_matrix = np.array(batch_adj_matrix)
@@ -371,25 +361,21 @@ class PartialGraphVectorBuilder(GraphBuilder):
             self.cached_adj_matrix = batch_adj_matrix
             self.cached_edge_indices = batch_edge_indices
 
+        self.step_counter += 1
         return batch_adj_matrix, batch_edge_indices
 
-    def _process_single_batch(self, state: np.ndarray):
+    def _process_single_graph(self, coords_with_id: np.ndarray):
         """Process a single batch item for PartialGraphVectorBuilder"""
-        # Extract coordinates from the specified feature dimensions
-        coords = state[:, list(self.coord_dim)]
-        hp = state[:, list(self.hp_dim)]
-        alive_agent_list = np.where(hp > 0)
-
         return build_partial_graph(
-            coords=coords,
+            coords_with_id=coords_with_id,
             comm_distance=self.comm_distance,
             distance_metric=self.distance_metric,
             n_subgraphs=self.n_subgraphs,
-            valid_node_list=self.valid_node_list
+            valid_node_list=self.valid_node_list,
+            target_node_list = self.target_node_list,
         )
 
     def reset(self):
-        """Reset the builder's internal state and cache"""
         self.step_counter = 0
         self.cached_adj_matrix = None
         self.cached_edge_indices = None
