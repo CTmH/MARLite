@@ -21,7 +21,7 @@ def check_smac_victory(env: ParallelEnv, infos: Dict[str, Any]) -> bool:
     return False
 
 def check_battle_wrapper_victory(env: ParallelEnv, infos: Dict[str, Any]) -> bool:
-    if len(env.opponent_agents) <= len(env.agents) * 0.8:
+    if len(env.opponent_agents) <= 0:
         return True
     return False
 
