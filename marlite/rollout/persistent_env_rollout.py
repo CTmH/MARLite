@@ -161,7 +161,7 @@ def persistent_env_rollout(env_config: EnvConfig,
                 episode['rewards'].append(rewards)
                 episode['truncations'].append(truncations)
                 episode['terminations'].append(terminations)
-                episode['next_states'].append(env.state())
+                #episode['next_states'].append(env.state()) # When game end, getting state may cause error
                 episode['next_observations'].append(observations)
 
                 # Update episode reward
@@ -173,11 +173,10 @@ def persistent_env_rollout(env_config: EnvConfig,
                 if check_victory is not None:
                     win_tag = check_victory(env, infos)
                 if win_tag or not env.agents:
+                    episode['next_states'].append(episode['states'][-1])
                     episode['next_avail_actions'].append(default_avail_actions)
                     break
-                #if not env.agents:  # Game has ended
-                #    episode['next_avail_actions'].append(default_avail_actions)
-                #    break
+                episode['next_states'].append(env.state())
 
             # Update Alive agent mask
             alive_mask = ensure_all_agents_present({agent: True for agent in env.agents}, default_alive_mask)
@@ -207,9 +206,6 @@ def persistent_env_rollout(env_config: EnvConfig,
             actions, all_actions = ret['actions'], ret['all_actions']
             edge_indices = ret.get('edge_indices', None)
 
-        # Check if the game was won using the provided function
-        #if check_victory is not None:
-        #    win_tag = check_victory(env, infos)
         episode['win_tag'] = win_tag
         episode['episode_length'] = len(episode['observations'])
         episode['episode_reward'] = episode_reward
