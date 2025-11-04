@@ -161,7 +161,7 @@ def persistent_env_rollout(env_config: EnvConfig,
                 episode['rewards'].append(rewards)
                 episode['truncations'].append(truncations)
                 episode['terminations'].append(terminations)
-                #episode['next_states'].append(env.state()) # When game end, getting state may cause error
+                #episode['next_states'].append(env.state()) # Avoid accessing state when game ends
                 episode['next_observations'].append(observations)
 
                 # Update episode reward

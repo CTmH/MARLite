@@ -16,7 +16,13 @@ dependencies = [
     "pettingzoo[butterfly,mpe]>=1.25.0",
     "smac-pettingzoo",
     "magent2",
+    "sumo-rl",
+    "pyvirtualdisplay",
 ]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["marlite*"]
 
 [project.scripts]
 marlite = "main:main"
@@ -40,6 +46,7 @@ index-strategy = "unsafe-best-match"
 smac-pettingzoo = { git = "https://github.com/CTmH/SMAC-PettingZoo.git" }
 magent2 = { git = "https://github.com/CTmH/MAgent2.git" }
 dm_env = { git = "https://github.com/CTmH/dm_env.git" }
+sumo-rl = { git = "https://github.com/LucasAlegre/sumo-rl.git" }
 torch = { index = "pytorch-rocm" }
 
 [[tool.uv.index]]
@@ -49,6 +56,6 @@ default = true
 
 [[tool.uv.index]]
 name = "pytorch-rocm"
-#url = "https://download.pytorch.org/whl/rocm6.4"
-url = "https://download.pytorch.org/whl/nightly/rocm7.0"
+url = "https://download.pytorch.org/whl/rocm6.4"
+#url = "https://download.pytorch.org/whl/nightly/rocm7.0"
 default = false
