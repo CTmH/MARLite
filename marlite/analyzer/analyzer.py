@@ -6,11 +6,14 @@ from marlite.rollout import RolloutManagerConfig
 from marlite.algorithm.agents import AgentGroupConfig
 
 class Analyzer:
-    def __init__(self,
-                 workdir: str,
-                 env_config: EnvConfig,
-                 agent_group_config: AgentGroupConfig,
-                 rolloutmanager_config: RolloutManagerConfig):
+    def __init__(
+        self,
+        workdir: str,
+        env_config: EnvConfig,
+        agent_group_config: AgentGroupConfig,
+        rolloutmanager_config: RolloutManagerConfig,
+        checkpoint: str = "best",  # New parameter
+    ):
         """
         Analyzer class to load the best model and analyze various features of the model
 
@@ -19,11 +22,13 @@ class Analyzer:
             env_config: Environment configuration
             agent_group_config: Agent group configuration
             rolloutmanager_config: Rollout manager configuration
+            checkpoint: Name of the checkpoint to load (e.g., 'best', '1', '2') — default is 'best'
         """
         self.workdir = workdir
         self.env_config = env_config
         self.agent_group_config = agent_group_config
         self.rolloutmanager_config = rolloutmanager_config
+        self.checkpoint = checkpoint  # Store checkpoint name
 
         # Directory paths
         self.checkpointdir = os.path.join(workdir, 'checkpoints')
@@ -32,14 +37,14 @@ class Analyzer:
         # Create agent group
         self.agent_group = agent_group_config.get_agent_group()
 
-        # Load best model
-        self.load_best_model()
+        # Load model from specified checkpoint
+        self.load_checkpoint_model()
 
-    def load_best_model(self):
-        """Load the best model parameters from the work directory"""
-        agent_path = os.path.join(self.checkpointdir, 'best', 'agent')
+    def load_checkpoint_model(self):
+        """Load model parameters from the specified checkpoint"""
+        agent_path = os.path.join(self.checkpointdir, self.checkpoint, 'agent')
         self.agent_group.load_params(agent_path)
-        logging.info(f"Successfully loaded best model parameters: {agent_path}")
+        logging.info(f"Successfully loaded model from checkpoint: {agent_path}")
 
     def generate_episodes(self, epsilon: float = 0.01):
         """
@@ -242,6 +247,67 @@ class Analyzer:
         negative_counts = {agent_id: negative_counts.get(agent_id, 0) for agent_id, _ in self.agent_group.agent_model_dict.items()}
         return negative_counts
 
+    def analyze_surviving_agents(self, episodes):
+        """
+        Analyze the number of surviving agents at the end of each episode.
+
+        Parameters:
+            episodes: List of episodes to analyze
+
+        Returns:
+            Dictionary with statistics on the number of surviving agents per episode
+        """
+        survival_counts = []
+        for episode in episodes:
+            alive_mask_sequence = episode.get('alive_mask')
+            if alive_mask_sequence is not None and len(alive_mask_sequence) > 0:
+                final_alive_mask = alive_mask_sequence[-1]  # Last step's alive mask
+                count = sum(1 for alive in final_alive_mask.values() if alive)
+                survival_counts.append(count)
+
+        if not survival_counts:
+            return None
+
+        data = np.array(survival_counts)
+        return {
+            'mean': float(np.mean(data)),
+            'std': float(np.std(data)),
+            'min': float(np.min(data)),
+            'max': float(np.max(data)),
+            'median': float(np.median(data)),
+            'total_episodes': len(survival_counts)
+        }
+
+    def analyze_win_rate(self, episodes):
+        """
+        Analyze the win rate across all episodes.
+
+        Parameters:
+            episodes: List of episodes to analyze
+
+        Returns:
+            Dictionary with statistics on win rate
+        """
+        win_results = []
+        for episode in episodes:
+            win_tag = episode.get('win_tag')
+            if win_tag is not None:
+                # Assume win_tag is a boolean or int (1 for win, 0 for loss)
+                win_results.append(1 if win_tag else 0)
+
+        if not win_results:
+            return None
+
+        data = np.array(win_results)
+        return {
+            'win_rate': float(np.mean(data)),
+            'std': float(np.std(data)),
+            'variance': float(np.var(data)),
+            'total_episodes': len(win_results),
+            'wins': int(np.sum(data)),
+            'losses': len(win_results) - int(np.sum(data)),
+        }
+
     def comprehensive_analysis(self, epsilon: float = 0.01):
         """
         Perform a comprehensive analysis and return all results
@@ -263,4 +329,6 @@ class Analyzer:
             'negative_rewards_per_episode': self.analyze_negative_rewards_per_episode(episodes),
             'positive_rewards': self.analyze_positive_rewards(episodes),
             'negative_rewards': self.analyze_negative_rewards(episodes),
+            'surviving_agents': self.analyze_surviving_agents(episodes),
+            'win_rate': self.analyze_win_rate(episodes),
         }

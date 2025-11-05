@@ -19,15 +19,26 @@ class AnalyzerConfig:
             'Default': Analyzer
         }
 
-    def create_analyzer(self, analyzer_type: str = 'Default') -> Analyzer:
+    def create_analyzer(self, analyzer_type: str = 'Default', checkpoint: str = "best") -> Analyzer:
+        """
+        Create an analyzer instance.
+
+        Parameters:
+            analyzer_type: Type of analyzer to create (default: 'Default')
+            checkpoint: Name of the checkpoint to load (e.g., 'best', '1', '2') — default is 'best'
+
+        Returns:
+            An initialized Analyzer instance
+        """
         if analyzer_type in self.registered_analyzers:
-            trainer_class = self.registered_analyzers[analyzer_type]
-            analyzer = trainer_class(
+            analyzer_class = self.registered_analyzers[analyzer_type]
+            analyzer = analyzer_class(
                 workdir=self.workdir,
                 env_config=self.env_config,
                 agent_group_config=self.agent_group_config,
                 rolloutmanager_config=self.rolloutmanager_config,
+                checkpoint=checkpoint,  # Pass checkpoint name
             )
         else:
-            raise ValueError(f"Unsupported algorithm: {analyzer_type}")
+            raise ValueError(f"Unsupported analyzer type: {analyzer_type}")
         return analyzer
