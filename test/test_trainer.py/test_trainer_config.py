@@ -32,7 +32,7 @@ class TestTrainerConfig(unittest.TestCase):
             self.config['replaybuffer_config']['capacity'] = 5
             self.config['trainer_config']['workdir'] = temp_dir
             self.trainer_config = TrainerConfig(self.config)
-            best_reward, _ = self.trainer_config.run()
+            best_metrics = self.trainer_config.run()
 
 class TestTrainerConfigWithKAZConfig(unittest.TestCase):
     def setUp(self):
@@ -62,7 +62,7 @@ class TestTrainerConfigWithKAZConfig(unittest.TestCase):
             self.config['replaybuffer_config']['capacity'] = 5
             self.config['trainer_config']['workdir'] = temp_dir
             self.trainer_config = TrainerConfig(self.config)
-            best_reward, _ = self.trainer_config.run()
+            best_metrics = self.trainer_config.run()
 
 class TestTrainerConfigWithMAgentPredator(unittest.TestCase):
     def setUp(self):
@@ -95,7 +95,7 @@ class TestTrainerConfigWithMAgentPredator(unittest.TestCase):
             self.config['replaybuffer_config']['capacity'] = 5
             self.config['trainer_config']['workdir'] = temp_dir
             self.trainer_config = TrainerConfig(self.config)
-            best_reward, _ = self.trainer_config.run()
+            best_metrics = self.trainer_config.run()
 
 class TestTrainerConfigWithMAgentPrey(unittest.TestCase):
     def setUp(self):
@@ -128,7 +128,7 @@ class TestTrainerConfigWithMAgentPrey(unittest.TestCase):
             self.config['replaybuffer_config']['capacity'] = 5
             self.config['trainer_config']['workdir'] = temp_dir
             self.trainer_config = TrainerConfig(self.config)
-            best_reward, _ = self.trainer_config.run()
+            best_metrics = self.trainer_config.run()
 
 class TestTrainerConfigWithMAgentBattlefield(unittest.TestCase):
     def setUp(self):
@@ -161,4 +161,4 @@ class TestTrainerConfigWithMAgentBattlefield(unittest.TestCase):
             self.config['replaybuffer_config']['capacity'] = 5
             self.config['trainer_config']['workdir'] = temp_dir
             self.trainer_config = TrainerConfig(self.config)
-            best_reward, _ = self.trainer_config.run()
+            best_metrics = self.trainer_config.run()

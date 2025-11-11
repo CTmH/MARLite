@@ -209,6 +209,9 @@ replaybuffer_config:
   traj_len: 1
   priority_attr: "all_agents_sum_rewards"
 
+analyzer_config:
+  type: "default"
+
 trainer_config:
   type: "GraphQMIX"
   gamma: 0.95
@@ -219,7 +222,7 @@ trainer_config:
 
   train_args:
     epochs: 100
-    target_reward: 1000
+    target_first_metric: 1000
     eval_interval: 4
     batch_size: 1024
     learning_times_per_epoch: 1

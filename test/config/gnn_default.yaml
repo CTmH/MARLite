@@ -75,8 +75,8 @@ agent_group_config:
     n_workers: 20
     n_subgraphs: 5
     valid_node_list: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24]
+    target_node_list: [36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71]
     update_interval: 5
-    channel_first: true
   graph_model_config:
     model_type: "GAT"
     input_dim: 128
@@ -225,6 +225,9 @@ replaybuffer_config:
   traj_len: 5
   priority_attr: "all_agents_sum_rewards"
 
+analyzer_config:
+  type: "default"
+
 trainer_config:
   type: "GraphQMIX"
   gamma: 0.95
@@ -235,7 +238,7 @@ trainer_config:
 
   train_args:
     epochs: 100
-    target_reward: 1000
+    target_first_metric: 1000
     eval_interval: 4
     batch_size: 1024
     learning_times_per_epoch: 1

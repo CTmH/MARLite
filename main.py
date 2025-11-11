@@ -1,7 +1,7 @@
 import argparse
 import yaml
 from marlite.trainer.trainer_config import TrainerConfig
-from marlite.analyzer.analyzer_config import AnalyzerConfig
+from marlite.experiment_analyzer.experiment_analyzer_config import ExperimentAnalyzerConfig
 
 def train(config_path):
     with open(config_path, 'r') as file:
@@ -9,14 +9,14 @@ def train(config_path):
     trainer_config = TrainerConfig(config)
     trainer_config.create_trainer()
     results = trainer_config.run()
-    print("Training completed. Results:\n", results)
+    print("Training completed.")
 
 def analyze(config_path, output_path, checkpoint="best"):
     with open(config_path, 'r') as f:
         config_data = yaml.safe_load(f)
 
     # Create configuration objects
-    analyzer_config = AnalyzerConfig(config_data)
+    analyzer_config = ExperimentAnalyzerConfig(config_data)
     analyzer = analyzer_config.create_analyzer(checkpoint=checkpoint)
     analysis_results = analyzer.comprehensive_analysis()
 

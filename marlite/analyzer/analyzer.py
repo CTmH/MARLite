@@ -1,73 +1,42 @@
-import os
+# marlite/analyzer/episode_analyzer.py
 import numpy as np
-from absl import logging
-from marlite.environment import EnvConfig
-from marlite.rollout import RolloutManagerConfig
-from marlite.algorithm.agents import AgentGroupConfig
+from typing import Dict, Any
 
 class Analyzer:
-    def __init__(
-        self,
-        workdir: str,
-        env_config: EnvConfig,
-        agent_group_config: AgentGroupConfig,
-        rolloutmanager_config: RolloutManagerConfig,
-        checkpoint: str = "best",  # New parameter
-    ):
+    """
+    EpisodeAnalyzer class to perform comprehensive analysis on episodes
+
+    This class contains all the data analysis functionality that was previously
+    in the Analyzer class, but separated to follow single responsibility principle.
+    """
+
+    def _calculate_statistics(self, data, include_total=False):
         """
-        Analyzer class to load the best model and analyze various features of the model
+        Calculate common statistics for numerical data
 
         Parameters:
-            workdir: Directory path where results are saved
-            env_config: Environment configuration
-            agent_group_config: Agent group configuration
-            rolloutmanager_config: Rollout manager configuration
-            checkpoint: Name of the checkpoint to load (e.g., 'best', '1', '2') — default is 'best'
-        """
-        self.workdir = workdir
-        self.env_config = env_config
-        self.agent_group_config = agent_group_config
-        self.rolloutmanager_config = rolloutmanager_config
-        self.checkpoint = checkpoint  # Store checkpoint name
-
-        # Directory paths
-        self.checkpointdir = os.path.join(workdir, 'checkpoints')
-        self.logdir = os.path.join(workdir, 'logs')
-
-        # Create agent group
-        self.agent_group = agent_group_config.get_agent_group()
-
-        # Load model from specified checkpoint
-        self.load_checkpoint_model()
-
-    def load_checkpoint_model(self):
-        """Load model parameters from the specified checkpoint"""
-        agent_path = os.path.join(self.checkpointdir, self.checkpoint, 'agent')
-        self.agent_group.load_params(agent_path)
-        logging.info(f"Successfully loaded model from checkpoint: {agent_path}")
-
-    def generate_episodes(self, epsilon: float = 0.01):
-        """
-        Generate multiple episodes using the best model
-
-        Parameters:
-            num_episodes: Number of episodes to generate
-            epsilon: Exploration rate
+            data: List or array of numerical data
+            include_total: Whether to include total count in results
 
         Returns:
-            List of generated episodes
+            Dictionary with statistical measures or None if data is empty
         """
-        manager = self.rolloutmanager_config.create_eval_manager(
-            self.agent_group,
-            self.env_config,
-            epsilon,
-        )
+        if not data:
+            return None
 
-        logging.info(f"Generating {manager.n_episodes} episodes using the best model...")
-        episodes = manager.generate_episodes()
-        manager.cleanup()
+        data = np.array(data)
+        result = {
+            'mean': float(np.mean(data)),
+            'std': float(np.std(data)),
+            'min': float(np.min(data)),
+            'max': float(np.max(data)),
+            'median': float(np.median(data)),
+        }
 
-        return episodes
+        if include_total:
+            result['total'] = len(data)
+
+        return result
 
     def analyze_decision_distribution(self, episodes):
         """
@@ -87,12 +56,12 @@ class Analyzer:
                         decision_stats[agent_id] = {}
                     decision_stats[agent_id][action] = decision_stats[agent_id].get(action, 0) + 1
 
-        decision_stats = {agent_id: decision_stats[agent_id] for agent_id, _ in self.agent_group.agent_model_dict.items()}
-
+        # Normalize to get probabilities
         for agent_id, actions in decision_stats.items():
             total = sum(actions.values())
-            for action in actions:
-                actions[action] /= total
+            if total > 0:
+                for action in actions:
+                    actions[action] /= total
 
         return decision_stats
 
@@ -107,13 +76,7 @@ class Analyzer:
             Dictionary with statistics on rewards
         """
         rewards = [ep['episode_reward'] for ep in episodes]
-        return {
-            'mean': float(np.mean(rewards)),
-            'std': float(np.std(rewards)),
-            'min': float(np.min(rewards)),
-            'max': float(np.max(rewards)),
-            'median': float(np.median(rewards)),
-        }
+        return self._calculate_statistics(rewards)
 
     def analyze_edge_counts(self, episodes):
         """
@@ -133,17 +96,26 @@ class Analyzer:
                 else:
                     edge_counts.append(0)
 
-        if not edge_counts:
-            return None
+        return self._calculate_statistics(edge_counts)
 
-        edge_counts = np.array(edge_counts)
-        return {
-            'mean': float(np.mean(edge_counts)),
-            'std': float(np.std(edge_counts)),
-            'min': float(np.min(edge_counts)),
-            'max': float(np.max(edge_counts)),
-            'median': float(np.median(edge_counts)),
-        }
+    def analyze_rewards_per_step(self, episodes, reward_condition):
+        """
+        Analyze reward occurrences per step across all episodes based on condition
+
+        Parameters:
+            episodes: List of episodes to analyze
+            reward_condition: Function that takes a reward and returns True/False
+
+        Returns:
+            Dictionary with statistics of reward counts per step
+        """
+        step_counts = []
+        for episode in episodes:
+            for step_rewards in episode['rewards']:
+                count = sum(1 for reward in step_rewards.values() if reward_condition(reward))
+                step_counts.append(count)
+
+        return self._calculate_statistics(step_counts, include_total=True)
 
     def analyze_positive_rewards_per_step(self, episodes):
         """
@@ -155,24 +127,7 @@ class Analyzer:
         Returns:
             Dictionary with statistics of positive reward counts per step
         """
-        step_counts = []
-        for episode in episodes:
-            for step_rewards in episode['rewards']:
-                count = sum(1 for reward in step_rewards.values() if reward > 0)
-                step_counts.append(count)
-
-        if not step_counts:
-            return None
-
-        data = np.array(step_counts)
-        return {
-            'mean': float(np.mean(data)),
-            'std': float(np.std(data)),
-            'min': float(np.min(data)),
-            'max': float(np.max(data)),
-            'median': float(np.median(data)),
-            'total_steps': len(step_counts)
-        }
+        return self.analyze_rewards_per_step(episodes, lambda x: x > 0)
 
     def analyze_negative_rewards_per_episode(self, episodes):
         """
@@ -192,18 +147,29 @@ class Analyzer:
                 episode_count += count
             episode_counts.append(episode_count)
 
-        if not episode_counts:
-            return None
+        return self._calculate_statistics(episode_counts, include_total=True)
 
-        data = np.array(episode_counts)
-        return {
-            'mean': float(np.mean(data)),
-            'std': float(np.std(data)),
-            'min': float(np.min(data)),
-            'max': float(np.max(data)),
-            'median': float(np.median(data)),
-            'total_episodes': len(episode_counts)
-        }
+    def analyze_reward_counts(self, episodes, reward_condition):
+        """
+        Analyze the count of reward occurrences for each agent based on condition
+
+        Parameters:
+            episodes: List of episodes to analyze
+            reward_condition: Function that takes a reward and returns True/False
+
+        Returns:
+            Dictionary with agent-wise counts of rewards meeting the condition
+        """
+        counts = {}
+        for episode in episodes:
+            for step_rewards in episode['rewards']:
+                for agent_id, reward in step_rewards.items():
+                    if reward_condition(reward):
+                        if agent_id not in counts:
+                            counts[agent_id] = 0
+                        counts[agent_id] += 1
+
+        return counts
 
     def analyze_positive_rewards(self, episodes):
         """
@@ -215,16 +181,7 @@ class Analyzer:
         Returns:
             Dictionary with agent-wise counts of positive rewards
         """
-        positive_counts = {}
-        for episode in episodes:
-            for step_rewards in episode['rewards']:
-                for agent_id, reward in step_rewards.items():
-                    if reward > 0:
-                        if agent_id not in positive_counts:
-                            positive_counts[agent_id] = 0
-                        positive_counts[agent_id] += 1
-        positive_counts = {agent_id: positive_counts.get(agent_id, 0) for agent_id, _ in self.agent_group.agent_model_dict.items()}
-        return positive_counts
+        return self.analyze_reward_counts(episodes, lambda x: x > 0)
 
     def analyze_negative_rewards(self, episodes):
         """
@@ -236,16 +193,7 @@ class Analyzer:
         Returns:
             Dictionary with agent-wise counts of negative rewards
         """
-        negative_counts = {}
-        for episode in episodes:
-            for step_rewards in episode['rewards']:
-                for agent_id, reward in step_rewards.items():
-                    if reward < 0:
-                        if agent_id not in negative_counts:
-                            negative_counts[agent_id] = 0
-                        negative_counts[agent_id] += 1
-        negative_counts = {agent_id: negative_counts.get(agent_id, 0) for agent_id, _ in self.agent_group.agent_model_dict.items()}
-        return negative_counts
+        return self.analyze_reward_counts(episodes, lambda x: x < 0)
 
     def analyze_surviving_agents(self, episodes):
         """
@@ -265,18 +213,7 @@ class Analyzer:
                 count = sum(1 for alive in final_alive_mask.values() if alive)
                 survival_counts.append(count)
 
-        if not survival_counts:
-            return None
-
-        data = np.array(survival_counts)
-        return {
-            'mean': float(np.mean(data)),
-            'std': float(np.std(data)),
-            'min': float(np.min(data)),
-            'max': float(np.max(data)),
-            'median': float(np.median(data)),
-            'total_episodes': len(survival_counts)
-        }
+        return self._calculate_statistics(survival_counts, include_total=True)
 
     def analyze_win_rate(self, episodes):
         """
@@ -299,31 +236,27 @@ class Analyzer:
             return None
 
         data = np.array(win_results)
+        win_rate = float(np.mean(data))
         return {
-            'win_rate': float(np.mean(data)),
-            'std': float(np.std(data)),
-            'variance': float(np.var(data)),
-            'total_episodes': len(win_results),
+            'win_rate': win_rate,
             'wins': int(np.sum(data)),
-            'losses': len(win_results) - int(np.sum(data)),
+            'losses': len(data) - int(np.sum(data)),
+            'mean': win_rate # For compatibility
         }
 
-    def comprehensive_analysis(self, epsilon: float = 0.01):
+    def __call__(self, episodes) -> Dict[str, Any]:
         """
-        Perform a comprehensive analysis and return all results
+        Perform comprehensive analysis on episodes
 
         Parameters:
-            num_episodes: Number of episodes to use for analysis
-            epsilon: Exploration rate
+            episodes: List of episodes to analyze
 
         Returns:
             Dictionary containing all analysis results
         """
-        episodes = self.generate_episodes(epsilon)
-
         return {
             'decision_distribution': self.analyze_decision_distribution(episodes),
-            'reward_distribution': self.analyze_reward_distribution(episodes),
+            'reward': self.analyze_reward_distribution(episodes),
             'edge_counts': self.analyze_edge_counts(episodes),
             'positive_rewards_per_step': self.analyze_positive_rewards_per_step(episodes),
             'negative_rewards_per_episode': self.analyze_negative_rewards_per_episode(episodes),

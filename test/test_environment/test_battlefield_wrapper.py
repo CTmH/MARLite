@@ -114,7 +114,7 @@ class TestBattleFieldWrapper(unittest.TestCase):
             def __init__(self):
                 self.agents = [f'red_{i}' for i in range(12)] + [f'blue_{i}' for i in range(12)]
                 self.possible_agents = self.agents[:]
-                self.observation_spaces = {agent: (5, 5) for agent in self.possible_agents}
+                self.observation_spaces = {agent: np.zeros((5, 5)) for agent in self.possible_agents}
                 self.action_spaces = {agent: (0, 5) for agent in self.possible_agents}
             def state(self):
                 return state

@@ -78,8 +78,8 @@ class TestMsgAggrQMIXTrainer(unittest.TestCase):
             self.trainer.workdir = temp_dir
             self.trainer.logdir = os.path.join(self.trainer.workdir, 'logs')
             self.trainer.checkpointdir = os.path.join(self.trainer.workdir, 'checkpoints')
-            reward, _, _ = self.trainer.evaluate()
-            best_reward, _ = self.trainer.train(epochs=2, target_reward=5)
+            result = self.trainer.evaluate()
+            best_metrics = self.trainer.train(epochs=2, target_first_metric=5)
 
 class TestMsgAggrSMACQMIXTrainer(unittest.TestCase):
     def setUp(self):
@@ -152,8 +152,8 @@ class TestMsgAggrSMACQMIXTrainer(unittest.TestCase):
             self.trainer.workdir = temp_dir
             self.trainer.logdir = os.path.join(self.trainer.workdir, 'logs')
             self.trainer.checkpointdir = os.path.join(self.trainer.workdir, 'checkpoints')
-            reward, _, _ = self.trainer.evaluate()
-            best_reward, _ = self.trainer.train(epochs=2, target_reward=5)
+            result = self.trainer.evaluate()
+            best_metrics = self.trainer.train(epochs=2, target_first_metric=5)
 
     def test_data_parallel(self):
         self.config_path = 'test/config/msg_aggr_smac.yaml'
@@ -279,8 +279,8 @@ class TestSeqMsgAggrSMACQMIXTrainer(unittest.TestCase):
             self.trainer.workdir = temp_dir
             self.trainer.logdir = os.path.join(self.trainer.workdir, 'logs')
             self.trainer.checkpointdir = os.path.join(self.trainer.workdir, 'checkpoints')
-            reward, _, _ = self.trainer.evaluate()
-            best_reward, _ = self.trainer.train(epochs=2, target_reward=5)
+            result = self.trainer.evaluate()
+            best_metrics = self.trainer.train(epochs=2, target_first_metric=5)
 
     def test_data_parallel(self):
         self.config_path = 'test/config/msg_aggr_smac.yaml'
@@ -406,8 +406,8 @@ class TestProbSeqMsgAggrSMACQMIXTrainer(unittest.TestCase):
             self.trainer.workdir = temp_dir
             self.trainer.logdir = os.path.join(self.trainer.workdir, 'logs')
             self.trainer.checkpointdir = os.path.join(self.trainer.workdir, 'checkpoints')
-            reward, _, _ = self.trainer.evaluate()
-            best_reward, _ = self.trainer.train(epochs=2, target_reward=5)
+            result = self.trainer.evaluate()
+            best_metrics = self.trainer.train(epochs=2, target_first_metric=5)
 
     def test_data_parallel(self):
         self.config_path = 'test/config/prob_seq_msg_aggr_smac.yaml'
@@ -533,8 +533,8 @@ class TestDualPathObsMsgAggrSMACQMIXTrainer(unittest.TestCase):
             self.trainer.workdir = temp_dir
             self.trainer.logdir = os.path.join(self.trainer.workdir, 'logs')
             self.trainer.checkpointdir = os.path.join(self.trainer.workdir, 'checkpoints')
-            reward, _, _ = self.trainer.evaluate()
-            best_reward, _ = self.trainer.train(epochs=2, target_reward=5)
+            result = self.trainer.evaluate()
+            best_metrics = self.trainer.train(epochs=2, target_first_metric=5)
 
     def test_data_parallel(self):
         self.config_path = 'test/config/prob_seq_msg_aggr_smac.yaml'

@@ -7,7 +7,7 @@ import torch
 
 from marlite.trainer import TrainerConfig
 
-class TestGNNObsCommQMIXTrainer(unittest.TestCase):
+class TestObsGNNCommQMIXTrainer(unittest.TestCase):
     def setUp(self):
         self.config_path = 'test/config/gnn_obs_comm_default.yaml'
         with open(self.config_path, 'r') as file:
@@ -61,8 +61,8 @@ class TestGNNObsCommQMIXTrainer(unittest.TestCase):
             self.trainer.workdir = temp_dir
             self.trainer.logdir = os.path.join(self.trainer.workdir, 'logs')
             self.trainer.checkpointdir = os.path.join(self.trainer.workdir, 'checkpoints')
-            reward, _, _ = self.trainer.evaluate()
-            best_reward, _ = self.trainer.train(epochs=2, target_reward=5)
+            result = self.trainer.evaluate()
+            best_metrics = self.trainer.train(epochs=2, target_first_metric=5)
 
     def test_data_parallel(self):
         self.config_path = 'test/config/gnn_obs_comm_default.yaml'
@@ -118,7 +118,7 @@ class TestGNNObsCommQMIXTrainer(unittest.TestCase):
                     self.assertFalse(torch.equal(w1, w2))
 
 
-class TestPartialGNNObsCommQMIXTrainer(unittest.TestCase):
+class TestPartialObsGNNCommQMIXTrainer(unittest.TestCase):
     def setUp(self):
         self.config_path = 'test/config/partial_gat_bf.yaml'
         with open(self.config_path, 'r') as file:
@@ -172,8 +172,8 @@ class TestPartialGNNObsCommQMIXTrainer(unittest.TestCase):
             self.trainer.workdir = temp_dir
             self.trainer.logdir = os.path.join(self.trainer.workdir, 'logs')
             self.trainer.checkpointdir = os.path.join(self.trainer.workdir, 'checkpoints')
-            reward, _, _ = self.trainer.evaluate()
-            best_reward, _ = self.trainer.train(epochs=2, target_reward=5)
+            result = self.trainer.evaluate()
+            best_metrics = self.trainer.train(epochs=2, target_first_metric=5)
 
 
 if __name__ == '__main__':

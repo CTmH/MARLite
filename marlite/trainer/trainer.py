@@ -1,12 +1,14 @@
 import os
 import sys
-import csv
+import yaml
 import torch
 import random
 import datetime
+import numpy as np
 from copy import deepcopy
 from absl import logging
-import numpy as np
+from typing import List
+
 from marlite.environment import EnvConfig
 from marlite.rollout import RolloutManagerConfig
 from marlite.replaybuffer import ReplayBufferConfig
@@ -16,6 +18,7 @@ from marlite.rollout import RolloutManagerConfig
 from marlite.util.optimizer_config import OptimizerConfig
 from marlite.util.lr_scheduler_config import LRSchedulerConfig
 from marlite.util.scheduler import Scheduler
+from marlite.analyzer import AnalyzerConfig
 
 class Trainer():
     def __init__(self,
@@ -28,6 +31,8 @@ class Trainer():
                  lr_scheduler_conf: LRSchedulerConfig,
                  rolloutmanager_config: RolloutManagerConfig,
                  replaybuffer_config: ReplayBufferConfig,
+                 analyzer_config: AnalyzerConfig,
+                 eval_metric_list: List[str] = ['reward'],
                  gamma: float = 0.9,
                  eval_epsilon: float = 0.01,
                  eval_threshold: float = 0.03,
@@ -47,9 +52,11 @@ class Trainer():
         self.eval_episodes_to_replay_ratio = eval_episodes_to_replay_ratio
         self.gamma = gamma
         self.n_workers = n_workers
+        self.eval_metric_list = eval_metric_list
 
         self.replaybuffer = replaybuffer_config.create_replaybuffer()
         self.rolloutmanager_config = rolloutmanager_config
+        self.analyzer = analyzer_config.create_analyzer()
 
         # Agent group
         self.eval_agent_group = agent_group_config.get_agent_group()
@@ -105,9 +112,7 @@ class Trainer():
             self.target_critic = torch.compile(self.target_critic.to(self.train_device)).to('cpu')
 
         # Metrics
-        self.best_mean_reward = -np.inf
-        self.best_reward_std = np.inf
-        self.best_win_rate = .0
+        self.best_metrics = {key: -np.inf for key in self.eval_metric_list}
 
         self.current_epoch = 0
 
@@ -127,10 +132,8 @@ class Trainer():
         torch.save(critic_params, os.path.join(critic_path, "critic.pth"))
         return self
 
-    def load_checkpoint(self, checkpoint: str, checkpoint_mean_reward = -np.inf, checkpoint_reward_std = np.inf, checkpoint_win_rate = .0):
-        self.best_mean_reward = checkpoint_mean_reward
-        self.best_reward_std = checkpoint_reward_std
-        self.best_win_rate = checkpoint_win_rate
+    def load_checkpoint(self, checkpoint: str):
+        self.best_metrics = {key: -np.inf for key in self.eval_metric_list}
         agent_path = os.path.join(self.checkpointdir, checkpoint, "agent")
         self.eval_agent_group.to("cpu")
         self.eval_critic.to("cpu")
@@ -181,23 +184,17 @@ class Trainer():
                                                            self.env_config,
                                                            self.eval_epsilon)
 
-        logging.info(f"Evaluating model...")
+        #logging.info(f"Evaluating model...")
         episodes = manager.generate_episodes()
         manager.cleanup()
-        rewards = np.array([episode['episode_reward'] for episode in episodes])
-        win_tags = np.array([episode['win_tag'] for episode in episodes])
-        win_rate = win_tags.mean().item()
 
-        sum_total = rewards.sum()
-        max_val = rewards.max()
-        min_val = rewards.min()
-        adjusted_sum = sum_total - max_val - min_val
-        adjusted_count = len(rewards) - 2
-        mean_reward = adjusted_sum / adjusted_count
-        mean_reward = mean_reward.item()
-        std_reward = np.std(rewards).item()
+        result = self.analyzer(episodes)
+        metrics = {key: result[key]['mean'] for key in self.eval_metric_list}
 
-        logging.info(f"Evaluation results: Mean reward {mean_reward:.4f}, Std reward {std_reward:.4f}, Win rate {win_rate:.4f}")
+        #logging.info(f"Evaluation results: Mean reward {mean_reward:.4f}, Std reward {std_reward:.4f}, Win rate {win_rate:.4f}")
+        logging.info(f"Evaluation results:")
+        for key in self.eval_metric_list:
+            logging.info(f"{key}: Mean:{result[key]['mean']:.4f} Std:{result[key].get('std', 0):.4f}")
 
         self.eval_agent_group.to("cpu")
         torch.cuda.empty_cache()
@@ -210,9 +207,9 @@ class Trainer():
             for i in sampled_indices:
                 self.replaybuffer.add_episode(episodes[i])
 
-        return mean_reward, std_reward, win_rate
+        return metrics
 
-    def train(self, epochs, target_reward, eval_interval=1, update_target_interval=1, batch_size=64, learning_times_per_epoch=1):
+    def train(self, epochs, target_first_metric, eval_interval=1, update_target_interval=1, batch_size=64, learning_times_per_epoch=1):
 
         best_loss = np.inf
         # Training loop
@@ -239,32 +236,41 @@ class Trainer():
             self.save_current_model(checkpoint_name)
             logging.info(f"Checkpoint saved at {checkpoint_name}")
 
-            mean_reward, reward_std, win_rate = self.evaluate()
-            self.save_intermediate_results(epoch, loss, mean_reward, reward_std, win_rate)
+            metrics = self.evaluate()
+            first_metric = next(iter(metrics.values()))
+            first_metric_name = next(iter(metrics.keys()))
+            self.save_intermediate_results(epoch, metrics)
 
             if isinstance(self.lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
-                self.lr_scheduler.step(mean_reward)
+                self.lr_scheduler.step(first_metric)
             elif isinstance(self.lr_scheduler, torch.optim.lr_scheduler.LRScheduler):
                 self.lr_scheduler.step()
-            self.eval_agent_group.lr_scheduler_step(mean_reward)
+            self.eval_agent_group.lr_scheduler_step(first_metric)
 
-            #if mean_reward >= self.best_mean_reward * (1 - self.eval_threshold):
-            if (mean_reward - self.best_mean_reward) / max(abs(self.best_mean_reward), 1) >= -self.eval_threshold:
+            cache_params = []
+            update_best = []
+            for metric_name in self.eval_metric_list:
+                metric = metrics[metric_name]
+                best_metric = self.best_metrics[metric_name]
+                #if mean_reward >= self.best_mean_reward * (1 - self.eval_threshold)
+                cache_params.append((metric - best_metric) / max(abs(best_metric), 1) >= -self.eval_threshold)
+                update_best.append(metric >= best_metric)
+            cache_params = np.array(cache_params, dtype=np.bool)
+            update_best = np.array(update_best, dtype=np.bool)
+
+            if cache_params.any():
                 self._cached_agent_group_params = self.eval_agent_group.get_agent_group_params()
                 self._cached_critic_params = deepcopy(self.eval_critic.state_dict())
                 logging.info(f"Epoch {epoch}: Cached parameters updated with current parameters.")
 
-            if mean_reward >= self.best_mean_reward or win_rate > self.best_win_rate:
-                self.best_mean_reward = mean_reward
-                self.best_reward_std = reward_std
-                self.best_win_rate = win_rate
-                best_loss = loss
+            if update_best.any():
+                self.best_metrics = metrics
                 self.best_agent_group_params = self.eval_agent_group.get_agent_group_params()
                 self.best_critic_params = deepcopy(self.eval_critic.state_dict())
-                logging.info(f"Epoch {epoch}: New best mean reward {self.best_mean_reward:.4f}")
+                logging.info(f"Epoch {epoch}: New best {first_metric_name}: {first_metric:.4f}")
 
-            if mean_reward >= target_reward:
-                logging.info(f"Epoch {epoch}: Target reward reached: {mean_reward:.4f} >= {target_reward:.4f}")
+            if first_metric >= target_first_metric:
+                logging.info(f"Epoch {epoch}: {first_metric_name} reached: {first_metric:.4f} >= {target_first_metric:.4f}")
                 break
 
             if epoch % eval_interval == 0:
@@ -277,21 +283,20 @@ class Trainer():
                 self.update_target_model_params()
                 logging.info(f"Epoch {epoch}: Target model updated with eval model parameters.")
 
-        self.save_intermediate_results('best', best_loss, self.best_mean_reward, self.best_reward_std, self.best_win_rate)
-        self.save_results_to_csv()
+        self.save_intermediate_results('best', metrics)
         self.save_best_model()
-        return self.best_mean_reward, self.best_reward_std
+        return self.best_metrics
 
-    def save_intermediate_results(self, epoch, loss, mean_reward, reward_std, win_rate):
-        self.training_history[epoch] = {
-            'loss': loss,
-            'mean_reward': mean_reward,
-            'reward_std': reward_std,
-            'win_rate': win_rate,
-        }
-        logging.info(f"Intermediate results saved for epoch {epoch}: Loss {loss:.4f}, " +
-                     f"Mean reward {mean_reward:.4f}, Std reward {reward_std:.4f}, Win rate {win_rate:.2f}")
+    def save_intermediate_results(self, epoch, metrics):
+        self.training_history[epoch] = metrics
+        # Save metrics to YAML file
+        os.makedirs(self.logdir, exist_ok=True)
+        yaml_path = os.path.join(self.logdir, 'results.yaml')
+        with open(yaml_path, 'w') as file:
+            yaml.dump(self.training_history, file)
+        logging.info(f"Intermediate results saved for epoch {epoch}. Results saved to {yaml_path}")
 
+'''
     def save_results_to_csv(self):
         os.makedirs(self.logdir, exist_ok=True)
         csv_path = os.path.join(self.logdir, 'results.csv')
@@ -301,3 +306,4 @@ class Trainer():
             for epoch, result in self.training_history.items():
                 writer.writerow([epoch, result['mean_reward'], result['reward_std'], result['win_rate']])
         logging.info(f"Results saved to {csv_path}")
+'''

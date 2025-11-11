@@ -61,8 +61,8 @@ class TestG2ANetQMIXTrainer(unittest.TestCase):
             self.trainer.workdir = temp_dir
             self.trainer.logdir = os.path.join(self.trainer.workdir, 'logs')
             self.trainer.checkpointdir = os.path.join(self.trainer.workdir, 'checkpoints')
-            reward, _, _ = self.trainer.evaluate()
-            best_reward, _ = self.trainer.train(epochs=2, target_reward=5)
+            result = self.trainer.evaluate()
+            best_metrics = self.trainer.train(epochs=2, target_first_metric=5)
 
     def test_data_parallel(self):
         self.config_path = 'test/config/g2anet_default.yaml'

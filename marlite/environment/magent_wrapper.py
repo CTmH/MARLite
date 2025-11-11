@@ -350,4 +350,6 @@ class BattleWrapper(MAgentWrapper):
         self.action_spaces = {agent: self.env.action_space(agent) for agent in self.possible_agents}
         self.possible_opponent_agents = [agent for agent in self.env.possible_agents if agent.startswith('blue_')]
         self.opponent_avail_actions = {agent: self.env.action_spaces[agent] for agent in self.possible_opponent_agents}
+        for agent in self.possible_opponent_agents:
+            temp_var = self.env.observation_space(agent)
         self.default_opponent_obs = {agent: np.zeros(self.env.observation_space(agent).shape, dtype=np.int8) for agent in self.possible_opponent_agents}

@@ -9,6 +9,7 @@ from marlite.replaybuffer import ReplayBufferConfig
 from marlite.util.scheduler import Scheduler
 from marlite.util.optimizer_config import OptimizerConfig
 from marlite.util.lr_scheduler_config import LRSchedulerConfig
+from marlite.analyzer import AnalyzerConfig
 from marlite.trainer.trainer import Trainer
 from marlite.trainer.qmix_trainer import QMIXTrainer
 from marlite.trainer.graph_qmix_trainer import GraphQMIXTrainer
@@ -34,6 +35,8 @@ class TrainerConfig:
         self.epsilon_scheduler = Scheduler(**self.config['epsilon_scheduler'])
         self.sample_ratio_scheduler = Scheduler(**self.config['sample_ratio_scheduler'])
 
+        self.analyzer_config = AnalyzerConfig(**self.config['analyzer_config'])
+
         self.trainer_config = self.config['trainer_config']
         self.trainer_type = self.trainer_config.pop('type')
         self.train_args = self.trainer_config.pop('train_args')
@@ -55,12 +58,13 @@ class TrainerConfig:
                 env_config=self.env_config,
                 agent_group_config = self.agent_group_config,
                 critic_config = self.critic_config,
-                epsilon_scheduler = self.epsilon_scheduler,
-                sample_ratio_scheduler = self.sample_ratio_scheduler,
+                epsilon_scheduler = deepcopy(self.epsilon_scheduler),
+                sample_ratio_scheduler = deepcopy(self.sample_ratio_scheduler),
                 critic_optimizer_config = self.critic_optimizer_config,
                 lr_scheduler_conf = self.lr_scheduler_conf,
                 rolloutmanager_config = self.rolloutmanager_config,
                 replaybuffer_config = self.replaybuffer_config,
+                analyzer_config = self.analyzer_config,
                 **self.trainer_config
             )
             if self.checkpoint:
