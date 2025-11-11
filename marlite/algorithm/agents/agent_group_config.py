@@ -202,7 +202,8 @@ def create_magent_prey_agent_group(agent_group_config: Dict[str, Any]) -> AgentG
 
 def create_magent_battle_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
     agents = agent_group_config["agent_list"]
-    return MAgentBattleAgentGroup(agents)
+    strategy = agent_group_config.get("strategy", "advanced")
+    return MAgentBattleAgentGroup(agents, strategy)
 
 registered_agent_groups = {
     "QMIX": create_qmix_agent_group,

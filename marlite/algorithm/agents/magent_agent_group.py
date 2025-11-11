@@ -88,13 +88,14 @@ class MAgentBattleAgentGroup(AgentGroup):
     Implements attack_8 (8 directions) and move_12 (12 positions within Manhattan distance 3)
     with obstacle avoidance.
     '''
-    def __init__(self, agents: Dict[str, str]) -> None:
+    def __init__(self, agents: Dict[str, str], strategy: str = "basic") -> None:
         self.agents = list(agents.keys())
+        self.strategy = strategy  # "basic" or "advanced"
 
         # Initialize constant class attributes
         self.do_nothing_action = 0
-        self.move_start_idx = 0
-        self.attack_start_idx = 12  # 1-based after 12 move actions and do_nothing
+        self.move_start_idx = 1  # move actions start at index 1 (after do_nothing)
+        self.attack_start_idx = 13  # attack actions start at index 13 (after 12 move actions and do_nothing)
         self.max_manhattan_dist = 2
         self.obs_size = 13  # 13x13 observation grid
 
@@ -121,34 +122,23 @@ class MAgentBattleAgentGroup(AgentGroup):
         if len(self.move_offsets) != 13:
             raise ValueError(f"Expected 13 move offsets, got {len(self.move_offsets)}")
 
-    def act(
+    def basic_strategy(
             self,
             observations: Dict[str, np.ndarray],
-            state: np.ndarray,
-            avail_actions: Dict[str, Any],
-            traj_padding_mask: np.ndarray,
-            alive_agents: List[str],
-            epsilon: float = .0
+            alive_agents: List[str]
         ) -> Dict[str, Any]:
         """
-        Select actions for battle environment agents with obstacle avoidance.
+        Basic strategy: Attack when possible, otherwise move toward enemies.
+        This is the original strategy from the current implementation.
 
         Args:
             observations (dict): Dictionary mapping agent IDs to observation arrays.
-                Shape: (T*obs_len*obs_len*F) where F=5 channels
-            state (numpy array): Global state information.
-            avail_actions (dict): Dictionary mapping agent IDs to action masks or spaces.
-            traj_padding_mask (numpy array): Padding mask for trajectory processing.
             alive_agents (list): List of agent IDs that are currently alive.
-            epsilon (float): Exploration rate.
 
         Returns:
-            dict: Selected actions for each agent with obstacle avoidance.
-                - 'actions': Dictionary mapping only alive agents to their selected actions
-                - 'all_actions': Dictionary mapping all agents to their selected actions
+            dict: Selected actions for each agent.
         """
         # Extract obstacle map and other team presence from observations
-        # Channel 0: obstacle/off the map, Channel 3: other team presence
         obstacle_map = {key: value[-1, :, :, 0] for key, value in observations.items()}
         other_team_presence = {key: value[-1, :, :, 3] for key, value in observations.items()}
 
@@ -194,7 +184,6 @@ class MAgentBattleAgentGroup(AgentGroup):
 
                         if enemy_at_pos:
                             # This attack action would hit an enemy
-                            # In battle environment, attacking an opponent gives reward
                             if 1 > max_enemy_value:
                                 max_enemy_value = 1
                                 best_action = self.attack_start_idx + j  # attack actions start at index 13
@@ -227,6 +216,207 @@ class MAgentBattleAgentGroup(AgentGroup):
                                 best_action = self.move_start_idx + j  # move actions start at index 1
 
             all_actions[agent] = best_action
+
+        return all_actions
+
+    def advanced_strategy(
+            self,
+            observations: Dict[str, np.ndarray],
+            alive_agents: List[str]
+        ) -> Dict[str, Any]:
+        """
+        Advanced strategy: Tactical decision making with HP management,
+        coordinated attacks, and strategic positioning.
+
+        Args:
+            observations (dict): Dictionary mapping agent IDs to observation arrays.
+            alive_agents (list): List of agent IDs that are currently alive.
+
+        Returns:
+            dict: Selected actions for each agent.
+        """
+        # Extract all relevant observation channels
+        obstacle_map = {key: value[-1, :, :, 0] for key, value in observations.items()}
+        my_team_presence = {key: value[-1, :, :, 1] for key, value in observations.items()}
+        my_team_hp = {key: value[-1, :, :, 2] for key, value in observations.items()}
+        other_team_presence = {key: value[-1, :, :, 3] for key, value in observations.items()}
+        other_team_hp = {key: value[-1, :, :, 4] for key, value in observations.items()}
+
+        # Get tensor of combined maps for pathfinding
+        combined_map = {key: obs + other for key, (obs, other) in
+                       zip(obstacle_map.keys(), zip(obstacle_map.values(), other_team_presence.values()))}
+        o_tensor = np.stack(list(combined_map.values()))
+        batch_size, n, m = o_tensor.shape
+
+        # Center coordinates (agent's current position)
+        cx = n // 2
+        cy = m // 2
+
+        all_actions = {}
+
+        for i, agent in enumerate(observations.keys()):
+            local_grid = o_tensor[i]
+            agent_pos = np.array([cx, cy])
+
+            # Get agent's current HP (from center position)
+            current_hp = my_team_hp[agent][cx, cy]
+
+            # Find nearby enemies and allies
+            enemy_positions = np.argwhere(other_team_presence[agent] > 0)
+            ally_positions = np.argwhere(my_team_presence[agent] > 0)
+
+            # Remove self from ally positions
+            ally_positions = ally_positions[~np.all(ally_positions == agent_pos, axis=1)]
+
+            # Calculate tactical metrics
+            enemy_count = len(enemy_positions)
+            ally_count = len(ally_positions)
+            enemy_hp_sum = np.sum(other_team_hp[agent][other_team_presence[agent] > 0]) if enemy_count > 0 else 0
+            ally_hp_sum = np.sum(my_team_hp[agent][my_team_presence[agent] > 0]) if ally_count > 0 else 0
+
+            # Strategy decision tree
+            best_action = self.do_nothing_action
+
+            # 1. HP Management: Retreat if low HP and outnumbered
+            if current_hp < 3 and (enemy_count > ally_count + 1 or enemy_hp_sum > ally_hp_sum * 1.5):
+                # Find safest retreat position (away from enemies)
+                best_retreat_value = -float('inf')
+
+                for j, offset in enumerate(self.move_offsets):
+                    move_pos = agent_pos + offset
+
+                    if (0 <= move_pos[0] < n and 0 <= move_pos[1] < m and
+                        local_grid[move_pos[0], move_pos[1]] == 0):
+
+                        # Calculate safety score (distance from enemies)
+                        safety_score = 0
+                        for enemy_pos in enemy_positions:
+                            dist = abs(move_pos[0] - enemy_pos[0]) + abs(move_pos[1] - enemy_pos[1])
+                            safety_score += dist  # Higher distance = safer
+
+                        # Prefer positions near allies for protection
+                        ally_proximity = 0
+                        for ally_pos in ally_positions:
+                            dist = abs(move_pos[0] - ally_pos[0]) + abs(move_pos[1] - ally_pos[1])
+                            if dist <= 2:
+                                ally_proximity += 1 / (dist + 1)
+
+                        total_value = safety_score + ally_proximity * 5
+
+                        if total_value > best_retreat_value:
+                            best_retreat_value = total_value
+                            best_action = self.move_start_idx + j
+
+            # 2. Coordinated Attack: Attack if we have numerical advantage
+            elif enemy_count > 0 and (ally_count >= enemy_count or current_hp > 5):
+                best_attack_value = -1
+
+                for j, offset in enumerate(self.attack_offsets):
+                    attack_pos = agent_pos + offset
+
+                    if (0 <= attack_pos[0] < n and 0 <= attack_pos[1] < m):
+                        enemy_at_pos = np.any(np.all(enemy_positions == attack_pos, axis=1))
+
+                        if enemy_at_pos:
+                            # Calculate attack value based on enemy HP and ally support
+                            enemy_hp = other_team_hp[agent][attack_pos[0], attack_pos[1]]
+                            attack_value = 10 - enemy_hp  # Prefer low HP enemies
+
+                            # Bonus for having allies nearby to support
+                            ally_support = 0
+                            for ally_pos in ally_positions:
+                                dist = abs(attack_pos[0] - ally_pos[0]) + abs(attack_pos[1] - ally_pos[1])
+                                if dist <= 2:
+                                    ally_support += 1
+
+                            attack_value += ally_support * 2
+
+                            if attack_value > best_attack_value:
+                                best_attack_value = attack_value
+                                best_action = self.attack_start_idx + j
+
+            # 3. Strategic Positioning: Move to better tactical positions
+            if best_action == self.do_nothing_action and len(self.move_offsets) > 0:
+                best_position_value = -float('inf')
+
+                for j, offset in enumerate(self.move_offsets):
+                    move_pos = agent_pos + offset
+
+                    if (0 <= move_pos[0] < n and 0 <= move_pos[1] < m and
+                        local_grid[move_pos[0], move_pos[1]] == 0):
+
+                        position_value = 0
+
+                        # Value based on enemy proximity (but not too close)
+                        for enemy_pos in enemy_positions:
+                            dist = abs(move_pos[0] - enemy_pos[0]) + abs(move_pos[1] - enemy_pos[1])
+                            if 2 <= dist <= 4:  # Optimal attack range
+                                position_value += 3
+                            elif dist < 2:  # Too close
+                                position_value -= 2
+
+                        # Value based on ally support
+                        for ally_pos in ally_positions:
+                            dist = abs(move_pos[0] - ally_pos[0]) + abs(move_pos[1] - ally_pos[1])
+                            if dist <= 2:  # Good for coordination
+                                position_value += 2
+
+                        # Value based on map control (center positions)
+                        center_dist = abs(move_pos[0] - cx) + abs(move_pos[1] - cy)
+                        position_value += (n - center_dist) * 0.5  # Prefer center
+
+                        if position_value > best_position_value:
+                            best_position_value = position_value
+                            best_action = self.move_start_idx + j
+
+            all_actions[agent] = best_action
+
+        return all_actions
+
+    def act(
+            self,
+            observations: Dict[str, np.ndarray],
+            state: np.ndarray,
+            avail_actions: Dict[str, Any],
+            traj_padding_mask: np.ndarray,
+            alive_agents: List[str],
+            epsilon: float = .0
+        ) -> Dict[str, Any]:
+        """
+        Select actions for battle environment agents using the specified strategy.
+
+        Args:
+            observations (dict): Dictionary mapping agent IDs to observation arrays.
+                Shape: (T*obs_len*obs_len*F) where F=5 channels
+            state (numpy array): Global state information.
+            avail_actions (dict): Dictionary mapping agent IDs to action masks or spaces.
+            traj_padding_mask (numpy array): Padding mask for trajectory processing.
+            alive_agents (list): List of agent IDs that are currently alive.
+            epsilon (float): Exploration rate.
+
+        Returns:
+            dict: Selected actions for each agent.
+                - 'actions': Dictionary mapping only alive agents to their selected actions
+                - 'all_actions': Dictionary mapping all agents to their selected actions
+        """
+        # Choose strategy based on strategy_type
+        if self.strategy == "advanced":
+            all_actions = self.advanced_strategy(observations, alive_agents)
+        else:
+            all_actions = self.basic_strategy(observations, alive_agents)
+
+        # Apply exploration with epsilon-greedy
+        if epsilon > 0:
+            for agent in all_actions.keys():
+                if np.random.random() < epsilon:
+                    # Random action from available actions
+                    if agent in avail_actions and hasattr(avail_actions[agent], '__len__'):
+                        available_actions = np.where(avail_actions[agent] > 0)[0]
+                        if len(available_actions) > 0:
+                            all_actions[agent] = np.random.choice(available_actions)
+                    else:
+                        # Fallback to random action from all possible actions
+                        all_actions[agent] = np.random.randint(0, 21)  # 21 total actions
 
         # Return actions only for alive agents
         actual_actions = {agent: all_actions[agent] for agent in alive_agents}
