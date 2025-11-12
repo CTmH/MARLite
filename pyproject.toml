@@ -59,3 +59,8 @@ name = "pytorch-rocm"
 url = "https://download.pytorch.org/whl/rocm6.4"
 #url = "https://download.pytorch.org/whl/nightly/rocm7.0"
 default = false
+
+[tool.pytest.ini_options]
+addopts = "-n auto --import-mode=importlib"
+testpaths = ["test"]
+env_files = [".env"]

@@ -1,4 +1,7 @@
+# IDE
+.vscode
 .continue
+
 # Experiment Results Folder
 results/
 analysis.ipynb

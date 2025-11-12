@@ -1,6 +1,4 @@
 # marlite/environment/magent_wrapper.py
-"""Wrapper classes for multi-agent environments with opponent agents."""
-
 from typing import Dict, Any, Tuple, List
 import numpy as np
 from collections import deque
