@@ -4,6 +4,7 @@ import importlib
 
 from marlite.environment.magent_wrapper import AdversarialPursuitPredator, AdversarialPursuitPrey, BattleWrapper
 from marlite.environment.smac_wrapper import SMACWrapper
+from marlite.environment.sumo_wrapper import SUMOWrapper
 
 REGISTERED_WRAPPERS = {
     'adversarial_pursuit_predator': AdversarialPursuitPredator,
@@ -11,6 +12,7 @@ REGISTERED_WRAPPERS = {
     'battle': BattleWrapper,
     'battlefield': BattleWrapper,
     'smac': SMACWrapper,
+    'sumo': SUMOWrapper
 }
 
 class EnvConfig():

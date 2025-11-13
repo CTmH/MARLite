@@ -5,12 +5,14 @@ from copy import deepcopy
 from marlite.analyzer.analyzer import Analyzer
 from marlite.analyzer.magent_analyzer import MAgentAnalyzer
 from marlite.analyzer.smac_analyzer import SMACAnalyzer
+from marlite.analyzer.sumo_analyzer import SUMOAnalyzer
 
 # Registry of available analyzer classes
 REGISTERED_ANALYZERS: Dict[str, Type] = {
     "default": Analyzer,
-    "Magent": MAgentAnalyzer,
-    "SMAC": SMACAnalyzer
+    "magent": MAgentAnalyzer,
+    "smac": SMACAnalyzer,
+    "sumo": SUMOAnalyzer,
 }
 
 class AnalyzerConfig:

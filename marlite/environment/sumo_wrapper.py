@@ -51,14 +51,18 @@ class SUMOWrapper(BaseParallelWrapper):
 
         return state_matrix
 
-    def reset(self) -> Tuple[Dict[str, np.ndarray], Dict[str, Any]]:
+    def reset(self, seed: int = None, options: Dict[str, Any] = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """
         Reset the environment and cache the state matrix.
+
+        Args:
+            seed: Random seed for reproducibility
+            options: Additional reset options
 
         Returns:
             Tuple of (observations, infos)
         """
-        observations, infos = self.env.reset()
+        observations, infos = self.env.reset(seed=seed, options=options)
 
         # Update agent list
         self.agents = self.env.agents

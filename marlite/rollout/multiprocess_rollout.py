@@ -52,6 +52,7 @@ def multiprocess_rollout(env_config: EnvConfig,
         'next_states': [],
         'next_observations': [],
         'next_avail_actions': [],
+        'infos': [],
         'all_agents_sum_rewards': [],
         'episode_reward': 0,
         'win_tag': False,
@@ -123,7 +124,7 @@ def multiprocess_rollout(env_config: EnvConfig,
             episode['edge_indices'].append(edge_indices)
             episode['actions'].append(all_actions)
             episode['avail_actions'].append(avail_actions)
-
+            episode['infos'].append(infos)
             # Step environment
             try:
                 observations, rewards, terminations, truncations, infos = env.step(actions)
