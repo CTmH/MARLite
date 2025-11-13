@@ -189,7 +189,6 @@ class Trainer():
         manager.cleanup()
 
         result = self.analyzer(episodes)
-        metrics = {key: result[key]['mean'] for key in self.eval_metric_list}
 
         #logging.info(f"Evaluation results: Mean reward {mean_reward:.4f}, Std reward {std_reward:.4f}, Win rate {win_rate:.4f}")
         logging.info(f"Evaluation results:")
@@ -207,7 +206,7 @@ class Trainer():
             for i in sampled_indices:
                 self.replaybuffer.add_episode(episodes[i])
 
-        return metrics
+        return result
 
     def train(self, epochs, target_first_metric, eval_interval=1, update_target_interval=1, batch_size=64, learning_times_per_epoch=1):
 
@@ -236,10 +235,11 @@ class Trainer():
             self.save_current_model(checkpoint_name)
             logging.info(f"Checkpoint saved at {checkpoint_name}")
 
-            metrics = self.evaluate()
+            result = self.evaluate()
+            metrics = {key: result[key]['mean'] for key in self.eval_metric_list}
             first_metric = next(iter(metrics.values()))
             first_metric_name = next(iter(metrics.keys()))
-            self.save_intermediate_results(epoch, metrics)
+            self.save_intermediate_results(epoch, result)
 
             if isinstance(self.lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
                 self.lr_scheduler.step(first_metric)
@@ -283,7 +283,7 @@ class Trainer():
                 self.update_target_model_params()
                 logging.info(f"Epoch {epoch}: Target model updated with eval model parameters.")
 
-        self.save_intermediate_results('best', metrics)
+        logging.info(f"Best strategy: {yaml.dump(self.best_metrics, default_flow_style=False, sort_keys=False)}")
         self.save_best_model()
         return self.best_metrics
 

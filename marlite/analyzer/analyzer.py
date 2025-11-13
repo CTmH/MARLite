@@ -38,6 +38,19 @@ class Analyzer:
 
         return result
 
+    def analyze_episode_length_distribution(self, episodes):
+        """
+        Analyze the distribution of episode lengths across all episodes.
+
+        Parameters:
+            episodes: List of episodes to analyze
+
+        Returns:
+            Dictionary with statistics on episode lengths
+        """
+        lengths = [len(episode['rewards']) for episode in episodes]
+        return self._calculate_statistics(lengths, include_total=False)
+
     def analyze_decision_distribution(self, episodes):
         """
         Analyze decision distribution of each agent
@@ -258,10 +271,11 @@ class Analyzer:
             'decision_distribution': self.analyze_decision_distribution(episodes),
             'reward': self.analyze_reward_distribution(episodes),
             'edge_counts': self.analyze_edge_counts(episodes),
-            'positive_rewards_per_step': self.analyze_positive_rewards_per_step(episodes),
-            'negative_rewards_per_episode': self.analyze_negative_rewards_per_episode(episodes),
-            'positive_rewards': self.analyze_positive_rewards(episodes),
-            'negative_rewards': self.analyze_negative_rewards(episodes),
+            #'positive_rewards_per_step': self.analyze_positive_rewards_per_step(episodes),
+            #'negative_rewards_per_episode': self.analyze_negative_rewards_per_episode(episodes),
+            #'positive_rewards': self.analyze_positive_rewards(episodes),
+            #'negative_rewards': self.analyze_negative_rewards(episodes),
+            'episode_length': self.analyze_episode_length_distribution(episodes),
             'surviving_agents': self.analyze_surviving_agents(episodes),
             'win_rate': self.analyze_win_rate(episodes),
         }
