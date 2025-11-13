@@ -132,7 +132,7 @@ class MAgentWrapper(BaseParallelWrapper):
         possible_agents_set = set(self.possible_agents)
         for agent in observations.keys():
             if agent in possible_agents_set:
-                obs = observations[agent].astype(np.int8)
+                obs = observations[agent].astype(np.float16)
                 if self.channel_first:
                     # (H, W, C) -> (C, H, W)
                     obs = np.transpose(obs, (2, 0, 1))
@@ -162,7 +162,7 @@ class MAgentWrapper(BaseParallelWrapper):
         self.opponent_observation_history.append(self.opponent_observations)
         agent_observations = {}
         for agent in self.possible_agents:
-            obs = observations[agent].astype(np.int8)
+            obs = observations[agent].astype(np.float16)
             if self.channel_first:
                 # (H, W, C) -> (C, H, W)
                 obs = np.transpose(obs, (2, 0, 1))
@@ -182,8 +182,8 @@ class MAgentWrapper(BaseParallelWrapper):
 
         if not self.vector_state:
             if self.channel_first:
-                return np.transpose(state.astype(np.int8), (2, 0, 1))
-            return state.astype(np.int8)
+                return np.transpose(state.astype(np.float16), (2, 0, 1))
+            return state.astype(np.float16)
 
         # Find all agent positions
         agent_positions = []
@@ -219,7 +219,7 @@ class MAgentWrapper(BaseParallelWrapper):
         if not agent_ids:
             # No agents found, return empty matrix
 
-            return np.zeros((self._n_env_possible_agents, feature_dim), dtype=np.int8)
+            return np.zeros((self._n_env_possible_agents, feature_dim), dtype=np.float16)
 
         # Create feature matrix
         feature_matrix = np.zeros((self._n_env_possible_agents, feature_dim), dtype=np.float16)
@@ -292,7 +292,7 @@ class AdversarialPursuitPredator(MAgentWrapper):
         self.action_spaces = {agent: self.env.action_space(agent) for agent in self.possible_agents}
         self.possible_opponent_agents = [agent for agent in self.env.possible_agents if agent.startswith('prey_')]
         self.opponent_avail_actions = {agent: self.env.action_spaces[agent] for agent in self.possible_opponent_agents}
-        self.default_opponent_obs = {agent: np.zeros(self.env.observation_space(agent).shape, dtype=np.int8) for agent in self.possible_opponent_agents}
+        self.default_opponent_obs = {agent: np.zeros(self.env.observation_space(agent).shape, dtype=np.float16) for agent in self.possible_opponent_agents}
 
 
 class AdversarialPursuitPrey(MAgentWrapper):
@@ -322,7 +322,7 @@ class AdversarialPursuitPrey(MAgentWrapper):
         self.action_spaces = {agent: self.env.action_space(agent) for agent in self.possible_agents}
         self.possible_opponent_agents = [agent for agent in self.env.possible_agents if agent.startswith('predator_')]
         self.opponent_avail_actions = {agent: self.env.action_spaces[agent] for agent in self.possible_opponent_agents}
-        self.default_opponent_obs = {agent: np.zeros(self.env.observation_space(agent).shape, dtype=np.int8) for agent in self.possible_opponent_agents}
+        self.default_opponent_obs = {agent: np.zeros(self.env.observation_space(agent).shape, dtype=np.float16) for agent in self.possible_opponent_agents}
 
 
 class BattleWrapper(MAgentWrapper):
@@ -350,4 +350,4 @@ class BattleWrapper(MAgentWrapper):
         self.opponent_avail_actions = {agent: self.env.action_spaces[agent] for agent in self.possible_opponent_agents}
         for agent in self.possible_opponent_agents:
             temp_var = self.env.observation_space(agent)
-        self.default_opponent_obs = {agent: np.zeros(self.env.observation_space(agent).shape, dtype=np.int8) for agent in self.possible_opponent_agents}
+        self.default_opponent_obs = {agent: np.zeros(self.env.observation_space(agent).shape, dtype=np.float16) for agent in self.possible_opponent_agents}

@@ -66,7 +66,7 @@ class TestAdversarialPursuitPredator(unittest.TestCase):
 
         # Create a mock state with shape (L, L, 29)
         L = 10  # Map size
-        state = np.zeros((L, L, 29), dtype=np.int8)
+        state = np.zeros((L, L, 29), dtype=np.float16)
 
         # Define channel indices
         OBSTACLE_CHANNEL = 0

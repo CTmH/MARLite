@@ -46,7 +46,7 @@ class TestPartialGraphMAgentBuilder(unittest.TestCase):
         channels = 15  # Based on the dimensions used in the config
 
         # Initialize state with zeros
-        states = np.zeros((batch_size, height, width, channels), dtype=np.int8)
+        states = np.zeros((batch_size, height, width, channels), dtype=np.float16)
 
         # Add some agents (set presence to 1 and valid binary IDs)
         for b in range(batch_size):
@@ -84,7 +84,7 @@ class TestPartialGraphMAgentBuilder(unittest.TestCase):
         channels = 15
 
         # All zeros means no agents present
-        states = np.zeros((batch_size, height, width, channels), dtype=np.int8)
+        states = np.zeros((batch_size, height, width, channels), dtype=np.float16)
 
         # Process the states
         adj_matrix, edge_index = self.builder(states)
@@ -113,7 +113,7 @@ class TestPartialGraphMAgentBuilder(unittest.TestCase):
         channels = 15  # Based on the dimensions used in the config
 
         # Initialize state with zeros
-        states = np.zeros((batch_size, height, width, channels), dtype=np.int8)
+        states = np.zeros((batch_size, height, width, channels), dtype=np.float16)
 
         # Add some agents (set presence to 1 and valid binary IDs)
         for b in range(batch_size):
