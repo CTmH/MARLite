@@ -133,12 +133,13 @@ class MsgAggrQMIXTrainer(Trainer):
                     # Only compute message aggregation losses after warmup period
                     if self.current_epoch >= self.warmup_epochs:
                         # Message aggregation loss
-                        target = torch.ones(bs, device=self.train_device)
-                        msg_aggr_loss = self.cosine_embedding_loss(
-                            aggregated_msg,
-                            state_features.detach(),
-                            target
-                        )
+                        msg_aggr_loss = torch.functional.F.smooth_l1_loss(aggregated_msg, state_features.detach())
+                        #target = torch.ones(bs, device=self.train_device)
+                        #msg_aggr_loss = self.cosine_embedding_loss(
+                        #    aggregated_msg,
+                        #    state_features.detach(),
+                        #    target
+                        #)
 
                         self.pit_loss.to(self.train_device)
                         critic_loss = self.pit_loss(torch.stack([td_error, msg_aggr_loss]))

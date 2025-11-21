@@ -905,6 +905,6 @@ class DualPathObsMsgAggrAgentGroup(MsgAggrAgentGroup):
 
 def _init_msg_extractor(m):
     if hasattr(m, 'weight') and m.weight is not None:
-        init.normal_(m.weight, mean=0.0, std=0.01)
+        init.normal_(m.weight, mean=0.0, std=0.001)
     if hasattr(m, 'bias') and m.bias is not None:
         init.zeros_(m.bias)
