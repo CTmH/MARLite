@@ -76,7 +76,7 @@ def multiprocess_rollout(env_config: EnvConfig,
          # Reset environment
         if i == 0:
             # Generate random seed based on current time
-            seed = int(time.time() * 1000) % (2**32 - 1)
+            seed = int(time.time() * 1000) % (2**24 - 1)
 
             # Reset environment
             try:

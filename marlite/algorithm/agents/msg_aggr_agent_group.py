@@ -4,6 +4,7 @@ import os
 from copy import deepcopy
 from typing import Dict, Any, List
 from torch.nn import DataParallel
+import torch.nn.init as init
 from marlite.algorithm.model.model_config import ModelConfig
 from marlite.algorithm.model import RNNModel, Conv1DModel, AttentionModel, MaskedModel
 from marlite.algorithm.agents.agent_group import AgentGroup
@@ -729,6 +730,10 @@ class DualPathObsMsgAggrAgentGroup(MsgAggrAgentGroup):
         self.msg_feature_extractors = {model_name: config.get_model()
                                      for model_name, config in msg_feature_extractor_configs.items()}
 
+        # Apply neutral initialization to message feature extractors
+        for fe in self.msg_feature_extractors.values():
+            fe.apply(_init_msg_extractor)
+
         # Add message feature extractors to parameters to optimize
         self.params_to_optimize += [{'params': extractor.parameters()}
                                    for extractor in self.msg_feature_extractors.values()]
@@ -812,7 +817,7 @@ class DualPathObsMsgAggrAgentGroup(MsgAggrAgentGroup):
             aggregated_msg = self.aggr_model(msg, alive_mask) # (B, N, F) -> (B, F)
         else:
             aggregated_msg = self.aggr_model(msg) # (B, N, F) -> (B, F)
-        aggregated_msg_expand = aggregated_msg.unsqueeze(1).expand(-1, len(self.agent_model_dict), -1) # (B, N, F)
+        aggregated_msg_expand = aggregated_msg.unsqueeze(1).expand(-1, len(self.agent_model_dict), -1).detach() # (B, N, F)
 
         hidden_states = torch.cat((local_obs, aggregated_msg_expand), dim=-1)  # (B, N, Hidden Size(F_local_obs + F_aggregated_msg))
 
@@ -897,3 +902,9 @@ class DualPathObsMsgAggrAgentGroup(MsgAggrAgentGroup):
             fe.load_state_dict(torch.load(os.path.join(model_dir, 'msg_feature_extractor.pth'),
                                           map_location=torch.device('cpu')))
         return self
+
+def _init_msg_extractor(m):
+    if hasattr(m, 'weight') and m.weight is not None:
+        init.normal_(m.weight, mean=0.0, std=0.01)
+    if hasattr(m, 'bias') and m.bias is not None:
+        init.zeros_(m.bias)
