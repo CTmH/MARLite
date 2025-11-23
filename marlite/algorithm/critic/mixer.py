@@ -1,4 +1,3 @@
-# marlite/algorithm/critic/mixer.py
 import torch.nn as nn
 import torch
 from typing import Dict
@@ -222,7 +221,7 @@ class ProbQMixer(Mixer):
     of a Gaussian distribution, enabling stochastic sampling of state features.
     """
 
-    def __init__(self, base_model_config: ModelConfig, feature_extractor_config: ModelConfig):
+    def __init__(self, base_model_config: ModelConfig, feature_extractor_config: ModelConfig, deterministic_eval = True):
         super(ProbQMixer, self).__init__()
         self.base_model = base_model_config.get_model()
         self.feature_extractor = feature_extractor_config.get_model()
@@ -230,6 +229,8 @@ class ProbQMixer(Mixer):
             self.fe_class_name = 'MaskedModel'
         else:
             self.fe_class_name = 'Other'
+
+        self.deterministic_eval = deterministic_eval
 
     def forward(
         self,
@@ -267,11 +268,16 @@ class ProbQMixer(Mixer):
         dim = encoded_states.size(-1) // 2
         mu = encoded_states[:, :dim]  # Mean
         log_var = encoded_states[:, dim:]  # Log variance
-
-        # Reparameterization trick for gradient estimation
         std = torch.exp(0.5 * log_var)
-        eps = torch.randn_like(std)
-        sample = mu + eps * std  # Sample from N(mu, sigma^2)
+
+        # Use deterministic evaluation if enabled and not in training mode
+        if self.deterministic_eval and not self.training:
+            # Directly use mu as output without reparameterization sampling
+            sample = mu
+        else:
+            # Reparameterization trick for gradient estimation
+            eps = torch.randn_like(std)
+            sample = mu + eps * std  # Sample from N(mu, sigma^2)
 
         # Mask Q-values and compute total Q-value
         masked_q_values = q_value_from_agents * alive_mask
@@ -296,7 +302,8 @@ class ProbSeqQMixer(Mixer):
         self,
         base_model_config: ModelConfig,
         feature_extractor_config: ModelConfig,
-        seq_model_config: ModelConfig
+        seq_model_config: ModelConfig,
+        deterministic_eval = True
     ):
         """
         Initialize the Probabilistic Sequential QMixer.
@@ -310,6 +317,8 @@ class ProbSeqQMixer(Mixer):
         self.base_model = base_model_config.get_model()
         self.feature_extractor = feature_extractor_config.get_model()
         self.seq_model = seq_model_config.get_model()
+
+        self.deterministic_eval = deterministic_eval
 
         if isinstance(self.feature_extractor, MaskedModel):
             self.fe_class_name = 'MaskedModel'
@@ -376,11 +385,16 @@ class ProbSeqQMixer(Mixer):
         dim = hidden_states.size(-1) // 2
         mu = hidden_states[:, :dim]  # Mean
         log_var = hidden_states[:, dim:]  # Log variance
-
-        # Reparameterization trick
         std = torch.exp(0.5 * log_var)
-        eps = torch.randn_like(std)
-        sample = mu + eps * std  # Sample from learned distribution
+
+        # Use deterministic evaluation if enabled and not in training mode
+        if self.deterministic_eval and not self.training:
+            # Directly use mu as output without reparameterization sampling
+            sample = mu
+        else:
+            # Reparameterization trick
+            eps = torch.randn_like(std)
+            sample = mu + eps * std  # Sample from learned distribution
 
         # Mask Q-values and compute total Q-value
         masked_q_values = q_value_from_agents * alive_mask[:, -1, :]

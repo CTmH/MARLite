@@ -347,6 +347,15 @@ class TestProbSeqMsgAggrSMACQMIXTrainer(unittest.TestCase):
         self.config['replaybuffer_config']['capacity'] = 2
         self.trainer_config = TrainerConfig(self.config)
 
+    def test_deterministic_eval(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self.trainer = self.trainer_config.create_trainer()
+            self.trainer.workdir = temp_dir
+            self.trainer.logdir = os.path.join(self.trainer.workdir, 'logs')
+            self.trainer.checkpointdir = os.path.join(self.trainer.workdir, 'checkpoints')
+            self.assertFalse(self.trainer.eval_agent_group.deterministic_eval)
+            self.assertFalse(self.trainer.eval_critic.deterministic_eval)
+
     def test_collect_experience(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             self.trainer = self.trainer_config.create_trainer()

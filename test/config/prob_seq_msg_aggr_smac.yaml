@@ -1,5 +1,6 @@
 agent_group_config:
   type: "ProbSeqMsgAggr"
+  deterministic_eval: false
   agent_list:
     stalker_0: model_0
     stalker_1: model_0
@@ -96,12 +97,13 @@ epsilon_scheduler:
 
 sample_ratio_scheduler:
   type: "linear"
-  start_value: 0.7
-  end_value: 0.3
+  start_value: 8
+  end_value: 8
   decay_steps: 40
 
 critic_config:
   type: "ProbSeqQMixer"
+  deterministic_eval: false
   model:
     model_type: QMixModel
     state_shape: 64
@@ -160,6 +162,7 @@ trainer_config:
   workdir: "./test/results/test_msg_aggr_smac"
   train_device: "cpu"
   n_workers: 2
+  sample_mode: "direct"
 
   train_args:
     epochs: 2

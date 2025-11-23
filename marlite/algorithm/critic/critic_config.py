@@ -28,21 +28,21 @@ def create_seq_qmixer(critic_config: Dict[str, Any]) -> SeqQMixer:
 
 def create_prob_qmixer(critic_config: Dict[str, Any]) -> QMixer:
     """Create a QMixer critic instance from config."""
-    model_config = ModelConfig(**critic_config["model"])
-    fe_config_dict = critic_config.get("feature_extractor", {"model_type": "Identity"})
+    model_config = ModelConfig(**critic_config.pop("model"))
+    fe_config_dict = critic_config.pop("feature_extractor", {"model_type": "Identity"})
     fe_config = ModelConfig(**fe_config_dict)
-    return ProbQMixer(model_config, fe_config)
+    return ProbQMixer(model_config, fe_config, **critic_config)
 
 
 def create_prob_seq_qmixer(critic_config: Dict[str, Any]) -> SeqQMixer:
     """Create a SeqQMixer critic instance from config."""
-    model_config = ModelConfig(**critic_config["model"])
-    fe_config_dict = critic_config.get("feature_extractor", {"model_type": "Identity"})
+    model_config = ModelConfig(**critic_config.pop("model"))
+    fe_config_dict = critic_config.pop("feature_extractor", {"model_type": "Identity"})
     fe_config = ModelConfig(**fe_config_dict)
 
-    seq_model_config = ModelConfig(**critic_config["seq_model"])
+    seq_model_config = ModelConfig(**critic_config.pop("seq_model"))
 
-    return ProbSeqQMixer(model_config, fe_config, seq_model_config)
+    return ProbSeqQMixer(model_config, fe_config, seq_model_config, **critic_config)
 
 # Registry mapping critic type names to creator functions
 registered_critic_creators: Dict[str, Callable[[Dict[str, Any]], Module]] = {

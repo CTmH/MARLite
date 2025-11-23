@@ -41,7 +41,8 @@ class Trainer():
                  train_device: str = 'cpu',
                  n_workers = 1,
                  use_data_parallel: bool = False,
-                 compile_models: bool = False,):
+                 compile_models: bool = False,
+                 sample_mode: str = 'ratio'):
 
         self.env_config = env_config
         self.critic_config = critic_config
@@ -53,6 +54,12 @@ class Trainer():
         self.gamma = gamma
         self.n_workers = n_workers
         self.eval_metric_list = eval_metric_list
+        # New attribute to control sampling mode
+        self.sample_mode = sample_mode  # 'ratio' or 'direct'
+
+        # Validate sample_mode
+        if self.sample_mode not in ['ratio', 'direct']:
+            raise ValueError(f"Invalid sample_mode: {self.sample_mode}. Must be 'ratio' or 'direct'")
 
         self.replaybuffer = replaybuffer_config.create_replaybuffer()
         self.rolloutmanager_config = rolloutmanager_config
@@ -217,9 +224,14 @@ class Trainer():
 
             logging.info(f"Epoch {epoch}: Collecting experiences")
             self.collect_experience(epsilon=self.epsilon.get_value(epoch))
-            sample_ratio = self.sample_ratio.get_value(epoch)
-            sample_size = len(self.replaybuffer.buffer) * sample_ratio
-            sample_size = round(sample_size)
+
+            if self.sample_mode == 'ratio':
+                sample_ratio = self.sample_ratio.get_value(epoch)
+                sample_size = len(self.replaybuffer.buffer) * sample_ratio
+                sample_size = round(sample_size)
+            else:  # self.sample_mode == 'direct'
+                sample_size = round(self.sample_ratio.get_value(epoch))
+            sample_size = min(sample_size, len(self.replaybuffer.buffer))
 
             # Learn and update eval model
             agent_group_lr = self.eval_agent_group.optimizer.param_groups[0]['lr']

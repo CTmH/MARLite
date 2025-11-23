@@ -11,6 +11,7 @@ from marlite.algorithm.agents.agent_group import AgentGroup
 from marlite.util.optimizer_config import OptimizerConfig
 from marlite.util.lr_scheduler_config import LRSchedulerConfig
 
+
 class MsgAggrAgentGroup(AgentGroup):
     def __init__(self,
                 agent_model_dict: Dict[str, str],
@@ -320,80 +321,8 @@ class MsgAggrAgentGroup(AgentGroup):
     def reset(self) -> 'AgentGroup':
         return self
 
-
-class ObsMsgAggrAgentGroup(MsgAggrAgentGroup):
-
-    def forward(self, observations: torch.Tensor, traj_padding_mask: torch.Tensor, alive_mask: torch.Tensor) -> Dict[str, Any]:
-        msg = [None for _ in range(len(self.agent_model_dict))]
-        local_obs = [None for _ in range(len(self.agent_model_dict))]
-        for (model_name, fe), (_, enc) in zip(self.feature_extractors.items(),
-                                                self.encoders.items()):
-            selected_agents = self.model_to_agents[model_name]
-            idx = self.model_to_agent_indices[model_name]
-            # observation shape: (Batch Size, Agent Number, Time Step, Feature Dimensions) (B, N, T, F)
-            obs = observations[:,idx] # (B, N, T, *(obs_shape))
-            bs = obs.shape[0]
-            n_agents = len(selected_agents)
-            ts = obs.shape[2]
-            obs_shape = list(obs.shape[3:])
-            # Use class name checking instead of isinstance
-            model_class_name = self.model_class_names[model_name]
-            if model_class_name == 'Conv1DModel':
-                # (B, N, T, *(obs_shape)) -> (B*N*T, *(obs_shape))
-                obs = obs.reshape(bs*n_agents*ts, *obs_shape).to(self.device)
-                obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
-                obs_vectorized = obs_vectorized.reshape(bs, n_agents, ts, -1) # (B*N*T, F) -> (B, N, T, F)
-                msg_selected = obs_vectorized[:, :, -1, :] # (B, N, T, F) -> (B, N, F)
-                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B, N, T, F) -> (B*N, T, F)
-                obs_vectorized = obs_vectorized.permute(0, 2, 1) # (B*N, T, F) -> (B*N, F, T)
-                local_obs_selected = enc(obs_vectorized) # (B*N, F, T) -> (B*N, F)
-            elif model_class_name == 'RNNModel':
-                obs = obs.reshape(bs*n_agents*ts, *obs_shape).to(self.device)
-                obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
-                obs_vectorized = obs_vectorized.reshape(bs, n_agents, ts, -1) # (B*N*T, F) -> (B, N, T, F)
-                msg_selected = obs_vectorized[:, :, -1, :] # (B, N, T, F) -> (B, N, F)
-                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B, N, T, F) -> (B*N, T, F)
-                enc.train() # cudnn RNN backward can only be called in training mode
-                local_obs_selected = enc(obs_vectorized) # (B*N, T, F) -> (B*N, F)
-            elif model_class_name == 'AttentionModel':
-                obs = obs.reshape(bs*n_agents*ts, *obs_shape).to(self.device)
-                obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
-                obs_vectorized = obs_vectorized.reshape(bs, n_agents, ts, -1) # (B*N*T, F) -> (B, N, T, F)
-                msg_selected = obs_vectorized[:, :, -1, :] # (B, N, T, F) -> (B, N, F)
-                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B, N, T, F) -> (B*N, T, F)
-                mask = traj_padding_mask[:,idx]
-                mask = mask.reshape(bs*n_agents, ts)
-                local_obs_selected = enc(obs_vectorized, mask) # (B*N, T, F) -> (B*N, F)
-            else:
-                obs = obs[:,:,-1, :] # (B, N, T, *(obs_shape)) -> (B, N, *(obs_shape))
-                obs = obs.reshape(bs*n_agents, *obs_shape).to(self.device) # (B, N, *(obs_shape)) -> (B*N, *(obs_shape))
-                obs_vectorized = fe(obs) # (B*N, *(obs_shape)) -> (B*N, F)
-                msg_selected = obs_vectorized.reshape(bs, n_agents, -1) # (B*N, F) -> (B, N, F)
-                local_obs_selected = enc(obs_vectorized) # (B*N, F) -> (B*N, F)
-
-            local_obs_selected = local_obs_selected.reshape(bs, n_agents, -1) # (B, N, F)
-            local_obs_selected = local_obs_selected.permute(1, 0, 2)  # (N, B, F)
-            msg_selected = msg_selected.permute(1, 0, 2)  # (N, B, F)
-
-            for i, m, lo in zip(idx, msg_selected, local_obs_selected):
-                msg[i] = m
-                local_obs[i] = lo
-
-        msg = torch.stack(msg).to(self.device) # (N, B, F)
-        msg = msg.permute(1, 0, 2)  # (B, N, F)
-        local_obs = torch.stack(local_obs).to(self.device) # (N, B, F)
-        local_obs = local_obs.permute(1, 0, 2)  # (B, N, F)
-        msg_detach = msg.detach()
-
-        # Aggregate message
-        if self.aggr_model_class_name == 'MaskedModel':
-            aggregated_msg = self.aggr_model(msg_detach, alive_mask) # (B, N, F) -> (B, F)
-        else:
-            aggregated_msg = self.aggr_model(msg_detach) # (B, N, F) -> (B, F)
-        aggregated_msg_expand = aggregated_msg.unsqueeze(1).expand(-1, len(self.agent_model_dict), -1).detach() # (B, N, F)
-
-        hidden_states = torch.cat((local_obs, aggregated_msg_expand), dim=-1)  # (B, N, Hidden Size(F_local_obs + F_aggregated_msg))
-
+    def _process_decoders(self, hidden_states):
+        """Common decoder processing logic for all models."""
         q_val = [None for _ in range(len(self.agent_model_dict))]
         for model_name, dec in self.decoders.items():
             selected_agents = self.model_to_agents[model_name]
@@ -413,298 +342,17 @@ class ObsMsgAggrAgentGroup(MsgAggrAgentGroup):
         q_val = torch.stack(q_val).to(self.device) # (N, B, F)
         q_val = q_val.permute(1, 0, 2)  # (B, N, F)
 
-        return {'q_val': q_val, 'aggregated_msg': aggregated_msg}
+        return q_val
 
 
-class SeqMsgAggrAgentGroup(MsgAggrAgentGroup):
-
-    def forward(self, observations: torch.Tensor, traj_padding_mask: torch.Tensor, alive_mask: torch.Tensor) -> Dict[str, Any]:
-        msg = [None for _ in range(len(self.agent_model_dict))]
-        for (model_name, fe), (_, enc) in zip(self.feature_extractors.items(),
-                                                self.encoders.items()):
-            selected_agents = self.model_to_agents[model_name]
-            idx = self.model_to_agent_indices[model_name]
-            # observation shape: (Batch Size, Agent Number, Time Step, Feature Dimensions) (B, N, T, F)
-            obs = observations[:,idx] # (B, N, T, *(obs_shape))
-            bs = obs.shape[0]
-            n_agents = len(selected_agents)
-            ts = obs.shape[2]
-            obs_shape = list(obs.shape[3:])
-            # Use class name checking instead of isinstance
-            model_class_name = self.model_class_names[model_name]
-            if model_class_name == 'Conv1DModel':
-                # (B, N, T, *(obs_shape)) -> (B*N*T, *(obs_shape))
-                obs = obs.reshape(bs*n_agents*ts, *obs_shape).to(self.device)
-                obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
-                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B*N*T, F) -> (B*N, T, F)
-                obs_vectorized = obs_vectorized.permute(0, 2, 1) # (B*N, T, F) -> (B*N, F, T)
-                msg_selected = enc(obs_vectorized) # (B*N, F, T) -> (B*N, F)
-            elif model_class_name == 'RNNModel':
-                obs = obs.reshape(bs*n_agents*ts, *obs_shape).to(self.device)
-                obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
-                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B*N*T, F) -> (B*N, T, F)
-                enc.train() # cudnn RNN backward can only be called in training mode
-                msg_selected = enc(obs_vectorized) # (B*N, T, F) -> (B*N, F)
-            elif model_class_name == 'AttentionModel':
-                obs = obs.reshape(bs*n_agents*ts, *obs_shape).to(self.device)
-                obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
-                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B*N*T, F) -> (B*N, T, F)
-                mask = traj_padding_mask[:,idx]
-                mask = mask.reshape(bs*n_agents, ts)
-                msg_selected = enc(obs_vectorized, mask) # (B*N, T, F) -> (B*N, F)
-            else:
-                obs = obs[:,:,-1, :] # (B, N, T, *(obs_shape)) -> (B, N, *(obs_shape))
-                obs = obs.reshape(bs*n_agents, *obs_shape).to(self.device) # (B, N, *(obs_shape)) -> (B*N, *(obs_shape))
-                obs_vectorized = fe(obs) # (B*N, *(obs_shape)) -> (B*N, F)
-                msg_selected = enc(obs_vectorized) # (B*N, F) -> (B*N, F)
-
-            msg_selected = msg_selected.reshape(bs, n_agents, -1) # (B, N, F)
-            msg_selected = msg_selected.permute(1, 0, 2)  # (N, B, F)
-
-            for i, m in zip(idx, msg_selected):
-                msg[i] = m
-
-        msg = torch.stack(msg).to(self.device) # (N, B, F)
-        msg = msg.permute(1, 0, 2)  # (B, N, F)
-        local_obs = msg
-        msg_detach = msg.detach()
-
-        # Aggregate message
-        if self.aggr_model_class_name == 'MaskedModel':
-            aggregated_msg = self.aggr_model(msg_detach, alive_mask) # (B, N, F) -> (B, F)
-        else:
-            aggregated_msg = self.aggr_model(msg_detach) # (B, N, F) -> (B, F)
-        aggregated_msg_expand = aggregated_msg.unsqueeze(1).expand(-1, len(self.agent_model_dict), -1).detach()  # (B, N, F)
-
-        hidden_states = torch.cat((local_obs, aggregated_msg_expand), dim=-1)  # (B, N, Hidden Size(F_local_obs + F_aggregated_msg))
-
-        q_val = [None for _ in range(len(self.agent_model_dict))]
-        for model_name, dec in self.decoders.items():
-            selected_agents = self.model_to_agents[model_name]
-            idx = self.model_to_agent_indices[model_name]
-            h = hidden_states[:,idx]
-            bs = h.shape[0]
-            n_agents = len(selected_agents)
-            hidden_size = h.shape[-1]
-            h = h.reshape(bs*n_agents, hidden_size) # (B*N, Hidden Size)
-            q_selected = dec(h)
-            q_selected = q_selected.reshape(bs, n_agents, -1) # (B, N, Action)
-            q_selected = q_selected.permute(1, 0, 2)  # (N, B, Action)
-
-            for i, m in zip(idx, q_selected):
-                q_val[i] = m
-
-        q_val = torch.stack(q_val).to(self.device) # (N, B, F)
-        q_val = q_val.permute(1, 0, 2)  # (B, N, F)
-
-        return {'q_val': q_val, 'aggregated_msg': aggregated_msg}
-
-class ProbMsgAggrAgentGroup(MsgAggrAgentGroup):
-
-    def forward(self, observations: torch.Tensor, traj_padding_mask: torch.Tensor, alive_mask: torch.Tensor) -> Dict[str, Any]:
-        msg = [None for _ in range(len(self.agent_model_dict))]
-        local_obs = [None for _ in range(len(self.agent_model_dict))]
-        for (model_name, fe), (_, enc) in zip(self.feature_extractors.items(),
-                                              self.encoders.items()):
-            selected_agents = self.model_to_agents[model_name]
-            idx = self.model_to_agent_indices[model_name]
-            # observation shape: (Batch Size, Agent Number, Time Step, Feature Dimensions) (B, N, T, F)
-            obs = observations[:,idx] # (B, N, T, *(obs_shape))
-            bs = obs.shape[0]
-            n_agents = len(selected_agents)
-            ts = obs.shape[2]
-            obs_shape = list(obs.shape[3:])
-            # Use class name checking instead of isinstance
-            model_class_name = self.model_class_names[model_name]
-            if model_class_name == 'Conv1DModel':
-                # (B, N, T, *(obs_shape)) -> (B*N*T, *(obs_shape))
-                obs = obs.reshape(bs*n_agents*ts, *obs_shape).to(self.device)
-                obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
-                obs_vectorized = obs_vectorized.reshape(bs, n_agents, ts, -1) # (B*N*T, F) -> (B, N, T, F)
-                msg_selected = obs_vectorized[:, :, -1, :] # (B, N, T, F) -> (B, N, F)
-                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B, N, T, F) -> (B*N, T, F)
-                obs_vectorized = obs_vectorized.permute(0, 2, 1) # (B*N, T, F) -> (B*N, F, T)
-                local_obs_selected = enc(obs_vectorized) # (B*N, F, T) -> (B*N, F)
-            elif model_class_name == 'RNNModel':
-                obs = obs.reshape(bs*n_agents*ts, *obs_shape).to(self.device)
-                obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
-                obs_vectorized = obs_vectorized.reshape(bs, n_agents, ts, -1) # (B*N*T, F) -> (B, N, T, F)
-                msg_selected = obs_vectorized[:, :, -1, :] # (B, N, T, F) -> (B, N, F)
-                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B, N, T, F) -> (B*N, T, F)
-                enc.train() # cudnn RNN backward can only be called in training mode
-                local_obs_selected = enc(obs_vectorized) # (B*N, T, F) -> (B*N, F)
-            elif model_class_name == 'AttentionModel':
-                obs = obs.reshape(bs*n_agents*ts, *obs_shape).to(self.device)
-                obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
-                obs_vectorized = obs_vectorized.reshape(bs, n_agents, ts, -1) # (B*N*T, F) -> (B, N, T, F)
-                msg_selected = obs_vectorized[:, :, -1, :] # (B, N, T, F) -> (B, N, F)
-                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B, N, T, F) -> (B*N, T, F)
-                mask = traj_padding_mask[:,idx]
-                mask = mask.reshape(bs*n_agents, ts)
-                local_obs_selected = enc(obs_vectorized, mask) # (B*N, T, F) -> (B*N, F)
-            else:
-                obs = obs[:,:,-1, :] # (B, N, T, *(obs_shape)) -> (B, N, *(obs_shape))
-                obs = obs.reshape(bs*n_agents, *obs_shape).to(self.device) # (B, N, *(obs_shape)) -> (B*N, *(obs_shape))
-                obs_vectorized = fe(obs) # (B*N, *(obs_shape)) -> (B*N, F)
-                msg_selected = obs_vectorized.reshape(bs, n_agents, -1) # (B*N, F) -> (B, N, F)
-                local_obs_selected = enc(obs_vectorized) # (B*N, F) -> (B*N, F)
-
-            local_obs_selected = local_obs_selected.reshape(bs, n_agents, -1) # (B, N, F)
-            local_obs_selected = local_obs_selected.permute(1, 0, 2)  # (N, B, F)
-            msg_selected = msg_selected.permute(1, 0, 2)  # (N, B, F)
-
-            for i, m, lo in zip(idx, msg_selected, local_obs_selected):
-                msg[i] = m
-                local_obs[i] = lo
-
-        msg = torch.stack(msg).to(self.device) # (N, B, F)
-        msg = msg.permute(1, 0, 2)  # (B, N, F)
-        local_obs = torch.stack(local_obs).to(self.device) # (N, B, F)
-        local_obs = local_obs.permute(1, 0, 2)  # (B, N, F)
-
-        # Aggregate message and split into mean and log variance
-        if self.aggr_model_class_name == 'MaskedModel':
-            aggr_output = self.aggr_model(msg, alive_mask)  # (B, N, F) -> (B, 2*F)
-        else:
-            aggr_output = self.aggr_model(msg)  # (B, N, F) -> (B, 2*F)
-
-        # Split output into mean and log variance
-        dim = aggr_output.size(-1) // 2
-        mu = aggr_output[:, :dim]  # Mean
-        log_var = aggr_output[:, dim:]  # Log variance
-
-        # Reparameterization
-        std = torch.exp(0.5 * log_var)
-        eps = torch.randn_like(std)
-        aggregated_msg = mu + eps * std  # Sample from Gaussian distribution
-        aggregated_msg_expand = aggregated_msg.unsqueeze(1).expand(-1, len(self.agent_model_dict), -1)  # (B, N, F)
-
-        hidden_states = torch.cat((local_obs, aggregated_msg_expand), dim=-1)  # (B, N, Hidden Size(F_local_obs + F_aggregated_msg))
-
-        q_val = [None for _ in range(len(self.agent_model_dict))]
-        for model_name, dec in self.decoders.items():
-            selected_agents = self.model_to_agents[model_name]
-            idx = self.model_to_agent_indices[model_name]
-            h = hidden_states[:,idx]
-            bs = h.shape[0]
-            n_agents = len(selected_agents)
-            hidden_size = h.shape[-1]
-            h = h.reshape(bs*n_agents, hidden_size) # (B*N, Hidden Size)
-            q_selected = dec(h)
-            q_selected = q_selected.reshape(bs, n_agents, -1) # (B, N, Action)
-            q_selected = q_selected.permute(1, 0, 2)  # (N, B, Action)
-
-            for i, m in zip(idx, q_selected):
-                q_val[i] = m
-
-        q_val = torch.stack(q_val).to(self.device) # (N, B, F)
-        q_val = q_val.permute(1, 0, 2)  # (B, N, F)
-
-        return {'q_val': q_val, 'aggregated_msg': aggregated_msg, 'mu': mu, 'std': std}
-
-class ProbSeqMsgAggrAgentGroup(MsgAggrAgentGroup):
-
-    def forward(self, observations: torch.Tensor, traj_padding_mask: torch.Tensor, alive_mask: torch.Tensor) -> Dict[str, Any]:
-        msg = [None for _ in range(len(self.agent_model_dict))]
-        for (model_name, fe), (_, enc) in zip(self.feature_extractors.items(),
-                                                self.encoders.items()):
-            selected_agents = self.model_to_agents[model_name]
-            idx = self.model_to_agent_indices[model_name]
-            # observation shape: (Batch Size, Agent Number, Time Step, Feature Dimensions) (B, N, T, F)
-            obs = observations[:,idx] # (B, N, T, *(obs_shape))
-            bs = obs.shape[0]
-            n_agents = len(selected_agents)
-            ts = obs.shape[2]
-            obs_shape = list(obs.shape[3:])
-            # Use class name checking instead of isinstance
-            model_class_name = self.model_class_names[model_name]
-            if model_class_name == 'Conv1DModel':
-                # (B, N, T, *(obs_shape)) -> (B*N*T, *(obs_shape))
-                obs = obs.reshape(bs*n_agents*ts, *obs_shape).to(self.device)
-                obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
-                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B*N*T, F) -> (B*N, T, F)
-                obs_vectorized = obs_vectorized.permute(0, 2, 1) # (B*N, T, F) -> (B*N, F, T)
-                msg_selected = enc(obs_vectorized) # (B*N, F, T) -> (B*N, F)
-            elif model_class_name == 'RNNModel':
-                obs = obs.reshape(bs*n_agents*ts, *obs_shape).to(self.device)
-                obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
-                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B*N*T, F) -> (B*N, T, F)
-                enc.train() # cudnn RNN backward can only be called in training mode
-                msg_selected = enc(obs_vectorized) # (B*N, T, F) -> (B*N, F)
-            elif model_class_name == 'AttentionModel':
-                obs = obs.reshape(bs*n_agents*ts, *obs_shape).to(self.device)
-                obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
-                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B*N*T, F) -> (B*N, T, F)
-                mask = traj_padding_mask[:,idx]
-                mask = mask.reshape(bs*n_agents, ts)
-                msg_selected = enc(obs_vectorized, mask) # (B*N, T, F) -> (B*N, F)
-            else:
-                obs = obs[:,:,-1, :] # (B, N, T, *(obs_shape)) -> (B, N, *(obs_shape))
-                obs = obs.reshape(bs*n_agents, *obs_shape).to(self.device) # (B, N, *(obs_shape)) -> (B*N, *(obs_shape))
-                obs_vectorized = fe(obs) # (B*N, *(obs_shape)) -> (B*N, F)
-                msg_selected = enc(obs_vectorized) # (B*N, F) -> (B*N, F)
-
-            msg_selected = msg_selected.reshape(bs, n_agents, -1) # (B, N, F)
-            msg_selected = msg_selected.permute(1, 0, 2)  # (N, B, F)
-
-            for i, m in zip(idx, msg_selected):
-                msg[i] = m
-
-        msg = torch.stack(msg).to(self.device) # (N, B, F)
-        msg = msg.permute(1, 0, 2)  # (B, N, F)
-        local_obs = msg
-
-        # Aggregate message
-        if self.aggr_model_class_name == 'MaskedModel':
-            aggr_output = self.aggr_model(msg, alive_mask) # (B, N, F) -> (B, F)
-        else:
-            aggr_output = self.aggr_model(msg) # (B, N, F) -> (B, F)
-
-        # Split output into mean and log variance
-        dim = aggr_output.size(-1) // 2
-        mu = aggr_output[:, :dim]  # Mean
-        log_var = aggr_output[:, dim:]  # Log variance
-
-        # Reparameterization
-        std = torch.exp(0.5 * log_var)
-        eps = torch.randn_like(std)
-        aggregated_msg = mu + eps * std  # Sample from Gaussian distribution
-        aggregated_msg_expand = aggregated_msg.unsqueeze(1).expand(-1, len(self.agent_model_dict), -1)  # (B, N, F)
-
-        hidden_states = torch.cat((local_obs, aggregated_msg_expand), dim=-1)  # (B, N, Hidden Size(F_local_obs + F_aggregated_msg))
-
-        q_val = [None for _ in range(len(self.agent_model_dict))]
-        for model_name, dec in self.decoders.items():
-            selected_agents = self.model_to_agents[model_name]
-            idx = self.model_to_agent_indices[model_name]
-            h = hidden_states[:,idx]
-            bs = h.shape[0]
-            n_agents = len(selected_agents)
-            hidden_size = h.shape[-1]
-            h = h.reshape(bs*n_agents, hidden_size) # (B*N, Hidden Size)
-            q_selected = dec(h)
-            q_selected = q_selected.reshape(bs, n_agents, -1) # (B, N, Action)
-            q_selected = q_selected.permute(1, 0, 2)  # (N, B, Action)
-
-            for i, m in zip(idx, q_selected):
-                q_val[i] = m
-
-        q_val = torch.stack(q_val).to(self.device) # (N, B, F)
-        q_val = q_val.permute(1, 0, 2)  # (B, N, F)
-
-        return {'q_val': q_val, 'aggregated_msg': aggregated_msg, 'mu': mu, 'std': std}
-
-
-class DualPathObsMsgAggrAgentGroup(MsgAggrAgentGroup):
+class DualPathMsgAggrAgentGroup(MsgAggrAgentGroup):
     """
-    Agent group with separate feature extractors and encoders for
-    observation processing and message generation.
+    Base class for dual-path message aggregation agent groups.
 
     This dual-path architecture allows specialized representation learning:
     - One path for local observation encoding (used in Q-value computation)
     - One path for message generation (used in communication)
     """
-
     def __init__(self,
                 agent_model_dict: Dict[str, str],
                 feature_extractor_configs: Dict[str, ModelConfig],  # For observation processing
@@ -731,8 +379,8 @@ class DualPathObsMsgAggrAgentGroup(MsgAggrAgentGroup):
                                      for model_name, config in msg_feature_extractor_configs.items()}
 
         # Apply neutral initialization to message feature extractors
-        for fe in self.msg_feature_extractors.values():
-            fe.apply(_init_msg_extractor)
+        #for fe in self.msg_feature_extractors.values():
+        #    fe.apply(_init_msg_extractor)
 
         # Add message feature extractors to parameters to optimize
         self.params_to_optimize += [{'params': extractor.parameters()}
@@ -744,12 +392,8 @@ class DualPathObsMsgAggrAgentGroup(MsgAggrAgentGroup):
         if lr_scheduler_config:
             self.lr_scheduler = lr_scheduler_config.get_lr_scheduler(self.optimizer)
 
-    def forward(self, observations: torch.Tensor, traj_padding_mask: torch.Tensor, alive_mask: torch.Tensor) -> Dict[str, Any]:
-        """
-        Forward pass with dual-path architecture:
-        - Observation path: processes observations for Q-value computation
-        - Message path: processes observations for message generation
-        """
+    def _process_dual_path_observations(self, observations, traj_padding_mask):
+        """Process observations using dual-path architecture."""
         # Process through observation path (for Q-value computation)
         msg = [None for _ in range(len(self.agent_model_dict))]
         local_obs = [None for _ in range(len(self.agent_model_dict))]
@@ -812,35 +456,7 @@ class DualPathObsMsgAggrAgentGroup(MsgAggrAgentGroup):
         local_obs = torch.stack(local_obs).to(self.device) # (N, B, F)
         local_obs = local_obs.permute(1, 0, 2)  # (B, N, F)
 
-        # Aggregate message
-        if self.aggr_model_class_name == 'MaskedModel':
-            aggregated_msg = self.aggr_model(msg, alive_mask) # (B, N, F) -> (B, F)
-        else:
-            aggregated_msg = self.aggr_model(msg) # (B, N, F) -> (B, F)
-        aggregated_msg_expand = aggregated_msg.unsqueeze(1).expand(-1, len(self.agent_model_dict), -1).detach() # (B, N, F)
-
-        hidden_states = torch.cat((local_obs, aggregated_msg_expand), dim=-1)  # (B, N, Hidden Size(F_local_obs + F_aggregated_msg))
-
-        q_val = [None for _ in range(len(self.agent_model_dict))]
-        for model_name, dec in self.decoders.items():
-            selected_agents = self.model_to_agents[model_name]
-            idx = self.model_to_agent_indices[model_name]
-            h = hidden_states[:,idx]
-            bs = h.shape[0]
-            n_agents = len(selected_agents)
-            hidden_size = h.shape[-1]
-            h = h.reshape(bs*n_agents, hidden_size) # (B*N, Hidden Size)
-            q_selected = dec(h)
-            q_selected = q_selected.reshape(bs, n_agents, -1) # (B, N, Action)
-            q_selected = q_selected.permute(1, 0, 2)  # (N, B, Action)
-
-            for i, m in zip(idx, q_selected):
-                q_val[i] = m
-
-        q_val = torch.stack(q_val).to(self.device) # (N, B, F)
-        q_val = q_val.permute(1, 0, 2)  # (B, N, F)
-
-        return {'q_val': q_val, 'aggregated_msg': aggregated_msg}
+        return msg, local_obs
 
     def set_agent_group_params(self, params: Dict[str, dict]) -> 'AgentGroup':
         """Override to handle message feature extractors"""
@@ -902,6 +518,353 @@ class DualPathObsMsgAggrAgentGroup(MsgAggrAgentGroup):
             fe.load_state_dict(torch.load(os.path.join(model_dir, 'msg_feature_extractor.pth'),
                                           map_location=torch.device('cpu')))
         return self
+
+
+# Base class for probabilistic message aggregation agent groups
+class ProbMsgAggrAgentGroup(MsgAggrAgentGroup):
+    def __init__(self,
+                agent_model_dict: Dict[str, str],
+                feature_extractor_configs: Dict[str, ModelConfig],
+                encoder_configs: Dict[str, ModelConfig],
+                decoder_configs: Dict[str, ModelConfig],
+                aggr_model_config: ModelConfig,
+                optimizer_config: OptimizerConfig,
+                lr_scheduler_config: LRSchedulerConfig=None,
+                deterministic_eval: bool = True,
+                device = 'cpu') -> None:
+
+        self.deterministic_eval = deterministic_eval
+
+        super().__init__(
+            agent_model_dict=agent_model_dict,
+            feature_extractor_configs=feature_extractor_configs,
+            encoder_configs=encoder_configs,
+            decoder_configs=decoder_configs,
+            aggr_model_config=aggr_model_config,
+            optimizer_config=optimizer_config,
+            lr_scheduler_config=lr_scheduler_config,
+            device=device
+        )
+
+    def _process_probabilistic_output(self, aggr_output):
+        """Process the aggregated output to get mean and std for probabilistic models."""
+        # Split output into mean and log variance
+        dim = aggr_output.size(-1) // 2
+        mu = aggr_output[:, :dim]  # Mean
+        log_var = aggr_output[:, dim:]  # Log variance
+        std = torch.exp(0.5 * log_var)
+
+        # Reparameterization or deterministic sampling based on mode
+        if not self.aggr_model.training and self.deterministic_eval:
+            # During evaluation with deterministic_eval=True, use mu directly
+            aggregated_msg = mu
+        else:
+            # During training or when deterministic_eval=False, use reparameterization
+            eps = torch.randn_like(std)
+            aggregated_msg = mu + eps * std  # Sample from Gaussian distribution
+
+        return aggregated_msg, mu, std
+
+
+# Shared base class for observation-based agent groups
+class ObsBasedMsgAggrAgentGroup(MsgAggrAgentGroup):
+    def _process_observations(self, observations, traj_padding_mask):
+        """Common observation processing logic for observation-based models."""
+        msg = [None for _ in range(len(self.agent_model_dict))]
+        encoded = [None for _ in range(len(self.agent_model_dict))]
+
+        for (model_name, fe), (_, enc) in zip(self.feature_extractors.items(),
+                                                self.encoders.items()):
+            selected_agents = self.model_to_agents[model_name]
+            idx = self.model_to_agent_indices[model_name]
+            # observation shape: (Batch Size, Agent Number, Time Step, Feature Dimensions) (B, N, T, F)
+            obs = observations[:,idx] # (B, N, T, *(obs_shape))
+            bs = obs.shape[0]
+            n_agents = len(selected_agents)
+            ts = obs.shape[2]
+            obs_shape = list(obs.shape[3:])
+            # Use class name checking instead of isinstance
+            model_class_name = self.model_class_names[model_name]
+
+            if model_class_name == 'Conv1DModel':
+                # (B, N, T, *(obs_shape)) -> (B*N*T, *(obs_shape))
+                obs = obs.reshape(bs*n_agents*ts, *obs_shape).to(self.device)
+                obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
+                obs_vectorized = obs_vectorized.reshape(bs, n_agents, ts, -1) # (B*N*T, F) -> (B, N, T, F)
+                msg_selected = obs_vectorized[:, :, -1, :] # (B, N, T, F) -> (B, N, F)
+                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B, N, T, F) -> (B*N, T, F)
+                obs_vectorized = obs_vectorized.permute(0, 2, 1) # (B*N, T, F) -> (B*N, F, T)
+                encoded_selected = enc(obs_vectorized) # (B*N, F, T) -> (B*N, F)
+            elif model_class_name == 'RNNModel':
+                obs = obs.reshape(bs*n_agents*ts, *obs_shape).to(self.device)
+                obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
+                obs_vectorized = obs_vectorized.reshape(bs, n_agents, ts, -1) # (B*N*T, F) -> (B, N, T, F)
+                msg_selected = obs_vectorized[:, :, -1, :] # (B, N, T, F) -> (B, N, F)
+                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B, N, T, F) -> (B*N, T, F)
+                enc.train() # cudnn RNN backward can only be called in training mode
+                encoded_selected = enc(obs_vectorized) # (B*N, T, F) -> (B*N, F)
+            elif model_class_name == 'AttentionModel':
+                obs = obs.reshape(bs*n_agents*ts, *obs_shape).to(self.device)
+                obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
+                obs_vectorized = obs_vectorized.reshape(bs, n_agents, ts, -1) # (B*N*T, F) -> (B, N, T, F)
+                msg_selected = obs_vectorized[:, :, -1, :] # (B, N, T, F) -> (B, N, F)
+                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B, N, T, F) -> (B*N, T, F)
+                mask = traj_padding_mask[:,idx]
+                mask = mask.reshape(bs*n_agents, ts)
+                encoded_selected = enc(obs_vectorized, mask) # (B*N, T, F) -> (B*N, F)
+            else:
+                obs = obs[:,:,-1, :] # (B, N, T, *(obs_shape)) -> (B, N, *(obs_shape))
+                obs = obs.reshape(bs*n_agents, *obs_shape).to(self.device) # (B, N, *(obs_shape)) -> (B*N, *(obs_shape))
+                obs_vectorized = fe(obs) # (B*N, *(obs_shape)) -> (B*N, F)
+                msg_selected = obs_vectorized.reshape(bs, n_agents, -1) # (B*N, F) -> (B, N, F)
+                encoded_selected = enc(obs_vectorized) # (B*N, F) -> (B*N, F)
+
+            encoded_selected = encoded_selected.reshape(bs, n_agents, -1) # (B, N, F)
+            encoded_selected = encoded_selected.permute(1, 0, 2)  # (N, B, F)
+            msg_selected = msg_selected.permute(1, 0, 2)  # (N, B, F)
+
+            for i, m, c in zip(idx, msg_selected, encoded_selected):
+                msg[i] = m
+                encoded[i] = c
+
+        msg = torch.stack(msg).to(self.device) # (N, B, F)
+        msg = msg.permute(1, 0, 2)  # (B, N, F)
+        encoded = torch.stack(encoded).to(self.device) # (N, B, F)
+        encoded = encoded.permute(1, 0, 2)  # (B, N, F)
+
+        return msg, encoded
+
+
+# Shared base class for sequence-based agent groups
+class SeqBasedMsgAggrAgentGroup(MsgAggrAgentGroup):
+    def _process_sequences(self, observations, traj_padding_mask):
+        """Common sequence processing logic for sequence-based models."""
+        encoded = [None for _ in range(len(self.agent_model_dict))]
+
+        for (model_name, fe), (_, enc) in zip(self.feature_extractors.items(),
+                                                self.encoders.items()):
+            selected_agents = self.model_to_agents[model_name]
+            idx = self.model_to_agent_indices[model_name]
+            # observation shape: (Batch Size, Agent Number, Time Step, Feature Dimensions) (B, N, T, F)
+            obs = observations[:,idx] # (B, N, T, *(obs_shape))
+            bs = obs.shape[0]
+            n_agents = len(selected_agents)
+            ts = obs.shape[2]
+            obs_shape = list(obs.shape[3:])
+            # Use class name checking instead of isinstance
+            model_class_name = self.model_class_names[model_name]
+
+            if model_class_name == 'Conv1DModel':
+                # (B, N, T, *(obs_shape)) -> (B*N*T, *(obs_shape))
+                obs = obs.reshape(bs*n_agents*ts, *obs_shape).to(self.device)
+                obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
+                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B*N*T, F) -> (B*N, T, F)
+                obs_vectorized = obs_vectorized.permute(0, 2, 1) # (B*N, T, F) -> (B*N, F, T)
+                encoded_selected = enc(obs_vectorized) # (B*N, F, T) -> (B*N, F)
+            elif model_class_name == 'RNNModel':
+                obs = obs.reshape(bs*n_agents*ts, *obs_shape).to(self.device)
+                obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
+                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B*N*T, F) -> (B*N, T, F)
+                enc.train() # cudnn RNN backward can only be called in training mode
+                encoded_selected = enc(obs_vectorized) # (B*N, T, F) -> (B*N, F)
+            elif model_class_name == 'AttentionModel':
+                obs = obs.reshape(bs*n_agents*ts, *obs_shape).to(self.device)
+                obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
+                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B*N*T, F) -> (B*N, T, F)
+                mask = traj_padding_mask[:,idx]
+                mask = mask.reshape(bs*n_agents, ts)
+                encoded_selected = enc(obs_vectorized, mask) # (B*N, T, F) -> (B*N, F)
+            else:
+                obs = obs[:,:,-1, :] # (B, N, T, *(obs_shape)) -> (B, N, *(obs_shape))
+                obs = obs.reshape(bs*n_agents, *obs_shape).to(self.device) # (B, N, *(obs_shape)) -> (B*N, *(obs_shape))
+                obs_vectorized = fe(obs) # (B*N, *(obs_shape)) -> (B*N, F)
+                encoded_selected = enc(obs_vectorized) # (B*N, F) -> (B*N, F)
+
+            encoded_selected = encoded_selected.reshape(bs, n_agents, -1) # (B, N, F)
+            encoded_selected = encoded_selected.permute(1, 0, 2)  # (N, B, F)
+
+            for i, m in zip(idx, encoded_selected):
+                encoded[i] = m
+
+        encoded = torch.stack(encoded).to(self.device) # (N, B, F)
+        encoded = encoded.permute(1, 0, 2)  # (B, N, F)
+
+        return encoded, encoded
+
+
+class ObsMsgAggrAgentGroup(ObsBasedMsgAggrAgentGroup):
+
+    def forward(self, observations: torch.Tensor, traj_padding_mask: torch.Tensor, alive_mask: torch.Tensor) -> Dict[str, Any]:
+        msg, encoded = self._process_observations(observations, traj_padding_mask)
+        msg_detach = msg.detach()
+
+        # Aggregate message
+        if self.aggr_model_class_name == 'MaskedModel':
+            aggregated_msg = self.aggr_model(msg_detach, alive_mask) # (B, N, F) -> (B, F)
+        else:
+            aggregated_msg = self.aggr_model(msg_detach) # (B, N, F) -> (B, F)
+        aggregated_msg_expand = aggregated_msg.unsqueeze(1).expand(-1, len(self.agent_model_dict), -1).detach() # (B, N, F)
+
+        hidden_states = torch.cat((encoded, aggregated_msg_expand), dim=-1)  # (B, N, Hidden Size(F_local_obs + F_aggregated_msg))
+
+        # Process decoders
+        q_val = self._process_decoders(hidden_states)
+
+        return {'q_val': q_val, 'aggregated_msg': aggregated_msg}
+
+
+class SeqMsgAggrAgentGroup(SeqBasedMsgAggrAgentGroup):
+
+    def forward(self, observations: torch.Tensor, traj_padding_mask: torch.Tensor, alive_mask: torch.Tensor) -> Dict[str, Any]:
+        msg, encoded = self._process_sequences(observations, traj_padding_mask)
+        msg_detach = msg.detach()
+
+        # Aggregate message
+        if self.aggr_model_class_name == 'MaskedModel':
+            aggregated_msg = self.aggr_model(msg_detach, alive_mask) # (B, N, F) -> (B, F)
+        else:
+            aggregated_msg = self.aggr_model(msg_detach) # (B, N, F) -> (B, F)
+        aggregated_msg_expand = aggregated_msg.unsqueeze(1).expand(-1, len(self.agent_model_dict), -1).detach()  # (B, N, F)
+
+        hidden_states = torch.cat((encoded, aggregated_msg_expand), dim=-1)  # (B, N, Hidden Size(F_local_obs + F_aggregated_msg))
+
+        # Process decoders
+        q_val = self._process_decoders(hidden_states)
+
+        return {'q_val': q_val, 'aggregated_msg': aggregated_msg}
+
+
+class ProbObsMsgAggrAgentGroup(ProbMsgAggrAgentGroup, ObsBasedMsgAggrAgentGroup):
+
+    def forward(self, observations: torch.Tensor, traj_padding_mask: torch.Tensor, alive_mask: torch.Tensor) -> Dict[str, Any]:
+        msg, encoded = self._process_observations(observations, traj_padding_mask)
+
+        # Aggregate message and split into mean and log variance
+        if self.aggr_model_class_name == 'MaskedModel':
+            aggr_output = self.aggr_model(msg, alive_mask)  # (B, N, F) -> (B, 2*F)
+        else:
+            aggr_output = self.aggr_model(msg)  # (B, N, F) -> (B, 2*F)
+
+        # Process probabilistic output
+        aggregated_msg, mu, std = self._process_probabilistic_output(aggr_output)
+        aggregated_msg_expand = aggregated_msg.unsqueeze(1).expand(-1, len(self.agent_model_dict), -1)  # (B, N, F)
+
+        hidden_states = torch.cat((encoded, aggregated_msg_expand), dim=-1)  # (B, N, Hidden Size(F_local_obs + F_aggregated_msg))
+
+        # Process decoders
+        q_val = self._process_decoders(hidden_states)
+
+        return {'q_val': q_val, 'aggregated_msg': aggregated_msg, 'mu': mu, 'std': std}
+
+
+class ProbSeqMsgAggrAgentGroup(ProbMsgAggrAgentGroup, SeqBasedMsgAggrAgentGroup):
+
+    def forward(self, observations: torch.Tensor, traj_padding_mask: torch.Tensor, alive_mask: torch.Tensor) -> Dict[str, Any]:
+        msg, encoded = self._process_sequences(observations, traj_padding_mask)
+
+        # Aggregate message
+        if self.aggr_model_class_name == 'MaskedModel':
+            aggr_output = self.aggr_model(msg, alive_mask) # (B, N, F) -> (B, F)
+        else:
+            aggr_output = self.aggr_model(msg) # (B, N, F) -> (B, F)
+
+        # Process probabilistic output
+        aggregated_msg, mu, std = self._process_probabilistic_output(aggr_output)
+        aggregated_msg_expand = aggregated_msg.unsqueeze(1).expand(-1, len(self.agent_model_dict), -1)  # (B, N, F)
+
+        hidden_states = torch.cat((encoded, aggregated_msg_expand), dim=-1)  # (B, N, Hidden Size(F_local_obs + F_aggregated_msg))
+
+        # Process decoders
+        q_val = self._process_decoders(hidden_states)
+
+        return {'q_val': q_val, 'aggregated_msg': aggregated_msg, 'mu': mu, 'std': std}
+
+
+class DualPathObsMsgAggrAgentGroup(DualPathMsgAggrAgentGroup):
+
+    def forward(self, observations: torch.Tensor, traj_padding_mask: torch.Tensor, alive_mask: torch.Tensor) -> Dict[str, Any]:
+        msg, local_obs = self._process_dual_path_observations(observations, traj_padding_mask)
+
+        # Aggregate message
+        if self.aggr_model_class_name == 'MaskedModel':
+            aggregated_msg = self.aggr_model(msg, alive_mask) # (B, N, F) -> (B, F)
+        else:
+            aggregated_msg = self.aggr_model(msg) # (B, N, F) -> (B, F)
+        aggregated_msg_expand = aggregated_msg.unsqueeze(1).expand(-1, len(self.agent_model_dict), -1).detach() # (B, N, F)
+
+        hidden_states = torch.cat((local_obs, aggregated_msg_expand), dim=-1)  # (B, N, Hidden Size(F_local_obs + F_aggregated_msg))
+
+        # Process decoders
+        q_val = self._process_decoders(hidden_states)
+
+        return {'q_val': q_val, 'aggregated_msg': aggregated_msg}
+
+
+class DualPathSeqMsgAggrAgentGroup(DualPathMsgAggrAgentGroup):
+
+    def forward(self, observations: torch.Tensor, traj_padding_mask: torch.Tensor, alive_mask: torch.Tensor) -> Dict[str, Any]:
+        msg, local_obs = self._process_dual_path_observations(observations, traj_padding_mask)
+
+        # Aggregate message
+        if self.aggr_model_class_name == 'MaskedModel':
+            aggregated_msg = self.aggr_model(msg, alive_mask) # (B, N, F) -> (B, F)
+        else:
+            aggregated_msg = self.aggr_model(msg) # (B, N, F) -> (B, F)
+        aggregated_msg_expand = aggregated_msg.unsqueeze(1).expand(-1, len(self.agent_model_dict), -1).detach()  # (B, N, F)
+
+        hidden_states = torch.cat((local_obs, aggregated_msg_expand), dim=-1)  # (B, N, Hidden Size(F_local_obs + F_aggregated_msg))
+
+        # Process decoders
+        q_val = self._process_decoders(hidden_states)
+
+        return {'q_val': q_val, 'aggregated_msg': aggregated_msg}
+
+
+class DualPathProbObsMsgAggrAgentGroup(DualPathMsgAggrAgentGroup, ProbMsgAggrAgentGroup):
+
+    def forward(self, observations: torch.Tensor, traj_padding_mask: torch.Tensor, alive_mask: torch.Tensor) -> Dict[str, Any]:
+        msg, local_obs = self._process_dual_path_observations(observations, traj_padding_mask)
+
+        # Aggregate message and split into mean and log variance
+        if self.aggr_model_class_name == 'MaskedModel':
+            aggr_output = self.aggr_model(msg, alive_mask)  # (B, N, F) -> (B, 2*F)
+        else:
+            aggr_output = self.aggr_model(msg)  # (B, N, F) -> (B, 2*F)
+
+        # Process probabilistic output
+        aggregated_msg, mu, std = self._process_probabilistic_output(aggr_output)
+        aggregated_msg_expand = aggregated_msg.unsqueeze(1).expand(-1, len(self.agent_model_dict), -1)  # (B, N, F)
+
+        hidden_states = torch.cat((local_obs, aggregated_msg_expand), dim=-1)  # (B, N, Hidden Size(F_local_obs + F_aggregated_msg))
+
+        # Process decoders
+        q_val = self._process_decoders(hidden_states)
+
+        return {'q_val': q_val, 'aggregated_msg': aggregated_msg, 'mu': mu, 'std': std}
+
+
+class DualPathProbSeqMsgAggrAgentGroup(DualPathMsgAggrAgentGroup, ProbMsgAggrAgentGroup):
+
+    def forward(self, observations: torch.Tensor, traj_padding_mask: torch.Tensor, alive_mask: torch.Tensor) -> Dict[str, Any]:
+        msg, local_obs = self._process_dual_path_observations(observations, traj_padding_mask)
+
+        # Aggregate message
+        if self.aggr_model_class_name == 'MaskedModel':
+            aggr_output = self.aggr_model(msg, alive_mask) # (B, N, F) -> (B, F)
+        else:
+            aggr_output = self.aggr_model(msg) # (B, N, F) -> (B, F)
+
+        # Process probabilistic output
+        aggregated_msg, mu, std = self._process_probabilistic_output(aggr_output)
+        aggregated_msg_expand = aggregated_msg.unsqueeze(1).expand(-1, len(self.agent_model_dict), -1)  # (B, N, F)
+
+        hidden_states = torch.cat((local_obs, aggregated_msg_expand), dim=-1)  # (B, N, Hidden Size(F_local_obs + F_aggregated_msg))
+
+        # Process decoders
+        q_val = self._process_decoders(hidden_states)
+
+        return {'q_val': q_val, 'aggregated_msg': aggregated_msg, 'mu': mu, 'std': std}
+
 
 def _init_msg_extractor(m):
     if hasattr(m, 'weight') and m.weight is not None:

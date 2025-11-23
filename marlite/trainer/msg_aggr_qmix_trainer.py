@@ -8,12 +8,16 @@ from marlite.trainer.trainer import Trainer
 from marlite.util.trajectory_dataset import TrajectoryDataLoader
 from marlite.util.loss_func import PITLoss
 
+
 class MsgAggrQMIXTrainer(Trainer):
     def __init__(self, **kwargs):
         margin = kwargs.pop('triplet_loss_margin', 1.0)
         pit_loss_alpha = kwargs.pop('pit_loss_alpha', 0.9)
         cosine_margin = kwargs.pop('cosine_margin', 0.5)
         self.warmup_epochs = kwargs.pop('warmup_epochs', 0)
+        # Add loss function selection parameters
+        loss_type = kwargs.pop('loss_type', 'weighted_sum')  # 'pit' or 'weighted_sum'
+        self.msg_aggr_weight = kwargs.pop('msg_aggr_weight', 1.0)
         super().__init__(**kwargs)
         self.triplet_loss = torch.nn.TripletMarginLoss(margin=margin)
         self.pit_loss = PITLoss(num_tasks=2, alpha=pit_loss_alpha)
@@ -21,6 +25,23 @@ class MsgAggrQMIXTrainer(Trainer):
             margin=cosine_margin,
             reduction='mean'
         )
+
+        # Determine which loss function to use based on configuration
+        if loss_type == 'pit':
+            self.compute_critic_loss = self._compute_pit_loss
+        elif loss_type == 'weighted_sum':
+            self.compute_critic_loss = self._compute_weighted_sum_loss
+        else:
+            raise ValueError(f"Unknown loss_type: {loss_type}. Supported values are 'pit' and 'weighted_sum'.")
+
+    def _compute_pit_loss(self, td_error, msg_aggr_loss):
+        """Compute loss using PIT loss function."""
+        self.pit_loss.to(self.train_device)
+        return self.pit_loss(torch.stack([td_error, msg_aggr_loss]))
+
+    def _compute_weighted_sum_loss(self, td_error, msg_aggr_loss):
+        """Compute loss using weighted sum of individual losses."""
+        return td_error + self.msg_aggr_weight * msg_aggr_loss
 
     def learn(self, sample_size, batch_size: int, times: int = 1):
         total_loss = 0.0
@@ -141,8 +162,8 @@ class MsgAggrQMIXTrainer(Trainer):
                         #    target
                         #)
 
-                        self.pit_loss.to(self.train_device)
-                        critic_loss = self.pit_loss(torch.stack([td_error, msg_aggr_loss]))
+                        # Use the predetermined loss function
+                        critic_loss = self.compute_critic_loss(td_error, msg_aggr_loss)
                     else:
                         # Before warmup period: only use TD error
                         critic_loss = td_error
@@ -180,13 +201,33 @@ class MsgAggrQMIXTrainer(Trainer):
 
         return total_loss / total_batches
 
+
 class ProbMsgAggrQMIXTrainer(Trainer):
     def __init__(self, **kwargs):
-        margin = kwargs.pop('triplet_loss_margin', 1.0)
         pit_loss_alpha = kwargs.pop('pit_loss_alpha', 0.9)
+        # Add loss function selection parameters
+        loss_type = kwargs.pop('loss_type', 'weighted_sum')  # 'pit' or 'weighted_sum'
+        self.msg_aggr_weight = kwargs.pop('msg_aggr_weight', 1.0)
+        self.warmup_epochs = kwargs.pop('warmup_epochs', 0)
         super().__init__(**kwargs)
-        self.triplet_loss = torch.nn.TripletMarginLoss(margin=margin)
         self.pit_loss = PITLoss(num_tasks=2, alpha=pit_loss_alpha)
+
+        # Determine which loss function to use based on configuration
+        if loss_type == 'pit':
+            self.compute_critic_loss = self._compute_pit_loss
+        elif loss_type == 'weighted_sum':
+            self.compute_critic_loss = self._compute_weighted_sum_loss
+        else:
+            raise ValueError(f"Unknown loss_type: {loss_type}. Supported values are 'pit' and 'weighted_sum'.")
+
+    def _compute_pit_loss(self, td_error, msg_aggr_loss):
+        """Compute loss using PIT loss function."""
+        self.pit_loss.to(self.train_device)
+        return self.pit_loss(torch.stack([td_error, msg_aggr_loss]))
+
+    def _compute_weighted_sum_loss(self, td_error, msg_aggr_loss):
+        """Compute loss using weighted sum of individual losses."""
+        return td_error + self.msg_aggr_weight * msg_aggr_loss
 
     def learn(self, sample_size, batch_size: int, times: int = 1):
         total_loss = 0.0
@@ -269,8 +310,12 @@ class ProbMsgAggrQMIXTrainer(Trainer):
                     self.eval_critic.train()
                     ret = self.eval_critic(q_val, states, alive_mask, obs_padding_mask[:,0,:])
                     q_tot = ret['q_tot']
-                    critic_mu = ret['mu']
-                    critic_std = ret['std']
+                    # Use target model for stablity
+                    with torch.no_grad():
+                        self.target_critic.eval()
+                        ret = self.target_critic(q_val, states, alive_mask, obs_padding_mask[:,0,:])
+                        critic_mu = ret['mu']
+                        critic_std = ret['std']
 
                     # Compute TD targets
                     with torch.no_grad():
@@ -295,13 +340,15 @@ class ProbMsgAggrQMIXTrainer(Trainer):
                     td_error = torch.nn.functional.mse_loss(q_tot, y_tot.detach())
                     # Message aggregation loss
                     ag_distribution = Normal(ag_mu, ag_std)
-                    critic_distribution = Normal(ag_mu.detach(), ag_std.detach())
+                    critic_distribution = Normal(critic_mu.detach(), critic_std.detach())
                     msg_aggr_loss = kl_divergence(ag_distribution, critic_distribution).mean()
 
-                    self.pit_loss.to(self.train_device)
-                    #critic_loss = self.pit_loss(torch.stack([td_error, msg_aggr_loss]))
-                    #print(f'msg_aggr_loss={msg_aggr_loss.item():.4f}, td_error={td_error.item():.4f}')
-                    critic_loss = td_error + msg_aggr_loss
+                    # Use the predetermined loss function
+                    if self.current_epoch < self.warmup_epochs:
+                        critic_loss = td_error  # Only use TD error during warmup
+                    else:
+                        critic_loss = self.compute_critic_loss(td_error, msg_aggr_loss)
+
                     if self.use_data_parallel:
                         critic_loss = torch.mean(critic_loss) # Reduce across all GPUs
 
