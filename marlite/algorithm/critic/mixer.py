@@ -203,10 +203,8 @@ class SeqQMixer(Mixer):
         # Select appropriate state features to return
         if self.state_feature_type == 'State':
             state_features = last_encoded_states
-        elif self.state_feature_type == 'Seq':
-            state_features = hidden_states
         else:
-            state_features = None
+            state_features = hidden_states
 
         return {
             "q_tot": q_tot,
@@ -251,7 +249,7 @@ class ProbQMixer(Mixer):
         Returns:
             Dict with keys:
                 - "q_tot": Total Q-value computed using sampled state features
-                - "state_features": Concatenated mean and log-variance tensors
+                - "state_features": Extracted state features
                 - "mu": Mean of the latent state distribution
                 - "std": Standard deviation of the latent state distribution
         """
@@ -285,7 +283,7 @@ class ProbQMixer(Mixer):
 
         return {
             "q_tot": q_tot,
-            "state_features": encoded_states,
+            "state_features": sample,
             "mu": mu,
             "std": std
         }
@@ -303,6 +301,7 @@ class ProbSeqQMixer(Mixer):
         base_model_config: ModelConfig,
         feature_extractor_config: ModelConfig,
         seq_model_config: ModelConfig,
+        state_feature_type: str = "Seq",
         deterministic_eval = True
     ):
         """
@@ -317,6 +316,12 @@ class ProbSeqQMixer(Mixer):
         self.base_model = base_model_config.get_model()
         self.feature_extractor = feature_extractor_config.get_model()
         self.seq_model = seq_model_config.get_model()
+
+        self.state_feature_type = state_feature_type
+        if state_feature_type == 'State':
+            self.forward_fn = self._forward_with_state_hidden
+        else:
+            self.forward_fn = self._forward_with_seq_hidden
 
         self.deterministic_eval = deterministic_eval
 
@@ -334,29 +339,75 @@ class ProbSeqQMixer(Mixer):
         else:
             self.seq_model_class_name = self.seq_model.__class__.__name__
 
-    def forward(
+    def _forward_with_state_hidden(
         self,
         q_value_from_agents: torch.Tensor,
         states: torch.Tensor,
         alive_mask: torch.Tensor,
         padding_mask: torch.Tensor,
     ) -> Dict[str, torch.Tensor]:
-        """
-        Forward pass of the probabilistic sequential QMixer.
+        bs = q_value_from_agents.shape[0]
+        ts = states.shape[1]
+        state_shape = states.shape[2:]
+        states = states.reshape(bs * ts, *state_shape)
 
-        Args:
-            q_value_from_agents: Tensor of shape [batch_size, n_agents] containing per-agent Q-values
-            states: Tensor of shape [batch_size, seq_len, n_agents, state_dim] containing agent states
-            alive_mask: Boolean mask of shape [batch_size, seq_len, n_agents] for alive agents
-            padding_mask: Boolean mask of shape [batch_size, seq_len] for valid timesteps
+        # Extract features for each timestep
+        if self.fe_class_name == 'MaskedModel':
+            encoded_states = self.feature_extractor(states, alive_mask.reshape(bs * ts, -1))
+        else:
+            encoded_states = self.feature_extractor(states)
 
-        Returns:
-            Dict with keys:
-                - "q_tot": Total Q-value computed using sampled sequence features
-                - "state_features": Concatenated mean and log-variance of final hidden state
-                - "mu": Mean of the latent sequence representation
-                - "std": Standard deviation of the latent sequence representation
-        """
+        # Split final hidden state into mean and log-variance
+        dim = encoded_states.size(-1) // 2
+        mu = encoded_states[:, :dim]  # Mean
+        log_var = encoded_states[:, dim:]  # Log variance
+        std = torch.exp(0.5 * log_var)
+
+        # Use deterministic evaluation if enabled and not in training mode
+        if self.deterministic_eval and not self.training:
+            # Directly use mu as output without reparameterization sampling
+            sample = mu
+        else:
+            # Reparameterization trick
+            eps = torch.randn_like(std)
+            sample = mu + eps * std  # Sample from learned distribution
+
+        encoded_states_sample = sample.reshape(bs, ts, -1)
+        mu = mu.reshape(bs, ts, -1)
+        std = std.reshape(bs, ts, -1)
+        last_encoded_states_sample = encoded_states_sample[:, -1, :]
+        last_mu = mu[:, -1, :]
+        last_std = std[:, -1, :]
+
+        # Process sequence with appropriate model
+        if self.seq_model_class_name == 'Conv1DModel':
+            encoded_states_sample = encoded_states_sample.permute(0, 2, 1)  # (B, T, F) -> (B, F, T)
+            hidden_states = self.seq_model(encoded_states_sample)
+        elif self.seq_model_class_name == 'RNNModel':
+            hidden_states = self.seq_model(encoded_states_sample)
+        elif self.seq_model_class_name == 'AttentionModel':
+            hidden_states = self.seq_model(encoded_states_sample, padding_mask)
+        else:
+            hidden_states = self.seq_model(encoded_states_sample[:, -1, :])
+
+        # Mask Q-values and compute total Q-value
+        masked_q_values = q_value_from_agents * alive_mask[:, -1, :]
+        q_tot = self.base_model(masked_q_values, hidden_states)
+
+        return {
+            "q_tot": q_tot,
+            "state_features": last_encoded_states_sample,
+            "mu": last_mu,
+            "std": last_std
+        }
+
+    def _forward_with_seq_hidden(
+        self,
+        q_value_from_agents: torch.Tensor,
+        states: torch.Tensor,
+        alive_mask: torch.Tensor,
+        padding_mask: torch.Tensor,
+    ) -> Dict[str, torch.Tensor]:
         bs = q_value_from_agents.shape[0]
         ts = states.shape[1]
         state_shape = states.shape[2:]
@@ -402,7 +453,37 @@ class ProbSeqQMixer(Mixer):
 
         return {
             "q_tot": q_tot,
-            "state_features": hidden_states,
+            "state_features": sample,
             "mu": mu,
             "std": std
         }
+
+    def forward(
+        self,
+        q_value_from_agents: torch.Tensor,
+        states: torch.Tensor,
+        alive_mask: torch.Tensor,
+        padding_mask: torch.Tensor,
+    ) -> Dict[str, torch.Tensor]:
+        """
+        Forward pass of the probabilistic sequential QMixer.
+
+        Args:
+            q_value_from_agents: Tensor of shape [batch_size, n_agents] containing per-agent Q-values
+            states: Tensor of shape [batch_size, seq_len, n_agents, state_dim] containing agent states
+            alive_mask: Boolean mask of shape [batch_size, seq_len, n_agents] for alive agents
+            padding_mask: Boolean mask of shape [batch_size, seq_len] for valid timesteps
+
+        Returns:
+            Dict with keys:
+                - "q_tot": Total Q-value computed using sampled sequence features
+                - "state_features": Sequence-aware state features based on state_feature_type
+                - "mu": Mean of the latent sequence representation
+                - "std": Standard deviation of the latent sequence representation
+        """
+        return self.forward_fn(
+            q_value_from_agents,
+            states,
+            alive_mask,
+            padding_mask
+        )

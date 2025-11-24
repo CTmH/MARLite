@@ -323,7 +323,6 @@ class ProbMsgAggrQMIXTrainer(Trainer):
                         next_observations = torch.tensor(next_observations, dtype=torch.float, device=self.train_device)
                         ret_next = self.eval_agent_group.forward(next_observations, next_obs_padding_mask, next_alive_mask[:,-1,:])
                         q_val_next = ret_next['q_val']
-                        #aggregated_msg_next = ret_next['aggregated_msg']
                         if use_action_mask:
                             q_val_next = torch.masked_fill(q_val_next, ~next_avail_actions, -torch.inf)
                         q_val_next = q_val_next.max(dim=-1).values
@@ -331,7 +330,6 @@ class ProbMsgAggrQMIXTrainer(Trainer):
                         self.target_critic.eval()
                         ret_next = self.target_critic(q_val_next, next_states, next_alive_mask, next_obs_padding_mask[:,0,:])
                         q_tot_next = ret_next['q_tot']
-                        #state_features_next = ret_next['state_features']
 
                     # Compute the TD target
                     y_tot = rewards + (1 - terminations) * self.gamma * q_tot_next
