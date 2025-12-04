@@ -268,7 +268,7 @@ class Analyzer:
             Dictionary containing all analysis results
         """
         return {
-            'decision_distribution': self.analyze_decision_distribution(episodes),
+            #'decision_distribution': self.analyze_decision_distribution(episodes),
             'reward': self.analyze_reward_distribution(episodes),
             'edge_counts': self.analyze_edge_counts(episodes),
             #'positive_rewards_per_step': self.analyze_positive_rewards_per_step(episodes),

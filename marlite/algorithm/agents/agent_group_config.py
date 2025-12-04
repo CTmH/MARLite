@@ -7,8 +7,8 @@ from marlite.algorithm.agents.random_agent_group import RandomAgentGroup
 from marlite.algorithm.agents.magent_agent_group import MAgentPreyAgentGroup, MAgentBattleAgentGroup
 from marlite.algorithm.agents.msg_aggr_agent_group import ObsMsgAggrAgentGroup, SeqMsgAggrAgentGroup
 from marlite.algorithm.agents.msg_aggr_agent_group import ProbObsMsgAggrAgentGroup, ProbSeqMsgAggrAgentGroup
-from marlite.algorithm.agents.msg_aggr_agent_group import DualPathObsMsgAggrAgentGroup, DualPathSeqMsgAggrAgentGroup
-from marlite.algorithm.agents.msg_aggr_agent_group import DualPathProbObsMsgAggrAgentGroup, DualPathProbSeqMsgAggrAgentGroup
+from marlite.algorithm.agents.msg_aggr_agent_group import DualPathObsMsgAggrAgentGroup
+from marlite.algorithm.agents.msg_aggr_agent_group import DualPathProbObsMsgAggrAgentGroup
 from marlite.algorithm.agents.gnn_comm_agent_group import ObsGNNCommAgentGroup, SeqGNNCommAgentGroup
 from marlite.algorithm.agents.g2anet_agent_group import G2ANetAgentGroup
 from marlite.algorithm.model import ModelConfig
@@ -129,16 +129,16 @@ def create_prob_seq_msg_aggr_agent_group(agent_group_config: Dict[str, Any]) -> 
 
 def create_dual_path_obs_msg_aggr_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
     return _create_dual_path_msg_agent_group(DualPathObsMsgAggrAgentGroup, agent_group_config)
-
+'''
 def create_dual_path_seq_msg_aggr_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
     return _create_dual_path_msg_agent_group(DualPathSeqMsgAggrAgentGroup, agent_group_config)
-
+'''
 def create_dual_path_prob_obs_msg_aggr_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
     return _create_dual_path_msg_agent_group(DualPathProbObsMsgAggrAgentGroup, agent_group_config)
-
+'''
 def create_dual_path_prob_seq_msg_aggr_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
     return _create_dual_path_msg_agent_group(DualPathProbSeqMsgAggrAgentGroup, agent_group_config)
-
+'''
 def _create_msg_agent_group(
     agent_group_class: Type[AgentGroup],
     agent_group_config: Dict[str, Any]
@@ -231,9 +231,9 @@ registered_agent_groups = {
     "ProbObsMsgAggr": create_prob_obs_msg_aggr_agent_group,
     "ProbSeqMsgAggr": create_prob_seq_msg_aggr_agent_group,
     "DualPathObsMsgAggr": create_dual_path_obs_msg_aggr_agent_group,
-    "DualPathSeqMsgAggr": create_dual_path_seq_msg_aggr_agent_group,
+    #"DualPathSeqMsgAggr": create_dual_path_seq_msg_aggr_agent_group,
     "DualPathProbObsMsgAggr": create_dual_path_prob_obs_msg_aggr_agent_group,
-    "DualPathProbSeqMsgAggr": create_dual_path_prob_seq_msg_aggr_agent_group,
+    #"DualPathProbSeqMsgAggr": create_dual_path_prob_seq_msg_aggr_agent_group,
     "GNN": create_gnn_agent_group,
     "ObsGNNComm": create_obs_gnn_comm_agent_group,
     "SeqGNNComm": create_seq_gnn_comm_agent_group,

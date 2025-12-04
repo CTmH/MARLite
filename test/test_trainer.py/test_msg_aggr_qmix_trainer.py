@@ -423,10 +423,10 @@ class TestProbSeqMsgAggrSMACQMIXTrainer(unittest.TestCase):
         with open(self.config_path, 'r') as file:
             self.config = yaml.safe_load(file)
         self.config['trainer_config']['train_args']['epochs'] = 2
-        self.config['rollout_config']['n_episodes'] = 2
+        self.config['rollout_config']['n_episodes'] = 4
         self.config['rollout_config']['n_eval_episodes'] = 2
-        self.config['rollout_config']['episode_limit'] = 2
-        self.config['replaybuffer_config']['capacity'] = 2
+        self.config['rollout_config']['episode_limit'] = 16
+        self.config['replaybuffer_config']['capacity'] = 4
         self.config['trainer_config']['use_data_parallel'] = True
         self.config['trainer_config']['train_device'] = 'cuda'
         self.trainer_config = TrainerConfig(self.config)
@@ -546,14 +546,14 @@ class TestDualPathObsMsgAggrSMACQMIXTrainer(unittest.TestCase):
             best_metrics = self.trainer.train(epochs=2, target_first_metric=5)
 
     def test_data_parallel(self):
-        self.config_path = 'test/config/prob_seq_msg_aggr_smac.yaml'
+        self.config_path = 'test/config/dual_path_obs_msg_aggr_smac.yaml'
         with open(self.config_path, 'r') as file:
             self.config = yaml.safe_load(file)
         self.config['trainer_config']['train_args']['epochs'] = 2
-        self.config['rollout_config']['n_episodes'] = 2
+        self.config['rollout_config']['n_episodes'] = 4
         self.config['rollout_config']['n_eval_episodes'] = 2
-        self.config['rollout_config']['episode_limit'] = 2
-        self.config['replaybuffer_config']['capacity'] = 2
+        self.config['rollout_config']['episode_limit'] = 16
+        self.config['replaybuffer_config']['capacity'] = 4
         self.config['trainer_config']['use_data_parallel'] = True
         self.config['trainer_config']['train_device'] = 'cuda'
         self.trainer_config = TrainerConfig(self.config)
@@ -573,14 +573,14 @@ class TestDualPathObsMsgAggrSMACQMIXTrainer(unittest.TestCase):
                     self.assertFalse(torch.equal(w1, w2))
 
     def test_torch_compile(self):
-        self.config_path = 'test/config/prob_seq_msg_aggr_smac.yaml'
+        self.config_path = 'test/config/dual_path_obs_msg_aggr_smac.yaml'
         with open(self.config_path, 'r') as file:
             self.config = yaml.safe_load(file)
         self.config['trainer_config']['train_args']['epochs'] = 2
-        self.config['rollout_config']['n_episodes'] = 2
+        self.config['rollout_config']['n_episodes'] = 4
         self.config['rollout_config']['n_eval_episodes'] = 2
-        self.config['rollout_config']['episode_limit'] = 2
-        self.config['replaybuffer_config']['capacity'] = 2
+        self.config['rollout_config']['episode_limit'] = 16
+        self.config['replaybuffer_config']['capacity'] = 4
         self.config['trainer_config']['compile_models'] = True
         self.trainer_config = TrainerConfig(self.config)
         with tempfile.TemporaryDirectory() as temp_dir:
