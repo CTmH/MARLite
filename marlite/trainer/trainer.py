@@ -78,10 +78,12 @@ class Trainer():
         self.target_critic.load_state_dict(self.eval_critic.state_dict())
         self.best_critic_params = deepcopy(self.eval_critic.state_dict())
         self._cached_critic_params = deepcopy(self.eval_critic.state_dict())
+        self.critic_optimizer_config = critic_optimizer_config
+        self.lr_scheduler_conf = lr_scheduler_conf
 
-        self.optimizer = critic_optimizer_config.get_optimizer(self.eval_critic.parameters())
+        self.optimizer = self.critic_optimizer_config.get_optimizer(self.eval_critic.parameters())
         if lr_scheduler_conf:
-            self.lr_scheduler = lr_scheduler_conf.get_lr_scheduler(self.optimizer)
+            self.lr_scheduler = self.lr_scheduler_conf.get_lr_scheduler(self.optimizer)
         else:
             self.lr_scheduler = None
 
@@ -216,8 +218,6 @@ class Trainer():
         return result
 
     def train(self, epochs, target_first_metric, eval_interval=1, update_target_interval=1, batch_size=64, learning_times_per_epoch=1):
-
-        best_loss = np.inf
         # Training loop
         for epoch in range(epochs):
             self.current_epoch = epoch

@@ -10,6 +10,7 @@ from marlite.algorithm.model import RNNModel, Conv1DModel, AttentionModel, Maske
 from marlite.algorithm.agents.agent_group import AgentGroup
 from marlite.util.optimizer_config import OptimizerConfig
 from marlite.util.lr_scheduler_config import LRSchedulerConfig
+from marlite.util.prob_util import process_probabilistic_output
 
 
 class MsgAggrAgentGroup(AgentGroup):
@@ -766,7 +767,7 @@ class ProbObsMsgAggrAgentGroup(MsgAggrAgentGroup):
 
         # Process probabilistic output
         deterministic = self.deterministic_eval and not self.aggr_model.training
-        aggregated_msg, mu, std = _process_probabilistic_output(aggr_output, deterministic)
+        aggregated_msg, mu, std = process_probabilistic_output(aggr_output, deterministic)
         aggregated_msg_expand = aggregated_msg.unsqueeze(1).expand(-1, len(self.agent_model_dict), -1)  # (B, N, F)
 
         hidden_states = torch.cat((encoded, aggregated_msg_expand), dim=-1)  # (B, N, Hidden Size(F_local_obs + F_aggregated_msg))
@@ -812,7 +813,7 @@ class ProbSeqMsgAggrAgentGroup(MsgAggrAgentGroup):
 
         # Process probabilistic output
         deterministic = self.deterministic_eval and not self.aggr_model.training
-        aggregated_msg, mu, std = _process_probabilistic_output(aggr_output, deterministic)
+        aggregated_msg, mu, std = process_probabilistic_output(aggr_output, deterministic)
         aggregated_msg_expand = aggregated_msg.unsqueeze(1).expand(-1, len(self.agent_model_dict), -1)  # (B, N, F)
 
         hidden_states = torch.cat((encoded, aggregated_msg_expand), dim=-1)  # (B, N, Hidden Size(F_local_obs + F_aggregated_msg))
@@ -941,7 +942,7 @@ class DualPathProbObsMsgAggrAgentGroup(DualPathObsMsgAggrAgentGroup):
 
         # Process probabilistic output
         deterministic = self.deterministic_eval and not self.aggr_model.training
-        aggregated_msg, mu, std = _process_probabilistic_output(aggr_output, deterministic)
+        aggregated_msg, mu, std = process_probabilistic_output(aggr_output, deterministic)
         aggregated_msg_expand = aggregated_msg.unsqueeze(1).expand(-1, len(self.agent_model_dict), -1)  # (B, N, F)
         if not self.enable_rl_grad_to_msg_aggr:
             aggregated_msg_expand = aggregated_msg_expand.detach()
@@ -976,25 +977,6 @@ class DualPathProbSeqMsgAggrAgentGroup(DualPathMsgAggrAgentGroup, ProbMsgAggrAge
 
         return {'q_val': q_val, 'aggregated_msg': aggregated_msg, 'mu': mu, 'std': std}
 '''
-
-def _process_probabilistic_output(aggr_output: torch.Tensor, deterministic: bool):
-    """Process the aggregated output to get mean and std for probabilistic models."""
-    # Split output into mean and log variance
-    dim = aggr_output.size(-1) // 2
-    mu = aggr_output[:, :dim]  # Mean
-    log_var = aggr_output[:, dim:]  # Log variance
-    std = torch.exp(0.5 * log_var)
-
-    # Reparameterization or deterministic sampling based on mode
-    if deterministic:
-        # During evaluation with deterministic_eval=True, use mu directly
-        aggregated_msg = mu
-    else:
-        # During training or when deterministic_eval=False, use reparameterization
-        eps = torch.randn_like(std)
-        aggregated_msg = mu + eps * std  # Sample from Gaussian distribution
-
-    return aggregated_msg, mu, std
 
 def _init_msg_extractor(m):
     if hasattr(m, 'weight') and m.weight is not None:

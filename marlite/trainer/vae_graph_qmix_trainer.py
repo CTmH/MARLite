@@ -1,15 +1,89 @@
 import torch
 import numpy as np
+from typing import Callable
 from torch.nn import DataParallel
 from tqdm import tqdm
+from copy import deepcopy
 
-from marlite.trainer.trainer import Trainer
+from marlite.algorithm.model import ModelConfig
+from marlite.trainer.semi_supervised_qmix_trainer import SemiSupervisedQMIXTrainer
 from marlite.util.trajectory_dataset import TrajectoryDataLoader
+from marlite.util.self_supervised_data_constructor.self_supervised_data_constructor_config import SelfSupervisedDataConstructorConfig
 
-class GraphQMIXTrainer(Trainer):
+
+class VAEGraphQMIXTrainer(SemiSupervisedQMIXTrainer):
+    """
+    A GraphQMIXTrainer subclass that works with probabilistic agent groups.
+    This trainer handles ProbObsGNNCommAgentGroup, ProbSeqGNNCommAgentGroup,
+    DualPathObsGNNCommAgentGroup, and DualPathProbObsGNNCommAgentGroup.
+    It optimizes the parameters of the independent multivariate Gaussian distributions
+    output by probabilistic agent groups using a VAE decoder.
+    """
+
     def __init__(self, **kwargs):
+
         super().__init__(**kwargs)
-        # Agent group
+
+        # Create data constructor from config
+        self.data_constructor = self.data_constructor_config.get_data_constructor()
+
+        self.eval_decoder = self.decoder_config.get_model()
+        self.target_decoder = self.decoder_config.get_model()
+        self.target_decoder.load_state_dict(self.eval_decoder.state_dict())
+        self.best_decoder_params = deepcopy(self.eval_decoder.state_dict())
+        self._cached_decoder_params = deepcopy(self.eval_decoder.state_dict())
+
+        params_need_optim = [
+            {'params': self.eval_critic.parameters()},
+            {'params': self.eval_decoder.parameters()}
+        ]
+        self.optimizer = self.critic_optimizer_config.get_optimizer(params_need_optim)
+        if self.lr_scheduler_conf:
+            self.lr_scheduler = self.lr_scheduler_conf.get_lr_scheduler(self.optimizer)
+        else:
+            self.lr_scheduler = None
+
+    def _compute_vae_loss(self,
+                         mu,
+                         std,
+                         observations,
+                         states,
+                         edge_indices,
+                         alive_mask):
+        """
+        Internal function to compute VAE loss for probabilistic agent groups.
+
+        Args:
+            mu: Mean of the Gaussian distribution (batch_size, n_agents, feature_dim)
+            std: Standard deviation of the Gaussian distribution (batch_size, n_agents, feature_dim)
+            observations: Actual observations from the environment
+            states: Environment states
+            edge_indices: Communication graph edge indices
+            batch_size: Size of the batch
+            n_agents: Number of agents
+
+        Returns:
+            VAE reconstruction loss
+        """
+        if self.eval_decoder is None or self.data_constructor is None or self.reconstruction_loss_fn is None:
+            # If decoder components are not provided, return 0 loss
+            return torch.tensor(0.0, device=mu.device)
+
+        # Sample from the Gaussian distribution to get latent representations
+        eps = torch.randn_like(std)
+        z = mu + eps * std  # Reparameterization trick (batch_size, n_agents, feature_dim)
+
+        # Use edge_indices to find communication partners for each agent
+        # Decode the latent representations to reconstruct observations
+        reconstructed_obs = self.eval_decoder(z)  # (batch_size, n_agents, feature_dim)
+
+        # Format the original observations for comparison
+        formatted_obs = self.data_constructor.process(observations, states, edge_indices, alive_mask)  # (batch_size, n_agents, feature_dim)
+
+        # Calculate reconstruction loss
+        reconstruction_loss = self.reconstruction_loss_fn(reconstructed_obs, formatted_obs)
+
+        return reconstruction_loss
 
     def learn(self, sample_size, batch_size: int, times: int = 1):
         total_loss = 0.0
@@ -21,11 +95,17 @@ class GraphQMIXTrainer(Trainer):
         self.target_agent_group.to(self.train_device)
         self.target_critic.to(self.train_device)
 
+        # Also move decoder to the appropriate device if it exists
+        if self.eval_decoder is not None:
+            self.eval_decoder.to(self.train_device)
+
         if self.use_data_parallel:
             self.eval_agent_group.wrap_data_parallel()
             self.eval_critic = DataParallel(self.eval_critic)
             self.target_agent_group.wrap_data_parallel()
             self.target_critic = DataParallel(self.target_critic)
+            if self.eval_decoder is not None:
+                self.eval_decoder = DataParallel(self.eval_decoder)
 
         for t in range(times):
             with tqdm(total=sample_size, desc=f'Times {t+1}/{times}', unit='batch') as pbar:
@@ -85,6 +165,9 @@ class GraphQMIXTrainer(Trainer):
                     self.eval_agent_group.reset().train() # Reset Graph Builder intervals
                     ret = self.eval_agent_group.forward(observations, states, obs_padding_mask, alive_mask[:,-1,:], edge_indices) # obs.shape (B, N, T, F)
                     q_val = ret['q_val']
+                    mu = ret['mu']
+                    std = ret['std']
+
                     actions = torch.Tensor(actions[:,:,-1:]).to(device=self.train_device, dtype=torch.int64) # (B, N, T, A)
                     q_val = torch.gather(q_val, dim=-1, index=actions)
                     q_val = q_val.squeeze(-1) # (B, N, 1) -> (B, N)
@@ -113,21 +196,34 @@ class GraphQMIXTrainer(Trainer):
 
                     # Compute the critic loss
                     critic_loss = torch.nn.functional.mse_loss(q_tot, y_tot.detach())
-                    if self.use_data_parallel:
-                        critic_loss = critic_loss.mean() # Reduce across all GPUs
 
-                    # Optimize the critic network
+                    # Compute VAE loss
+                    vae_loss = self._compute_vae_loss(
+                        mu, std, observations, states, edge_indices, alive_mask
+                    )
+
+                    # Total loss is the sum of critic loss and VAE loss
+                    total_batch_loss = critic_loss + self.self_supervised_learning_loss_weight * vae_loss
+
+                    if self.use_data_parallel:
+                        total_batch_loss = total_batch_loss.mean() # Reduce across all GPUs
+
+                    # Optimize the networks - only use the main optimizer since it includes both critic and decoder params
                     self.eval_agent_group.zero_grad()
                     self.eval_critic.zero_grad()
-                    critic_loss.backward()
+                    self.eval_decoder.zero_grad()
+
+                    total_batch_loss.backward()
                     torch.nn.utils.clip_grad_norm_(
-                        self.eval_critic.parameters(),
+                        list(self.eval_critic.parameters()) +
+                        list(self.eval_agent_group.parameters()) +
+                        (list(self.eval_decoder.parameters()) if self.eval_decoder is not None else []),
                         max_norm=5.0
                     )
                     self.optimizer.step()
                     self.eval_agent_group.step()
 
-                    total_loss += critic_loss.detach().cpu().item()
+                    total_loss += total_batch_loss.detach().cpu().item()
                     total_batches += 1
 
                     pbar.update(bs)
@@ -137,11 +233,15 @@ class GraphQMIXTrainer(Trainer):
             self.eval_critic = self.eval_critic.module
             self.target_agent_group.unwrap_data_parallel()
             self.target_critic = self.target_critic.module
+            if self.eval_decoder is not None:
+                self.eval_decoder = self.eval_decoder.module
 
         self.eval_agent_group.to("cpu")
         self.eval_critic.to("cpu")
         self.target_agent_group.to("cpu")
         self.target_critic.to("cpu")
+        if self.eval_decoder is not None:
+            self.eval_decoder.to("cpu")
         torch.cuda.empty_cache()
 
         return total_loss / total_batches

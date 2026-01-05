@@ -317,6 +317,9 @@ class ProbMsgAggrQMIXTrainer(Trainer):
                         critic_mu = ret['mu']
                         critic_std = ret['std']
 
+                    #state_dict = {'ag_mu': ag_mu, 'ag_std': ag_std, 'critic_mu': critic_mu, 'critic_std': critic_std}
+                    #torch.save(state_dict, '/home/ctmh/Source/MARLite/draft/multiple_tensors.pth')
+
                     # Compute TD targets
                     with torch.no_grad():
                         self.target_agent_group.eval()

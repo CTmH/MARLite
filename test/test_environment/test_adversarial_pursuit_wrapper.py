@@ -170,6 +170,129 @@ class TestAdversarialPursuitPredator(unittest.TestCase):
         self.assertEqual(vector_state[2, 6], 1)  # Action 1 for second agent
         self.assertEqual(vector_state[3, 7], 1)  # Action 2 for third agent
 
+    def test_vector_observation(self):
+        """Test the vector observation conversion functionality"""
+
+        # Create a mock observation with shape (H, W, C)
+        H, W, C = 10, 10, 29  # Typical observation dimensions
+        observation = np.zeros((H, W, C), dtype=np.float16)
+
+        # Define channel indices for observation
+        OBSERVATION_OBSTACLE_CHANNEL = 0
+        OBSERVATION_TEAM_0_PRESENCE_CHANNEL = 1
+        OBSERVATION_TEAM_1_PRESENCE_CHANNEL = 4
+
+        # Add some obstacles
+        observation[0, 0, OBSERVATION_OBSTACLE_CHANNEL] = 1
+        observation[9, 9, OBSERVATION_OBSTACLE_CHANNEL] = 1
+        observation[5, 5, OBSERVATION_OBSTACLE_CHANNEL] = 1
+
+        # Add team 0 agents (predators)
+        observation[2, 2, OBSERVATION_TEAM_0_PRESENCE_CHANNEL] = 1
+        observation[2, 2, 2] = 100  # HP
+        observation[2, 2, 3] = 1    # Team 0 presence
+
+        observation[3, 3, OBSERVATION_TEAM_0_PRESENCE_CHANNEL] = 1
+        observation[3, 3, 2] = 80   # HP
+        observation[3, 3, 3] = 1    # Team 0 presence
+
+        # Add team 1 agents (prey - opponents)
+        observation[7, 7, OBSERVATION_TEAM_1_PRESENCE_CHANNEL] = 1
+        observation[7, 7, 5] = 90   # HP
+        observation[7, 7, 6] = 1    # Team 1 presence
+
+        observation[8, 8, OBSERVATION_TEAM_1_PRESENCE_CHANNEL] = 1
+        observation[8, 8, 5] = 70   # HP
+        observation[8, 8, 6] = 1    # Team 1 presence
+
+        # Create a mock environment that returns our observation
+        class MockEnv:
+            def __init__(self):
+                self.agents = [f'predator_{i}' for i in range(25)] + [f'prey{i}' for i in range(50)]
+                self.possible_agents = self.agents[:]
+                self.observation_spaces = {agent: (5, 5) for agent in self.possible_agents}
+                self.action_spaces = {agent: (0, 5) for agent in self.possible_agents}
+
+            def observation_space(self, key):
+                return self.observation_spaces[key]
+
+            def action_space(self, key):
+                return self.action_spaces[key]
+
+            def reset(self, seed=None, options=None):
+                # Return our mock observation for all agents
+                obs_dict = {}
+                for agent in self.agents:
+                    obs_dict[agent] = observation.copy()
+                return obs_dict, {}
+
+            def step(self, actions):
+                # Return our mock observation for all agents
+                obs_dict = {}
+                for agent in self.agents:
+                    obs_dict[agent] = observation.copy()
+                return obs_dict, {}, {}, {}, {}
+
+            def state(self):
+                return np.zeros((10, 10, 29), dtype=np.float16)
+
+        # Create wrapper with vector_observation enabled
+        kwargs = {
+            'opponent_agent_group_config': self.opponent_agent_group_config,
+            'opp_obs_queue_len': 5,
+            'vector_observation': True,
+            'max_vector_observation_records': 8
+        }
+
+        # Test the vector observation conversion
+        wrapper = AdversarialPursuitPredator(env=MockEnv(), **kwargs)
+
+        # Reset to get initial observations
+        observations, _ = wrapper.reset()
+
+        # Verify that observations are vectorized
+        if observations:
+            # Get first agent's observation
+            first_agent_obs = list(observations.values())[0]
+
+            # Check shape: should be (max_vector_observation_records, C)
+            expected_shape = (8, C)
+            self.assertEqual(first_agent_obs.shape, expected_shape,
+                           f"Expected shape {expected_shape}, got {first_agent_obs.shape}")
+
+            # Verify the center is at (H//2, W//2) = (5, 5)
+            center_y, center_x = H // 2, W // 2
+
+            # Calculate Manhattan distances from center to each entity we placed
+            # (0,0): distance = |0-5| + |0-5| = 10
+            # (9,9): distance = |9-5| + |9-5| = 8
+            # (5,5): distance = |5-5| + |5-5| = 0
+            # (2,2): distance = |2-5| + |2-5| = 6
+            # (3,3): distance = |3-5| + |3-5| = 4
+            # (7,7): distance = |7-5| + |7-5| = 4
+            # (8,8): distance = |8-5| + |8-5| = 6
+
+            # The closest entities should be at (5,5), then (3,3) and (7,7) (both distance 4),
+            # then (2,2), (8,8), (9,9), (0,0)
+
+            # Since we have max_vector_observation_records=8, all should be included
+            # Check that the first row contains the closest entity (5,5)
+            self.assertTrue(np.array_equal(first_agent_obs[0], observation[5, 5]),
+                          "First row should contain closest entity at (5,5)")
+
+            # Check that the observation contains non-zero values (not all zeros)
+            self.assertFalse(np.all(first_agent_obs == 0),
+                           "Vectorized observation should not be all zeros")
+
+            # Verify that the number of non-zero rows matches expected entities
+            # We placed 7 entities total, so should have 7 non-zero rows
+            non_zero_rows = np.sum(np.any(first_agent_obs != 0, axis=1))
+            self.assertGreaterEqual(non_zero_rows, 7,
+                                  f"Expected at least 7 non-zero rows, got {non_zero_rows}")
+        else:
+            self.fail("No observations returned from reset()")
+
+
 class TestAdversarialPursuitPrey(unittest.TestCase):
 
     def setUp(self):

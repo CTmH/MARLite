@@ -42,7 +42,7 @@ class TestQMIXAgentGroup(unittest.TestCase):
         obs = np.stack([obs for _ in range(bs)])
         obs = torch.Tensor(obs)
         states = np.stack([self.env.state() for _ in range(bs)])
-        traj_padding_mask = torch.ones((bs, self.seq_length))
+        traj_padding_mask = torch.zeros((bs, self.seq_length))
         alive_mask = torch.ones((bs, len(self.env.agents)))
 
         # Test get_q_values method in evaluation mode

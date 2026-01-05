@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from marlite.algorithm.model.self_attention import SelfAttentionLearnablePE, SelfAttentionFixedPE
+from marlite.algorithm.model.self_attention import SelfAttentionLearnablePE, SelfAttentionFixedPE, SelfAttention
 from marlite.algorithm.model.attention_model import AttentionModel
 from marlite.algorithm.model.masked_model import MaskedModel
 
@@ -16,7 +16,7 @@ class ResidualMLP(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return x + self.net(x)  # 残差连接
+        return x + self.net(x)
 
 
 class ResAttMaskedProbEnc(MaskedModel):
@@ -25,19 +25,6 @@ class ResAttMaskedProbEnc(MaskedModel):
         super(ResAttMaskedProbEnc, self).__init__()
         self.res_att_enc = SimpleResAttEnc(input_dim, embed_dim, num_heads, max_seq_len, dropout)
         self.linear = nn.Linear(embed_dim, output_dim)
-
-    def forward(self, x: torch.Tensor, padding_mask:torch.Tensor=None):
-        """
-        Args:
-            x: Input tensor of shape [batch_size, seq_len(n_agents), input_dim]
-            padding_mask: Mask for padding tokens [batch_size, seq_len]
-
-        Returns:
-            Global embedding of shape [batch_size, output_dim]
-        """
-        h = self.res_att_enc(x, key_padding_mask=padding_mask)
-        output = self.linear(F.gelu(h))
-        return output
 
     def forward(self, x: torch.Tensor, alive_mask: torch.Tensor):
         """
@@ -57,6 +44,7 @@ class ResAttMaskedProbEnc(MaskedModel):
 
 
 class ResAttMaskedStateEnc(MaskedModel):
+
     def __init__(self, input_dim, embed_dim, num_heads, max_seq_len, dropout=0.1):
         super(ResAttMaskedStateEnc, self).__init__()
         self.res_att_enc = ResAttEnc(input_dim, embed_dim, num_heads, max_seq_len, dropout)
@@ -77,6 +65,7 @@ class ResAttMaskedStateEnc(MaskedModel):
 
 
 class ResAttStateEnc(nn.Module):
+
     def __init__(self, input_dim, embed_dim, num_heads, max_seq_len, dropout=0.1):
         super(ResAttStateEnc, self).__init__()
         self.res_att_enc = ResAttEnc(input_dim, embed_dim, num_heads, max_seq_len, dropout)
@@ -90,6 +79,29 @@ class ResAttStateEnc(nn.Module):
             Global embedding of shape [batch_size, embed_dim]
         """
         key_padding_mask = torch.zeros((x.size(0),x.size(1)), dtype=torch.bool, device=x.device)
+        return self.res_att_enc(x, key_padding_mask=key_padding_mask)
+
+
+class ResAttObsEnc(nn.Module):
+    """
+    Observation encoder that uses a residual attention encoder.
+    Uses `create_key_padding_mask` to automatically generate key_padding_mask
+    based on whether each position in the input sequence is all zeros.
+    """
+
+    def __init__(self, input_dim, embed_dim, num_heads, max_seq_len, dropout=0.1):
+        super(ResAttObsEnc, self).__init__()
+        self.res_att_enc = ResAttEnc(input_dim, embed_dim, num_heads, max_seq_len, dropout)
+
+    def forward(self, x: torch.Tensor):
+        """
+        Args:
+            x: Input tensor of shape [batch_size, seq_len(n_agents), input_dim]
+
+        Returns:
+            Global embedding of shape [batch_size, embed_dim]
+        """
+        key_padding_mask = create_key_padding_mask(x)
         return self.res_att_enc(x, key_padding_mask=key_padding_mask)
 
 
@@ -115,6 +127,7 @@ class ResAttSeqEnc(AttentionModel):
 
 
 class ResAttEnc(nn.Module):
+
     def __init__(self, input_dim, embed_dim, num_heads, max_seq_len, dropout=0.1):
         super(ResAttEnc, self).__init__()
         self.linear = nn.Linear(input_dim, embed_dim)
@@ -168,6 +181,7 @@ class ResAttEnc(nn.Module):
 
 
 class SimpleResAttMaskedStateEnc(MaskedModel):
+
     def __init__(self, input_dim, embed_dim, num_heads, max_seq_len, dropout=0.1):
         super(SimpleResAttMaskedStateEnc, self).__init__()
         self.res_att_enc = SimpleResAttEnc(input_dim, embed_dim, num_heads, max_seq_len, dropout)
@@ -186,7 +200,9 @@ class SimpleResAttMaskedStateEnc(MaskedModel):
         not_alive_mask = ~torch.where(all_false_rows.unsqueeze(1), True, alive_mask)
         return self.res_att_enc(x, key_padding_mask=not_alive_mask)
 
+
 class SimpleResAttStateEnc(nn.Module):
+
     def __init__(self, input_dim, embed_dim, num_heads, max_seq_len, dropout=0.1):
         super(SimpleResAttStateEnc, self).__init__()
         self.res_att_enc = SimpleResAttEnc(input_dim, embed_dim, num_heads, max_seq_len, dropout)
@@ -201,6 +217,33 @@ class SimpleResAttStateEnc(nn.Module):
         """
         key_padding_mask = torch.zeros((x.size(0),x.size(1)), dtype=torch.bool, device=x.device)
         return self.res_att_enc(x, key_padding_mask=key_padding_mask)
+
+
+class SimpleResAttObsEnc(AttentionModel):
+    """
+    Observation encoder that uses a simple residual attention encoder.
+    Uses `create_key_padding_mask` to automatically generate key_padding_mask
+    based on whether each position in the input sequence is all zeros.
+    """
+
+    def __init__(self, input_dim, output_dim, embed_dim, num_heads, max_seq_len, dropout=0.1):
+        super(SimpleResAttObsEnc, self).__init__()
+        self.res_att_enc = SimpleResAttEnc(input_dim, embed_dim, num_heads, max_seq_len, dropout)
+        self.linear = nn.Linear(embed_dim, output_dim)
+
+    def forward(self, x: torch.Tensor):
+        """
+        Args:
+            x: Input tensor of shape [batch_size, seq_len(n_agents), input_dim]
+
+        Returns:
+            Global embedding of shape [batch_size, output_dim]
+        """
+        key_padding_mask = create_key_padding_mask(x)
+        h = self.res_att_enc(x, key_padding_mask=key_padding_mask)
+        output = self.linear(F.gelu(h))
+        return output
+
 
 class SimpleResAttSeqEnc(AttentionModel):
 
@@ -263,7 +306,8 @@ class SimpleResAttEnc(nn.Module):
         output = self.norm3(x)
 
         return output
-'''
+
+
 def create_key_padding_mask(tensor: torch.Tensor):
     """
     Creates a key padding mask for attention mechanisms based on whether each time step
@@ -292,4 +336,3 @@ def create_key_padding_mask(tensor: torch.Tensor):
         key_padding_mask[all_zeros_in_batch, -1] = False
 
     return key_padding_mask
-'''

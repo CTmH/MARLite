@@ -346,6 +346,15 @@ class ProbSeqQMixer(Mixer):
         alive_mask: torch.Tensor,
         padding_mask: torch.Tensor,
     ) -> Dict[str, torch.Tensor]:
+        # Get device from feature_extractor
+        device = next(self.feature_extractor.parameters()).device
+
+        # Move tensors to feature_extractor's device
+        states = states.to(device)
+        alive_mask = alive_mask.to(device)
+        padding_mask = padding_mask.to(device)
+        q_value_from_agents = q_value_from_agents.to(device)
+
         bs = q_value_from_agents.shape[0]
         ts = states.shape[1]
         state_shape = states.shape[2:]
@@ -353,7 +362,7 @@ class ProbSeqQMixer(Mixer):
 
         # Extract features for each timestep
         if self.fe_class_name == 'MaskedModel':
-            encoded_states = self.feature_extractor(states, alive_mask.reshape(bs * ts, -1))
+            encoded_states = self.feature_extractor(states, alive_mask.reshape(bs * ts, -1).to(device))
         else:
             encoded_states = self.feature_extractor(states)
 
@@ -408,6 +417,15 @@ class ProbSeqQMixer(Mixer):
         alive_mask: torch.Tensor,
         padding_mask: torch.Tensor,
     ) -> Dict[str, torch.Tensor]:
+        # Get device from feature_extractor
+        device = next(self.feature_extractor.parameters()).device
+
+        # Move tensors to feature_extractor's device
+        states = states.to(device)
+        alive_mask = alive_mask.to(device)
+        padding_mask = padding_mask.to(device)
+        q_value_from_agents = q_value_from_agents.to(device)
+
         bs = q_value_from_agents.shape[0]
         ts = states.shape[1]
         state_shape = states.shape[2:]
@@ -415,7 +433,7 @@ class ProbSeqQMixer(Mixer):
 
         # Extract features for each timestep
         if self.fe_class_name == 'MaskedModel':
-            encoded_states = self.feature_extractor(states, alive_mask.reshape(bs * ts, -1))
+            encoded_states = self.feature_extractor(states, alive_mask.reshape(bs * ts, -1).to(device))
         else:
             encoded_states = self.feature_extractor(states)
 
@@ -423,7 +441,7 @@ class ProbSeqQMixer(Mixer):
 
         # Process sequence with appropriate model
         if self.seq_model_class_name == 'Conv1DModel':
-            encoded_states = encoded_states.permute(0, 2, 1)  # (B, T, F) -> (B, F, T)
+            encoded_states = encoded_states.permute(0, 2, 1) # (B, T, F) -> (B, F, T)
             hidden_states = self.seq_model(encoded_states)
         elif self.seq_model_class_name == 'RNNModel':
             hidden_states = self.seq_model(encoded_states)

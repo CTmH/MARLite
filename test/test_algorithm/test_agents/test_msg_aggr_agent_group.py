@@ -42,7 +42,7 @@ class TestSeqMsgAggrAgentGroup(unittest.TestCase):
         obs = np.stack([obs for _ in range(bs)])
         obs = torch.Tensor(obs)
         states = np.stack([self.env.state() for _ in range(bs)])
-        traj_padding_mask = torch.ones((bs, n_agents, self.seq_length))
+        traj_padding_mask = torch.zeros((bs, n_agents, self.seq_length))
         traj_padding_mask[:, 0] = torch.zeros_like(traj_padding_mask[:, 0])
         traj_padding_mask = traj_padding_mask.to(dtype=torch.bool)
         alive_mask = torch.ones((bs, len(self.env.agents)))

@@ -37,6 +37,8 @@ analysis = [
     "matplotlib>=3.10.3",
     "notebook>=7.4.2",
     "pandas>=2.3.0",
+    "scikit-learn",
+    "seaborn"
 ]
 
 [tool.uv]
