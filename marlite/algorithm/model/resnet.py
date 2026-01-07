@@ -89,9 +89,10 @@ class ResAttObsEnc(nn.Module):
     based on whether each position in the input sequence is all zeros.
     """
 
-    def __init__(self, input_dim, embed_dim, num_heads, max_seq_len, dropout=0.1):
+    def __init__(self, input_dim, output_dim, embed_dim, num_heads, max_seq_len, dropout=0.1):
         super(ResAttObsEnc, self).__init__()
         self.res_att_enc = ResAttEnc(input_dim, embed_dim, num_heads, max_seq_len, dropout)
+        self.linear = nn.Linear(embed_dim, output_dim)
 
     def forward(self, x: torch.Tensor):
         """
@@ -102,7 +103,9 @@ class ResAttObsEnc(nn.Module):
             Global embedding of shape [batch_size, embed_dim]
         """
         key_padding_mask = create_key_padding_mask(x)
-        return self.res_att_enc(x, key_padding_mask=key_padding_mask)
+        h = self.res_att_enc(x, key_padding_mask=key_padding_mask)
+        output = self.linear(F.gelu(h))
+        return output
 
 
 class ResAttSeqEnc(AttentionModel):

@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from typing import Callable
+from typing import List
 from torch.nn import DataParallel
 from tqdm import tqdm
 from copy import deepcopy
@@ -9,7 +9,7 @@ from marlite.algorithm.model import ModelConfig
 from marlite.trainer.semi_supervised_qmix_trainer import SemiSupervisedQMIXTrainer
 from marlite.util.trajectory_dataset import TrajectoryDataLoader
 from marlite.util.self_supervised_data_constructor.self_supervised_data_constructor_config import SelfSupervisedDataConstructorConfig
-
+from marlite.algorithm.model.gather_layer import GatherLayer
 
 class VAEGraphQMIXTrainer(SemiSupervisedQMIXTrainer):
     """
@@ -20,9 +20,10 @@ class VAEGraphQMIXTrainer(SemiSupervisedQMIXTrainer):
     output by probabilistic agent groups using a VAE decoder.
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, kl_divergence_weight=1.0, **kwargs):
 
         super().__init__(**kwargs)
+        self.kl_divergence_weight = kl_divergence_weight
 
         # Create data constructor from config
         self.data_constructor = self.data_constructor_config.get_data_constructor()
@@ -44,12 +45,13 @@ class VAEGraphQMIXTrainer(SemiSupervisedQMIXTrainer):
             self.lr_scheduler = None
 
     def _compute_vae_loss(self,
-                         mu,
-                         std,
-                         observations,
-                         states,
-                         edge_indices,
-                         alive_mask):
+                         mu: torch.Tensor,
+                         std: torch.Tensor,
+                         log_var: torch.Tensor,
+                         observations: torch.Tensor,
+                         states: torch.Tensor,
+                         edge_indices: List[List[np.ndarray]],
+                         alive_mask: torch.Tensor):
         """
         Internal function to compute VAE loss for probabilistic agent groups.
 
@@ -59,31 +61,55 @@ class VAEGraphQMIXTrainer(SemiSupervisedQMIXTrainer):
             observations: Actual observations from the environment
             states: Environment states
             edge_indices: Communication graph edge indices
-            batch_size: Size of the batch
-            n_agents: Number of agents
+            alive_mask: Mask indicating which agents are alive
+            log_var: Log variance of the Gaussian distribution (batch_size, n_agents, feature_dim), optional
 
         Returns:
-            VAE reconstruction loss
+            VAE total loss (reconstruction loss + KL divergence loss)
         """
-        if self.eval_decoder is None or self.data_constructor is None or self.reconstruction_loss_fn is None:
-            # If decoder components are not provided, return 0 loss
-            return torch.tensor(0.0, device=mu.device)
-
         # Sample from the Gaussian distribution to get latent representations
         eps = torch.randn_like(std)
         z = mu + eps * std  # Reparameterization trick (batch_size, n_agents, feature_dim)
 
-        # Use edge_indices to find communication partners for each agent
         # Decode the latent representations to reconstruct observations
         reconstructed_obs = self.eval_decoder(z)  # (batch_size, n_agents, feature_dim)
 
         # Format the original observations for comparison
-        formatted_obs = self.data_constructor.process(observations, states, edge_indices, alive_mask)  # (batch_size, n_agents, feature_dim)
+        observations_np = observations.detach().cpu().numpy()
+        states_np = states.detach().cpu().numpy()
+        alive_mask_np = alive_mask.detach().cpu().numpy()
+        formatted_obs, padding_mask = self.data_constructor.process(observations_np, states_np, edge_indices, alive_mask_np)  # (batch_size, n_agents, feature_dim)
+
+        shape = (-1,) + formatted_obs.shape[-2:]
+        reconstructed_obs = torch.reshape(reconstructed_obs, shape)
+        formatted_obs = formatted_obs.reshape(shape)
+        padding_mask = padding_mask.reshape(-1, padding_mask.shape[-1])
+        formatted_obs = torch.tensor(formatted_obs, device=reconstructed_obs.device)
+        padding_mask = torch.tensor(padding_mask, device=reconstructed_obs.device)
 
         # Calculate reconstruction loss
-        reconstruction_loss = self.reconstruction_loss_fn(reconstructed_obs, formatted_obs)
+        reconstruction_loss = self.reconstruction_loss(reconstructed_obs, formatted_obs, padding_mask)
 
-        return reconstruction_loss
+        # Calculate KL divergence loss
+        # KL divergence between the learned distribution q(z|x) and prior p(z)
+        # For Gaussian prior N(0, I) and posterior N(mu, std^2), KL divergence is:
+        # If log_var is provided, use it directly for better numerical stability
+        # KL(q(z|x) || p(z)) = 0.5 * sum(1 + log_var - mu^2 - exp(log_var))
+
+        kl_divergence = -0.5 * torch.sum(1 + log_var - mu.pow(2) - torch.exp(log_var), dim=-1)  # Sum over feature dimension
+
+        kl_divergence = torch.mean(kl_divergence)  # Average over batch and agents
+
+        # Handle DataParallel case: gather losses from all GPUs
+        if self.use_data_parallel:
+            # Gather losses from all GPUs
+            gathered_recon_losses = GatherLayer.apply(reconstruction_loss)
+            reconstruction_loss = torch.stack(gathered_recon_losses).mean() if gathered_recon_losses else reconstruction_loss
+
+        # Total VAE loss: reconstruction loss + KL divergence loss
+        total_vae_loss = reconstruction_loss + self.kl_divergence_weight * kl_divergence
+
+        return total_vae_loss
 
     def learn(self, sample_size, batch_size: int, times: int = 1):
         total_loss = 0.0
@@ -160,13 +186,14 @@ class VAEGraphQMIXTrainer(SemiSupervisedQMIXTrainer):
                     next_obs_padding_mask = torch.stack([next_obs_padding_mask] * n_agents, dim=1).to(self.train_device)
 
                     # Compute the Q-tot
-                    edge_indices = [edge_indices[i][-1] for i in range(bs)] # (B, T, 2, N) -> (B, 2, N) Take only the last edge indices
+                    last_edge_indices = [edge_indices[i][-1] for i in range(bs)] # (B, T, 2, N) -> (B, 2, N) Take only the last edge indices
                     observations = torch.tensor(observations, dtype=torch.float, device=self.train_device)
                     self.eval_agent_group.reset().train() # Reset Graph Builder intervals
-                    ret = self.eval_agent_group.forward(observations, states, obs_padding_mask, alive_mask[:,-1,:], edge_indices) # obs.shape (B, N, T, F)
+                    ret = self.eval_agent_group.forward(observations, states, obs_padding_mask, alive_mask[:,-1,:], last_edge_indices) # obs.shape (B, N, T, F)
                     q_val = ret['q_val']
                     mu = ret['mu']
                     std = ret['std']
+                    log_var = ret['log_var']
 
                     actions = torch.Tensor(actions[:,:,-1:]).to(device=self.train_device, dtype=torch.int64) # (B, N, T, A)
                     q_val = torch.gather(q_val, dim=-1, index=actions)
@@ -181,7 +208,7 @@ class VAEGraphQMIXTrainer(SemiSupervisedQMIXTrainer):
                     with torch.no_grad():
                         next_observations = torch.tensor(next_observations, dtype=torch.float, device=self.train_device)
                         self.target_agent_group.reset().eval() # Reset Graph Builder intervals
-                        ret_next = self.eval_agent_group.forward(next_observations, next_states, next_obs_padding_mask, next_alive_mask[:,-1,:], edge_indices)
+                        ret_next = self.eval_agent_group.forward(next_observations, next_states, next_obs_padding_mask, next_alive_mask[:,-1,:], last_edge_indices)
                         q_val_next = ret_next['q_val']
                         if use_action_mask:
                             q_val_next = torch.masked_fill(q_val_next, ~next_avail_actions, -torch.inf)
@@ -197,16 +224,16 @@ class VAEGraphQMIXTrainer(SemiSupervisedQMIXTrainer):
                     # Compute the critic loss
                     critic_loss = torch.nn.functional.mse_loss(q_tot, y_tot.detach())
 
+                    if self.use_data_parallel:
+                        critic_loss = critic_loss.mean() # Reduce across all GPUs
+
                     # Compute VAE loss
                     vae_loss = self._compute_vae_loss(
-                        mu, std, observations, states, edge_indices, alive_mask
+                        mu, std, log_var, observations, states, edge_indices, alive_mask
                     )
 
                     # Total loss is the sum of critic loss and VAE loss
                     total_batch_loss = critic_loss + self.self_supervised_learning_loss_weight * vae_loss
-
-                    if self.use_data_parallel:
-                        total_batch_loss = total_batch_loss.mean() # Reduce across all GPUs
 
                     # Optimize the networks - only use the main optimizer since it includes both critic and decoder params
                     self.eval_agent_group.zero_grad()
@@ -216,7 +243,6 @@ class VAEGraphQMIXTrainer(SemiSupervisedQMIXTrainer):
                     total_batch_loss.backward()
                     torch.nn.utils.clip_grad_norm_(
                         list(self.eval_critic.parameters()) +
-                        list(self.eval_agent_group.parameters()) +
                         (list(self.eval_decoder.parameters()) if self.eval_decoder is not None else []),
                         max_norm=5.0
                     )

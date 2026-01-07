@@ -80,10 +80,10 @@ class GraphQMIXTrainer(Trainer):
                     next_obs_padding_mask = torch.stack([next_obs_padding_mask] * n_agents, dim=1).to(self.train_device)
 
                     # Compute the Q-tot
-                    edge_indices = [edge_indices[i][-1] for i in range(bs)] # (B, T, 2, N) -> (B, 2, N) Take only the last edge indices
+                    last_edge_indices = [edge_indices[i][-1] for i in range(bs)] # (B, T, 2, N) -> (B, 2, N) Take only the last edge indices
                     observations = torch.tensor(observations, dtype=torch.float, device=self.train_device)
                     self.eval_agent_group.reset().train() # Reset Graph Builder intervals
-                    ret = self.eval_agent_group.forward(observations, states, obs_padding_mask, alive_mask[:,-1,:], edge_indices) # obs.shape (B, N, T, F)
+                    ret = self.eval_agent_group.forward(observations, states, obs_padding_mask, alive_mask[:,-1,:], last_edge_indices) # obs.shape (B, N, T, F)
                     q_val = ret['q_val']
                     actions = torch.Tensor(actions[:,:,-1:]).to(device=self.train_device, dtype=torch.int64) # (B, N, T, A)
                     q_val = torch.gather(q_val, dim=-1, index=actions)
@@ -98,7 +98,7 @@ class GraphQMIXTrainer(Trainer):
                     with torch.no_grad():
                         next_observations = torch.tensor(next_observations, dtype=torch.float, device=self.train_device)
                         self.target_agent_group.reset().eval() # Reset Graph Builder intervals
-                        ret_next = self.eval_agent_group.forward(next_observations, next_states, next_obs_padding_mask, next_alive_mask[:,-1,:], edge_indices)
+                        ret_next = self.eval_agent_group.forward(next_observations, next_states, next_obs_padding_mask, next_alive_mask[:,-1,:], last_edge_indices)
                         q_val_next = ret_next['q_val']
                         if use_action_mask:
                             q_val_next = torch.masked_fill(q_val_next, ~next_avail_actions, -torch.inf)

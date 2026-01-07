@@ -767,7 +767,7 @@ class ProbObsMsgAggrAgentGroup(MsgAggrAgentGroup):
 
         # Process probabilistic output
         deterministic = self.deterministic_eval and not self.aggr_model.training
-        aggregated_msg, mu, std = process_probabilistic_output(aggr_output, deterministic)
+        aggregated_msg, log_var, mu, std = process_probabilistic_output(aggr_output, deterministic)
         aggregated_msg_expand = aggregated_msg.unsqueeze(1).expand(-1, len(self.agent_model_dict), -1)  # (B, N, F)
 
         hidden_states = torch.cat((encoded, aggregated_msg_expand), dim=-1)  # (B, N, Hidden Size(F_local_obs + F_aggregated_msg))
@@ -775,7 +775,7 @@ class ProbObsMsgAggrAgentGroup(MsgAggrAgentGroup):
         # Process decoders
         q_val = self._process_decoders(hidden_states)
 
-        return {'q_val': q_val, 'aggregated_msg': aggregated_msg, 'mu': mu, 'std': std}
+        return {'q_val': q_val, 'aggregated_msg': aggregated_msg, 'mu': mu, 'std': std, 'log_var': log_var}
 
 
 class ProbSeqMsgAggrAgentGroup(MsgAggrAgentGroup):
@@ -813,7 +813,7 @@ class ProbSeqMsgAggrAgentGroup(MsgAggrAgentGroup):
 
         # Process probabilistic output
         deterministic = self.deterministic_eval and not self.aggr_model.training
-        aggregated_msg, mu, std = process_probabilistic_output(aggr_output, deterministic)
+        aggregated_msg, log_var, mu, std = process_probabilistic_output(aggr_output, deterministic)
         aggregated_msg_expand = aggregated_msg.unsqueeze(1).expand(-1, len(self.agent_model_dict), -1)  # (B, N, F)
 
         hidden_states = torch.cat((encoded, aggregated_msg_expand), dim=-1)  # (B, N, Hidden Size(F_local_obs + F_aggregated_msg))
@@ -821,7 +821,7 @@ class ProbSeqMsgAggrAgentGroup(MsgAggrAgentGroup):
         # Process decoders
         q_val = self._process_decoders(hidden_states)
 
-        return {'q_val': q_val, 'aggregated_msg': aggregated_msg, 'mu': mu, 'std': std}
+        return {'q_val': q_val, 'aggregated_msg': aggregated_msg, 'mu': mu, 'std': std, 'log_var': log_var}
 
 
 class DualPathObsMsgAggrAgentGroup(DualPathBasedMsgAggrAgentGroup):
@@ -942,7 +942,7 @@ class DualPathProbObsMsgAggrAgentGroup(DualPathObsMsgAggrAgentGroup):
 
         # Process probabilistic output
         deterministic = self.deterministic_eval and not self.aggr_model.training
-        aggregated_msg, mu, std = process_probabilistic_output(aggr_output, deterministic)
+        aggregated_msg, log_var, mu, std = process_probabilistic_output(aggr_output, deterministic)
         aggregated_msg_expand = aggregated_msg.unsqueeze(1).expand(-1, len(self.agent_model_dict), -1)  # (B, N, F)
         if not self.enable_rl_grad_to_msg_aggr:
             aggregated_msg_expand = aggregated_msg_expand.detach()
@@ -952,7 +952,7 @@ class DualPathProbObsMsgAggrAgentGroup(DualPathObsMsgAggrAgentGroup):
         # Process decoders
         q_val = self._process_decoders(hidden_states)
 
-        return {'q_val': q_val, 'aggregated_msg': aggregated_msg, 'mu': mu, 'std': std}
+        return {'q_val': q_val, 'aggregated_msg': aggregated_msg, 'mu': mu, 'std': std, 'log_var': log_var}
 
 '''
 class DualPathProbSeqMsgAggrAgentGroup(DualPathMsgAggrAgentGroup, ProbMsgAggrAgentGroup):
@@ -975,7 +975,7 @@ class DualPathProbSeqMsgAggrAgentGroup(DualPathMsgAggrAgentGroup, ProbMsgAggrAge
         # Process decoders
         q_val = self._process_decoders(hidden_states)
 
-        return {'q_val': q_val, 'aggregated_msg': aggregated_msg, 'mu': mu, 'std': std}
+        return {'q_val': q_val, 'aggregated_msg': aggregated_msg, 'mu': mu, 'std': std, 'log_var': log_var}
 '''
 
 def _init_msg_extractor(m):

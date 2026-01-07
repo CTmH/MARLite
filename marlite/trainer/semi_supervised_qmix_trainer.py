@@ -5,7 +5,7 @@ import yaml
 import numpy as np
 from copy import deepcopy
 from absl import logging
-from typing import Callable
+from torch.nn.modules.loss import _Loss
 
 from marlite.algorithm.model import ModelConfig
 from marlite.trainer.trainer import Trainer
@@ -17,13 +17,13 @@ class SemiSupervisedQMIXTrainer(Trainer):
     def __init__(self,
                  decoder_config: ModelConfig,
                  data_constructor_config: SelfSupervisedDataConstructorConfig,
-                 reconstruction_loss_fn: Callable,
+                 reconstruction_loss: _Loss,
                  self_supervised_learning_loss_weight=1.0,
                  **kwargs):
 
         self.decoder_config = decoder_config
         self.data_constructor_config = data_constructor_config
-        self.reconstruction_loss_fn = reconstruction_loss_fn
+        self.reconstruction_loss = reconstruction_loss
         self.self_supervised_learning_loss_weight = self_supervised_learning_loss_weight
 
         super().__init__(**kwargs)

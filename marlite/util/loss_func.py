@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as F
 from torch.nn.modules.loss import _Loss
+from typing import Dict, Type
 
 class PITLoss(_Loss):
     def __init__(self, num_tasks: int, alpha: float = 0.9, eps: float = 1e-8, reduction: str = 'mean'):
@@ -162,3 +163,97 @@ class InfoNCELoss(_Loss):
             return loss.sum()
         else:  # 'none'
             return loss
+
+
+class ChamferDistanceLoss(_Loss):
+    """
+    Computes Chamfer Distance loss between two sets of points.
+    Input tensors should have shape: (batch_size, n_points, feature_dim)
+
+    Args:
+        reduction (str, optional): Specifies the reduction to apply to the output.
+            Default: 'mean'. Options: 'none', 'sum'
+        use_squared_distance (bool, optional): Whether to use squared Euclidean distance.
+            Default: True (recommended for better gradient behavior)
+    """
+    def __init__(self, reduction='mean', use_squared_distance=True):
+        super().__init__(reduction=reduction)
+        self.use_squared_distance = use_squared_distance
+
+    def forward(self, pred_set:torch.Tensor, target_set:torch.Tensor, mask:torch.Tensor=None):
+        """
+        Args:
+            pred_set: Predicted set of points (B, N, D)
+            target_set: Target set of points (B, N, D)
+            mask: Optional boolean mask indicating valid points (B, N)
+        Returns:
+            loss: Chamfer Distance loss (scalar tensor when reduction='mean' or 'sum',
+                  or (B,) tensor when reduction='none')
+        """
+        B, N, D = pred_set.shape
+
+        # Compute pairwise distances
+        dist_matrix = self._pairwise_distance(pred_set, target_set)  # Removed mask parameter
+
+        # Compute min distances in both directions
+        min_dist_pred_to_target = dist_matrix.min(dim=2).values  # (B, N)
+        min_dist_target_to_pred = dist_matrix.min(dim=1).values  # (B, N)
+
+        # Apply mask if provided
+        if mask is not None:
+            valid_pred = mask.float()
+            valid_target = mask.float()
+            min_dist_pred_to_target = min_dist_pred_to_target * valid_pred
+            min_dist_target_to_pred = min_dist_target_to_pred * valid_target
+
+            # Normalize by number of valid points per set
+            num_valid_pred = valid_pred.sum(dim=1, keepdim=True).clamp_min(1)
+            num_valid_target = valid_target.sum(dim=1, keepdim=True).clamp_min(1)
+
+            forward_loss = min_dist_pred_to_target.sum(dim=1) / num_valid_pred.squeeze()
+            backward_loss = min_dist_target_to_pred.sum(dim=1) / num_valid_target.squeeze()
+
+            loss_per_batch = forward_loss + backward_loss
+        else:
+            # Normalize by number of points
+            num_points = torch.tensor(N, dtype=torch.float32, device=pred_set.device)
+            forward_loss = min_dist_pred_to_target.sum(dim=1) / num_points
+            backward_loss = min_dist_target_to_pred.sum(dim=1) / num_points
+
+            loss_per_batch = forward_loss + backward_loss
+
+        # Apply reduction
+        if self.reduction == 'none':
+            return loss_per_batch # (B,)
+        elif self.reduction == 'mean':
+            return loss_per_batch.mean()
+        elif self.reduction == 'sum':
+            return loss_per_batch.sum()
+        else:
+            raise ValueError(f"Invalid reduction type: {self.reduction}")
+
+    def _pairwise_distance(self, set1:torch.Tensor, set2:torch.Tensor):
+        """
+        Compute pairwise Euclidean distances between two sets of points.
+
+        Args:
+            set1: (B, N1, D)
+            set2: (B, N2, D)
+        Returns:
+            dist_matrix: (B, N1, N2)
+        """
+        # Compute squared differences
+        diff = set1.unsqueeze(2) - set2.unsqueeze(1)  # (B, N1, 1, D) - (B, 1, N2, D) -> (B, N1, N2, D)
+
+        # Compute squared Euclidean distance
+        dist_sq = (diff ** 2).sum(dim=-1)  # (B, N1, N2)
+
+        if self.use_squared_distance:
+            return dist_sq
+        else:
+            return dist_sq.clamp_min(1e-12).sqrt()
+
+
+REGISTERED_RECONSTRUCTION_LOSS: Dict[str, Type[_Loss]] = {
+    "ChamferDist": ChamferDistanceLoss
+}

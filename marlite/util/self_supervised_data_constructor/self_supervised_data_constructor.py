@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 import numpy as np
-from typing import Optional
+from typing import Optional, Tuple
 
 
 class SelfSupervisedDataConstructor(ABC):
@@ -19,19 +19,19 @@ class SelfSupervisedDataConstructor(ABC):
 
     @abstractmethod
     def process(self, observations: np.ndarray, states: Optional[np.ndarray],
-                edge_indices: np.ndarray, alive_mask: np.ndarray,
-                window_size: int) -> np.ndarray:
+                edge_indices: np.ndarray, alive_mask: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """
         Process the input data to construct self-supervised learning data.
 
         Args:
-            observations: Array of shape (batch_size, n_agents, window_size, feature_dim)
+            observations: Array of shape (batch_size, n_agents, max_observed_entities, feature_dim)
             states: Optional array, not used in this implementation
             edge_indices: Array of shape (batch_size, 2, edge_num)
             alive_mask: Array of shape (batch_size, n_agents)
-            window_size: Number of entities the agent can see
 
         Returns:
-            Processed array of shape (batch_size, n_agents, max_entities_perception, feature_dim)
+            A tuple containing:
+            - Processed array of shape (batch_size, n_agents, max_entities_perception, feature_dim)
+            - Mask array of shape (batch_size, n_agents, max_entities_perception) indicating padding
         """
         pass

@@ -188,13 +188,13 @@ class ProbObsGNNCommAgentGroup(ObsGNNCommAgentGroup):
 
         # Process probabilistic output
         deterministic = self.deterministic_eval and not self.graph_model.training
-        estimates, mu, std = process_probabilistic_output(embedding, deterministic) # All (B, N, F)
+        estimates, log_var, mu, std = process_probabilistic_output(embedding, deterministic) # All (B, N, F)
 
         hidden_states = torch.cat((estimates, local_obs), dim=-1)  # (B, N, Hidden Size + F_local_obs)
 
         q_val = self._process_decoders(hidden_states)
 
-        return {'q_val': q_val, 'edge_indices': edge_indices, 'local_state_estimates': estimates, 'mu': mu, 'std': std}
+        return {'q_val': q_val, 'edge_indices': edge_indices, 'local_state_estimates': estimates, 'mu': mu, 'std': std, 'log_var': log_var}
 
 
 class ProbSeqGNNCommAgentGroup(SeqGNNCommAgentGroup):
@@ -257,13 +257,13 @@ class ProbSeqGNNCommAgentGroup(SeqGNNCommAgentGroup):
 
         # Process probabilistic output
         deterministic = self.deterministic_eval and not self.graph_model.training
-        estimates, mu, std = process_probabilistic_output(embedding, deterministic) # All (B, N, F)
+        estimates, log_var, mu, std = process_probabilistic_output(embedding, deterministic) # All (B, N, F)
 
         hidden_states = torch.cat((estimates, local_obs), dim=-1)  # (B, N, Hidden Size + F_local_obs)
 
         q_val = self._process_decoders(hidden_states)
 
-        return {'q_val': q_val, 'edge_indices': edge_indices, 'local_state_estimates': embedding, 'mu': mu, 'std': std}
+        return {'q_val': q_val, 'edge_indices': edge_indices, 'local_state_estimates': estimates, 'mu': mu, 'std': std, 'log_var': log_var}
 
 
 class DualPathBasedGNNCommAgentGroup(GraphAgentGroup):
@@ -637,7 +637,7 @@ class DualPathProbObsGNNCommAgentGroup(DualPathObsGNNCommAgentGroup):
 
         # Process probabilistic output
         deterministic = self.deterministic_eval and not self.graph_model.training
-        estimates, mu, std = process_probabilistic_output(embedding, deterministic) # All (B, N, F)
+        estimates, log_var, mu, std = process_probabilistic_output(embedding, deterministic) # All (B, N, F)
         if not self.enable_rl_grad_to_msg_aggr:
             estimates = estimates.detach()
 
@@ -645,4 +645,4 @@ class DualPathProbObsGNNCommAgentGroup(DualPathObsGNNCommAgentGroup):
 
         q_val = self._process_decoders(hidden_states)
 
-        return {'q_val': q_val, 'edge_indices': edge_indices, 'local_state_estimates': embedding, 'mu': mu, 'std': std}
+        return {'q_val': q_val, 'edge_indices': edge_indices, 'local_state_estimates': estimates, 'mu': mu, 'std': std, 'log_var': log_var}

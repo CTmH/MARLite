@@ -17,4 +17,4 @@ def process_probabilistic_output(aggr_output: torch.Tensor, deterministic: bool)
         eps = torch.randn_like(std)
         aggregated_msg = mu + eps * std  # Sample from Gaussian distribution
 
-    return aggregated_msg, mu, std
+    return aggregated_msg, log_var, mu, std

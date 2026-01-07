@@ -8,6 +8,7 @@ from marlite.algorithm.model.rnn import GRUModel
 from marlite.algorithm.model.conv1d_model import CustomConv1DModel
 from marlite.algorithm.model.resnet import ResAttMaskedProbEnc, ResAttMaskedStateEnc, ResAttStateEnc, ResAttSeqEnc
 from marlite.algorithm.model.resnet import SimpleResAttMaskedStateEnc, SimpleResAttStateEnc, SimpleResAttSeqEnc
+from marlite.algorithm.model.resnet import ResAttObsEnc, SimpleResAttObsEnc
 from marlite.algorithm.model.qmix_critic_model import QMixModel
 from marlite.algorithm.model.graphmix_critic_model import GraphMixModel
 
@@ -23,10 +24,12 @@ registered_models = {
     "Custom": CustomModel,
     "CustomTimeSeq": CustomConv1DModel, # For compatibility
     "CustomConv1D": CustomConv1DModel,
+    "ResAttObsEnc": ResAttObsEnc,
     "ResAttStateEnc": ResAttStateEnc,
     "ResAttMaskedStateEnc": ResAttMaskedStateEnc,
     "ResAttSeqEnc": ResAttSeqEnc,
     "ResAttMaskedProbEnc": ResAttMaskedProbEnc,
+    "SimpleResAttObsEnc": SimpleResAttObsEnc,
     "SimpleResAttStateEnc": SimpleResAttStateEnc,
     "SimpleResAttMaskedStateEnc": SimpleResAttMaskedStateEnc,
     "SimpleResAttSeqEnc": SimpleResAttSeqEnc,
