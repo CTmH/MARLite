@@ -59,7 +59,7 @@ class MagentVecObsDataConstructor(SelfSupervisedDataConstructor):
         # Prepare mask array with time sequence
         mask = np.zeros((batch_size, n_agents, seq_len, self.max_entities_perception), dtype=bool)
 
-        if self.n_workers > 0:
+        if self.n_workers > 1:
             # Use process pool for parallel processing
             with ProcessPoolExecutor(max_workers=self.n_workers) as executor:
                 # Prepare arguments for each batch

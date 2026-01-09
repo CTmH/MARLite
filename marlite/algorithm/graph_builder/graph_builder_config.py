@@ -1,7 +1,7 @@
 from copy import deepcopy
 from marlite.algorithm.graph_builder.graph_builder import GraphBuilder
 from marlite.algorithm.graph_builder.fullconn_graph_builder import FullConnGraphBuilder
-from marlite.algorithm.graph_builder.magent_graph_builder import MAgentGraphBuilder
+from marlite.algorithm.graph_builder.magent_graph_builder import MAgentGraphBuilder, MAgentVecStateGraphBuilder
 from marlite.algorithm.graph_builder.partial_graph_builder import PartialGraphMAgentBuilder, PartialGraphVectorStateBuilder
 from marlite.algorithm.graph_builder.random_group_graph_builder import RandomGroupGraphBuilder
 from marlite.algorithm.graph_builder.g2anet_graph_builder import G2ANetGraphBuilder
@@ -10,6 +10,7 @@ registered_graph_builder_models = {
     "FullConn": FullConnGraphBuilder,
     "RandomGroup": RandomGroupGraphBuilder,
     "MAgent": MAgentGraphBuilder,
+    "MAgentVecState": MAgentVecStateGraphBuilder,
     "PartialMAgent": PartialGraphMAgentBuilder,
     "PartialVectorState": PartialGraphVectorStateBuilder,
     "G2ANet": G2ANetGraphBuilder,

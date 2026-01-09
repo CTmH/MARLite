@@ -13,7 +13,7 @@ class MAgentGraphBuilder(GraphBuilder):
             self,
             binary_agent_id_dim: list,
             agent_presence_dim: list,
-            comm_distance: int,
+            comm_distance: float,
             distance_metric: str = 'cityblock',
             n_workers: int = 8,
             valid_node_list: Union[list, None] = None, # Suggestion: Add valid_node_list, otherwise isolated nodes will be ignored in the node mapping.
@@ -103,6 +103,166 @@ class MAgentGraphBuilder(GraphBuilder):
                 [self.comm_distance] * bs,
                 [self.distance_metric] * bs
             ))
+
+        batch_adj_matrix, batch_edge_indices = zip(*results)
+        batch_adj_matrix = np.array(batch_adj_matrix)
+        batch_edge_indices = list(batch_edge_indices)
+
+        if not self.training:
+            self.cached_adj_matrix = batch_adj_matrix
+            self.cached_edge_indices = batch_edge_indices
+
+        return batch_adj_matrix, batch_edge_indices
+
+    def reset(self):
+        self.step_counter = 0
+        self.cached_adj_matrix = None
+        self.cached_edge_indices = None
+        return self
+
+
+class MAgentVecStateGraphBuilder(GraphBuilder):
+    """
+    A graph builder for states with shape (batch_size, n_agents, feature_dim).
+    Filters agents based on health points and team membership before building communication graphs.
+    """
+
+    def __init__(
+            self,
+            coord_dims: Tuple[int, int],
+            hp_dim: int,
+            team_dim: int,
+            selected_teams: List[int],
+            comm_distance: float,
+            distance_metric: str = 'euclidean',
+            update_interval: int = 1,
+            n_workers: int = 8):
+        """
+        Initialize the FeatureAgentGraphBuilder.
+
+        Args:
+            coord_dims: Tuple of 2 dimensions representing x and y coordinates in feature_dim
+            hp_dim: Dimension index for agent health points
+            team_dim: Dimension index for agent team number
+            selected_teams: List of team numbers to include in the graph
+            comm_distance: Communication distance threshold
+            distance_metric: Distance metric for calculating distances ('euclidean', 'cityblock', etc.)
+            update_interval: How often to update the graph (for caching)
+            n_workers: Number of worker processes for parallel processing
+        """
+        super().__init__()
+        self.coord_dims = coord_dims
+        self.hp_dim = hp_dim
+        self.team_dim = team_dim
+        self.selected_teams = selected_teams
+        self.comm_distance = comm_distance
+        self.distance_metric = distance_metric
+        self.update_interval = update_interval
+        self.n_workers = n_workers
+        self.step_counter = 0
+        self.cached_adj_matrix = None
+        self.cached_edge_indices = None
+
+    def _process_single_batch(self, batch_state: ndarray) -> Tuple[ndarray, ndarray]:
+        """
+        Process a single batch of states to build communication graph.
+
+        Args:
+            batch_state: Array of shape (n_agents, feature_dim)
+
+        Returns:
+            Tuple of (adjacency_matrix, edge_indices)
+        """
+        # Extract coordinates, health points, and teams
+        coords = batch_state[:, self.coord_dims]  # (n_agents, 2)
+        hps = batch_state[:, self.hp_dim]  # (n_agents,)
+        teams = batch_state[:, self.team_dim]  # (n_agents,)
+
+        # Create mask for candidate agents (based on team membership only)
+        candidate_mask = np.isin(teams, self.selected_teams)
+        candidate_agent_ids = np.where(candidate_mask)[0]  # All candidate agent IDs
+
+        # If no candidate agents, return empty results
+        if len(candidate_agent_ids) == 0:
+            return np.zeros((0, 0), dtype=np.int64), np.empty((2, 0), dtype=np.int64)
+
+        # Find maximum agent ID among candidates
+        max_id = np.max(candidate_agent_ids)
+
+        # Create adjacency matrix (size based on max original agent ID)
+        adj_matrix = np.zeros((max_id+1, max_id+1), dtype=np.int64)
+
+        # Create mask for valid agents (HP > 0 and in selected teams)
+        valid_mask = (hps > 0) & candidate_mask
+        valid_agent_ids = np.where(valid_mask)[0]  # Valid agent IDs
+
+        # If no valid agents, return zero matrix and empty edge index
+        if len(valid_agent_ids) == 0:
+            return adj_matrix, np.empty((2, 0), dtype=np.int64)
+
+        # Get coordinates of valid agents
+        valid_coords = coords[valid_mask]
+
+        # Calculate distances between valid agents
+        if len(valid_agent_ids) > 1:
+            distances = cdist(valid_coords, valid_coords, metric=self.distance_metric)
+
+            # Create connection mask (within communication distance, excluding self)
+            connection_mask = (distances <= self.comm_distance) & (distances > 0)
+            rows, cols = np.where(connection_mask)
+
+            # Get corresponding original agent IDs
+            rows_orig = valid_agent_ids[rows]
+            cols_orig = valid_agent_ids[cols]
+
+            # Fill adjacency matrix (bidirectional connections)
+            adj_matrix[rows_orig, cols_orig] = 1
+            #adj_matrix[cols_orig, rows_orig] = 1
+
+            # Build edge index (bidirectional edges using original agent IDs)
+            edge_index = np.vstack([rows_orig, cols_orig])
+            #edge_index = np.vstack([
+            #    np.hstack([rows_orig, cols_orig]),
+            #    np.hstack([cols_orig, rows_orig])
+            #])
+        else:
+            # Only one valid agent, no edges
+            edge_index = np.empty((2, 0), dtype=np.int64)
+
+        return adj_matrix, edge_index
+
+    def forward(self, states: ndarray) -> Tuple[ndarray, List[ndarray]]:
+        """
+        Build communication graphs for batch of states.
+
+        Args:
+            states: Array of shape (batch_size, n_agents, feature_dim)
+
+        Returns:
+            Tuple of (batch_adj_matrix, batch_edge_indices)
+        """
+        bs = states.shape[0]
+
+        if not self.training:
+            self.step_counter += 1
+            if (self.step_counter % self.update_interval != 0
+                and self.cached_adj_matrix is not None
+                and self.cached_edge_indices is not None):
+                return deepcopy(self.cached_adj_matrix), deepcopy(self.cached_edge_indices)
+
+        # Determine number of workers
+        n_workers = min(bs, self.n_workers)
+
+        # Process batches in parallel
+        if n_workers > 1:
+            with ProcessPoolExecutor(max_workers=n_workers) as executor:
+                results = list(executor.map(
+                    self._process_single_batch,
+                    [states[b] for b in range(bs)]
+                ))
+        else:
+            # Single process fallback
+            results = [self._process_single_batch(states[b]) for b in range(bs)]
 
         batch_adj_matrix, batch_edge_indices = zip(*results)
         batch_adj_matrix = np.array(batch_adj_matrix)

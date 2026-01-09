@@ -5,10 +5,8 @@ from torch.nn import DataParallel
 from tqdm import tqdm
 from copy import deepcopy
 
-from marlite.algorithm.model import ModelConfig
 from marlite.trainer.semi_supervised_qmix_trainer import SemiSupervisedQMIXTrainer
 from marlite.util.trajectory_dataset import TrajectoryDataLoader
-from marlite.util.self_supervised_data_constructor.self_supervised_data_constructor_config import SelfSupervisedDataConstructorConfig
 from marlite.algorithm.model.gather_layer import GatherLayer
 
 class VAEGraphQMIXTrainer(SemiSupervisedQMIXTrainer):
