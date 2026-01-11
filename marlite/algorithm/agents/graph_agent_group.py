@@ -4,7 +4,9 @@ import os
 from copy import deepcopy
 from typing import Dict, List, Any
 from torch.nn import DataParallel
-from marlite.algorithm.model import TimeSeqModel, RNNModel, Conv1DModel, AttentionModel
+from torch_geometric.data import Batch, Data
+from torch_geometric.utils import unbatch
+from marlite.algorithm.model import RNNModel, Conv1DModel, AttentionModel
 from marlite.algorithm.model.model_config import ModelConfig
 from marlite.algorithm.agents.agent_group import AgentGroup
 from marlite.algorithm.graph_builder import GraphBuilderConfig
@@ -62,6 +64,34 @@ class GraphAgentGroup(AgentGroup):
                 self.model_class_names[model_name] = 'AttentionModel'
             else:
                 self.model_class_names[model_name] = model.__class__.__name__
+
+    def compute_graph_embeddings(self, msg: torch.Tensor, edge_indices: List[np.ndarray]):
+        """
+        Compute graph embeddings by passing messages through the graph model.
+
+        Args:
+            msg: Message tensor of shape (batch_size, num_agents, feature_dim)
+            edge_indices: Edge indices for the graph
+
+        Returns:
+            embedding: Embedding tensor of shape (batch_size, num_agents, hidden_dim)
+        """
+        bs = msg.shape[0]
+
+        # Communication between agents using the graph model.
+        batch_data = [None for i in range(bs)]
+        for i in range(bs):
+            batch_data[i] = Data(
+                x = msg[i],
+                edge_index = torch.Tensor(edge_indices[i]).to(device=self.device, dtype=torch.int)
+            )
+        batch_data = Batch.from_data_list(batch_data)
+        x, e, batch = batch_data.x, batch_data.edge_index, batch_data.batch
+        batch_h = self.graph_model(x, e)
+        embedding = unbatch(batch_h, batch) # (B, N, Hidden Size)
+        embedding = torch.stack(embedding)
+
+        return embedding
 
     def _process_observations(self, observations, traj_padding_mask):
         """Common observation processing logic for observation-based models."""

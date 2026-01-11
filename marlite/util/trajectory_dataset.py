@@ -48,6 +48,9 @@ class TrajectoryDataset(Dataset):
 
         return sample
 
+    def __iter__(self):
+        for i in range(len(self)):
+            yield self[i]
 
 
 class TrajectoryDataLoader(DataLoader):

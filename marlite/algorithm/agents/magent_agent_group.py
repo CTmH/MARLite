@@ -88,7 +88,7 @@ class MAgentBattleAgentGroup(AgentGroup):
     Implements attack_8 (8 directions) and move_12 (12 positions within Manhattan distance 3)
     with obstacle avoidance.
     '''
-    def __init__(self, agents: Dict[str, str], strategy: str = "basic") -> None:
+    def __init__(self, agents: Dict[str, str], strategy: str = "advanced") -> None:
         self.agents = list(agents.keys())
         self.strategy = strategy  # "basic" or "advanced"
 

@@ -45,6 +45,18 @@ class TestVAEGraphQMIXBattle(unittest.TestCase):
                 if w1.requires_grad:
                     self.assertFalse(torch.equal(w1, w2))
 
+    def test_self_supervised_learn(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self.trainer = self.trainer_config.create_trainer()
+            self.trainer.workdir = temp_dir
+            self.trainer.logdir = os.path.join(self.trainer.workdir, 'logs')
+            self.trainer.checkpointdir = os.path.join(self.trainer.workdir, 'checkpoints')
+            origin_critic_params = deepcopy(self.trainer.target_critic.state_dict())
+            self.trainer.collect_experience(0.9)
+            self.trainer.self_supervised_learn(sample_size=32, batch_size=8, times=1)
+            self.trainer.update_target_model_params()
+            critic_params = self.trainer.target_critic.state_dict()
+
     def test_save_load_checkpoint(self):
         checkpoint = 'test_checkpoint'
         with tempfile.TemporaryDirectory() as temp_dir:

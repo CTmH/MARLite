@@ -4,8 +4,6 @@ import torch
 from typing import Dict, List, Any
 from copy import deepcopy
 from torch.nn import DataParallel
-from torch_geometric.data import Batch, Data
-from torch_geometric.utils import unbatch
 from marlite.algorithm.model.model_config import ModelConfig
 from marlite.algorithm.agents.graph_agent_group import GraphAgentGroup
 from marlite.algorithm.graph_builder import GraphBuilderConfig
@@ -36,6 +34,15 @@ class ObsGNNCommAgentGroup(GraphAgentGroup):
             device=device,
         )
 
+    def _compute_local_state_estimates(self, msg, edge_indices):
+        """Compute local state estimates from messages and local observations."""
+        # Compute graph embeddings using parent method
+        embedding = self.compute_graph_embeddings(msg, edge_indices)
+
+        local_state_estimates = embedding  # For non-probabilistic case, embedding is the estimate
+
+        return local_state_estimates, edge_indices
+
     def forward(self,
                 observations: Dict[str, np.ndarray],
                 states: np.ndarray,
@@ -44,30 +51,18 @@ class ObsGNNCommAgentGroup(GraphAgentGroup):
                 edge_indices: List[np.ndarray] | None = None
         ) -> Dict[str, Any]:
         msg, local_obs = self._process_observations(observations, traj_padding_mask)
-        bs = msg.shape[0]
 
         # Build Graph
         if edge_indices is None:  # If edge_indices are not provided
             adj_matrix, edge_indices = self.graph_builder(states)
 
-        # Communication between agents using the graph model.
-        batch_data = [None for i in range(bs)]
-        for i in range(bs):
-            batch_data[i] = Data(
-                x = msg[i],
-                edge_index = torch.Tensor(edge_indices[i]).to(device=self.device, dtype=torch.int)
-            )
-        batch_data = Batch.from_data_list(batch_data)
-        x, e, batch = batch_data.x, batch_data.edge_index, batch_data.batch
-        batch_h = self.graph_model(x, e)
-        embedding = unbatch(batch_h, batch) # (B, N, Hidden Size)
-        embedding = torch.stack(embedding)
+        local_state_estimates, edge_indices = self._compute_local_state_estimates(msg, edge_indices)
 
-        hidden_states = torch.cat((embedding, local_obs), dim=-1)  # (B, N, Hidden Size + F_local_obs)
+        hidden_states = torch.cat((local_state_estimates, local_obs), dim=-1)  # (B, N, Hidden Size + F_local_obs)
 
         q_val = self._process_decoders(hidden_states)
 
-        return {'q_val': q_val, 'edge_indices': edge_indices, 'local_state_estimates': embedding}
+        return {'q_val': q_val, 'edge_indices': edge_indices, 'local_state_estimates': local_state_estimates}
 
 
 class SeqGNNCommAgentGroup(GraphAgentGroup):
@@ -93,6 +88,15 @@ class SeqGNNCommAgentGroup(GraphAgentGroup):
             device=device,
         )
 
+    def _compute_local_state_estimates(self, msg, edge_indices):
+        """Compute local state estimates from messages and local observations."""
+        # Compute graph embeddings using parent method
+        embedding = self.compute_graph_embeddings(msg, edge_indices)
+
+        local_state_estimates = embedding  # For non-probabilistic case, embedding is the estimate
+
+        return local_state_estimates, edge_indices
+
     def forward(self,
                 observations: Dict[str, np.ndarray],
                 states: np.ndarray,
@@ -101,30 +105,18 @@ class SeqGNNCommAgentGroup(GraphAgentGroup):
                 edge_indices: List[np.ndarray] | None = None
         ) -> Dict[str, Any]:
         msg, local_obs = self._process_sequences(observations, traj_padding_mask)
-        bs = msg.shape[0]
 
         # Build Graph
         if edge_indices is None:  # If edge_indices are not provided
             adj_matrix, edge_indices = self.graph_builder(states)
 
-        # Communication between agents using the graph model.
-        batch_data = [None for i in range(bs)]
-        for i in range(bs):
-            batch_data[i] = Data(
-                x = msg[i],
-                edge_index = torch.Tensor(edge_indices[i]).to(device=self.device, dtype=torch.int)
-            )
-        batch_data = Batch.from_data_list(batch_data)
-        x, e, batch = batch_data.x, batch_data.edge_index, batch_data.batch
-        batch_h = self.graph_model(x, e)
-        embedding = unbatch(batch_h, batch) # (B, N, Hidden Size)
-        embedding = torch.stack(embedding)
+        local_state_estimates, edge_indices = self._compute_local_state_estimates(msg, edge_indices)
 
-        hidden_states = torch.cat((embedding, local_obs), dim=-1)  # (B, N, Hidden Size + F)
+        hidden_states = torch.cat((local_state_estimates, local_obs), dim=-1)  # (B, N, Hidden Size + F)
 
         q_val = self._process_decoders(hidden_states)
 
-        return {'q_val': q_val, 'edge_indices': edge_indices, 'local_state_estimates': embedding}
+        return {'q_val': q_val, 'edge_indices': edge_indices, 'local_state_estimates': local_state_estimates}
 
 
 
@@ -159,6 +151,17 @@ class ProbObsGNNCommAgentGroup(ObsGNNCommAgentGroup):
         )
         self.deterministic_eval = deterministic_eval
 
+    def _compute_local_state_estimates(self, msg, edge_indices):
+        """Compute local state estimates from messages and local observations with probabilistic output."""
+        # Compute graph embeddings using parent method
+        embedding = self.compute_graph_embeddings(msg, edge_indices)
+
+        # Process probabilistic output
+        deterministic = self.deterministic_eval and not self.graph_model.training
+        estimates, log_var, mu, std = process_probabilistic_output(embedding, deterministic) # All (B, N, F)
+
+        return estimates, edge_indices, mu, std, log_var
+
     def forward(self,
                 observations: Dict[str, np.ndarray],
                 states: np.ndarray,
@@ -167,28 +170,12 @@ class ProbObsGNNCommAgentGroup(ObsGNNCommAgentGroup):
                 edge_indices: List[np.ndarray] | None = None
         ) -> Dict[str, Any]:
         msg, local_obs = self._process_observations(observations, traj_padding_mask)
-        bs = msg.shape[0]
 
         # Build Graph
         if edge_indices is None:  # If edge_indices are not provided
             adj_matrix, edge_indices = self.graph_builder(states)
 
-        # Communication between agents using the graph model.
-        batch_data = [None for i in range(bs)]
-        for i in range(bs):
-            batch_data[i] = Data(
-                x = msg[i],
-                edge_index = torch.Tensor(edge_indices[i]).to(device=self.device, dtype=torch.int)
-            )
-        batch_data = Batch.from_data_list(batch_data)
-        x, e, batch = batch_data.x, batch_data.edge_index, batch_data.batch
-        batch_h = self.graph_model(x, e)
-        embedding = unbatch(batch_h, batch) # List of (N, Hidden Size)
-        embedding = torch.stack(embedding)
-
-        # Process probabilistic output
-        deterministic = self.deterministic_eval and not self.graph_model.training
-        estimates, log_var, mu, std = process_probabilistic_output(embedding, deterministic) # All (B, N, F)
+        estimates, edge_indices, mu, std, log_var = self._compute_local_state_estimates(msg, edge_indices)
 
         hidden_states = torch.cat((estimates, local_obs), dim=-1)  # (B, N, Hidden Size + F_local_obs)
 
@@ -228,6 +215,17 @@ class ProbSeqGNNCommAgentGroup(SeqGNNCommAgentGroup):
         )
         self.deterministic_eval = deterministic_eval
 
+    def _compute_local_state_estimates(self, msg, edge_indices):
+        """Compute local state estimates from messages and local observations with probabilistic output."""
+        # Compute graph embeddings using parent method
+        embedding = self.compute_graph_embeddings(msg, edge_indices)
+
+        # Process probabilistic output
+        deterministic = self.deterministic_eval and not self.graph_model.training
+        estimates, log_var, mu, std = process_probabilistic_output(embedding, deterministic) # All (B, N, F)
+
+        return estimates, edge_indices, mu, std, log_var
+
     def forward(self,
                 observations: Dict[str, np.ndarray],
                 states: np.ndarray,
@@ -236,28 +234,12 @@ class ProbSeqGNNCommAgentGroup(SeqGNNCommAgentGroup):
                 edge_indices: List[np.ndarray] | None = None
         ) -> Dict[str, Any]:
         msg, local_obs = self._process_sequences(observations, traj_padding_mask)
-        bs = msg.shape[0]
 
         # Build Graph
         if edge_indices is None:  # If edge_indices are not provided
             adj_matrix, edge_indices = self.graph_builder(states)
 
-        # Communication between agents using the graph model.
-        batch_data = [None for i in range(bs)]
-        for i in range(bs):
-            batch_data[i] = Data(
-                x = msg[i],
-                edge_index = torch.Tensor(edge_indices[i]).to(device=self.device, dtype=torch.int)
-            )
-        batch_data = Batch.from_data_list(batch_data)
-        x, e, batch = batch_data.x, batch_data.edge_index, batch_data.batch
-        batch_h = self.graph_model(x, e)
-        embedding = unbatch(batch_h, batch) # List of (N, Hidden Size)
-        embedding = torch.stack(embedding)
-
-        # Process probabilistic output
-        deterministic = self.deterministic_eval and not self.graph_model.training
-        estimates, log_var, mu, std = process_probabilistic_output(embedding, deterministic) # All (B, N, F)
+        estimates, edge_indices, mu, std, log_var = self._compute_local_state_estimates(msg, edge_indices)
 
         hidden_states = torch.cat((estimates, local_obs), dim=-1)  # (B, N, Hidden Size + F_local_obs)
 
@@ -537,6 +519,18 @@ class DualPathObsGNNCommAgentGroup(DualPathBasedGNNCommAgentGroup):
         if lr_scheduler_config:
             self.lr_scheduler = lr_scheduler_config.get_lr_scheduler(self.optimizer)
 
+    def _compute_local_state_estimates(self, msg, edge_indices):
+        """Compute local state estimates from messages and local observations."""
+        # Compute graph embeddings using parent method
+        embedding = self.compute_graph_embeddings(msg, edge_indices)
+
+        if not self.enable_rl_grad_to_msg_aggr:
+            embedding = embedding.detach()
+
+        local_state_estimates = embedding  # For non-probabilistic case, embedding is the estimate
+
+        return local_state_estimates, edge_indices
+
     def forward(self,
                 observations: Dict[str, np.ndarray],
                 states: np.ndarray,
@@ -545,33 +539,18 @@ class DualPathObsGNNCommAgentGroup(DualPathBasedGNNCommAgentGroup):
                 edge_indices: List[np.ndarray] | None = None
         ) -> Dict[str, Any]:
         msg, local_obs = self._process_observations(observations, traj_padding_mask)
-        bs = msg.shape[0]
 
         # Build Graph
         if edge_indices is None:  # If edge_indices are not provided
             adj_matrix, edge_indices = self.graph_builder(states)
 
-        # Communication between agents using the graph model.
-        batch_data = [None for i in range(bs)]
-        for i in range(bs):
-            batch_data[i] = Data(
-                x = msg[i],
-                edge_index = torch.Tensor(edge_indices[i]).to(device=self.device, dtype=torch.int)
-            )
-        batch_data = Batch.from_data_list(batch_data)
-        x, e, batch = batch_data.x, batch_data.edge_index, batch_data.batch
-        batch_h = self.graph_model(x, e)
-        embedding = unbatch(batch_h, batch) # (B, N, Hidden Size)
-        embedding = torch.stack(embedding)
+        local_state_estimates, edge_indices = self._compute_local_state_estimates(msg, edge_indices)
 
-        if not self.enable_rl_grad_to_msg_aggr:
-            embedding = embedding.detach()
-
-        hidden_states = torch.cat((embedding, local_obs), dim=-1)  # (B, N, Hidden Size + F_local_obs)
+        hidden_states = torch.cat((local_state_estimates, local_obs), dim=-1)  # (B, N, Hidden Size + F_local_obs)
 
         q_val = self._process_decoders(hidden_states)
 
-        return {'q_val': q_val, 'edge_indices': edge_indices, 'local_state_estimates': embedding}
+        return {'q_val': q_val, 'edge_indices': edge_indices, 'local_state_estimates': local_state_estimates}
 
 
 class DualPathProbObsGNNCommAgentGroup(DualPathObsGNNCommAgentGroup):
@@ -608,6 +587,19 @@ class DualPathProbObsGNNCommAgentGroup(DualPathObsGNNCommAgentGroup):
         )
         self.deterministic_eval = deterministic_eval
 
+    def _compute_local_state_estimates(self, msg, edge_indices):
+        """Compute local state estimates from messages and local observations with probabilistic output."""
+        # Compute graph embeddings using parent method
+        embedding = self.compute_graph_embeddings(msg, edge_indices)
+
+        # Process probabilistic output
+        deterministic = self.deterministic_eval and not self.graph_model.training
+        estimates, log_var, mu, std = process_probabilistic_output(embedding, deterministic) # All (B, N, F)
+        if not self.enable_rl_grad_to_msg_aggr:
+            estimates = estimates.detach()
+
+        return estimates, edge_indices, mu, std, log_var
+
     def forward(self,
                 observations: Dict[str, np.ndarray],
                 states: np.ndarray,
@@ -616,30 +608,12 @@ class DualPathProbObsGNNCommAgentGroup(DualPathObsGNNCommAgentGroup):
                 edge_indices: List[np.ndarray] | None = None
         ) -> Dict[str, Any]:
         msg, local_obs = self._process_observations(observations, traj_padding_mask)
-        bs = msg.shape[0]
 
         # Build Graph
         if edge_indices is None:  # If edge_indices are not provided
             adj_matrix, edge_indices = self.graph_builder(states)
 
-        # Communication between agents using the graph model.
-        batch_data = [None for i in range(bs)]
-        for i in range(bs):
-            batch_data[i] = Data(
-                x = msg[i],
-                edge_index = torch.Tensor(edge_indices[i]).to(device=self.device, dtype=torch.int)
-            )
-        batch_data = Batch.from_data_list(batch_data)
-        x, e, batch = batch_data.x, batch_data.edge_index, batch_data.batch
-        batch_h = self.graph_model(x, e)
-        embedding = unbatch(batch_h, batch) # List of (N, Hidden Size)
-        embedding = torch.stack(embedding)
-
-        # Process probabilistic output
-        deterministic = self.deterministic_eval and not self.graph_model.training
-        estimates, log_var, mu, std = process_probabilistic_output(embedding, deterministic) # All (B, N, F)
-        if not self.enable_rl_grad_to_msg_aggr:
-            estimates = estimates.detach()
+        estimates, edge_indices, mu, std, log_var = self._compute_local_state_estimates(msg, edge_indices)
 
         hidden_states = torch.cat((estimates, local_obs), dim=-1)  # (B, N, Hidden Size + F_local_obs)
 

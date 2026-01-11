@@ -2,14 +2,15 @@ import torch
 import numpy as np
 from typing import List
 from torch.nn import DataParallel
+from torch.utils.data import TensorDataset, DataLoader
 from tqdm import tqdm
 from copy import deepcopy
 
-from marlite.trainer.semi_supervised_qmix_trainer import SemiSupervisedQMIXTrainer
+from marlite.trainer.self_supervised_qmix_trainer import SelfSupervisedQMIXTrainer
 from marlite.util.trajectory_dataset import TrajectoryDataLoader
 from marlite.algorithm.model.gather_layer import GatherLayer
 
-class VAEGraphQMIXTrainer(SemiSupervisedQMIXTrainer):
+class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
     """
     A GraphQMIXTrainer subclass that works with probabilistic agent groups.
     This trainer handles ProbObsGNNCommAgentGroup, ProbSeqGNNCommAgentGroup,
@@ -41,7 +42,7 @@ class VAEGraphQMIXTrainer(SemiSupervisedQMIXTrainer):
             self.lr_scheduler = self.lr_scheduler_conf.get_lr_scheduler(self.optimizer)
         else:
             self.lr_scheduler = None
-
+    '''
     def _compute_vae_loss(self,
                          mu: torch.Tensor,
                          std: torch.Tensor,
@@ -108,6 +109,96 @@ class VAEGraphQMIXTrainer(SemiSupervisedQMIXTrainer):
         total_vae_loss = reconstruction_loss + self.kl_divergence_weight * kl_divergence
 
         return total_vae_loss
+    '''
+    def self_supervised_learn(self, sample_size, batch_size: int, times: int = 1):
+        total_loss = 0.0
+        total_batches = 0
+
+        self.eval_agent_group.to(self.train_device)
+        self.eval_decoder.to(self.train_device)
+
+        if self.use_data_parallel:
+            self.eval_agent_group.wrap_data_parallel()
+            self.eval_decoder = DataParallel(self.eval_decoder)
+
+        # VAE self supervised learning
+        self.eval_agent_group.train()
+        for t in range(times):
+            with tqdm(total=sample_size, desc=f'Times {t+1}/{times}', unit='batch') as pbar:
+                # Implement the learning logic for QMix
+                # Get a batch of data from the replay buffer
+                data = self.replaybuffer.sample(sample_size)
+                data = list(data)
+                alive_mask = np.array([e['alive_mask'] for e in data])
+                obs_padding_mask = np.array([e['obs_padding_mask'] for e in data])
+                observations = np.array([e['observations'] for e in data])
+                states = np.array([e['states'] for e in data])
+                edge_indices = [e['edge_indices'] for e in data]
+                alive_mask = np.array(alive_mask)
+                observations = np.array(observations)
+                formatted_obs, construct_padding_mask = self.data_constructor.process(observations, states, edge_indices, alive_mask)
+                edge_indices = torch.tensor(edge_indices)
+                observations = torch.tensor(observations)
+                formatted_obs = torch.tensor(formatted_obs)
+                construct_padding_mask = torch.tensor(construct_padding_mask)
+                obs_padding_mask = torch.tensor(obs_padding_mask)
+                dataset = TensorDataset(observations, obs_padding_mask, formatted_obs, edge_indices, construct_padding_mask)
+                dataloader = DataLoader(dataset,
+                                        batch_size=batch_size,
+                                        shuffle=True,
+                                        num_workers=self.n_workers)
+                bs = states.shape[0]
+
+                for obs, obs_mask, formatted, edge, construct_mask in dataloader:
+                    msg, _ = self.eval_agent_group._process_observations(obs, obs_mask)
+                    estimates, _, mu, std, log_var = self.eval_agent_group._compute_local_state_estimates(msg, edge)
+                    reconstructed_obs = self.eval_decoder(estimates)
+                    reconstructed_obs = torch.reshape(reconstructed_obs, formatted.shape)
+                    reconstruction_loss = self.reconstruction_loss(reconstructed_obs, formatted_obs, construct_mask)
+                    # Calculate KL divergence loss
+                    # KL divergence between the learned distribution q(z|x) and prior p(z)
+                    # For Gaussian prior N(0, I) and posterior N(mu, std^2), KL divergence is:
+                    # If log_var is provided, use it directly for better numerical stability
+                    # KL(q(z|x) || p(z)) = 0.5 * sum(1 + log_var - mu^2 - exp(log_var))
+
+                    kl_divergence = -0.5 * torch.sum(1 + log_var - mu.pow(2) - torch.exp(log_var), dim=-1)  # Sum over feature dimension
+
+                    kl_divergence = torch.mean(kl_divergence)  # Average over batch and agents
+
+                    # Total VAE loss: reconstruction loss + KL divergence loss
+                    vae_loss = reconstruction_loss + self.kl_divergence_weight * kl_divergence
+
+                    # Compute VAE loss
+                    vae_loss = self._compute_vae_loss(
+                        mu, std, log_var, observations, states, edge_indices, alive_mask
+                    )
+
+                    # Optimize the networks - only use the main optimizer since it includes both critic and decoder params
+                    self.eval_agent_group.zero_grad()
+                    self.eval_decoder.zero_grad()
+
+                    vae_loss.backward()
+                    torch.nn.utils.clip_grad_norm_(
+                        list(self.eval_decoder.parameters()),
+                        max_norm=5.0
+                    )
+                    self.optimizer.step()
+                    self.eval_agent_group.step()
+
+                    total_loss += vae_loss.detach().cpu().item()
+                    total_batches += 1
+
+                    pbar.update(bs)
+
+        if self.use_data_parallel:
+            self.eval_agent_group.unwrap_data_parallel()
+            self.eval_decoder = self.eval_decoder.module
+
+        self.eval_agent_group.to("cpu")
+        self.eval_decoder.to("cpu")
+        torch.cuda.empty_cache()
+
+        return total_loss / total_batches
 
     def learn(self, sample_size, batch_size: int, times: int = 1):
         total_loss = 0.0
@@ -119,17 +210,11 @@ class VAEGraphQMIXTrainer(SemiSupervisedQMIXTrainer):
         self.target_agent_group.to(self.train_device)
         self.target_critic.to(self.train_device)
 
-        # Also move decoder to the appropriate device if it exists
-        if self.eval_decoder is not None:
-            self.eval_decoder.to(self.train_device)
-
         if self.use_data_parallel:
             self.eval_agent_group.wrap_data_parallel()
             self.eval_critic = DataParallel(self.eval_critic)
             self.target_agent_group.wrap_data_parallel()
             self.target_critic = DataParallel(self.target_critic)
-            if self.eval_decoder is not None:
-                self.eval_decoder = DataParallel(self.eval_decoder)
 
         for t in range(times):
             with tqdm(total=sample_size, desc=f'Times {t+1}/{times}', unit='batch') as pbar:
@@ -189,10 +274,6 @@ class VAEGraphQMIXTrainer(SemiSupervisedQMIXTrainer):
                     self.eval_agent_group.reset().train() # Reset Graph Builder intervals
                     ret = self.eval_agent_group.forward(observations, states, obs_padding_mask, alive_mask[:,-1,:], last_edge_indices) # obs.shape (B, N, T, F)
                     q_val = ret['q_val']
-                    mu = ret['mu']
-                    std = ret['std']
-                    log_var = ret['log_var']
-
                     actions = torch.Tensor(actions[:,:,-1:]).to(device=self.train_device, dtype=torch.int64) # (B, N, T, A)
                     q_val = torch.gather(q_val, dim=-1, index=actions)
                     q_val = q_val.squeeze(-1) # (B, N, 1) -> (B, N)
@@ -221,33 +302,21 @@ class VAEGraphQMIXTrainer(SemiSupervisedQMIXTrainer):
 
                     # Compute the critic loss
                     critic_loss = torch.nn.functional.mse_loss(q_tot, y_tot.detach())
-
                     if self.use_data_parallel:
                         critic_loss = critic_loss.mean() # Reduce across all GPUs
 
-                    # Compute VAE loss
-                    vae_loss = self._compute_vae_loss(
-                        mu, std, log_var, observations, states, edge_indices, alive_mask
-                    )
-
-                    # Total loss is the sum of critic loss and VAE loss
-                    total_batch_loss = critic_loss + self.self_supervised_learning_loss_weight * vae_loss
-
-                    # Optimize the networks - only use the main optimizer since it includes both critic and decoder params
+                    # Optimize the critic network
                     self.eval_agent_group.zero_grad()
                     self.eval_critic.zero_grad()
-                    self.eval_decoder.zero_grad()
-
-                    total_batch_loss.backward()
+                    critic_loss.backward()
                     torch.nn.utils.clip_grad_norm_(
-                        list(self.eval_critic.parameters()) +
-                        (list(self.eval_decoder.parameters()) if self.eval_decoder is not None else []),
+                        self.eval_critic.parameters(),
                         max_norm=5.0
                     )
                     self.optimizer.step()
                     self.eval_agent_group.step()
 
-                    total_loss += total_batch_loss.detach().cpu().item()
+                    total_loss += critic_loss.detach().cpu().item()
                     total_batches += 1
 
                     pbar.update(bs)
@@ -257,15 +326,11 @@ class VAEGraphQMIXTrainer(SemiSupervisedQMIXTrainer):
             self.eval_critic = self.eval_critic.module
             self.target_agent_group.unwrap_data_parallel()
             self.target_critic = self.target_critic.module
-            if self.eval_decoder is not None:
-                self.eval_decoder = self.eval_decoder.module
 
         self.eval_agent_group.to("cpu")
         self.eval_critic.to("cpu")
         self.target_agent_group.to("cpu")
         self.target_critic.to("cpu")
-        if self.eval_decoder is not None:
-            self.eval_decoder.to("cpu")
         torch.cuda.empty_cache()
 
         return total_loss / total_batches

@@ -15,7 +15,7 @@ class MAgentGraphBuilder(GraphBuilder):
             agent_presence_dim: list,
             comm_distance: float,
             distance_metric: str = 'cityblock',
-            n_workers: int = 8,
+            n_workers: int = 0,
             valid_node_list: Union[list, None] = None, # Suggestion: Add valid_node_list, otherwise isolated nodes will be ignored in the node mapping.
             update_interval: int = 1,
             channel_first: bool = False):
@@ -63,7 +63,9 @@ class MAgentGraphBuilder(GraphBuilder):
         map_func = np.vectorize(lambda x: node_mapping.get(x))
 
         if len(coords) > 0:
+            # Use numba-optimized distance calculation for Euclidean distance
             distances = cdist(coords, coords, metric=distance_metric)
+
             mask = (distances <= threshold) & (np.triu(np.ones_like(distances, dtype=bool), k=1))
             rows, cols = np.where(mask)
 
@@ -101,7 +103,8 @@ class MAgentGraphBuilder(GraphBuilder):
                 [self.binary_agent_id_dim] * bs,
                 [self.agent_presence_dim] * bs,
                 [self.comm_distance] * bs,
-                [self.distance_metric] * bs
+                [self.distance_metric] * bs,
+                [self.valid_node_list] * bs
             ))
 
         batch_adj_matrix, batch_edge_indices = zip(*results)
@@ -136,7 +139,7 @@ class MAgentVecStateGraphBuilder(GraphBuilder):
             comm_distance: float,
             distance_metric: str = 'euclidean',
             update_interval: int = 1,
-            n_workers: int = 8):
+            n_workers: int = 0):
         """
         Initialize the FeatureAgentGraphBuilder.
 
@@ -163,7 +166,7 @@ class MAgentVecStateGraphBuilder(GraphBuilder):
         self.cached_adj_matrix = None
         self.cached_edge_indices = None
 
-    def _process_single_batch(self, batch_state: ndarray) -> Tuple[ndarray, ndarray]:
+    def _process_single_sample(self, batch_state: ndarray) -> Tuple[ndarray, ndarray]:
         """
         Process a single batch of states to build communication graph.
 
@@ -250,19 +253,18 @@ class MAgentVecStateGraphBuilder(GraphBuilder):
                 and self.cached_edge_indices is not None):
                 return deepcopy(self.cached_adj_matrix), deepcopy(self.cached_edge_indices)
 
-        # Determine number of workers
         n_workers = min(bs, self.n_workers)
 
         # Process batches in parallel
         if n_workers > 1:
             with ProcessPoolExecutor(max_workers=n_workers) as executor:
                 results = list(executor.map(
-                    self._process_single_batch,
+                    self._process_single_sample,
                     [states[b] for b in range(bs)]
                 ))
         else:
             # Single process fallback
-            results = [self._process_single_batch(states[b]) for b in range(bs)]
+            results = [self._process_single_sample(states[b]) for b in range(bs)]
 
         batch_adj_matrix, batch_edge_indices = zip(*results)
         batch_adj_matrix = np.array(batch_adj_matrix)

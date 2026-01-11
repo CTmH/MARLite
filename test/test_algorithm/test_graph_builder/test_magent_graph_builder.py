@@ -71,7 +71,7 @@ class TestMAgentVecStateGraphBuilder(unittest.TestCase):
         self.assertEqual(self.graph_builder.selected_teams, [1, 2])
         self.assertEqual(self.graph_builder.comm_distance, 5.0)
         self.assertEqual(self.graph_builder.distance_metric, 'euclidean')
-        self.assertEqual(self.graph_builder.n_workers, 8)  # Default value
+        self.assertEqual(self.graph_builder.n_workers, 0)  # Default value
 
     def test_process_single_batch_no_candidates(self):
         """Test processing when no agents belong to selected teams."""
@@ -81,7 +81,7 @@ class TestMAgentVecStateGraphBuilder(unittest.TestCase):
             [3.0, 4.0, 5.0, 4],   # Agent 1: team 4 (not selected)
         ])
 
-        adj_matrix, edge_indices = self.graph_builder._process_single_batch(state_no_candidates)
+        adj_matrix, edge_indices = self.graph_builder._process_single_sample(state_no_candidates)
 
         # Should return empty matrices
         self.assertEqual(adj_matrix.shape, (0, 0))
@@ -95,7 +95,7 @@ class TestMAgentVecStateGraphBuilder(unittest.TestCase):
             [3.0, 4.0, 0.0, 2],   # Agent 1: team 2, hp 0 (invalid)
         ])
 
-        adj_matrix, edge_indices = self.graph_builder._process_single_batch(state_no_valid)
+        adj_matrix, edge_indices = self.graph_builder._process_single_sample(state_no_valid)
 
         # Should return zero matrix with correct size and empty edge indices
         expected_size = 2  # 2 candidate agents
@@ -110,7 +110,7 @@ class TestMAgentVecStateGraphBuilder(unittest.TestCase):
             [3.0, 4.0, 0.0, 2],   # Agent 1: team 2, hp 0 (invalid)
         ])
 
-        adj_matrix, edge_indices = self.graph_builder._process_single_batch(state_single)
+        adj_matrix, edge_indices = self.graph_builder._process_single_sample(state_single)
 
         # Should return matrix sized for max agent ID (1) with no edges
         expected_size = 2  # Max ID is 1 (agent 1)
@@ -138,7 +138,7 @@ class TestMAgentVecStateGraphBuilder(unittest.TestCase):
             distance_metric=self.distance_metric
         )
 
-        adj_matrix, edge_indices = builder_small_dist._process_single_batch(state_far_apart)
+        adj_matrix, edge_indices = builder_small_dist._process_single_sample(state_far_apart)
 
         # Should return matrix sized for max agent ID (1) with no edges
         expected_size = 2  # Max ID is 1 (agent 1)
@@ -158,7 +158,7 @@ class TestMAgentVecStateGraphBuilder(unittest.TestCase):
             [1.0, 1.0, 8.0, 2]    # Agent 3: team 2, hp 8
         ])
 
-        adj_matrix, edge_indices = self.graph_builder._process_single_batch(state_close)
+        adj_matrix, edge_indices = self.graph_builder._process_single_sample(state_close)
 
         # Should return matrix sized for max agent ID (3)
         expected_size = 4  # Max ID is 3 (agent 3)
@@ -223,7 +223,7 @@ class TestMAgentVecStateGraphBuilder(unittest.TestCase):
             [1.0, 1.0, 5.0, 1],   # Agent 1: team 1, hp 5
         ])
 
-        adj_matrix, edge_indices = self.graph_builder._process_single_batch(simple_state)
+        adj_matrix, edge_indices = self.graph_builder._process_single_sample(simple_state)
 
         # With distance 5.0, agents 0 and 1 should be connected (distance ~1.41)
         # Check adjacency matrix
@@ -259,7 +259,7 @@ class TestMAgentVecStateGraphBuilder(unittest.TestCase):
             distance_metric=self.distance_metric
         )
 
-        adj_matrix, edge_indices = team_builder._process_single_batch(team_test_state)
+        adj_matrix, edge_indices = team_builder._process_single_sample(team_test_state)
 
         # Should create matrix sized for 2 candidate agents
         self.assertEqual(adj_matrix.shape, (2, 2))
@@ -281,7 +281,7 @@ class TestMAgentVecStateGraphBuilder(unittest.TestCase):
             [6.0, 8.0, 5.0, 1],   # Agent 2: team 1, hp 5 (valid)
         ])
 
-        adj_matrix, edge_indices = self.graph_builder._process_single_batch(hp_test_state)
+        adj_matrix, edge_indices = self.graph_builder._process_single_sample(hp_test_state)
 
         # Should create matrix sized for max ID (2)
         self.assertEqual(adj_matrix.shape, (3, 3))

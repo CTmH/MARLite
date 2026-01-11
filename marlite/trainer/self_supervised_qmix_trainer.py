@@ -12,7 +12,7 @@ from marlite.trainer.trainer import Trainer
 from marlite.util.self_supervised_data_constructor.self_supervised_data_constructor_config import SelfSupervisedDataConstructorConfig
 
 
-class SemiSupervisedQMIXTrainer(Trainer):
+class SelfSupervisedQMIXTrainer(Trainer):
 
     def __init__(self,
                  decoder_config: ModelConfig,
@@ -132,8 +132,12 @@ class SemiSupervisedQMIXTrainer(Trainer):
             critic_lr = self.optimizer.param_groups[0]['lr']
             logging.info(f"Epoch {epoch}: Batch size: {batch_size}, Critic learning rate: {critic_lr:.8f}, Agent learning rate: {agent_group_lr:.8f}")
             logging.info(f"Epoch {epoch}: Learning {learning_times_per_epoch} times per epoch ...")
+            logging.info(f"Epoch {epoch}: Self-Supervised Learning ...")
+            ssl_loss = self.self_supervised_learn(sample_size=sample_size, batch_size=batch_size, times=learning_times_per_epoch)
+            logging.info(f"Epoch {epoch}: Self-Supervised Learning Loss {ssl_loss:.4f}")
+            logging.info(f"Epoch {epoch}: Reinforcement Learning ...")
             loss = self.learn(sample_size=sample_size, batch_size=batch_size, times=learning_times_per_epoch)
-            logging.info(f"Epoch {epoch}: Loss {loss:.4f}")
+            logging.info(f"Epoch {epoch}: Reinforcement Learning Loss {loss:.4f}")
 
             # Save checkpoint
             checkpoint_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -195,3 +199,6 @@ class SemiSupervisedQMIXTrainer(Trainer):
         logging.info(f"Best strategy: {yaml.dump(self.best_metrics, default_flow_style=False, sort_keys=False)}")
         self.save_best_model()
         return self.best_metrics
+
+    def self_supervised_learn(sample_size: float, batch_size: int, times: int):
+        raise NotImplementedError

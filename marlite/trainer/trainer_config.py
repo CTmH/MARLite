@@ -4,7 +4,7 @@ from marlite.trainer.trainer import Trainer
 from marlite.trainer.qmix_trainer import QMIXTrainer
 from marlite.trainer.graph_qmix_trainer import GraphQMIXTrainer
 from marlite.trainer.msg_aggr_qmix_trainer import MsgAggrQMIXTrainer, ProbMsgAggrQMIXTrainer
-from marlite.trainer.semi_supervised_qmix_trainer import SemiSupervisedQMIXTrainer
+from marlite.trainer.self_supervised_qmix_trainer import SelfSupervisedQMIXTrainer
 from marlite.trainer.vae_graph_qmix_trainer import VAEGraphQMIXTrainer
 from marlite.config_processor import REGISTERED_PROCESSORS
 
