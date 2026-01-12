@@ -186,7 +186,7 @@ def multiprocess_rollout(env_config: EnvConfig,
 
         ret = agent_group.act(processed_obs, env.state(), avail_actions, traj_padding_mask, env.agents, epsilon)
         actions, all_actions = ret['actions'], ret['all_actions']
-        edge_indices = ret.get('edge_indices', None)
+        edge_indices = ret.get('edge_indices', np.zeros((2, 0)))
 
     episode['win_tag'] = win_tag
     episode['episode_length'] = len(episode['observations'])

@@ -1,10 +1,9 @@
-import signal
 import numpy as np
 from copy import deepcopy
 from typing import Callable, List, Dict, Any
 import time
 from marlite.environment import EnvConfig
-from marlite.algorithm.agents import AgentGroup, GraphAgentGroup
+from marlite.algorithm.agents import AgentGroup
 from marlite.util.env_util import obs_preprocess, ensure_all_agents_present
 
 def persistent_env_rollout(env_config: EnvConfig,
@@ -206,7 +205,7 @@ def persistent_env_rollout(env_config: EnvConfig,
 
             ret = agent_group.act(processed_obs, env.state(), avail_actions, traj_padding_mask, env.agents, epsilon)
             actions, all_actions = ret['actions'], ret['all_actions']
-            edge_indices = ret.get('edge_indices', None)
+            edge_indices = ret.get('edge_indices', np.zeros((2, 0)))
 
         episode['win_tag'] = win_tag
         episode['episode_length'] = len(episode['observations'])

@@ -1,9 +1,8 @@
 import unittest
 import numpy as np
-import multiprocessing as mp
 
 from marlite.replaybuffer.normal_replaybuffer import NormalReplayBuffer
-from marlite.util.trajectory_dataset import TrajectoryDataLoader
+from marlite.util.trajectory_dataset import TrajectoryDataLoader, NUMERIC_ATTR, OBJ_ATTR
 from marlite.algorithm.agents.qmix_agent_group import QMIXAgentGroup
 from marlite.algorithm.model import ModelConfig
 from marlite.rollout.multiprocess_rollout import multiprocess_rollout
@@ -85,10 +84,10 @@ class TestTrajectoryDataset(unittest.TestCase):
             self.assertEqual(len(sample['rewards']), self.traj_len)
             self.assertEqual(len(sample['states']), self.traj_len)
             self.assertEqual(len(sample['edge_indices']), self.traj_len)
-            self.assertTrue(isinstance(sample['observations'][0], dict))
-            self.assertTrue(isinstance(sample['actions'][0], dict))
-            self.assertTrue(isinstance(sample['rewards'][0], dict))
-            self.assertTrue(isinstance(sample['states'], list))
+            self.assertTrue(isinstance(sample['observations'][0], np.ndarray))
+            self.assertTrue(isinstance(sample['actions'][0], np.ndarray))
+            self.assertTrue(isinstance(sample['rewards'][0], np.ndarray))
+            self.assertTrue(isinstance(sample['states'][0], np.ndarray))
 
 class TestTrajectoryDataloader(unittest.TestCase):
 
@@ -161,8 +160,9 @@ class TestTrajectoryDataloader(unittest.TestCase):
         self.dataloader = TrajectoryDataLoader(dataset=self.dataset, batch_size=3, shuffle=True)
 
     def test_get_batch(self):
+        all_attr = NUMERIC_ATTR + OBJ_ATTR
         for batch in self.dataloader:
-            for key1, key2 in zip(batch.keys(), self.dataloader.attr):
+            for key1, key2 in zip(batch.keys(), NUMERIC_ATTR):
                 self.assertEqual(key1, key2)
 
 if __name__ == '__main__':

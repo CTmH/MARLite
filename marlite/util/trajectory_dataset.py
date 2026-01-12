@@ -1,5 +1,51 @@
-from torch.utils.data import Dataset, DataLoader
 import numpy as np
+import torch
+from operator import itemgetter
+from torch.utils.data import Dataset, DataLoader
+from torch.utils.data._utils.collate import default_collate
+
+
+ARRAY_ATTR = [
+    'states',
+    'edge_indices',
+    'next_states',
+]
+DICT_ATTR = [
+    'alive_mask',
+    'observations',
+    'next_observations',
+    'next_avail_actions',
+    'actions',
+    'rewards',
+    'terminations',
+    'truncations',
+]
+PADDING_ATTR = [
+    'obs_padding_mask',
+    'next_obs_padding_mask',
+]
+
+NUMERIC_ATTR = [
+    'states',
+    'next_states',
+    'alive_mask',
+    'observations',
+    'next_observations',
+    'actions',
+    'rewards',
+    'terminations',
+    'truncations',
+    'obs_padding_mask',
+    'next_obs_padding_mask',
+]
+
+DYNAMIC_LEN_ATTR = [
+    'edge_indices',
+]
+
+OBJ_ATTR = [
+    'next_avail_actions', # gym.spaces.Space if use_action_mask = False
+]
 
 class TrajectoryDataset(Dataset):
 
@@ -7,44 +53,52 @@ class TrajectoryDataset(Dataset):
         self.sample_id_list = sample_id_list
         self.episode_buffer = episode_buffer
         self.traj_len = traj_len
-        self.attr = ['alive_mask',
-                     'observations',
-                     'states',
-                     'edge_indices',
-                     'next_states',
-                     'next_observations',
-                     'next_avail_actions',
-                     'actions',
-                     'rewards',
-                     'terminations',
-                     'truncations']
-        self.padding_attr = ['obs_padding_mask', 'next_obs_padding_mask']
+        self.array_attr = ARRAY_ATTR
+        self.dict_attr = DICT_ATTR
+        self.padding_attr = PADDING_ATTR
 
     def __len__(self):
         return len(self.sample_id_list)
 
     def __getitem__(self, idx):
         episode_id, pos = self.sample_id_list[idx]
-        sample = {key: [] for key in self.attr}
-        sample = sample | {key: [] for key in self.padding_attr}
+        sample = {key: [] for key in self.array_attr + self.dict_attr + self.padding_attr}
         start = pos - self.traj_len + 1
+
         # Padding with the first element of the episode
         # if there is not enough elements in the episode before the start position
         while start < 0:
-            for key in self.attr:
-                if key == 'observations':
-                    zero_obs = self.episode_buffer[episode_id][key][0]
-                    zero_obs = {agent: np.zeros_like(o) for agent, o in zero_obs.items()}
-                    sample[key].append(zero_obs)
-                else:
-                    sample[key].append(self.episode_buffer[episode_id][key][0])
+            # Handle array attributes
+            for key in self.array_attr:
+                sample[key].append(np.zeros_like(self.episode_buffer[episode_id][key][0]))
+
+            # Handle dictionary attributes
+            for key in self.dict_attr:
+                first_element = self.episode_buffer[episode_id][key][0]
+                zero_element = np.stack([np.zeros_like(value) for value in first_element.values()])
+                sample[key].append(zero_element)
+
             for key in self.padding_attr:
                 sample[key].append(True)
             start += 1
-        for key in self.attr:
+
+        # Process array attributes (no conversion needed)
+        for key in self.array_attr:
             sample[key] += self.episode_buffer[episode_id][key][start:pos+1]
+
+        # Process dictionary attributes (convert to numpy arrays)
+        for key in self.dict_attr:
+            dict_sequence = self.episode_buffer[episode_id][key][start:pos+1]
+            # Convert each dictionary in the sequence to a numpy array
+            converted_sequence = []
+            for dict_item in dict_sequence:
+                # Extract values in order and stack them into a single array
+                converted_array = np.stack(list(dict_item.values()), axis=0)  # Stack along agent dimension
+                converted_sequence.append(converted_array)
+            sample[key] += converted_sequence
+
         for key in self.padding_attr:
-            sample[key] += [False] * (pos - start +1)
+            sample[key] += [False] * (pos - start + 1)
 
         return sample
 
@@ -60,83 +114,46 @@ class TrajectoryDataLoader(DataLoader):
             batch_size=batch_size,
             shuffle=shuffle,
             num_workers=num_workers,
-            collate_fn=self.collate_fn
+            collate_fn=trajectory_collate_fn
         )
-        self.attr = ['alive_mask',
-                     'observations',
-                     'obs_padding_mask',
-                     'states',
-                     'edge_indices',
-                     'next_states',
-                     'next_observations',
-                     'next_obs_padding_mask',
-                     'next_avail_actions',
-                     'actions',
-                     'rewards',
-                     'terminations',
-                     'truncations']
 
-    @staticmethod
-    def collate_fn(batch):
-        # Extract necessary components from the trajectory
-        alive_mask = [traj['alive_mask'] for traj in batch]
-        observations = [traj['observations'] for traj in batch]
-        obs_padding_mask = [traj['obs_padding_mask'] for traj in batch]
-        states = [traj['states'] for traj in batch]
-        edge_indices = [traj['edge_indices'] for traj in batch]
-        actions = [traj['actions'] for traj in batch]
-        rewards = [traj['rewards'] for traj in batch]
-        next_state = [traj['next_states'] for traj in batch]
-        next_observations = [traj['next_observations'] for traj in batch]
-        next_obs_padding_mask = [traj['next_obs_padding_mask'] for traj in batch]
-        next_avail_actions = [traj['next_avail_actions'] for traj in batch]
-        terminations = [traj['terminations'] for traj in batch]
-        truncations = [traj['truncations'] for traj in batch]
+def trajectory_collate_fn(batch):
+    """
+    Custom collate for TrajectoryDataset that preserves gym.Space objects.
 
-        # Format Data
-
-        # Observations
-        # Nested list convert to numpy array (Batch Size, Time Step, Agent Number, Feature Dimensions) (B, T, N, F) -> (B, N, T, F)
-        observations = np.array([[[value for _, value in dict.items()] for dict in traj] for traj in observations])
-        next_observations = np.array([[[value for _, value in dict.items()] for dict in traj] for traj in next_observations])
-
-        obs_shape = observations.shape
-        n_dim_obs = len(obs_shape)
-        transpose_arg = [0, 2, 1] + list(range(3, n_dim_obs))
-        observations, next_observations = observations.transpose(transpose_arg), next_observations.transpose(transpose_arg)
-
-        # Actions, Rewards, Terminations
-        # Nested list convert to numpy array (Batch Size, Time Step, Agent Number) (B, T, N) -> (B, N, T)
-        alive_mask = np.array([[[value for _, value in dict.items()] for dict in traj] for traj in alive_mask]).transpose(0,2,1)
-        actions = np.array([[[value for _, value in dict.items()] for dict in traj] for traj in actions]).transpose(0,2,1)
-        rewards = np.array([[[value for _, value in dict.items()] for dict in traj] for traj in rewards]).transpose(0,2,1)
-        terminations = np.array([[[value for _, value in dict.items()] for dict in traj] for traj in terminations]).transpose(0,2,1)
-        truncations = np.array([[[value for _, value in dict.items()] for dict in traj] for traj in truncations]).transpose(0,2,1)
-
-        next_avail_actions =  np.array([[[value for _, value in dict.items()] for dict in traj] for traj in next_avail_actions])
-        next_avail_actions = np.transpose(next_avail_actions, [0, 2, 1] if next_avail_actions.ndim == 3 else [0, 2, 1, 3])
-
-        # States (Batch Size, Time Step, Feature Dimensions) (B, T, F)
-        states = np.array(states)
-        next_state = np.array(next_state)
-
-        obs_padding_mask = np.array(obs_padding_mask, dtype=np.bool)
-        next_obs_padding_mask = np.array(next_obs_padding_mask, dtype=np.bool)
-
-        batch_dict = {
-            'alive_mask': alive_mask,
-            'observations': observations,
-            'obs_padding_mask': obs_padding_mask,
-            'states': states,
-            'edge_indices': edge_indices,
-            'next_states': next_state,
-            'next_observations': next_observations,
-            'next_obs_padding_mask': next_obs_padding_mask,
-            'next_avail_actions': next_avail_actions,
-            'actions': actions,
-            'rewards': rewards,
-            'terminations': terminations,
-            'truncations': truncations
+    Assumes each sample is a dict like:
+        {
+            'actions': np.ndarray,
+            'observations': np.ndarray,
+            ...
+            'action_space': Discrete(5),   # ← Space stored under reserved key
         }
 
-        return batch_dict
+    Args:
+        batch: List of samples from Dataset.__getitem__ (each is a dict)
+
+    Returns:
+        collated: dict where numeric arrays are stacked by default_collate,
+                  and Space objects are kept as-is (one per batch, assumed identical).
+    """
+    # Collate numeric data using PyTorch's default behavior
+    #numeric_batch = [dict(zip(NUMERIC_ATTR, itemgetter(*NUMERIC_ATTR)(sample))) for sample in batch]
+    #collated = default_collate(numeric_batch)
+    collated = {}
+    for k in NUMERIC_ATTR:
+        collated[k] = torch.tensor([sample[k] for sample in batch])
+
+    # Preserve space objects — assume they're identical across batch
+    for k in OBJ_ATTR:
+        first_elem = batch[0][k][0]
+        if np.issubdtype(first_elem.dtype, np.object_):
+            collated[k] = np.stack([sample[k] for sample in batch])  # Keep original object (not collated)
+        elif np.issubdtype(first_elem.dtype, np.number):
+            collated[k] = torch.tensor([sample[k] for sample in batch])
+        else:
+            raise ValueError(f"Unexpected data type for {k}: {batch[0][k][0].dtype}")
+
+    for k in DYNAMIC_LEN_ATTR:
+        collated[k] = [sample[k] for sample in batch]
+
+    return collated
