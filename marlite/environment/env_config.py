@@ -1,6 +1,7 @@
 from typing import Dict, Any
 from pettingzoo import ParallelEnv
 import importlib
+from copy import deepcopy
 
 from marlite.environment.magent_wrapper import AdversarialPursuitPredator, AdversarialPursuitPrey, BattleWrapper
 from marlite.environment.smac_wrapper import SMACWrapper
@@ -21,7 +22,7 @@ class EnvConfig():
         self.module_name = module_name
         self.env_name = env_name
         self.env_config = env_config
-        self.wrapper_config = wrapper_config
+        self.wrapper_config = deepcopy(wrapper_config)
         self.wrapper_type = None
         if self.wrapper_config:
             self.wrapper_type = self.wrapper_config.pop('type', None)

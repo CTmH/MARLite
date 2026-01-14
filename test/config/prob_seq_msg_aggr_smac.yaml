@@ -89,18 +89,6 @@ env_config:
   wrapper_config:
     type: smac
 
-epsilon_scheduler:
-  type: "linear"
-  start_value: 1.0
-  end_value: 0.1
-  decay_steps: 100
-
-sample_ratio_scheduler:
-  type: "linear"
-  start_value: 8
-  end_value: 8
-  decay_steps: 40
-
 critic_config:
   type: "ProbSeqQMixer"
   deterministic_eval: false
@@ -163,6 +151,19 @@ trainer_config:
   train_device: "cpu"
   n_workers: 2
   sample_mode: "direct"
+
+  epsilon_scheduler:
+    type: "linear"
+    start_value: 1.0
+    end_value: 0.1
+    decay_steps: 100
+
+  sample_ratio_scheduler:
+    type: "linear"
+    start_value: 8
+    end_value: 8
+    decay_steps: 40
+
 
   train_args:
     epochs: 2

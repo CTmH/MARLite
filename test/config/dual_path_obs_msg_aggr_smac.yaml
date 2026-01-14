@@ -99,18 +99,6 @@ env_config:
   wrapper_config:
     type: smac
 
-epsilon_scheduler:
-  type: "linear"
-  start_value: 1.0
-  end_value: 0.1
-  decay_steps: 100
-
-sample_ratio_scheduler:
-  type: "linear"
-  start_value: 0.7
-  end_value: 0.3
-  decay_steps: 40
-
 critic_config:
   type: "QMixer"
   model:
@@ -163,6 +151,18 @@ trainer_config:
   workdir: "./test/results/test_msg_aggr_smac"
   train_device: "cpu"
   n_workers: 2
+
+  epsilon_scheduler:
+    type: "linear"
+    start_value: 1.0
+    end_value: 0.1
+    decay_steps: 100
+
+  sample_ratio_scheduler:
+    type: "linear"
+    start_value: 0.7
+    end_value: 0.3
+    decay_steps: 40
 
   train_args:
     epochs: 2

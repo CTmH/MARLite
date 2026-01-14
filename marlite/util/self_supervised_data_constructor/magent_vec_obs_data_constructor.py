@@ -151,10 +151,12 @@ def _pad_or_truncate_numba(entities, max_entities_perception):
     return result, mask
 
 @jit(nopython=True, cache=True)
-def _process_single_agent_numba(observations_np, edge_indices_np, alive_agents, agent_idx,
-                                max_observed_entities, max_entities_perception, feature_dim, seq_len):
+def _process_single_agent_numba_new_dims(observations_np, edge_indices_np, alive_mask_np,
+                                         agent_idx, max_observed_entities, max_entities_perception,
+                                         feature_dim, seq_len):
     """
     Numba-accelerated function to process a single agent across all time steps.
+    Updated for new alive_mask dimension: (n_agents, seq_len)
     """
     # Prepare result for this agent
     result = np.zeros((seq_len, max_entities_perception, feature_dim), dtype=observations_np.dtype)
@@ -162,6 +164,10 @@ def _process_single_agent_numba(observations_np, edge_indices_np, alive_agents, 
 
     # Process each time step
     for t in range(seq_len):
+        # Get alive agents at time t
+        # NEW DIMENSION: alive_mask_np is (n_agents, seq_len), so alive_mask_np[:, t] gives us all agents at time t
+        alive_agents_at_t = np.where(alive_mask_np[:, t])[0]  # Get all agents alive at time t
+
         # Get the edge indices for this specific time step
         edge_indices_t = edge_indices_np[t]  # (2, edge_num)
 
@@ -173,7 +179,7 @@ def _process_single_agent_numba(observations_np, edge_indices_np, alive_agents, 
                 self_obs[k, f] = observations_np[agent_idx, t, k, f]
 
         # Step 2: Get observations from agents that send TO this agent (in-edges only)
-        neighbor_agents = _get_alive_neighbors_numba(edge_indices_t, alive_agents, agent_idx)
+        neighbor_agents = _get_alive_neighbors_numba(edge_indices_t, alive_agents_at_t, agent_idx)
 
         # Calculate total number of entities we'll have
         total_entities = max_observed_entities * (1 + len(neighbor_agents))
@@ -264,7 +270,7 @@ class MagentVecObsDataConstructor(SelfSupervisedDataConstructor):
             observations: Array of shape (batch_size, n_agents, seq_len, max_observed_entities, feature_dim)
             states: Optional array, not used in this implementation
             edge_indices: List of shape (batch_size, seq_len) containing np.ndarray of shape (2, edge_num) for each time step
-            alive_mask: Array of shape (batch_size, n_agents)
+            alive_mask: Array of shape (batch_size, n_agents, seq_len) - NEW DIMENSION
 
         Returns:
             A tuple containing:
@@ -311,7 +317,7 @@ class MagentVecObsDataConstructor(SelfSupervisedDataConstructor):
                     args = (
                         observations[i],
                         edge_indices[i],
-                        alive_mask[i],
+                        alive_mask[i],  # Use the new dimension format directly: (n_agents, seq_len)
                         self.max_observed_entities,
                         self.max_entities_perception,
                         feature_dim,
@@ -336,10 +342,10 @@ class MagentVecObsDataConstructor(SelfSupervisedDataConstructor):
         else:
             # Process sequentially
             for batch_idx in range(batch_size):
-                processed_sample, mask_batch = self._process_single_sample((
+                processed_sample, mask_batch = self._process_single_sample_new_dims((
                     observations[batch_idx],
                     edge_indices[batch_idx],
-                    alive_mask[batch_idx],
+                    alive_mask[batch_idx],  # Use the new dimension format directly: (n_agents, seq_len)
                     self.max_observed_entities,
                     self.max_entities_perception,
                     feature_dim,
@@ -369,17 +375,18 @@ class MagentVecObsDataConstructor(SelfSupervisedDataConstructor):
         """
         results = []
         for args in batch_args_list:
-            processed_batch, mask_batch = self._process_single_sample(args)
+            processed_batch, mask_batch = self._process_single_sample_new_dims(args)
             results.append((processed_batch, mask_batch))
         return results
 
-    def _process_single_sample(self, args):
+    def _process_single_sample_new_dims(self, args):
         """
-        Process a single sample of data (used for parallel processing).
+        Process a single sample of data with new alive_mask dimension format (used for parallel processing).
 
         Args:
             args: Tuple containing (observations, edge_indices, alive_mask, max_observed_entities,
                     max_entities_perception, feature_dim, seq_len)
+            alive_mask has dimension (n_agents, seq_len) in new format
 
         Returns:
             A tuple containing:
@@ -394,21 +401,27 @@ class MagentVecObsDataConstructor(SelfSupervisedDataConstructor):
         result = np.zeros((n_agents, seq_len, max_entities_perception, feature_dim), dtype=observations_np.dtype)
         mask = np.zeros((n_agents, seq_len, max_entities_perception), dtype=bool)
 
-        # Convert alive mask to boolean indices
-        alive_agents = np.where(alive_mask_np)[0]
+        # Process each agent at each time step
+        for agent_idx in range(n_agents):
+            # Check if agent is alive at any time step
+            # NEW DIMENSION: alive_mask_np is (n_agents, seq_len), so alive_mask_np[agent_idx, :] gets all time steps for this agent
+            agent_alive_any_time = np.any(alive_mask_np[agent_idx, :])  # Check if agent_idx is alive at any time step
 
-        # Process each alive agent
-        for agent_idx in alive_agents:
-            agent_result, agent_mask = _process_single_agent_numba(
-                observations_np, edge_indices_np, alive_agents, agent_idx,
-                max_observed_entities, max_entities_perception, feature_dim, seq_len
-            )
+            if agent_alive_any_time:
+                agent_result, agent_mask = _process_single_agent_numba_new_dims(
+                    observations_np, edge_indices_np, alive_mask_np,
+                    agent_idx, max_observed_entities, max_entities_perception, feature_dim, seq_len
+                )
 
-            # Copy results back to main arrays
-            for t in range(seq_len):
-                for i in range(max_entities_perception):
-                    for f in range(feature_dim):
-                        result[agent_idx, t, i, f] = agent_result[t, i, f]
-                    mask[agent_idx, t, i] = agent_mask[t, i]
+                # Copy results back to main arrays
+                for t in range(seq_len):
+                    # Only update if the agent is alive at this specific time step
+                    # NEW DIMENSION: alive_mask_np is (n_agents, seq_len), so alive_mask_np[agent_idx, t]
+                    # checks if agent_idx is alive at time t
+                    if alive_mask_np[agent_idx, t]:
+                        for i in range(max_entities_perception):
+                            for f in range(feature_dim):
+                                result[agent_idx, t, i, f] = agent_result[t, i, f]
+                            mask[agent_idx, t, i] = agent_mask[t, i]
 
         return result, mask

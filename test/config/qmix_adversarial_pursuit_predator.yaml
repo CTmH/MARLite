@@ -139,18 +139,6 @@ env_config:
     opp_obs_queue_len: 1
     channel_first: true
 
-epsilon_scheduler:
-  type: "logarithmic"
-  start_value: 1.0
-  end_value: 0.05
-  decay_steps: 100
-
-sample_ratio_scheduler:
-  type: "linear"
-  start_value: 1.0
-  end_value: 0.3
-  decay_steps: 100
-
 critic_config:
   type: "QMixer"
   model:
@@ -233,6 +221,18 @@ trainer_config:
   eval_epsilon: 0.01
   workdir: "./test/results/qmix_default"
   train_device: "cpu"
+
+  epsilon_scheduler:
+    type: "logarithmic"
+    start_value: 1.0
+    end_value: 0.05
+    decay_steps: 100
+
+  sample_ratio_scheduler:
+    type: "linear"
+    start_value: 1.0
+    end_value: 0.3
+    decay_steps: 100
 
   train_args:
     epochs: 100

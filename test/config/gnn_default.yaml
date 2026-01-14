@@ -155,18 +155,6 @@ env_config:
     opp_obs_queue_len: 1
     channel_first: true
 
-epsilon_scheduler:
-  type: "linear"
-  start_value: 1.0
-  end_value: 0.1
-  decay_steps: 100
-
-sample_ratio_scheduler:
-  type: "linear"
-  start_value: 0.7
-  end_value: 0.3
-  decay_steps: 40
-
 critic_config:
   type: "QMixer"
   model:
@@ -235,6 +223,18 @@ trainer_config:
   workdir: "/home/ctmh/exp/partial_gnn_202506051030"
   train_device: "cpu"
   n_workers: 2
+
+  epsilon_scheduler:
+    type: "linear"
+    start_value: 1.0
+    end_value: 0.1
+    decay_steps: 100
+
+  sample_ratio_scheduler:
+    type: "linear"
+    start_value: 0.7
+    end_value: 0.3
+    decay_steps: 40
 
   train_args:
     epochs: 100

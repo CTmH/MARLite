@@ -142,18 +142,6 @@ env_config:
         blue_34: policy
         blue_35: policy
 
-epsilon_scheduler:
-  type: "linear"
-  start_value: 1.0
-  end_value: 0.05
-  decay_steps: 100
-
-sample_ratio_scheduler:
-  type: "logarithmic"
-  start_value: 0.66
-  end_value: 0.33
-  decay_steps: 100
-
 critic_config:
   type: "QMixer"
   model:
@@ -180,6 +168,32 @@ critic_config:
     factor: 0.5
     patience: 4
     min_lr: 0.00001
+
+self_supervised_learning_config:
+  model:
+    model_type: "Custom"
+    layers:
+    - type: Linear
+      in_features: 64
+      out_features: 656
+  optimizer:
+    type: "Adam"
+    lr: 0.001
+    weight_decay: 0.00001
+  lr_scheduler:
+    type: "ReduceLROnPlateau"
+    mode: 'max'
+    factor: 0.5
+    patience: 4
+    min_lr: 0.00001
+  data_constructor_config:
+    type: "MagentVecObs"
+    max_entities_perception: 16
+    max_observed_entities: 8
+    n_workers: 8
+  reconstruction_loss_config:
+    type: "ChamferDist"
+    use_squared_distance: True
 
 rollout_config:
   manager_type: "multi-process"
@@ -211,21 +225,19 @@ trainer_config:
   use_data_parallel: false
   compile_models: false
   n_workers: 0
-  decoder_config:
-    model_type: "Custom"
-    layers:
-    - type: Linear
-      in_features: 64
-      out_features: 656
-  data_constructor_config:
-    type: "MagentVecObs"
-    max_entities_perception: 16
-    max_observed_entities: 8
-    n_workers: 8
-  reconstruction_loss_config:
-   type: "ChamferDist"
-   use_squared_distance: True
   self_supervised_learning_loss_weight: 0.75
+
+  epsilon_scheduler:
+    type: "linear"
+    start_value: 1.0
+    end_value: 0.05
+    decay_steps: 100
+
+  sample_ratio_scheduler:
+    type: "logarithmic"
+    start_value: 0.66
+    end_value: 0.33
+    decay_steps: 100
 
   train_args:
     epochs: 100
@@ -234,3 +246,5 @@ trainer_config:
     update_target_interval: 2
     batch_size: 256
     learning_times_per_epoch: 1
+    ssl_batch_size: 256
+    ssl_learning_times_per_epoch: 1

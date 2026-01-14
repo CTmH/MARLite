@@ -1,9 +1,13 @@
 import numpy as np
 import torch
-from operator import itemgetter
 from torch.utils.data import Dataset, DataLoader
-from torch.utils.data._utils.collate import default_collate
 
+FLOAT_ATTR = [
+    'states',
+    'next_states',
+    'observations',
+    'next_observations',
+]
 
 ARRAY_ATTR = [
     'states',

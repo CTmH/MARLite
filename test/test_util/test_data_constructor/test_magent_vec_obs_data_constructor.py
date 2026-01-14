@@ -17,7 +17,8 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
         states = None
         # Empty edge_indices: List[List[np.ndarray]] where each time step has (2, 0) shape
         edge_indices = [[np.empty((2, 0), dtype=int)]]  # batch 0, time 0: (2, 0)
-        alive_mask = np.array([[True, True]], dtype=bool)
+        # NEW DIMENSION: alive_mask is now (batch_size, n_agents, seq_len)
+        alive_mask = np.array([[[True], [True]]], dtype=bool)  # (1, 2, 1)
 
         constructor = MagentVecObsDataConstructor(max_entities_perception=4, max_observed_entities=2, with_time_seq=False, n_workers=0)
 
@@ -63,7 +64,8 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
         states = None
         # Empty edge_indices: List[List[np.ndarray]] where each time step has (2, 0) shape
         edge_indices = [[np.empty((2, 0), dtype=int)]]  # batch 0, time 0: (2, 0)
-        alive_mask = np.array([[True, True]], dtype=bool)
+        # NEW DIMENSION: alive_mask is now (batch_size, n_agents, seq_len)
+        alive_mask = np.array([[[True], [True]]], dtype=bool)  # (1, 2, 1)
 
         constructor = MagentVecObsDataConstructor(max_entities_perception=4, max_observed_entities=2, with_time_seq=True, n_workers=0)
 
@@ -109,7 +111,8 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
         # edge_indices: List[List[np.ndarray]] where each time step has (2, 1) shape with one edge from agent1 to agent0
         edge_indices = [[np.array([[1], [0]], dtype=int)]]  # batch 0, time 0: (2, 1), source=1, target=0
 
-        alive_mask = np.array([[True, True]], dtype=bool)
+        # NEW DIMENSION: alive_mask is now (batch_size, n_agents, seq_len)
+        alive_mask = np.array([[[True], [True]]], dtype=bool)  # (1, 2, 1)
 
         constructor = MagentVecObsDataConstructor(max_entities_perception=5, max_observed_entities=2, with_time_seq=False, n_workers=0)
 
@@ -165,7 +168,8 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
             ]
         ]
 
-        alive_mask = np.array([[True, True]], dtype=bool)
+        # NEW DIMENSION: alive_mask is now (batch_size, n_agents, seq_len)
+        alive_mask = np.array([[[True, True], [True, True]]], dtype=bool)  # (1, 2, 2)
 
         constructor = MagentVecObsDataConstructor(max_entities_perception=5, max_observed_entities=2, with_time_seq=True, n_workers=0)
 
@@ -238,7 +242,8 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
         # Self-loop on agent0 (0->0) + edge from agent1 to agent0 (1->0)
         edge_indices = [[np.array([[0, 1], [0, 0]], dtype=int)]]  # batch 0, time 0: (2, 2), edges: (0→0) and (1→0)
 
-        alive_mask = np.array([[True, True]], dtype=bool)
+        # NEW DIMENSION: alive_mask is now (batch_size, n_agents, seq_len)
+        alive_mask = np.array([[[True], [True]]], dtype=bool)  # (1, 2, 1)
 
         constructor = MagentVecObsDataConstructor(max_entities_perception=3, max_observed_entities=2, with_time_seq=False, n_workers=0)
 
@@ -283,7 +288,8 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
         ]]]], dtype=np.float32)  # (1, 1, 1, 4, 2)
 
         edge_indices = [[np.empty((2, 0), dtype=int)]]  # no edges for time 0
-        alive_mask = np.array([[True]])
+        # NEW DIMENSION: alive_mask is now (batch_size, n_agents, seq_len)
+        alive_mask = np.array([[[True]]])  # (1, 1, 1)
 
         constructor = MagentVecObsDataConstructor(max_entities_perception=2, max_observed_entities=4, with_time_seq=False, n_workers=0)
 
@@ -320,7 +326,8 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
             [0, 0, 1],  # targets → a0 gets from a1,a2; a1 gets from a0
         ], dtype=int)]]
 
-        alive_mask = np.array([[True, True, True]], dtype=bool)
+        # NEW DIMENSION: alive_mask is now (batch_size, n_agents, seq_len)
+        alive_mask = np.array([[[True], [True], [True]]], dtype=bool)  # (1, 3, 1)
 
         constructor_seq = MagentVecObsDataConstructor(max_entities_perception=6, max_observed_entities=2, with_time_seq=False, n_workers=0)
         constructor_par = MagentVecObsDataConstructor(max_entities_perception=6, max_observed_entities=2, with_time_seq=False, n_workers=1)
@@ -355,7 +362,8 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
             [0, 0],  # targets
         ], dtype=int)]]
 
-        alive_mask = np.array([[True, False, True]], dtype=bool)  # a1 dead
+        # NEW DIMENSION: alive_mask is now (batch_size, n_agents, seq_len)
+        alive_mask = np.array([[[True], [False], [True]]], dtype=bool)  # a1 dead, (1, 3, 1)
 
         constructor = MagentVecObsDataConstructor(max_entities_perception=4, max_observed_entities=2, with_time_seq=False, n_workers=0)
 
@@ -447,7 +455,10 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
                 np.empty((2, 0), dtype=int),  # time 2
             ]
         ]
-        alive_mask = np.array([[True, True, True], [True, True, True]], dtype=bool)
+
+        # NEW DIMENSION: alive_mask is now (batch_size, n_agents, seq_len)
+        alive_mask = np.array([[[True, True, True], [True, True, True], [True, True, True]],
+                               [[True, True, True], [True, True, True], [True, True, True]]], dtype=bool)  # (2, 3, 3)
 
         # Test with_time_seq=False
         constructor_no_time = MagentVecObsDataConstructor(max_entities_perception=4, max_observed_entities=2, with_time_seq=False, n_workers=0)

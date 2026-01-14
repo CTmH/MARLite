@@ -165,18 +165,6 @@ env_config:
         blue_34: policy
         blue_35: policy
 
-epsilon_scheduler:
-  type: "linear"
-  start_value: 1.0
-  end_value: 0.05
-  decay_steps: 100
-
-sample_ratio_scheduler:
-  type: "logarithmic"
-  start_value: 0.66
-  end_value: 0.33
-  decay_steps: 100
-
 critic_config:
   type: "QMixer"
   model:
@@ -251,6 +239,18 @@ trainer_config:
   use_data_parallel: false
   compile_models: false
   n_workers: 0
+
+  epsilon_scheduler:
+    type: "linear"
+    start_value: 1.0
+    end_value: 0.05
+    decay_steps: 100
+
+  sample_ratio_scheduler:
+    type: "logarithmic"
+    start_value: 0.66
+    end_value: 0.33
+    decay_steps: 100
 
   train_args:
     epochs: 100

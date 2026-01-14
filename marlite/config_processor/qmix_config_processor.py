@@ -17,69 +17,76 @@ from marlite.config_processor.config_processor import ConfigProcessor
 
 
 class QMIXConfigProcessor(ConfigProcessor):
-    def get_common_kwargs(self, config: Dict) -> Dict:
-        """Process common configurations and return common kwargs for all trainers"""
-        # Process common configurations
-        agent_group_config = AgentGroupConfig(**config['agent_group_config'])
-        env_config = EnvConfig(**config['env_config'])
 
-        # Process critic config
-        critic_conf = config['critic_config']
+    def parse_agent_group_config(self, config: Dict[str, Dict]) -> AgentGroupConfig:
+        """Parse agent group configuration"""
+        return AgentGroupConfig(**config['agent_group_config'])
+
+    def parse_env_config(self, config: Dict[str, Dict]) -> EnvConfig:
+        """Parse environment configuration"""
+        return EnvConfig(**config['env_config'])
+
+    def parse_critic_config(self, config: Dict[str, Dict]) -> Tuple[CriticConfig, OptimizerConfig, LRSchedulerConfig]:
+        """Parse critic configuration"""
+        critic_conf = config['critic_config'].copy()
         critic_optimizer_conf = critic_conf.pop('optimizer')
         critic_optimizer_config = OptimizerConfig(**critic_optimizer_conf)
         lr_scheduler_conf = LRSchedulerConfig(**critic_conf.pop('lr_scheduler')) if 'lr_scheduler' in critic_conf else None
         critic_config = CriticConfig(**critic_conf)
+        return critic_config, critic_optimizer_config, lr_scheduler_conf
 
-        # Process rollout and replay buffer configs
-        rolloutmanager_config = RolloutManagerConfig(**config['rollout_config'])
-        replaybuffer_config = ReplayBufferConfig(**config['replaybuffer_config'])
+    def parse_rollout_config(self, config: Dict[str, Dict]) -> RolloutManagerConfig:
+        """Parse rollout configuration"""
+        return RolloutManagerConfig(**config['rollout_config'])
 
-        # Process schedulers
-        epsilon_scheduler = Scheduler(**config['epsilon_scheduler'])
-        sample_ratio_scheduler = Scheduler(**config['sample_ratio_scheduler'])
+    def parse_replaybuffer_config(self, config: Dict[str, Dict]) -> ReplayBufferConfig:
+        """Parse replay buffer configuration"""
+        return ReplayBufferConfig(**config['replaybuffer_config'])
 
-        # Process analyzer config
-        analyzer_config = AnalyzerConfig(**config['analyzer_config'])
+    def parse_analyzer_config(self, config: Dict[str, Dict]) -> AnalyzerConfig:
+        """Parse analyzer configuration"""
+        return AnalyzerConfig(**config['analyzer_config'])
 
-        # Build common kwargs dictionary
-        common_kwargs = {
+    def parse_trainer_config(self, config: Dict[str, Dict]) -> Tuple[Scheduler, Scheduler, Dict, Dict, str, str]:
+        """Parse trainer configuration and return trainer_config, train_args, checkpoint and trainer_type"""
+        trainer_config = deepcopy(config['trainer_config'])
+
+        # Extract training arguments and checkpoint settings
+        train_args = trainer_config.pop('train_args')
+        checkpoint = trainer_config.pop('checkpoint', None)
+        trainer_type = trainer_config.pop('type')
+
+        # Handle epsilon_scheduler and sample_ratio_scheduler as part of trainer_config
+        epsilon_scheduler = Scheduler(**trainer_config.pop('epsilon_scheduler'))
+        sample_ratio_scheduler = Scheduler(**trainer_config.pop('sample_ratio_scheduler'))
+
+        return epsilon_scheduler, sample_ratio_scheduler, trainer_config, train_args, checkpoint, trainer_type
+
+    def process(self, config: Dict[str, Dict]) -> Tuple[Dict, Dict, str]:
+        """Process the config and return trainer_kwargs, train_args, and checkpoint"""
+        config = deepcopy(config)
+        # Parse individual components
+        agent_group_config = self.parse_agent_group_config(config)
+        env_config = self.parse_env_config(config)
+        critic_config, critic_optimizer_config, lr_scheduler_conf = self.parse_critic_config(config)
+        rolloutmanager_config = self.parse_rollout_config(config)
+        replaybuffer_config = self.parse_replaybuffer_config(config)
+        analyzer_config = self.parse_analyzer_config(config)
+        epsilon_scheduler, sample_ratio_scheduler, trainer_config, train_args, checkpoint, trainer_type = self.parse_trainer_config(config)
+
+        # Build trainer kwargs dictionary
+        trainer_kwargs = {
             'env_config': env_config,
             'agent_group_config': agent_group_config,
             'critic_config': critic_config,
-            'epsilon_scheduler': epsilon_scheduler,
-            'sample_ratio_scheduler': sample_ratio_scheduler,
             'critic_optimizer_config': critic_optimizer_config,
             'lr_scheduler_conf': lr_scheduler_conf,
             'rolloutmanager_config': rolloutmanager_config,
             'replaybuffer_config': replaybuffer_config,
             'analyzer_config': analyzer_config,
+            'epsilon_scheduler': epsilon_scheduler,
+            'sample_ratio_scheduler': sample_ratio_scheduler,
         }
-
-        return common_kwargs
-
-    def get_specific_kwargs(self, trainer_config: Dict) -> Dict:
-        """Process the config and return specific kwargs for the trainer"""
-        return {}
-
-    def process(self, config: Dict) -> Tuple[Dict, Dict, str]:
-        """Process the config and return trainer_kwargs, trainer_class, train_args, and checkpoint"""
-        # Create deep copy to avoid modifying original dict
-        config_copy = deepcopy(config)
-
-        # Process trainer config to extract trainer_type
-        trainer_config = config_copy['trainer_config']
-        trainer_type = trainer_config.pop('type')
-
-        # Extract training arguments and checkpoint settings
-        train_args = trainer_config.pop('train_args')
-        checkpoint = trainer_config.pop('checkpoint', None)
-
-        # Process common and specific kwargs
-        common_kwargs = self.get_common_kwargs(config_copy)
-        specific_kwargs = self.get_specific_kwargs(trainer_config)
-
-        # Combine common and specific kwargs
-        trainer_kwargs = {**common_kwargs, **specific_kwargs}
 
         # Add remaining items from trainer_config to trainer_kwargs
         trainer_kwargs.update(trainer_config)
@@ -87,12 +94,38 @@ class QMIXConfigProcessor(ConfigProcessor):
         return trainer_kwargs, train_args, checkpoint
 
 class SemiSupervisedQMIXConfigProcessor(QMIXConfigProcessor):
-    def get_specific_kwargs(self, trainer_config: Dict) -> Dict:
-        # Build ModelConfig from the configuration
-        decoder_config = ModelConfig(**trainer_config.pop('decoder_config'))
-        data_constructor_config = SelfSupervisedDataConstructorConfig(**trainer_config.pop('data_constructor_config'))
-        reconstruction_loss_config: Dict[str, Any] = trainer_config.pop('reconstruction_loss_config')
+
+    def parse_self_supervised_learning_config(self, config: Dict[str, Dict]) -> Tuple[ModelConfig, SelfSupervisedDataConstructorConfig, Any]:
+        """Parse self-supervised learning configuration"""
+        ssl_config = deepcopy(config['self_supervised_learning_config'])
+        ssl_model_config = ModelConfig(**ssl_config.pop('model'))
+        ssl_optimizer_config = OptimizerConfig(**ssl_config.pop('optimizer'))
+        ssl_lr_scheduler_conf = LRSchedulerConfig(**ssl_config.pop('lr_scheduler'))
+        data_constructor_config = SelfSupervisedDataConstructorConfig(**ssl_config.pop('data_constructor_config'))
+
+        reconstruction_loss_config: Dict[str, Any] = ssl_config.pop('reconstruction_loss_config')
         reconstruction_loss_type = reconstruction_loss_config.pop('type')
         reconstruction_loss_class = REGISTERED_RECONSTRUCTION_LOSS[reconstruction_loss_type]
         reconstruction_loss = reconstruction_loss_class(**reconstruction_loss_config)
-        return {'decoder_config': decoder_config, 'data_constructor_config': data_constructor_config, 'reconstruction_loss': reconstruction_loss}
+
+        return ssl_model_config, ssl_optimizer_config, ssl_lr_scheduler_conf, data_constructor_config, reconstruction_loss
+
+    def process(self, config: Dict[str, Dict]) -> Tuple[Dict, Dict, str]:
+        """Process the config and return trainer_kwargs, train_args, and checkpoint"""
+        config = deepcopy(config)
+        # Parse individual components using parent class
+        trainer_kwargs, train_args, checkpoint = super().process(config)
+
+        # Parse self-supervised learning config specific to this class
+        ssl_model_config, ssl_optimizer_config, ssl_lr_scheduler_conf, data_constructor_config, reconstruction_loss = self.parse_self_supervised_learning_config(config)
+
+        # Add self-supervised learning specific configs to trainer_kwargs
+        trainer_kwargs.update({
+            'ssl_model_config': ssl_model_config,
+            'ssl_optimizer_config': ssl_optimizer_config,
+            'ssl_lr_scheduler_conf': ssl_lr_scheduler_conf,
+            'data_constructor_config': data_constructor_config,
+            'reconstruction_loss': reconstruction_loss
+        })
+
+        return trainer_kwargs, train_args, checkpoint
