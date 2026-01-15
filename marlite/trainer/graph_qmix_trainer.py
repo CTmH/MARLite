@@ -1,5 +1,4 @@
 import torch
-import numpy as np
 from torch.nn import DataParallel
 from tqdm import tqdm
 
@@ -46,21 +45,17 @@ class GraphQMIXTrainer(Trainer):
                     actions = batch['actions'].to(dtype=torch.int)  # (B, T, N)
                     rewards = batch['rewards'].to(dtype=torch.float32)  # (B, T, N)
                     next_states = batch['next_states'].to(dtype=torch.float32)  # (B, T, F)
+                    next_edge_indices = batch['next_edge_indices']  # (B, T, 2, N)
                     next_observations = batch['next_observations'].to(dtype=torch.float32)  # (B, T, N, F)
                     next_obs_padding_mask = batch['next_obs_padding_mask'].to(dtype=torch.bool)  # (B, T)
                     next_avail_actions = batch['next_avail_actions']  # Could be numpy array or tensor
+                    next_alive_mask = batch['next_alive_mask'].to(dtype=torch.bool)
                     terminations = batch['terminations'].to(dtype=torch.bool)  # (B, T, N)
-                    truncations = batch['truncations'].to(dtype=torch.bool)  # (B, T, N)
+                    #truncations = batch['truncations'].to(dtype=torch.bool)  # (B, T, N)
                     bs = states.shape[0]  # Actual batch size
                     n_agents = rewards.shape[2]  # Changed from shape[1] to shape[2] since (B, T, N)
 
                     # Create alive_mask_next from terminations and truncations
-                    # alive_mask = torch.tensor(alive_mask).to(dtype=torch.bool) # REMOVED: already converted above
-                    terminations = terminations[:,-1] # (B, T, N) -> (B, N) # REMOVED torch.tensor conversion
-                    truncations = truncations[:,-1] # (B, T, N) -> (B, N) # REMOVED torch.tensor conversion
-                    next_alive_mask = ~(terminations | truncations)
-                    next_alive_mask = next_alive_mask.unsqueeze(dim=1)
-                    next_alive_mask = torch.cat([alive_mask[:,1:,:], next_alive_mask], dim=1)
                     next_alive_mask = next_alive_mask.to(self.train_device)
                     alive_mask = alive_mask.to(self.train_device)
 
@@ -74,6 +69,7 @@ class GraphQMIXTrainer(Trainer):
 
                     rewards = rewards[:,-1] # (B, T, N) -> (B, N)
                     rewards = rewards.sum(dim=1).to(self.train_device) # (B, N) -> (B) Sum over all agents rewards
+                    terminations = terminations[:,-1] # (B, T, N) -> (B, N)
                     terminations = terminations.prod(dim=1).to(self.train_device) # (B, N) -> (B) if all agents are terminated then game over
 
                     # obs_padding_mask = torch.tensor(obs_padding_mask, dtype=torch.bool) # (B, T) # REMOVED: already converted above
@@ -83,6 +79,7 @@ class GraphQMIXTrainer(Trainer):
 
                     # Compute the Q-tot
                     last_edge_indices = [edge_indices[i][-1] for i in range(bs)] # (B, T, 2, N) -> (B, 2, N) Take only the last edge indices
+                    last_next_edge_indices = [next_edge_indices[i][-1] for i in range(bs)] # (B, T, 2, N) -> (B, 2, N)
                     # observations = torch.tensor(observations, dtype=torch.float, device=self.train_device) # REMOVED: already converted above
                     self.eval_agent_group.reset().train() # Reset Graph Builder intervals
                     observations = torch.transpose(observations, 1, 2).to(self.train_device) # obs.shape (B, T, N, F) -> (B, N, T, F)
@@ -102,7 +99,7 @@ class GraphQMIXTrainer(Trainer):
                         self.target_agent_group.reset().eval() # Reset Graph Builder intervals
                         next_observations = torch.transpose(next_observations, 1, 2).to(self.train_device) # obs.shape (B, T, N, F) -> (B, N, T, F)
                         next_states = next_states.to(self.train_device)
-                        ret_next = self.eval_agent_group.forward(next_observations, next_states, next_obs_padding_mask, next_alive_mask[:,-1,:], last_edge_indices)
+                        ret_next = self.target_agent_group.forward(next_observations, next_states, next_obs_padding_mask, next_alive_mask[:,-1,:], last_next_edge_indices)
                         q_val_next = ret_next['q_val']
                         if use_action_mask:
                             q_val_next = torch.masked_fill(q_val_next, ~next_avail_actions, -torch.inf)

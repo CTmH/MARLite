@@ -34,17 +34,17 @@ class MAgentGraphBuilder(GraphBuilder):
         self.cached_edge_indices = None
 
     @staticmethod
-    def _process_batch(
-            batch_state,
+    def _process_sample(
+            sample_state,
             binary_agent_id_dim: list,
             agent_presence_dim: list,
             comm_distance: int,
             distance_metric: str,
             valid_node_list: Union[list, None] = None):
         """Process a single batch item"""
-        binary_agent_id = batch_state[:, :, binary_agent_id_dim]
+        binary_agent_id = sample_state[:, :, binary_agent_id_dim]
         agent_positions = np.apply_along_axis(binary_to_decimal, -1, binary_agent_id).astype(np.int64)
-        agent_presence = batch_state[:, :, agent_presence_dim]
+        agent_presence = sample_state[:, :, agent_presence_dim]
         agent_presence = agent_presence.astype(np.int64)
         agent_presence = agent_presence.sum(axis=-1)
         agent_positions = agent_positions * agent_presence + agent_presence - np.ones_like(agent_presence)
@@ -96,16 +96,29 @@ class MAgentGraphBuilder(GraphBuilder):
                 return deepcopy(self.cached_adj_matrix), deepcopy(self.cached_edge_indices)
 
         n_workers = min(bs, self.n_workers)
-        with ProcessPoolExecutor(max_workers=self.n_workers) as executor:
-            results = list(executor.map(
-                self._process_batch,
-                [states[b] for b in range(bs)],
-                [self.binary_agent_id_dim] * bs,
-                [self.agent_presence_dim] * bs,
-                [self.comm_distance] * bs,
-                [self.distance_metric] * bs,
-                [self.valid_node_list] * bs
-            ))
+
+        # Process batches in parallel
+        if n_workers > 1:
+            with ProcessPoolExecutor(max_workers=n_workers) as executor:
+                results = list(executor.map(
+                    self._process_sample,
+                    [states[b] for b in range(bs)],
+                    [self.binary_agent_id_dim] * bs,
+                    [self.agent_presence_dim] * bs,
+                    [self.comm_distance] * bs,
+                    [self.distance_metric] * bs,
+                    [self.valid_node_list] * bs
+                ))
+        else:
+            # Single process fallback
+            results = [self._process_sample(
+                states[b],
+                self.binary_agent_id_dim,
+                self.agent_presence_dim,
+                self.comm_distance,
+                self.distance_metric,
+                self.valid_node_list
+            ) for b in range(bs)]
 
         batch_adj_matrix, batch_edge_indices = zip(*results)
         batch_adj_matrix = np.array(batch_adj_matrix)
@@ -122,7 +135,6 @@ class MAgentGraphBuilder(GraphBuilder):
         self.cached_adj_matrix = None
         self.cached_edge_indices = None
         return self
-
 
 class MAgentVecStateGraphBuilder(GraphBuilder):
     """
@@ -166,20 +178,20 @@ class MAgentVecStateGraphBuilder(GraphBuilder):
         self.cached_adj_matrix = None
         self.cached_edge_indices = None
 
-    def _process_single_sample(self, batch_state: ndarray) -> Tuple[ndarray, ndarray]:
+    def _process_single_sample(self, sample_state: ndarray) -> Tuple[ndarray, ndarray]:
         """
         Process a single batch of states to build communication graph.
 
         Args:
-            batch_state: Array of shape (n_agents, feature_dim)
+            sample_state: Array of shape (n_agents, feature_dim)
 
         Returns:
             Tuple of (adjacency_matrix, edge_indices)
         """
         # Extract coordinates, health points, and teams
-        coords = batch_state[:, self.coord_dims]  # (n_agents, 2)
-        hps = batch_state[:, self.hp_dim]  # (n_agents,)
-        teams = batch_state[:, self.team_dim]  # (n_agents,)
+        coords = sample_state[:, self.coord_dims]  # (n_agents, 2)
+        hps = sample_state[:, self.hp_dim]  # (n_agents,)
+        teams = sample_state[:, self.team_dim]  # (n_agents,)
 
         # Create mask for candidate agents (based on team membership only)
         candidate_mask = np.isin(teams, self.selected_teams)
@@ -220,14 +232,9 @@ class MAgentVecStateGraphBuilder(GraphBuilder):
 
             # Fill adjacency matrix (bidirectional connections)
             adj_matrix[rows_orig, cols_orig] = 1
-            #adj_matrix[cols_orig, rows_orig] = 1
 
             # Build edge index (bidirectional edges using original agent IDs)
             edge_index = np.vstack([rows_orig, cols_orig])
-            #edge_index = np.vstack([
-            #    np.hstack([rows_orig, cols_orig]),
-            #    np.hstack([cols_orig, rows_orig])
-            #])
         else:
             # Only one valid agent, no edges
             edge_index = np.empty((2, 0), dtype=np.int64)

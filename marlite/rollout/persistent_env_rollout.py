@@ -62,6 +62,8 @@ def persistent_env_rollout(env_config: EnvConfig,
             'avail_actions': [],
             'truncations': [],
             'terminations': [],
+            'next_alive_mask': [],
+            'next_edge_indices': [],
             'next_states': [],
             'next_observations': [],
             'next_avail_actions': [],
@@ -193,8 +195,6 @@ def persistent_env_rollout(env_config: EnvConfig,
                 # Create available actions from action spaces
                 current_avail_actions = {agent: env.action_space(agent) for agent in env.agents}
             avail_actions = ensure_all_agents_present(current_avail_actions, default_avail_actions)
-            if i > 0:
-                episode['next_avail_actions'].append(avail_actions)
 
             # Get actions from agent
             processed_obs, traj_padding_mask = obs_preprocess(
@@ -206,6 +206,11 @@ def persistent_env_rollout(env_config: EnvConfig,
             ret = agent_group.act(processed_obs, env.state(), avail_actions, traj_padding_mask, env.agents, epsilon)
             actions, all_actions = ret['actions'], ret['all_actions']
             edge_indices = ret.get('edge_indices', np.zeros((2, 0)))
+
+            if i > 0:
+                episode['next_alive_mask'].append(alive_mask)
+                episode['next_avail_actions'].append(avail_actions)
+                episode['next_edge_indices'].append(edge_indices)
 
         episode['win_tag'] = win_tag
         episode['episode_length'] = len(episode['observations'])

@@ -13,11 +13,13 @@ ARRAY_ATTR = [
     'states',
     'edge_indices',
     'next_states',
+    'next_edge_indices',
 ]
 DICT_ATTR = [
     'alive_mask',
     'observations',
     'next_observations',
+    'next_alive_mask',
     'next_avail_actions',
     'actions',
     'rewards',
@@ -34,17 +36,19 @@ NUMERIC_ATTR = [
     'next_states',
     'alive_mask',
     'observations',
-    'next_observations',
     'actions',
     'rewards',
     'terminations',
     'truncations',
     'obs_padding_mask',
+    'next_alive_mask',
+    'next_observations',
     'next_obs_padding_mask',
 ]
 
 DYNAMIC_LEN_ATTR = [
     'edge_indices',
+    'next_edge_indices',
 ]
 
 OBJ_ATTR = [
@@ -140,12 +144,10 @@ def trajectory_collate_fn(batch):
         collated: dict where numeric arrays are stacked by default_collate,
                   and Space objects are kept as-is (one per batch, assumed identical).
     """
-    # Collate numeric data using PyTorch's default behavior
-    #numeric_batch = [dict(zip(NUMERIC_ATTR, itemgetter(*NUMERIC_ATTR)(sample))) for sample in batch]
-    #collated = default_collate(numeric_batch)
     collated = {}
     for k in NUMERIC_ATTR:
-        collated[k] = torch.tensor([sample[k] for sample in batch])
+        batch_values = [sample[k] for sample in batch]
+        collated[k] = torch.tensor(np.array(batch_values))
 
     # Preserve space objects — assume they're identical across batch
     for k in OBJ_ATTR:

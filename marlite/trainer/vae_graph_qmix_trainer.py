@@ -34,74 +34,6 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
     def learn(self, sample_size, batch_size: int, times: int = 1):
         return GraphQMIXTrainer.learn(self, sample_size, batch_size, times)
 
-    '''
-    def _compute_vae_loss(self,
-                         mu: torch.Tensor,
-                         std: torch.Tensor,
-                         log_var: torch.Tensor,
-                         observations: torch.Tensor,
-                         states: torch.Tensor,
-                         edge_indices: List[List[np.ndarray]],
-                         alive_mask: torch.Tensor):
-        """
-        Internal function to compute VAE loss for probabilistic agent groups.
-
-        Args:
-            mu: Mean of the Gaussian distribution (batch_size, n_agents, feature_dim)
-            std: Standard deviation of the Gaussian distribution (batch_size, n_agents, feature_dim)
-            observations: Actual observations from the environment
-            states: Environment states
-            edge_indices: Communication graph edge indices
-            alive_mask: Mask indicating which agents are alive
-            log_var: Log variance of the Gaussian distribution (batch_size, n_agents, feature_dim), optional
-
-        Returns:
-            VAE total loss (reconstruction loss + KL divergence loss)
-        """
-        # Sample from the Gaussian distribution to get latent representations
-        eps = torch.randn_like(std)
-        z = mu + eps * std  # Reparameterization trick (batch_size, n_agents, feature_dim)
-
-        # Decode the latent representations to reconstruct observations
-        reconstructed_obs = self.ssl_model(z)  # (batch_size, n_agents, feature_dim)
-
-        # Format the original observations for comparison
-        observations_np = observations.detach().cpu().numpy()
-        states_np = states.detach().cpu().numpy()
-        alive_mask_np = alive_mask.detach().cpu().numpy()
-        formatted_obs, padding_mask = self.data_constructor.process(observations_np, states_np, edge_indices, alive_mask_np)  # (batch_size, n_agents, feature_dim)
-
-        shape = (-1,) + formatted_obs.shape[-2:]
-        reconstructed_obs = torch.reshape(reconstructed_obs, shape)
-        formatted_obs = formatted_obs.reshape(shape)
-        padding_mask = padding_mask.reshape(-1, padding_mask.shape[-1])
-        formatted_obs = torch.tensor(formatted_obs, device=reconstructed_obs.device)
-        padding_mask = torch.tensor(padding_mask, device=reconstructed_obs.device)
-
-        # Calculate reconstruction loss
-        reconstruction_loss = self.reconstruction_loss(reconstructed_obs, formatted_obs, padding_mask)
-
-        # Calculate KL divergence loss
-        # KL divergence between the learned distribution q(z|x) and prior p(z)
-        # For Gaussian prior N(0, I) and posterior N(mu, std^2), KL divergence is:
-        # If log_var is provided, use it directly for better numerical stability
-        # KL(q(z|x) || p(z)) = 0.5 * sum(1 + log_var - mu^2 - exp(log_var))
-
-        kl_divergence = -0.5 * torch.sum(1 + log_var - mu.pow(2) - torch.exp(log_var), dim=-1)  # Sum over feature dimension
-
-        kl_divergence = torch.mean(kl_divergence)  # Average over batch and agents
-
-        # Handle DataParallel case: gather losses from all GPUs
-        if self.use_data_parallel:
-            # Gather losses from all GPUs
-            gathered_recon_losses = GatherLayer.apply(reconstruction_loss)
-            reconstruction_loss = torch.stack(gathered_recon_losses).mean() if gathered_recon_losses else reconstruction_loss
-
-        # Total VAE loss: reconstruction loss + KL divergence loss
-        total_vae_loss = reconstruction_loss + self.kl_divergence_weight * kl_divergence
-
-        return total_vae_loss
-    '''
     def self_supervised_learn(self, sample_size, batch_size: int, times: int = 1):
         total_loss = 0.0
         total_batches = 0
@@ -177,7 +109,7 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
                         list(self.ssl_model.parameters()),
                         max_norm=5.0
                     )
-                    self.optimizer.step()
+                    self.ssl_optimizer.step()
                     self.eval_agent_group.step()
 
                     total_loss += vae_loss.detach().cpu().item()
