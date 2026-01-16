@@ -256,7 +256,7 @@ class TestAdversarialPursuitPredator(unittest.TestCase):
             first_agent_obs = list(observations.values())[0]
 
             # Check shape: should be (max_vector_observation_records, C)
-            expected_shape = (8, C)
+            expected_shape = (8, C + 2) # Append relative position
             self.assertEqual(first_agent_obs.shape, expected_shape,
                            f"Expected shape {expected_shape}, got {first_agent_obs.shape}")
 
@@ -277,7 +277,7 @@ class TestAdversarialPursuitPredator(unittest.TestCase):
 
             # Since we have max_vector_observation_records=8, all should be included
             # Check that the first row contains the closest entity (5,5)
-            self.assertTrue(np.array_equal(first_agent_obs[0], observation[5, 5]),
+            self.assertTrue(np.array_equal(first_agent_obs[0][:-2], observation[5, 5]),
                           "First row should contain closest entity at (5,5)")
 
             # Check that the observation contains non-zero values (not all zeros)

@@ -191,8 +191,9 @@ class MAgentWrapper(BaseParallelWrapper):
             observation: The agent observation tensor of shape (H, W, C)
 
         Returns:
-            Matrix of shape (max_vector_observation_records, C) containing the closest
-            entities' full observation vectors, padded with zeros if fewer entities exist
+            Matrix of shape (max_vector_observation_records, C + 2) containing the closest
+            entities' full observation vectors with relative position information (dy, dx) appended,
+            padded with zeros if fewer entities exist
         """
         # Get observation dimensions
         H, W, C = observation.shape
@@ -238,15 +239,19 @@ class MAgentWrapper(BaseParallelWrapper):
         else:
             sorted_positions = np.array([]).reshape(0, 2)
 
-        # Create result matrix
+        # Create result matrix - extend C dimension by 2 for relative position info (dy, dx)
         max_records = self.max_vector_observation_records
-        result = np.zeros((max_records, C), dtype=np.float16)
+        result = np.zeros((max_records, C + 2), dtype=np.float16)  # Add 2 channels for relative position
 
-        # Fill with closest entities (obstacles and agents)
+        # Fill with closest entities (obstacles and agents) + normalized relative position info
         n_entities = min(len(sorted_positions), max_records)
         for i in range(n_entities):
             y, x = sorted_positions[i]
-            result[i] = observation[y, x]
+            # Copy original observation data
+            result[i, :C] = observation[y, x]
+            # Add normalized relative position information (dy, dx) ∈ [-1, 1]
+            result[i, C] = (y - center_y) / (center_y or 1)  # avoid div-by-zero if H=1
+            result[i, C + 1] = (x - center_x) / (center_x or 1)  # same for W
 
         return result
 

@@ -52,11 +52,9 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
             data = list(data)
             alive_mask = np.stack([e['alive_mask'] for e in data])
             obs_padding_mask = np.stack([e['obs_padding_mask'] for e in data])
-            observations = np.stack([e['observations'] for e in data])
+            observations = np.stack([e['observations'] for e in data]).astype(np.float32)
             states = np.stack([e['states'] for e in data])
             edge_indices = [e['edge_indices'] for e in data]
-            alive_mask = alive_mask.swapaxes(1, 2) # (B, T, N) -> (B, N, T)
-            observations = observations.swapaxes(1, 2).astype(np.float32)
             formatted_obs, construct_padding_mask = self.data_constructor.process(observations, states, edge_indices, alive_mask)
             observations = torch.tensor(observations)
             formatted_obs = torch.tensor(formatted_obs)
@@ -68,7 +66,7 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
                                     batch_size=batch_size,
                                     shuffle=True,
                                     num_workers=self.n_workers)
-            n_agents = alive_mask.shape[1]
+            n_agents = alive_mask.shape[2]
             with tqdm(total=sample_size, desc=f'Times {t+1}/{times}', unit='batch') as pbar:
                 for obs, obs_mask, formatted, edge_idx, construct_mask in dataloader:
                     bs = obs.shape[0]
@@ -78,7 +76,7 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
                     obs_mask = torch.stack([obs_mask] * n_agents, dim=1).to(self.train_device)  # (B, N, T)
                     formatted = formatted.to(self.train_device, dtype=torch.float32)
                     construct_mask = construct_mask.to(self.train_device, dtype=torch.bool)
-
+                    obs = obs.transpose(1, 2) # (B, T, N, O) -> (B, N, T, O)
                     msg, _ = self.eval_agent_group._process_observations(obs, obs_mask)
                     estimates, _, mu, _, log_var = self.eval_agent_group._compute_local_state_estimates(msg, last_ts_edges)
                     reconstructed_obs = self.ssl_model(estimates)

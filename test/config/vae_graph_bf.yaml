@@ -41,7 +41,7 @@ agent_group_config:
     model_0:
       feature_extractor:
         model_type: "SimpleResAttObsEnc"
-        input_dim: 41
+        input_dim: 43
         embed_dim: 128
         output_dim: 64
         num_heads: 1
@@ -175,7 +175,7 @@ self_supervised_learning_config:
     layers:
     - type: Linear
       in_features: 64
-      out_features: 656
+      out_features: 176
   optimizer:
     type: "Adam"
     lr: 0.001
@@ -189,8 +189,9 @@ self_supervised_learning_config:
   data_constructor_config:
     type: "MagentVecObs"
     max_entities_perception: 16
-    max_observed_entities: 8
     n_workers: 8
+    with_time_seq: false
+    include_features: [ 0, 1, 2, 3, 4, 5, 6, 39, 40, 41, 42]
   reconstruction_loss_config:
     type: "ChamferDist"
     use_squared_distance: True
