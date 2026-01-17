@@ -1,13 +1,14 @@
 import torch
 import numpy as np
+import time
+import absl.logging as logging
 from torch.nn import DataParallel
 from torch.utils.data import TensorDataset, DataLoader
 from tqdm import tqdm
 
 from marlite.trainer.self_supervised_qmix_trainer import SelfSupervisedQMIXTrainer
 from marlite.trainer.graph_qmix_trainer import GraphQMIXTrainer
-from marlite.util.trajectory_dataset import TrajectoryDataLoader
-from marlite.algorithm.model.gather_layer import GatherLayer
+
 
 class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
     """
@@ -55,7 +56,13 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
             observations = np.stack([e['observations'] for e in data]).astype(np.float32)
             states = np.stack([e['states'] for e in data])
             edge_indices = [e['edge_indices'] for e in data]
+
+            start_time = time.time()
             formatted_obs, construct_padding_mask = self.data_constructor.process(observations, states, edge_indices, alive_mask)
+            end_time = time.time()
+            processing_time = end_time - start_time
+            logging.info(f'Processing the self-supervised learning data takes {processing_time:.4f} seconds.')
+
             observations = torch.tensor(observations)
             formatted_obs = torch.tensor(formatted_obs)
             construct_padding_mask = torch.tensor(construct_padding_mask)
