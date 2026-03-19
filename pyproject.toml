@@ -10,8 +10,7 @@ dependencies = [
     "torch>=2.8.0",
     "torch-geometric>=2.6.1",
     "tqdm>=4.67.1",
-    "absl-py>=2.3.1",
-    "mpe2>=0.0.1",
+    "mpe2",
     "networkx>=3.4.2",
     "pettingzoo[butterfly,mpe]>=1.25.0",
     "smac-pettingzoo",
@@ -45,6 +44,7 @@ analysis = [
 
 [tool.uv]
 index-strategy = "unsafe-best-match"
+package = true
 
 [tool.uv.sources]
 smac-pettingzoo = { git = "https://github.com/CTmH/SMAC-PettingZoo.git" }
@@ -52,6 +52,7 @@ magent2 = { git = "https://github.com/CTmH/MAgent2.git" }
 dm_env = { git = "https://github.com/CTmH/dm_env.git" }
 sumo-rl = { git = "https://github.com/LucasAlegre/sumo-rl.git" }
 torch = { index = "pytorch-rocm" }
+mpe2 = {git = "https://github.com/Farama-Foundation/MPE2.git"}
 
 [[tool.uv.index]]
 name = "pypi"
@@ -60,7 +61,7 @@ default = true
 
 [[tool.uv.index]]
 name = "pytorch-rocm"
-url = "https://download.pytorch.org/whl/rocm6.4"
+url = "https://download.pytorch.org/whl/rocm7.1"
 default = false
 
 [tool.pytest.ini_options]

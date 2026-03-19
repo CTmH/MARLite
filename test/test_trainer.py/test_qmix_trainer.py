@@ -10,7 +10,7 @@ from marlite.trainer import TrainerConfig
 
 class TestQMixTrainer(unittest.TestCase):
     def setUp(self):
-        self.config_path = 'test/config/qmix_kaz.yaml'
+        self.config_path = 'test/config/qmix_default.yaml'
         with open(self.config_path, 'r') as file:
             self.config = yaml.safe_load(file)
         self.config['trainer_config']['train_args']['epochs'] = 2
@@ -26,7 +26,6 @@ class TestQMixTrainer(unittest.TestCase):
             self.trainer.workdir = temp_dir
             self.trainer.logdir = os.path.join(self.trainer.workdir, 'logs')
             self.trainer.checkpointdir = os.path.join(self.trainer.workdir, 'checkpoints')
-            n_episodes = 4
             self.trainer.collect_experience(0.9)
             self.assertNotEqual(len(self.trainer.replaybuffer.buffer), 0)
 
@@ -171,7 +170,7 @@ class TestQMixTrainer(unittest.TestCase):
                         ))
 
     def test_data_parallel(self):
-        self.config_path = 'test/config/qmix_kaz.yaml'
+        self.config_path = 'test/config/qmix_default.yaml'
         with open(self.config_path, 'r') as file:
             self.config = yaml.safe_load(file)
         self.config['trainer_config']['train_args']['epochs'] = 2
@@ -198,7 +197,7 @@ class TestQMixTrainer(unittest.TestCase):
                     self.assertFalse(torch.equal(w1, w2))
 
     def test_torch_compile(self):
-        self.config_path = 'test/config/qmix_kaz.yaml'
+        self.config_path = 'test/config/qmix_default.yaml'
         with open(self.config_path, 'r') as file:
             self.config = yaml.safe_load(file)
         self.config['trainer_config']['train_args']['epochs'] = 2

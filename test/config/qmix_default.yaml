@@ -20,8 +20,8 @@ agent_group_config:
     weight_decay: 0.0001
 
 env_config:
-  module_name: "mpe2.simple_spread_v3"
-  env_name: "env"
+  module_name: "mpe2"
+  env_name: "simple_spread_v3"
 
 critic_config:
   type: "QMixer"

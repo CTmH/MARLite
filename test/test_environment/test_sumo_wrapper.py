@@ -1,4 +1,5 @@
 import unittest
+import os
 import numpy as np
 import sumo_rl
 from marlite.environment.sumo_wrapper import SUMOWrapper
@@ -7,10 +8,17 @@ class TestSUMOWrapper(unittest.TestCase):
 
     def setUp(self):
         """Set up test fixtures before each test method."""
+        # Get sumo_rl package directory dynamically
+        sumo_rl_dir = os.path.dirname(sumo_rl.__file__)
+        
+        # Construct paths to net and route files
+        net_file = os.path.join(sumo_rl_dir, 'nets', 'RESCO', 'grid4x4', 'grid4x4.net.xml')
+        route_file = os.path.join(sumo_rl_dir, 'nets', 'RESCO', 'grid4x4', 'grid4x4_1.rou.xml')
+        
         # Initialize the environment
         self.env = sumo_rl.parallel_env(
-            net_file='.venv/lib/python3.13/site-packages/sumo_rl/nets/RESCO/grid4x4/grid4x4.net.xml',
-            route_file='.venv/lib/python3.13/site-packages/sumo_rl/nets/RESCO/grid4x4/grid4x4_1.rou.xml',
+            net_file=net_file,
+            route_file=route_file,
             use_gui=False,
             num_seconds=3600
         )
