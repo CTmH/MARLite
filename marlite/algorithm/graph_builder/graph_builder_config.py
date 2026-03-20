@@ -5,6 +5,7 @@ from marlite.algorithm.graph_builder.magent_graph_builder import MAgentGraphBuil
 from marlite.algorithm.graph_builder.partial_graph_builder import PartialGraphMAgentBuilder, PartialGraphVectorStateBuilder
 from marlite.algorithm.graph_builder.random_group_graph_builder import RandomGroupGraphBuilder
 from marlite.algorithm.graph_builder.g2anet_graph_builder import G2ANetGraphBuilder
+from marlite.algorithm.graph_builder.fixed_edge_graph_builder import FixedEdgeGraphBuilder
 
 registered_graph_builder_models = {
     "FullConn": FullConnGraphBuilder,
@@ -14,6 +15,7 @@ registered_graph_builder_models = {
     "PartialMAgent": PartialGraphMAgentBuilder,
     "PartialVectorState": PartialGraphVectorStateBuilder,
     "G2ANet": G2ANetGraphBuilder,
+    "Fixed": FixedEdgeGraphBuilder,
 }
 class GraphBuilderConfig:
 

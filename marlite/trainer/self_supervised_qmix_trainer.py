@@ -12,7 +12,7 @@ from marlite.trainer.trainer import Trainer
 from marlite.util.optimizer_config import OptimizerConfig
 from marlite.util.lr_scheduler_config import LRSchedulerConfig
 from marlite.util.self_supervised_data_constructor.self_supervised_data_constructor_config import SelfSupervisedDataConstructorConfig
-
+from marlite.util.loss_func import ReconstructionLoss
 
 class SelfSupervisedQMIXTrainer(Trainer):
 
@@ -230,3 +230,10 @@ class SelfSupervisedQMIXTrainer(Trainer):
 
     def self_supervised_learn(self, sample_size: float, batch_size: int, times: int):
         raise NotImplementedError
+
+    def _compute_ssl_loss(self, pred_set:torch.Tensor, target_set:torch.Tensor, mask:torch.Tensor=None):
+        if isinstance(self.reconstruction_loss, ReconstructionLoss):
+            reconstruction_loss = self.reconstruction_loss(pred_set, target_set, mask)
+        else:
+            reconstruction_loss = self.reconstruction_loss(pred_set, target_set)
+        return reconstruction_loss

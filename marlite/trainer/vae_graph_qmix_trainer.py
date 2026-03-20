@@ -88,7 +88,7 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
                     estimates, _, mu, _, log_var = self.eval_agent_group._compute_local_state_estimates(msg, last_ts_edges)
                     reconstructed_obs = self.ssl_model(estimates)
                     reconstructed_obs = torch.reshape(reconstructed_obs, formatted.shape)
-                    reconstruction_loss = self.reconstruction_loss(
+                    reconstruction_loss = self._compute_ssl_loss(
                         reconstructed_obs.view(-1, *reconstructed_obs.shape[2:]),
                         formatted.view(-1, *formatted.shape[2:]),
                         construct_mask.view(-1, *construct_mask.shape[2:]))

@@ -1,6 +1,6 @@
 import torch
 import torch.nn.functional as F
-from torch.nn.modules.loss import _Loss
+from torch.nn.modules.loss import _Loss, MSELoss
 from typing import Dict, Type
 
 class PITLoss(_Loss):
@@ -164,8 +164,55 @@ class InfoNCELoss(_Loss):
         else:  # 'none'
             return loss
 
+class ReconstructionLoss(_Loss):
+    """
+    Base class for reconstruction loss functions.
 
-class ChamferDistanceLoss(_Loss):
+    This class provides a flexible initialization method that can accept
+    variable arguments to accommodate different initialization requirements
+    of its subclasses. Subclasses should override the forward method to
+    implement specific reconstruction loss calculations.
+
+    Args:
+        reduction (str, optional): Specifies the reduction to apply to the output.
+            Default: 'mean'. Options: 'none', 'mean', 'sum'
+        **kwargs: Additional keyword arguments that may be needed by subclasses.
+    """
+    def __init__(self, **kwargs):
+        """
+        Initialize the reconstruction loss.
+
+        This method accepts variable arguments to support different initialization
+        requirements of subclasses. The reduction parameter is passed to the
+        parent _Loss class, while additional kwargs are stored for potential
+        use by subclasses.
+
+        Args:
+            **kwargs: Additional parameters specific to subclasses
+        """
+        super().__init__(**kwargs)
+
+    def forward(self, pred_set:torch.Tensor, target_set:torch.Tensor, mask:torch.Tensor=None):
+        """
+        Compute reconstruction loss between predicted and target sets.
+
+        This method must be implemented by subclasses to define specific
+        reconstruction loss calculations.
+
+        Args:
+            pred_set (torch.Tensor): Predicted set of points/features
+            target_set (torch.Tensor): Target set of points/features
+            mask (torch.Tensor, optional): Optional mask indicating valid elements
+
+        Returns:
+            torch.Tensor: Reconstruction loss value
+
+        Raises:
+            NotImplementedError: If not implemented by subclass
+        """
+        raise NotImplementedError("Subclasses must implement forward method")
+
+class ChamferDistanceLoss(ReconstructionLoss):
     """
     Computes Chamfer Distance loss between two sets of points.
     Input tensors should have shape: (batch_size, n_points, feature_dim)
@@ -255,5 +302,6 @@ class ChamferDistanceLoss(_Loss):
 
 
 REGISTERED_RECONSTRUCTION_LOSS: Dict[str, Type[_Loss]] = {
-    "ChamferDist": ChamferDistanceLoss
+    "ChamferDist": ChamferDistanceLoss,
+    "MSE": MSELoss,
 }

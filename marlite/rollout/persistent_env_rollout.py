@@ -178,6 +178,8 @@ def persistent_env_rollout(env_config: EnvConfig,
                 if win_tag or not env.agents:
                     episode['next_states'].append(episode['states'][-1])
                     episode['next_avail_actions'].append(default_avail_actions)
+                    episode['next_alive_mask'].append(default_alive_mask)
+                    episode['next_edge_indices'].append(edge_indices)
                     break
                 episode['next_states'].append(env.state())
 
