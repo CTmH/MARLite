@@ -200,7 +200,7 @@ class TestFixedEdgeGraphBuilder(unittest.TestCase):
     def test_graph_builder_config_integration(self):
         """Test integration with GraphBuilderConfig."""
         config = {
-            "type": "FixedEdge",
+            "type": "Fixed",
             "edge_indices": [[0, 1, 2], [1, 2, 0]],
             "num_nodes": 3,
             "add_self_loop": True,

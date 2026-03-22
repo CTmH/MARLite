@@ -633,7 +633,7 @@ class GraphAgentGroup(AgentGroup):
         return self
 
     def reset(self) -> "AgentGroup":
-        if isinstance(self.graph_builder, DataParallel):
+        if hasattr(self.graph_builder, "module"):
             self.graph_builder.module.reset()
         else:
             self.graph_builder.reset()

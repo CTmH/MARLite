@@ -130,22 +130,38 @@ class TestQMIXAgentGroup(unittest.TestCase):
 
     def test_wrap_distributed_data_parallel(self):
         """Test wrapping models with DistributedDataParallel."""
-        # Test DDP wrapping
-        self.agent_group.wrap_data_parallel(device_id=0)
-        for (model_name, model), (_, fe) in zip(
-            self.agent_group.models.items(), self.agent_group.feature_extractors.items()
-        ):
-            self.assertIsInstance(model, DDP)
-            self.assertIsInstance(fe, DDP)
+        import torch.distributed as dist
+        import os
 
-        self.agent_group.unwrap_data_parallel()
-        for (model_name, model), (_, fe) in zip(
-            self.agent_group.models.items(), self.agent_group.feature_extractors.items()
-        ):
-            self.assertNotIsInstance(model, DDP)
-            self.assertNotIsInstance(fe, DDP)
-            self.assertIsInstance(model, torch.nn.Module)
-            self.assertIsInstance(fe, torch.nn.Module)
+        # Initialize DDP process group for testing
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "29500"
+        if not dist.is_initialized():
+            dist.init_process_group("gloo", rank=0, world_size=1)
+
+        try:
+            # Test DDP wrapping
+            self.agent_group.wrap_data_parallel(device_id=0)
+            for (model_name, model), (_, fe) in zip(
+                self.agent_group.models.items(),
+                self.agent_group.feature_extractors.items(),
+            ):
+                self.assertIsInstance(model, DDP)
+                self.assertIsInstance(fe, DDP)
+
+            self.agent_group.unwrap_data_parallel()
+            for (model_name, model), (_, fe) in zip(
+                self.agent_group.models.items(),
+                self.agent_group.feature_extractors.items(),
+            ):
+                self.assertNotIsInstance(model, DDP)
+                self.assertNotIsInstance(fe, DDP)
+                self.assertIsInstance(model, torch.nn.Module)
+                self.assertIsInstance(fe, torch.nn.Module)
+        finally:
+            # Clean up DDP process group
+            if dist.is_initialized():
+                dist.destroy_process_group()
 
     def test_save_load_params(self):
         # Create a temporary directory to save parameters

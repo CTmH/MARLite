@@ -57,9 +57,10 @@ class MsgAggrQMIXTrainer(Trainer):
 
         if self.use_ddp:
             self.eval_agent_group.wrap_data_parallel()
-            self.eval_critic = DataParallel(self.eval_critic)
+            device_id = get_local_device_id(self.train_device)
+            self.eval_critic = DDP(self.eval_critic, device_ids=[device_id])
             self.target_agent_group.wrap_data_parallel()
-            self.target_critic = DataParallel(self.target_critic)
+            self.target_critic = DDP(self.target_critic, device_ids=[device_id])
 
         for t in range(times):
             with tqdm(
@@ -293,9 +294,10 @@ class ProbMsgAggrQMIXTrainer(Trainer):
 
         if self.use_ddp:
             self.eval_agent_group.wrap_data_parallel()
-            self.eval_critic = DataParallel(self.eval_critic)
+            device_id = get_local_device_id(self.train_device)
+            self.eval_critic = DDP(self.eval_critic, device_ids=[device_id])
             self.target_agent_group.wrap_data_parallel()
-            self.target_critic = DataParallel(self.target_critic)
+            self.target_critic = DDP(self.target_critic, device_ids=[device_id])
 
         for t in range(times):
             with tqdm(
