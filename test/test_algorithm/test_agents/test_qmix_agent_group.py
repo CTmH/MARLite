@@ -4,11 +4,11 @@ import yaml
 import numpy as np
 import tempfile
 from mpe2 import simple_spread_v3
-from torch.nn import DataParallel
+from torch.nn.parallel import DistributedDataParallel as DDP
 from marlite.algorithm.agents import AgentGroupConfig
 
-class TestQMIXAgentGroup(unittest.TestCase):
 
+class TestQMIXAgentGroup(unittest.TestCase):
     def setUp(self):
         # Environment setup and model configuration
         self.env = simple_spread_v3.parallel_env(render_mode="rgb_array")
@@ -18,10 +18,10 @@ class TestQMIXAgentGroup(unittest.TestCase):
         self.obs_shape = self.obs_shape[0]
         self.action_space_shape = self.env.action_space(key).n
         # Agent group configuration
-        config_path = 'test/config/qmix_default.yaml'
-        with open(config_path, 'r') as file:
+        config_path = "test/config/qmix_default.yaml"
+        with open(config_path, "r") as file:
             config = yaml.safe_load(file)
-        self.agent_group_config = AgentGroupConfig(**config['agent_group_config'])
+        self.agent_group_config = AgentGroupConfig(**config["agent_group_config"])
 
         # Initialize QMIXAgents
         self.agent_group = self.agent_group_config.get_agent_group()
@@ -29,11 +29,16 @@ class TestQMIXAgentGroup(unittest.TestCase):
         observations = {agent: [] for agent in self.env.agents}
         self.seq_length = 5
         for i in range(self.seq_length):
-            actions = {agent: self.env.action_space(agent).sample() for agent in self.env.agents}
+            actions = {
+                agent: self.env.action_space(agent).sample()
+                for agent in self.env.agents
+            }
             obs, rewards, terminations, truncations, infos = self.env.step(actions)
             for agent in self.env.agents:
                 observations[agent].append(obs[agent])
-        self.observations = {key: np.array(value) for key, value in observations.items()}
+        self.observations = {
+            key: np.array(value) for key, value in observations.items()
+        }
 
     def test_forward(self):
         bs = 5
@@ -46,60 +51,99 @@ class TestQMIXAgentGroup(unittest.TestCase):
         alive_mask = torch.ones((bs, len(self.env.agents)))
 
         # Test get_q_values method in evaluation mode
-        ret = self.agent_group.forward(observations=obs, traj_padding_mask=traj_padding_mask, alive_mask=alive_mask)
-        q_values = ret['q_val']
+        ret = self.agent_group.forward(
+            observations=obs, traj_padding_mask=traj_padding_mask, alive_mask=alive_mask
+        )
+        q_values = ret["q_val"]
         q_values = q_values.detach().cpu().numpy().squeeze()
-        self.assertEqual(q_values.shape, (bs, len(self.env.agents), self.action_space_shape))
+        self.assertEqual(
+            q_values.shape, (bs, len(self.env.agents), self.action_space_shape)
+        )
 
         # Test get_q_values method in training mode
         self.agent_group.train()
-        ret = self.agent_group.forward(observations=obs, traj_padding_mask=traj_padding_mask, alive_mask=alive_mask)
-        q_values = ret['q_val']
+        ret = self.agent_group.forward(
+            observations=obs, traj_padding_mask=traj_padding_mask, alive_mask=alive_mask
+        )
+        q_values = ret["q_val"]
         q_values = q_values.detach().cpu().numpy().squeeze()
-        self.assertEqual(q_values.shape, (bs, len(self.env.agents), self.action_space_shape))
+        self.assertEqual(
+            q_values.shape, (bs, len(self.env.agents), self.action_space_shape)
+        )
 
     def test_act(self):
         # Test act method with epsilon = 0 (greedy policy)
         traj_padding_mask = np.ones(self.seq_length)
         state = self.env.state()
-        ret = self.agent_group.act(self.observations, state, self.env.action_spaces, traj_padding_mask, self.env.agents, epsilon=0)
-        actions = ret['actions']
+        ret = self.agent_group.act(
+            self.observations,
+            state,
+            self.env.action_spaces,
+            traj_padding_mask,
+            self.env.agents,
+            epsilon=0,
+        )
+        actions = ret["actions"]
         self.assertEqual(len(actions), len(self.env.agents))
 
         # Test act method with epsilon = 1 (random policy)
-        ret = self.agent_group.act(self.observations, state, self.env.action_spaces, traj_padding_mask, self.env.agents, epsilon=1)
-        actions = ret['actions']
+        ret = self.agent_group.act(
+            self.observations,
+            state,
+            self.env.action_spaces,
+            traj_padding_mask,
+            self.env.agents,
+            epsilon=1,
+        )
+        actions = ret["actions"]
         self.assertEqual(len(actions), len(self.env.agents))
 
         # Test act method with epsilon = 0.5
-        ret = self.agent_group.act(self.observations, state, self.env.action_spaces, traj_padding_mask, self.env.agents, epsilon=0.5)
-        actions = ret['actions']
+        ret = self.agent_group.act(
+            self.observations,
+            state,
+            self.env.action_spaces,
+            traj_padding_mask,
+            self.env.agents,
+            epsilon=0.5,
+        )
+        actions = ret["actions"]
         self.assertEqual(len(actions), len(self.env.agents))
 
     def test_eval(self):
         self.agent_group.eval()
         # Check if the agent group is in evaluation mode
-        for (model_name, model), (_, fe) in zip(self.agent_group.models.items(), self.agent_group.feature_extractors.items()):
+        for (model_name, model), (_, fe) in zip(
+            self.agent_group.models.items(), self.agent_group.feature_extractors.items()
+        ):
             self.assertFalse(model.training)
             self.assertFalse(fe.training)
 
     def test_train(self):
         self.agent_group.train()
         # Check if the agent group is in training mode
-        for (model_name, model), (_, fe) in zip(self.agent_group.models.items(), self.agent_group.feature_extractors.items()):
+        for (model_name, model), (_, fe) in zip(
+            self.agent_group.models.items(), self.agent_group.feature_extractors.items()
+        ):
             self.assertTrue(model.training)
             self.assertTrue(fe.training)
 
-    def test_wrap_data_parallel(self):
-        self.agent_group.wrap_data_parallel()
-        for (model_name, model), (_, fe) in zip(self.agent_group.models.items(), self.agent_group.feature_extractors.items()):
-            self.assertIsInstance(model, DataParallel)
-            self.assertIsInstance(fe, DataParallel)
+    def test_wrap_distributed_data_parallel(self):
+        """Test wrapping models with DistributedDataParallel."""
+        # Test DDP wrapping
+        self.agent_group.wrap_data_parallel(device_id=0)
+        for (model_name, model), (_, fe) in zip(
+            self.agent_group.models.items(), self.agent_group.feature_extractors.items()
+        ):
+            self.assertIsInstance(model, DDP)
+            self.assertIsInstance(fe, DDP)
 
         self.agent_group.unwrap_data_parallel()
-        for (model_name, model), (_, fe) in zip(self.agent_group.models.items(), self.agent_group.feature_extractors.items()):
-            self.assertNotIsInstance(model, DataParallel)
-            self.assertNotIsInstance(fe, DataParallel)
+        for (model_name, model), (_, fe) in zip(
+            self.agent_group.models.items(), self.agent_group.feature_extractors.items()
+        ):
+            self.assertNotIsInstance(model, DDP)
+            self.assertNotIsInstance(fe, DDP)
             self.assertIsInstance(model, torch.nn.Module)
             self.assertIsInstance(fe, torch.nn.Module)
 
@@ -110,5 +154,6 @@ class TestQMIXAgentGroup(unittest.TestCase):
             self.agent_group.save_params(tmpdirname)
             self.agent_group.load_params(tmpdirname)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()

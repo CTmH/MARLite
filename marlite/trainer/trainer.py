@@ -7,7 +7,7 @@ import datetime
 import numpy as np
 from copy import deepcopy
 from absl import logging
-from typing import List
+from typing import List, Union
 
 from marlite.environment import EnvConfig
 from marlite.rollout import RolloutManagerConfig
@@ -18,31 +18,39 @@ from marlite.rollout import RolloutManagerConfig
 from marlite.util.optimizer_config import OptimizerConfig
 from marlite.util.lr_scheduler_config import LRSchedulerConfig
 from marlite.util.scheduler import Scheduler
+from marlite.util.distributed_utils import (
+    get_device_list,
+    is_ddp_model,
+    average_loss,
+    get_local_device_id,
+)
 from marlite.analyzer import AnalyzerConfig
 
-class Trainer():
-    def __init__(self,
-                 env_config: EnvConfig,
-                 agent_group_config: AgentGroupConfig,
-                 critic_config: CriticConfig,
-                 epsilon_scheduler: Scheduler,
-                 sample_ratio_scheduler: Scheduler,
-                 critic_optimizer_config: OptimizerConfig,
-                 lr_scheduler_conf: LRSchedulerConfig,
-                 rolloutmanager_config: RolloutManagerConfig,
-                 replaybuffer_config: ReplayBufferConfig,
-                 analyzer_config: AnalyzerConfig,
-                 eval_metric_list: List[str] = ['reward'],
-                 gamma: float = 0.9,
-                 eval_epsilon: float = 0.01,
-                 eval_threshold: float = 0.03,
-                 eval_episodes_to_replay_ratio: float = 0.25,
-                 workdir: str = "",
-                 train_device: str = 'cpu',
-                 n_workers = 1,
-                 use_data_parallel: bool = False,
-                 compile_models: bool = False,
-                 sample_mode: str = 'ratio'):
+
+class Trainer:
+    def __init__(
+        self,
+        env_config: EnvConfig,
+        agent_group_config: AgentGroupConfig,
+        critic_config: CriticConfig,
+        epsilon_scheduler: Scheduler,
+        sample_ratio_scheduler: Scheduler,
+        critic_optimizer_config: OptimizerConfig,
+        lr_scheduler_conf: LRSchedulerConfig,
+        rolloutmanager_config: RolloutManagerConfig,
+        replaybuffer_config: ReplayBufferConfig,
+        analyzer_config: AnalyzerConfig,
+        eval_metric_list: List[str] = ["reward"],
+        gamma: float = 0.9,
+        eval_epsilon: float = 0.01,
+        eval_threshold: float = 0.03,
+        eval_episodes_to_replay_ratio: float = 0.25,
+        workdir: str = "",
+        train_device: Union[str, List[str]] = "cpu",
+        n_workers=1,
+        compile_models: bool = False,
+        sample_mode: str = "ratio",
+    ):
 
         self.env_config = env_config
         self.critic_config = critic_config
@@ -58,8 +66,10 @@ class Trainer():
         self.sample_mode = sample_mode  # 'ratio' or 'direct'
 
         # Validate sample_mode
-        if self.sample_mode not in ['ratio', 'direct']:
-            raise ValueError(f"Invalid sample_mode: {self.sample_mode}. Must be 'ratio' or 'direct'")
+        if self.sample_mode not in ["ratio", "direct"]:
+            raise ValueError(
+                f"Invalid sample_mode: {self.sample_mode}. Must be 'ratio' or 'direct'"
+            )
 
         self.replaybuffer = replaybuffer_config.create_replaybuffer()
         self.rolloutmanager_config = rolloutmanager_config
@@ -69,7 +79,9 @@ class Trainer():
         self.eval_agent_group = agent_group_config.get_agent_group()
         self.target_agent_group = agent_group_config.get_agent_group()
         self.best_agent_group_params = self.eval_agent_group.get_agent_group_params()
-        self.target_agent_group.set_agent_group_params(self.best_agent_group_params)  # Load the model parameters to eval agent group
+        self.target_agent_group.set_agent_group_params(
+            self.best_agent_group_params
+        )  # Load the model parameters to eval agent group
         self._cached_agent_group_params = self.best_agent_group_params
 
         # Critic
@@ -81,7 +93,9 @@ class Trainer():
         self.critic_optimizer_config = critic_optimizer_config
         self.lr_scheduler_conf = lr_scheduler_conf
 
-        self.optimizer = self.critic_optimizer_config.get_optimizer(self.eval_critic.parameters())
+        self.optimizer = self.critic_optimizer_config.get_optimizer(
+            self.eval_critic.parameters()
+        )
         if lr_scheduler_conf:
             self.lr_scheduler = self.lr_scheduler_conf.get_lr_scheduler(self.optimizer)
         else:
@@ -89,36 +103,55 @@ class Trainer():
 
         # Work directory
         self.workdir = workdir
-        self.logdir = os.path.join(workdir, 'logs')
-        self.checkpointdir = os.path.join(workdir, 'checkpoints')
+        self.logdir = os.path.join(workdir, "logs")
+        self.checkpointdir = os.path.join(workdir, "checkpoints")
 
         self.training_history = {}
 
         # Configure absl logging
         os.makedirs(self.logdir, exist_ok=True)
         # Set the log file (absl will automatically add timestamps and process info)
-        logging.get_absl_handler().use_absl_log_file('training', self.logdir)
+        logging.get_absl_handler().use_absl_log_file("training", self.logdir)
         # Set log level
         logging.set_verbosity(logging.INFO)
-        logging.get_absl_handler().python_handler.stream = sys.stdout  # Ensure output to console
+        logging.get_absl_handler().python_handler.stream = (
+            sys.stdout
+        )  # Ensure output to console
 
-        # Device
-        self.num_gpus = torch.cuda.device_count()
-        if self.num_gpus > 1 and use_data_parallel:
-            self.train_device = "cuda"
-            self.use_data_parallel = use_data_parallel
+        # Device configuration
+        # train_device can be:
+        # - str: "cpu", "cuda", or "cuda:0" for single device training
+        # - List[str]: ["cuda:0", "cuda:1", ...] for multi-GPU training with DDP
+        self.train_device_config = train_device
+        self.device_list, self.use_ddp = get_device_list(train_device)
+
+        if self.use_ddp:
+            # Multi-GPU DDP training - use the first device as primary
+            self.train_device = self.device_list[0]
+            logging.info(
+                f"Using DistributedDataParallel with devices: {self.device_list}"
+            )
         else:
-            self.train_device = train_device
-            self.use_data_parallel = False
+            # Single device training
+            self.train_device = self.device_list[0]
+            logging.info(f"Using single device: {self.train_device}")
 
         # torch.compile
         self.compile_models = compile_models
         if self.compile_models:
             logging.info(f"Compiling models...")
-            self.eval_agent_group = self.eval_agent_group.to(self.train_device).compile_models().to('cpu')
-            self.target_agent_group = self.target_agent_group.to(self.train_device).compile_models().to('cpu')
-            self.eval_critic = torch.compile(self.eval_critic.to(self.train_device)).to('cpu')
-            self.target_critic = torch.compile(self.target_critic.to(self.train_device)).to('cpu')
+            self.eval_agent_group = (
+                self.eval_agent_group.to(self.train_device).compile_models().to("cpu")
+            )
+            self.target_agent_group = (
+                self.target_agent_group.to(self.train_device).compile_models().to("cpu")
+            )
+            self.eval_critic = torch.compile(self.eval_critic.to(self.train_device)).to(
+                "cpu"
+            )
+            self.target_critic = torch.compile(
+                self.target_critic.to(self.train_device)
+            ).to("cpu")
 
         # Metrics
         self.best_metrics = {key: -np.inf for key in self.eval_metric_list}
@@ -147,7 +180,9 @@ class Trainer():
         self.eval_agent_group.to("cpu")
         self.eval_critic.to("cpu")
         self.eval_agent_group.load_params(agent_path)
-        critic_path = os.path.join(self.checkpointdir, checkpoint, "critic", "critic.pth")
+        critic_path = os.path.join(
+            self.checkpointdir, checkpoint, "critic", "critic.pth"
+        )
         self.eval_critic.load_state_dict(torch.load(critic_path, weights_only=True))
         self.best_agent_group_params = self.eval_agent_group.get_agent_group_params()
         self.best_critic_params = deepcopy(self.eval_critic.state_dict())
@@ -159,7 +194,7 @@ class Trainer():
     def save_best_model(self):
         self.eval_agent_group.set_agent_group_params(self.best_agent_group_params)
         self.eval_critic.load_state_dict(self.best_critic_params)
-        self.save_current_model(checkpoint = 'best')
+        self.save_current_model(checkpoint="best")
         return self
 
     def collect_experience(self, epsilon: float):
@@ -167,9 +202,9 @@ class Trainer():
         Collect experiences using multiple rollout workers.
         """
         self.eval_agent_group.eval()
-        manager = self.rolloutmanager_config.create_manager(self.eval_agent_group,
-                                                           self.env_config,
-                                                           epsilon)
+        manager = self.rolloutmanager_config.create_manager(
+            self.eval_agent_group, self.env_config, epsilon
+        )
         episodes = manager.generate_episodes()
 
         for episode in episodes:
@@ -183,26 +218,30 @@ class Trainer():
     def update_target_model_params(self):
         agent_group_params = self.eval_agent_group.get_agent_group_params()
         self.target_agent_group.set_agent_group_params(agent_group_params)
-        critic_params = deepcopy(self.eval_critic.state_dict())  # Update critic parameters
+        critic_params = deepcopy(
+            self.eval_critic.state_dict()
+        )  # Update critic parameters
         self.target_critic.load_state_dict(critic_params)
         return self
 
     def evaluate(self):
         self.eval_agent_group.eval()
-        manager = self.rolloutmanager_config.create_eval_manager(self.eval_agent_group,
-                                                           self.env_config,
-                                                           self.eval_epsilon)
+        manager = self.rolloutmanager_config.create_eval_manager(
+            self.eval_agent_group, self.env_config, self.eval_epsilon
+        )
 
-        #logging.info(f"Evaluating model...")
+        # logging.info(f"Evaluating model...")
         episodes = manager.generate_episodes()
         manager.cleanup()
 
         result = self.analyzer(episodes)
 
-        #logging.info(f"Evaluation results: Mean reward {mean_reward:.4f}, Std reward {std_reward:.4f}, Win rate {win_rate:.4f}")
+        # logging.info(f"Evaluation results: Mean reward {mean_reward:.4f}, Std reward {std_reward:.4f}, Win rate {win_rate:.4f}")
         logging.info(f"Evaluation results:")
         for key in self.eval_metric_list:
-            logging.info(f"{key}: Mean:{result[key]['mean']:.4f} Std:{result[key].get('std', 0):.4f}")
+            logging.info(
+                f"{key}: Mean:{result[key]['mean']:.4f} Std:{result[key].get('std', 0):.4f}"
+            )
 
         self.eval_agent_group.to("cpu")
         torch.cuda.empty_cache()
@@ -217,7 +256,15 @@ class Trainer():
 
         return result
 
-    def train(self, epochs, target_first_metric, eval_interval=1, update_target_interval=1, batch_size=64, learning_times_per_epoch=1):
+    def train(
+        self,
+        epochs,
+        target_first_metric,
+        eval_interval=1,
+        update_target_interval=1,
+        batch_size=64,
+        learning_times_per_epoch=1,
+    ):
         # Training loop
         for epoch in range(epochs):
             self.current_epoch = epoch
@@ -225,7 +272,7 @@ class Trainer():
             logging.info(f"Epoch {epoch}: Collecting experiences")
             self.collect_experience(epsilon=self.epsilon.get_value(epoch))
 
-            if self.sample_mode == 'ratio':
+            if self.sample_mode == "ratio":
                 sample_ratio = self.sample_ratio.get_value(epoch)
                 sample_size = len(self.replaybuffer.buffer) * sample_ratio
                 sample_size = round(sample_size)
@@ -234,11 +281,19 @@ class Trainer():
             sample_size = min(sample_size, len(self.replaybuffer.buffer))
 
             # Learn and update eval model
-            agent_group_lr = self.eval_agent_group.optimizer.param_groups[0]['lr']
-            critic_lr = self.optimizer.param_groups[0]['lr']
-            logging.info(f"Epoch {epoch}: Batch size: {batch_size}, Critic learning rate: {critic_lr:.8f}, Agent learning rate: {agent_group_lr:.8f}")
-            logging.info(f"Epoch {epoch}: Learning {learning_times_per_epoch} times per epoch ...")
-            loss = self.learn(sample_size=sample_size, batch_size=batch_size, times=learning_times_per_epoch)
+            agent_group_lr = self.eval_agent_group.optimizer.param_groups[0]["lr"]
+            critic_lr = self.optimizer.param_groups[0]["lr"]
+            logging.info(
+                f"Epoch {epoch}: Batch size: {batch_size}, Critic learning rate: {critic_lr:.8f}, Agent learning rate: {agent_group_lr:.8f}"
+            )
+            logging.info(
+                f"Epoch {epoch}: Learning {learning_times_per_epoch} times per epoch ..."
+            )
+            loss = self.learn(
+                sample_size=sample_size,
+                batch_size=batch_size,
+                times=learning_times_per_epoch,
+            )
             logging.info(f"Epoch {epoch}: Loss {loss:.4f}")
 
             # Save checkpoint
@@ -248,12 +303,14 @@ class Trainer():
             logging.info(f"Checkpoint saved at {checkpoint_name}")
 
             result = self.evaluate()
-            metrics = {key: result[key]['mean'] for key in self.eval_metric_list}
+            metrics = {key: result[key]["mean"] for key in self.eval_metric_list}
             first_metric = next(iter(metrics.values()))
             first_metric_name = next(iter(metrics.keys()))
             self.save_intermediate_results(epoch, result)
 
-            if isinstance(self.lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+            if isinstance(
+                self.lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau
+            ):
                 self.lr_scheduler.step(first_metric)
             elif isinstance(self.lr_scheduler, torch.optim.lr_scheduler.LRScheduler):
                 self.lr_scheduler.step()
@@ -264,38 +321,59 @@ class Trainer():
             for metric_name in self.eval_metric_list:
                 metric = metrics[metric_name]
                 best_metric = self.best_metrics[metric_name]
-                #if mean_reward >= self.best_mean_reward * (1 - self.eval_threshold)
-                cache_params.append((metric - best_metric) / max(abs(best_metric), 1) >= -self.eval_threshold)
+                # if mean_reward >= self.best_mean_reward * (1 - self.eval_threshold)
+                cache_params.append(
+                    (metric - best_metric) / max(abs(best_metric), 1)
+                    >= -self.eval_threshold
+                )
                 update_best.append(metric >= best_metric)
             cache_params = np.array(cache_params, dtype=np.bool)
             update_best = np.array(update_best, dtype=np.bool)
 
             if cache_params.any():
-                self._cached_agent_group_params = self.eval_agent_group.get_agent_group_params()
+                self._cached_agent_group_params = (
+                    self.eval_agent_group.get_agent_group_params()
+                )
                 self._cached_critic_params = deepcopy(self.eval_critic.state_dict())
-                logging.info(f"Epoch {epoch}: Cached parameters updated with current parameters.")
+                logging.info(
+                    f"Epoch {epoch}: Cached parameters updated with current parameters."
+                )
 
             if update_best.any():
                 self.best_metrics = metrics
-                self.best_agent_group_params = self.eval_agent_group.get_agent_group_params()
+                self.best_agent_group_params = (
+                    self.eval_agent_group.get_agent_group_params()
+                )
                 self.best_critic_params = deepcopy(self.eval_critic.state_dict())
-                logging.info(f"Epoch {epoch}: New best {first_metric_name}: {first_metric:.4f}")
+                logging.info(
+                    f"Epoch {epoch}: New best {first_metric_name}: {first_metric:.4f}"
+                )
 
             if first_metric >= target_first_metric:
-                logging.info(f"Epoch {epoch}: {first_metric_name} reached: {first_metric:.4f} >= {target_first_metric:.4f}")
+                logging.info(
+                    f"Epoch {epoch}: {first_metric_name} reached: {first_metric:.4f} >= {target_first_metric:.4f}"
+                )
                 break
 
             if epoch % eval_interval == 0:
-                self.eval_agent_group.set_agent_group_params(self._cached_agent_group_params)
+                self.eval_agent_group.set_agent_group_params(
+                    self._cached_agent_group_params
+                )
                 self.eval_critic.load_state_dict(self._cached_critic_params)
                 self.update_target_model_params()
-                logging.info(f"Epoch {epoch}: Eval model and Target model updated with cached parameters.")
+                logging.info(
+                    f"Epoch {epoch}: Eval model and Target model updated with cached parameters."
+                )
 
             if epoch % update_target_interval == 0:
                 self.update_target_model_params()
-                logging.info(f"Epoch {epoch}: Target model updated with eval model parameters.")
+                logging.info(
+                    f"Epoch {epoch}: Target model updated with eval model parameters."
+                )
 
-        logging.info(f"Best strategy: {yaml.dump(self.best_metrics, default_flow_style=False, sort_keys=False)}")
+        logging.info(
+            f"Best strategy: {yaml.dump(self.best_metrics, default_flow_style=False, sort_keys=False)}"
+        )
         self.save_best_model()
         return self.best_metrics
 
@@ -303,12 +381,15 @@ class Trainer():
         self.training_history[epoch] = metrics
         # Save metrics to YAML file
         os.makedirs(self.logdir, exist_ok=True)
-        yaml_path = os.path.join(self.logdir, 'results.yaml')
-        with open(yaml_path, 'w') as file:
+        yaml_path = os.path.join(self.logdir, "results.yaml")
+        with open(yaml_path, "w") as file:
             yaml.dump(self.training_history, file)
-        logging.info(f"Intermediate results saved for epoch {epoch}. Results saved to {yaml_path}")
+        logging.info(
+            f"Intermediate results saved for epoch {epoch}. Results saved to {yaml_path}"
+        )
 
-'''
+
+"""
     def save_results_to_csv(self):
         os.makedirs(self.logdir, exist_ok=True)
         csv_path = os.path.join(self.logdir, 'results.csv')
@@ -318,4 +399,4 @@ class Trainer():
             for epoch, result in self.training_history.items():
                 writer.writerow([epoch, result['mean_reward'], result['reward_std'], result['win_rate']])
         logging.info(f"Results saved to {csv_path}")
-'''
+"""

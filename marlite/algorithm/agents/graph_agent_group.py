@@ -3,7 +3,7 @@ import torch
 import os
 from copy import deepcopy
 from typing import Dict, List, Any
-from torch.nn import DataParallel
+from torch.nn.parallel import DistributedDataParallel as DDP
 from torch_geometric.data import Batch, Data
 from torch_geometric.utils import unbatch
 from marlite.algorithm.model import RNNModel, Conv1DModel, AttentionModel
@@ -13,41 +13,66 @@ from marlite.algorithm.graph_builder import GraphBuilderConfig
 from marlite.util.optimizer_config import OptimizerConfig
 from marlite.util.lr_scheduler_config import LRSchedulerConfig
 
+
 class GraphAgentGroup(AgentGroup):
-    def __init__(self,
-                agent_model_dict: Dict[str, str],
-                feature_extractor_configs: Dict[str, ModelConfig],
-                encoder_configs: Dict[str, ModelConfig],
-                decoder_configs: Dict[str, ModelConfig],
-                graph_builder_config: GraphBuilderConfig,
-                graph_model_config: ModelConfig,
-                optimizer_config: OptimizerConfig,
-                lr_scheduler_config: LRSchedulerConfig=None,
-                device = 'cpu') -> None:
+    def __init__(
+        self,
+        agent_model_dict: Dict[str, str],
+        feature_extractor_configs: Dict[str, ModelConfig],
+        encoder_configs: Dict[str, ModelConfig],
+        decoder_configs: Dict[str, ModelConfig],
+        graph_builder_config: GraphBuilderConfig,
+        graph_model_config: ModelConfig,
+        optimizer_config: OptimizerConfig,
+        lr_scheduler_config: LRSchedulerConfig = None,
+        device="cpu",
+    ) -> None:
         super().__init__()
         self.device = device
         self.agent_model_dict = agent_model_dict
-        self.feature_extractors = {model_name: config.get_model() for model_name, config in feature_extractor_configs.items()}
-        self.encoders = {model_name: config.get_model() for model_name, config in encoder_configs.items()}
-        self.models = self.encoders # For compatibility
-        self.decoders = {model_name: config.get_model() for model_name, config in decoder_configs.items()}
-        self.graph_model = graph_model_config.get_model()  # Graph model for message passing
+        self.feature_extractors = {
+            model_name: config.get_model()
+            for model_name, config in feature_extractor_configs.items()
+        }
+        self.encoders = {
+            model_name: config.get_model()
+            for model_name, config in encoder_configs.items()
+        }
+        self.models = self.encoders  # For compatibility
+        self.decoders = {
+            model_name: config.get_model()
+            for model_name, config in decoder_configs.items()
+        }
+        self.graph_model = (
+            graph_model_config.get_model()
+        )  # Graph model for message passing
         self.graph_builder = graph_builder_config.get_graph_builder()
-        self.params_to_optimize = [{'params': extractor.parameters()} for extractor in self.feature_extractors.values()]
-        self.params_to_optimize += [{'params': encoder.parameters()} for encoder in self.encoders.values()]
-        self.params_to_optimize += [{'params': decoder.parameters()} for decoder in self.decoders.values()]
-        self.params_to_optimize += [{'params': self.graph_builder.parameters()}]
-        self.params_to_optimize += [{'params': self.graph_model.parameters()}]
+        self.params_to_optimize = [
+            {"params": extractor.parameters()}
+            for extractor in self.feature_extractors.values()
+        ]
+        self.params_to_optimize += [
+            {"params": encoder.parameters()} for encoder in self.encoders.values()
+        ]
+        self.params_to_optimize += [
+            {"params": decoder.parameters()} for decoder in self.decoders.values()
+        ]
+        self.params_to_optimize += [{"params": self.graph_builder.parameters()}]
+        self.params_to_optimize += [{"params": self.graph_model.parameters()}]
         self.optimizer = optimizer_config.get_optimizer(self.params_to_optimize)
         self.lr_scheduler = None
         if lr_scheduler_config:
             self.lr_scheduler = lr_scheduler_config.get_lr_scheduler(self.optimizer)
 
         # Initialize model_to_agent dictionary and model_to_agent_indices dictionary
-        self.model_to_agents = {model_name:[] for model_name in encoder_configs.keys()}
-        self.model_to_agent_indices = {model_name:[] for model_name in encoder_configs.keys()}
+        self.model_to_agents = {model_name: [] for model_name in encoder_configs.keys()}
+        self.model_to_agent_indices = {
+            model_name: [] for model_name in encoder_configs.keys()
+        }
         for i, (agent_name, model_name) in enumerate(self.agent_model_dict.items()):
-            assert model_name in self.model_to_agents.keys(), f"Model {model_name} not found in model_configs"
+            assert model_name in self.model_to_agents.keys(), (
+                f"Model {model_name} not found in model_configs"
+            )
             self.model_to_agents[model_name].append(agent_name)
             self.model_to_agent_indices[model_name].append(i)
 
@@ -57,15 +82,17 @@ class GraphAgentGroup(AgentGroup):
         self.model_class_names = {}
         for model_name, model in self.encoders.items():
             if isinstance(model, RNNModel):
-                self.model_class_names[model_name] = 'RNNModel'
+                self.model_class_names[model_name] = "RNNModel"
             elif isinstance(model, Conv1DModel):
-                self.model_class_names[model_name] = 'Conv1DModel'
+                self.model_class_names[model_name] = "Conv1DModel"
             elif isinstance(model, AttentionModel):
-                self.model_class_names[model_name] = 'AttentionModel'
+                self.model_class_names[model_name] = "AttentionModel"
             else:
                 self.model_class_names[model_name] = model.__class__.__name__
 
-    def compute_graph_embeddings(self, msg: torch.Tensor, edge_indices: List[np.ndarray]):
+    def compute_graph_embeddings(
+        self, msg: torch.Tensor, edge_indices: List[np.ndarray]
+    ):
         """
         Compute graph embeddings by passing messages through the graph model.
 
@@ -82,13 +109,15 @@ class GraphAgentGroup(AgentGroup):
         batch_data = [None for i in range(bs)]
         for i in range(bs):
             batch_data[i] = Data(
-                x = msg[i],
-                edge_index = torch.Tensor(edge_indices[i]).to(device=self.device, dtype=torch.int)
+                x=msg[i],
+                edge_index=torch.Tensor(edge_indices[i]).to(
+                    device=self.device, dtype=torch.int
+                ),
             )
         batch_data = Batch.from_data_list(batch_data)
         x, e, batch = batch_data.x, batch_data.edge_index, batch_data.batch
         batch_h = self.graph_model(x, e)
-        embedding = unbatch(batch_h, batch) # (B, N, Hidden Size)
+        embedding = unbatch(batch_h, batch)  # (B, N, Hidden Size)
         embedding = torch.stack(embedding)
 
         return embedding
@@ -98,12 +127,13 @@ class GraphAgentGroup(AgentGroup):
         msg = [None for _ in range(len(self.agent_model_dict))]
         local_obs = [None for _ in range(len(self.agent_model_dict))]
 
-        for (model_name, fe), (_, enc) in zip(self.feature_extractors.items(),
-                                                self.encoders.items()):
+        for (model_name, fe), (_, enc) in zip(
+            self.feature_extractors.items(), self.encoders.items()
+        ):
             selected_agents = self.model_to_agents[model_name]
             idx = self.model_to_agent_indices[model_name]
             # observation shape: (Batch Size, Agent Number, Time Step, Feature Dimensions) (B, N, T, F)
-            obs = observations[:,idx] # (B, N, T, *(obs_shape))
+            obs = observations[:, idx]  # (B, N, T, *(obs_shape))
             bs = obs.shape[0]
             n_agents = len(selected_agents)
             ts = obs.shape[2]
@@ -111,40 +141,64 @@ class GraphAgentGroup(AgentGroup):
             # Use class name checking instead of isinstance
             model_class_name = self.model_class_names[model_name]
 
-            if model_class_name == 'Conv1DModel':
+            if model_class_name == "Conv1DModel":
                 # (B, N, T, *(obs_shape)) -> (B*N*T, *(obs_shape))
-                obs = obs.reshape(bs*n_agents*ts, *obs_shape).to(self.device)
-                obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
-                obs_vectorized = obs_vectorized.reshape(bs, n_agents, ts, -1) # (B*N*T, F) -> (B, N, T, F)
-                msg_selected = obs_vectorized[:, :, -1, :] # (B, N, T, F) -> (B, N, F)
-                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B, N, T, F) -> (B*N, T, F)
-                obs_vectorized = obs_vectorized.permute(0, 2, 1) # (B*N, T, F) -> (B*N, F, T)
-                local_obs_selected = enc(obs_vectorized) # (B*N, F, T) -> (B*N, F)
-            elif model_class_name == 'RNNModel':
-                obs = obs.reshape(bs*n_agents*ts, *obs_shape).to(self.device)
-                obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
-                obs_vectorized = obs_vectorized.reshape(bs, n_agents, ts, -1) # (B*N*T, F) -> (B, N, T, F)
-                msg_selected = obs_vectorized[:, :, -1, :] # (B, N, T, F) -> (B, N, F)
-                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B, N, T, F) -> (B*N, T, F)
-                enc.train() # cudnn RNN backward can only be called in training mode
-                local_obs_selected = enc(obs_vectorized) # (B*N, T, F) -> (B*N, F)
-            elif model_class_name == 'AttentionModel':
-                obs = obs.reshape(bs*n_agents*ts, *obs_shape).to(self.device)
-                obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
-                obs_vectorized = obs_vectorized.reshape(bs, n_agents, ts, -1) # (B*N*T, F) -> (B, N, T, F)
-                msg_selected = obs_vectorized[:, :, -1, :] # (B, N, T, F) -> (B, N, F)
-                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B, N, T, F) -> (B*N, T, F)
-                mask = traj_padding_mask[:,idx]
-                mask = mask.reshape(bs*n_agents, ts)
-                local_obs_selected = enc(obs_vectorized, mask) # (B*N, T, F) -> (B*N, F)
+                obs = obs.reshape(bs * n_agents * ts, *obs_shape).to(self.device)
+                obs_vectorized = fe(obs)  # (B*N*T, (obs_shape)) -> (B*N*T, F)
+                obs_vectorized = obs_vectorized.reshape(
+                    bs, n_agents, ts, -1
+                )  # (B*N*T, F) -> (B, N, T, F)
+                msg_selected = obs_vectorized[:, :, -1, :]  # (B, N, T, F) -> (B, N, F)
+                obs_vectorized = obs_vectorized.reshape(
+                    bs * n_agents, ts, -1
+                )  # (B, N, T, F) -> (B*N, T, F)
+                obs_vectorized = obs_vectorized.permute(
+                    0, 2, 1
+                )  # (B*N, T, F) -> (B*N, F, T)
+                local_obs_selected = enc(obs_vectorized)  # (B*N, F, T) -> (B*N, F)
+            elif model_class_name == "RNNModel":
+                obs = obs.reshape(bs * n_agents * ts, *obs_shape).to(self.device)
+                obs_vectorized = fe(obs)  # (B*N*T, (obs_shape)) -> (B*N*T, F)
+                obs_vectorized = obs_vectorized.reshape(
+                    bs, n_agents, ts, -1
+                )  # (B*N*T, F) -> (B, N, T, F)
+                msg_selected = obs_vectorized[:, :, -1, :]  # (B, N, T, F) -> (B, N, F)
+                obs_vectorized = obs_vectorized.reshape(
+                    bs * n_agents, ts, -1
+                )  # (B, N, T, F) -> (B*N, T, F)
+                enc.train()  # cudnn RNN backward can only be called in training mode
+                local_obs_selected = enc(obs_vectorized)  # (B*N, T, F) -> (B*N, F)
+            elif model_class_name == "AttentionModel":
+                obs = obs.reshape(bs * n_agents * ts, *obs_shape).to(self.device)
+                obs_vectorized = fe(obs)  # (B*N*T, (obs_shape)) -> (B*N*T, F)
+                obs_vectorized = obs_vectorized.reshape(
+                    bs, n_agents, ts, -1
+                )  # (B*N*T, F) -> (B, N, T, F)
+                msg_selected = obs_vectorized[:, :, -1, :]  # (B, N, T, F) -> (B, N, F)
+                obs_vectorized = obs_vectorized.reshape(
+                    bs * n_agents, ts, -1
+                )  # (B, N, T, F) -> (B*N, T, F)
+                mask = traj_padding_mask[:, idx]
+                mask = mask.reshape(bs * n_agents, ts)
+                local_obs_selected = enc(
+                    obs_vectorized, mask
+                )  # (B*N, T, F) -> (B*N, F)
             else:
-                obs = obs[:,:,-1, :] # (B, N, T, *(obs_shape)) -> (B, N, *(obs_shape))
-                obs = obs.reshape(bs*n_agents, *obs_shape).to(self.device) # (B, N, *(obs_shape)) -> (B*N, *(obs_shape))
-                obs_vectorized = fe(obs) # (B*N, *(obs_shape)) -> (B*N, F)
-                msg_selected = obs_vectorized.reshape(bs, n_agents, -1) # (B*N, F) -> (B, N, F)
-                local_obs_selected = enc(obs_vectorized) # (B*N, F) -> (B*N, F)
+                obs = obs[
+                    :, :, -1, :
+                ]  # (B, N, T, *(obs_shape)) -> (B, N, *(obs_shape))
+                obs = obs.reshape(bs * n_agents, *obs_shape).to(
+                    self.device
+                )  # (B, N, *(obs_shape)) -> (B*N, *(obs_shape))
+                obs_vectorized = fe(obs)  # (B*N, *(obs_shape)) -> (B*N, F)
+                msg_selected = obs_vectorized.reshape(
+                    bs, n_agents, -1
+                )  # (B*N, F) -> (B, N, F)
+                local_obs_selected = enc(obs_vectorized)  # (B*N, F) -> (B*N, F)
 
-            local_obs_selected = local_obs_selected.reshape(bs, n_agents, -1) # (B, N, F)
+            local_obs_selected = local_obs_selected.reshape(
+                bs, n_agents, -1
+            )  # (B, N, F)
             local_obs_selected = local_obs_selected.permute(1, 0, 2)  # (N, B, F)
             msg_selected = msg_selected.permute(1, 0, 2)  # (N, B, F)
 
@@ -152,9 +206,9 @@ class GraphAgentGroup(AgentGroup):
                 msg[i] = m
                 local_obs[i] = lo
 
-        msg = torch.stack(msg).to(self.device) # (N, B, F)
+        msg = torch.stack(msg).to(self.device)  # (N, B, F)
         msg = msg.permute(1, 0, 2)  # (B, N, F)
-        local_obs = torch.stack(local_obs).to(self.device) # (N, B, F)
+        local_obs = torch.stack(local_obs).to(self.device)  # (N, B, F)
         local_obs = local_obs.permute(1, 0, 2)  # (B, N, F)
 
         return msg, local_obs
@@ -163,51 +217,68 @@ class GraphAgentGroup(AgentGroup):
         """Common sequence processing logic for sequence-based models."""
         local_obs = [None for _ in range(len(self.agent_model_dict))]
 
-        for (model_name, fe), (_, enc) in zip(self.feature_extractors.items(),
-                                                self.encoders.items()):
+        for (model_name, fe), (_, enc) in zip(
+            self.feature_extractors.items(), self.encoders.items()
+        ):
             selected_agents = self.model_to_agents[model_name]
             idx = self.model_to_agent_indices[model_name]
             # observation shape: (Batch Size, Agent Number, Time Step, Feature Dimensions) (B, N, T, F)
-            obs = observations[:,idx] # (B, N, T, *(obs_shape))
+            obs = observations[:, idx]  # (B, N, T, *(obs_shape))
             bs = obs.shape[0]
             n_agents = len(selected_agents)
             ts = obs.shape[2]
             obs_shape = list(obs.shape[3:])
 
             model_class_name = self.model_class_names[model_name]
-            if model_class_name == 'Conv1DModel':
+            if model_class_name == "Conv1DModel":
                 # (B, N, T, *(obs_shape)) -> (B*N*T, *(obs_shape))
-                obs = obs.reshape(bs*n_agents*ts, *obs_shape).to(self.device)
-                obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
-                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B*N*T, F) -> (B*N, T, F)
-                obs_vectorized = obs_vectorized.permute(0, 2, 1) #  (B*N, T, F) -> (B*N, F, T)
-                local_obs_selected = enc(obs_vectorized) # (B*N, F, T) -> (B*N, F)
-            elif model_class_name == 'RNNModel':
-                obs = obs.reshape(bs*n_agents*ts, *obs_shape).to(self.device)
-                obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
-                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B*N*T, F) -> (B*N, T, F)
-                enc.train() # cudnn RNN backward can only be called in training mode
-                local_obs_selected = enc(obs_vectorized) # (B*N, T, F) -> (B*N, F)
-            elif model_class_name == 'AttentionModel':
-                obs = obs.reshape(bs*n_agents*ts, *obs_shape).to(self.device)
-                obs_vectorized = fe(obs) # (B*N*T, (obs_shape)) -> (B*N*T, F)
-                obs_vectorized = obs_vectorized.reshape(bs*n_agents, ts, -1) # (B*N*T, F) -> (B*N, T, F)
-                mask = traj_padding_mask[:,idx]
-                mask = mask.reshape(bs*n_agents, ts)
-                local_obs_selected = enc(obs_vectorized, mask) # (B*N, T, F) -> (B*N, F)
+                obs = obs.reshape(bs * n_agents * ts, *obs_shape).to(self.device)
+                obs_vectorized = fe(obs)  # (B*N*T, (obs_shape)) -> (B*N*T, F)
+                obs_vectorized = obs_vectorized.reshape(
+                    bs * n_agents, ts, -1
+                )  # (B*N*T, F) -> (B*N, T, F)
+                obs_vectorized = obs_vectorized.permute(
+                    0, 2, 1
+                )  #  (B*N, T, F) -> (B*N, F, T)
+                local_obs_selected = enc(obs_vectorized)  # (B*N, F, T) -> (B*N, F)
+            elif model_class_name == "RNNModel":
+                obs = obs.reshape(bs * n_agents * ts, *obs_shape).to(self.device)
+                obs_vectorized = fe(obs)  # (B*N*T, (obs_shape)) -> (B*N*T, F)
+                obs_vectorized = obs_vectorized.reshape(
+                    bs * n_agents, ts, -1
+                )  # (B*N*T, F) -> (B*N, T, F)
+                enc.train()  # cudnn RNN backward can only be called in training mode
+                local_obs_selected = enc(obs_vectorized)  # (B*N, T, F) -> (B*N, F)
+            elif model_class_name == "AttentionModel":
+                obs = obs.reshape(bs * n_agents * ts, *obs_shape).to(self.device)
+                obs_vectorized = fe(obs)  # (B*N*T, (obs_shape)) -> (B*N*T, F)
+                obs_vectorized = obs_vectorized.reshape(
+                    bs * n_agents, ts, -1
+                )  # (B*N*T, F) -> (B*N, T, F)
+                mask = traj_padding_mask[:, idx]
+                mask = mask.reshape(bs * n_agents, ts)
+                local_obs_selected = enc(
+                    obs_vectorized, mask
+                )  # (B*N, T, F) -> (B*N, F)
             else:
-                obs = obs[:,:,-1, :] # (B, N, T, *(obs_shape)) -> (B, N, *(obs_shape))
-                obs = obs.reshape(bs*n_agents, *obs_shape).to(self.device) # (B, N, *(obs_shape)) -> (B*N, *(obs_shape))
-                obs_vectorized = fe(obs) # (B*N, *(obs_shape)) -> (B*N, F)
-                local_obs_selected = enc(obs_vectorized) # (B*N, F) -> (B*N, F)
+                obs = obs[
+                    :, :, -1, :
+                ]  # (B, N, T, *(obs_shape)) -> (B, N, *(obs_shape))
+                obs = obs.reshape(bs * n_agents, *obs_shape).to(
+                    self.device
+                )  # (B, N, *(obs_shape)) -> (B*N, *(obs_shape))
+                obs_vectorized = fe(obs)  # (B*N, *(obs_shape)) -> (B*N, F)
+                local_obs_selected = enc(obs_vectorized)  # (B*N, F) -> (B*N, F)
 
-            local_obs_selected = local_obs_selected.reshape(bs, n_agents, -1) # (B, N, F)
+            local_obs_selected = local_obs_selected.reshape(
+                bs, n_agents, -1
+            )  # (B, N, F)
             local_obs_selected = local_obs_selected.permute(1, 0, 2)  # (N, B, F)
 
             for i, m in zip(idx, local_obs_selected):
                 local_obs[i] = m
 
-        local_obs = torch.stack(local_obs).to(self.device) # (N, B, F)
+        local_obs = torch.stack(local_obs).to(self.device)  # (N, B, F)
         local_obs = local_obs.permute(1, 0, 2)  # (B, N, F)
         msg = local_obs
 
@@ -219,41 +290,42 @@ class GraphAgentGroup(AgentGroup):
         for model_name, dec in self.decoders.items():
             selected_agents = self.model_to_agents[model_name]
             idx = self.model_to_agent_indices[model_name]
-            h = hidden_states[:,idx]
+            h = hidden_states[:, idx]
             bs = h.shape[0]
             n_agents = len(selected_agents)
             hidden_size = h.shape[-1]
-            h = h.reshape(bs*n_agents, hidden_size) # (B*N, Hidden Size)
+            h = h.reshape(bs * n_agents, hidden_size)  # (B*N, Hidden Size)
             q_selected = dec(h)
-            q_selected = q_selected.reshape(bs, n_agents, -1) # (B, N, Action)
+            q_selected = q_selected.reshape(bs, n_agents, -1)  # (B, N, Action)
             q_selected = q_selected.permute(1, 0, 2)  # (N, B, Action)
 
             for i, m in zip(idx, q_selected):
                 q_val[i] = m
 
-        q_val = torch.stack(q_val).to(self.device) # (N, B, F)
+        q_val = torch.stack(q_val).to(self.device)  # (N, B, F)
         q_val = q_val.permute(1, 0, 2)  # (B, N, F)
 
         return q_val
 
-    def forward(self,
-                observations: Dict[str, np.ndarray],
-                states: np.ndarray,
-                traj_padding_mask: torch.Tensor,
-                alive_mask: torch.Tensor,
-                edge_indices: List[np.ndarray] | None = None
-        ) -> Dict[str, Any]:
+    def forward(
+        self,
+        observations: Dict[str, np.ndarray],
+        states: np.ndarray,
+        traj_padding_mask: torch.Tensor,
+        alive_mask: torch.Tensor,
+        edge_indices: List[np.ndarray] | None = None,
+    ) -> Dict[str, Any]:
         raise NotImplementedError
 
     def act(
-            self,
-            observations: Dict[str, np.ndarray],
-            state: np.ndarray,
-            avail_actions: Dict[str, Any],
-            traj_padding_mask: np.ndarray,
-            alive_agents: List[str],
-            epsilon: float = .0
-        ) -> Dict[str, Any]:
+        self,
+        observations: Dict[str, np.ndarray],
+        state: np.ndarray,
+        avail_actions: Dict[str, Any],
+        traj_padding_mask: np.ndarray,
+        alive_agents: List[str],
+        epsilon: float = 0.0,
+    ) -> Dict[str, Any]:
         """
         Select actions based on Q-values and exploration with action masking.
 
@@ -273,22 +345,30 @@ class GraphAgentGroup(AgentGroup):
         obs = np.stack(obs)
         obs = torch.tensor(obs).unsqueeze(0).to(dtype=torch.float, device=self.device)
 
-        padding_mask = torch.tensor(traj_padding_mask, dtype=torch.bool) # (T)
-        padding_mask = torch.stack([padding_mask] * len(self.agent_model_dict), dim=0) # (N, T)
-        padding_mask = padding_mask.unsqueeze(0).to(self.device) # (1, N, T)
+        padding_mask = torch.tensor(traj_padding_mask, dtype=torch.bool)  # (T)
+        padding_mask = torch.stack(
+            [padding_mask] * len(self.agent_model_dict), dim=0
+        )  # (N, T)
+        padding_mask = padding_mask.unsqueeze(0).to(self.device)  # (1, N, T)
 
-        alive_mask = torch.tensor([agent in set(alive_agents) for agent in self.agent_model_dict.keys()])
+        alive_mask = torch.tensor(
+            [agent in set(alive_agents) for agent in self.agent_model_dict.keys()]
+        )
         alive_mask = alive_mask.unsqueeze(0).to(self.device)
 
         with torch.no_grad():
-            ret = self.forward(obs, np.expand_dims(state, axis=0), padding_mask, alive_mask)
-            q_values = ret['q_val']  # (1, num_agents, num_actions)
+            ret = self.forward(
+                obs, np.expand_dims(state, axis=0), padding_mask, alive_mask
+            )
+            q_values = ret["q_val"]  # (1, num_agents, num_actions)
             q_values = q_values.detach().cpu().numpy().squeeze()
 
         # Handle different types of avail_actions
         if isinstance(next(iter(avail_actions.values())), np.ndarray):
             # Action masking case
-            action_masks = np.array([avail_actions[agent_id] for agent_id in self.agent_model_dict.keys()])
+            action_masks = np.array(
+                [avail_actions[agent_id] for agent_id in self.agent_model_dict.keys()]
+            )
 
             # Apply action masks to Q-values
             masked_q_values = np.where(action_masks == 1, q_values, -np.inf)
@@ -298,36 +378,51 @@ class GraphAgentGroup(AgentGroup):
 
             # Generate random actions according to action masks
             mask_probs = action_masks / np.sum(action_masks, axis=1, keepdims=True)
-            random_actions = np.array([
-                np.random.choice(len(probs), p=probs)
-                for probs in mask_probs
-            ]).astype(np.int64)
+            random_actions = np.array(
+                [np.random.choice(len(probs), p=probs) for probs in mask_probs]
+            ).astype(np.int64)
         else:
             # Action space sampling case
             optimal_actions = np.argmax(q_values, axis=-1).astype(np.int64)
-            random_actions = np.array([avail_actions[agent].sample() for agent in self.agent_model_dict.keys()]).astype(np.int64)
+            random_actions = np.array(
+                [
+                    avail_actions[agent].sample()
+                    for agent in self.agent_model_dict.keys()
+                ]
+            ).astype(np.int64)
 
         # Epsilon-greedy action selection
-        random_choices = np.random.binomial(1, epsilon, len(self.agent_model_dict)).astype(np.int64)
-        actions = random_choices * random_actions + (1 - random_choices) * optimal_actions
+        random_choices = np.random.binomial(
+            1, epsilon, len(self.agent_model_dict)
+        ).astype(np.int64)
+        actions = (
+            random_choices * random_actions + (1 - random_choices) * optimal_actions
+        )
         actions = actions.astype(np.int64).tolist()
 
         # Create action dictionary
-        all_actions = {agent: action for agent, action in zip(self.agent_model_dict.keys(), actions)}
+        all_actions = {
+            agent: action
+            for agent, action in zip(self.agent_model_dict.keys(), actions)
+        }
         actual_actions = {agent: all_actions[agent] for agent in alive_agents}
 
-        return {'actions': actual_actions, 'all_actions': all_actions, 'edge_indices': ret['edge_indices'][0]}
+        return {
+            "actions": actual_actions,
+            "all_actions": all_actions,
+            "edge_indices": ret["edge_indices"][0],
+        }
 
-    def set_agent_group_params(self, params: Dict[str, dict]) -> 'AgentGroup':
+    def set_agent_group_params(self, params: Dict[str, dict]) -> "AgentGroup":
         feature_extractor_params = params.get("feature_extractor", {})
         encoder_params = params.get("encoder", {})
         decoder_params = params.get("decoder", {})
         graph_builder_params = params.get("graph_builder", {})
         graph_model_params = params.get("graph_model", {})
         for (model_name, enc), (_, fe), (_, dec) in zip(
-                self.encoders.items(),
-                self.feature_extractors.items(),
-                self.decoders.items()
+            self.encoders.items(),
+            self.feature_extractors.items(),
+            self.decoders.items(),
         ):
             enc.load_state_dict(encoder_params[model_name])
             fe.load_state_dict(feature_extractor_params[model_name])
@@ -362,20 +457,17 @@ class GraphAgentGroup(AgentGroup):
         }
         return params
 
-    def zero_grad(self) -> 'AgentGroup':
+    def zero_grad(self) -> "AgentGroup":
         self.optimizer.zero_grad()
         return self
 
-    def step(self) -> 'AgentGroup':
+    def step(self) -> "AgentGroup":
         for p in self.params_to_optimize:
-            torch.nn.utils.clip_grad_norm_(
-                p['params'],
-                max_norm=5.0
-            )
+            torch.nn.utils.clip_grad_norm_(p["params"], max_norm=5.0)
         self.optimizer.step()
         return self
 
-    def lr_scheduler_step(self, reward) -> 'AgentGroup':
+    def lr_scheduler_step(self, reward) -> "AgentGroup":
         if not self.lr_scheduler:
             return self
         if isinstance(self.lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
@@ -384,11 +476,12 @@ class GraphAgentGroup(AgentGroup):
             self.lr_scheduler.step()
         return self
 
-    def to(self, device: str) -> 'AgentGroup':
+    def to(self, device: str) -> "AgentGroup":
         for (_, enc), (_, fe), (_, dec) in zip(
             self.encoders.items(),
             self.feature_extractors.items(),
-            self.decoders.items()):
+            self.decoders.items(),
+        ):
             enc.to(device)
             fe.to(device)
             dec.to(device)
@@ -397,11 +490,12 @@ class GraphAgentGroup(AgentGroup):
         self.device = device
         return self
 
-    def eval(self) -> 'AgentGroup':
+    def eval(self) -> "AgentGroup":
         for (_, enc), (_, fe), (_, dec) in zip(
             self.encoders.items(),
             self.feature_extractors.items(),
-            self.decoders.items()):
+            self.decoders.items(),
+        ):
             enc.eval()
             fe.eval()
             dec.eval()
@@ -409,11 +503,12 @@ class GraphAgentGroup(AgentGroup):
         self.graph_model.eval()
         return self
 
-    def train(self) -> 'AgentGroup':
+    def train(self) -> "AgentGroup":
         for (_, enc), (_, fe), (_, dec) in zip(
             self.encoders.items(),
             self.feature_extractors.items(),
-            self.decoders.items()):
+            self.decoders.items(),
+        ):
             enc.train()
             fe.train()
             dec.train()
@@ -421,11 +516,12 @@ class GraphAgentGroup(AgentGroup):
         self.graph_model.train()
         return self
 
-    def share_memory(self) -> 'AgentGroup':
+    def share_memory(self) -> "AgentGroup":
         for (_, enc), (_, fe), (_, dec) in zip(
             self.encoders.items(),
             self.feature_extractors.items(),
-            self.decoders.items()):
+            self.decoders.items(),
+        ):
             enc.share_memory()
             fe.share_memory()
             dec.share_memory()
@@ -433,70 +529,110 @@ class GraphAgentGroup(AgentGroup):
         self.graph_model.share_memory()
         return self
 
-    def wrap_data_parallel(self) -> 'AgentGroup':
+    def wrap_data_parallel(self, device_id: int = 0) -> "AgentGroup":
+        """Wrap models with DistributedDataParallel.
+
+        Args:
+            device_id: The GPU device ID to use for this process
+        """
+        device = f"cuda:{device_id}"
         for id in self.encoders.keys():
-            self.encoders[id] = DataParallel(self.encoders[id])
-            self.feature_extractors[id] = DataParallel(self.feature_extractors[id])
-            self.decoders[id] = DataParallel(self.decoders[id])
-        self.graph_builder = DataParallel(self.graph_builder)
-        #self.graph_model = DataParallel(self.graph_model)
+            self.encoders[id] = self.encoders[id].to(device)
+            self.encoders[id] = DDP(self.encoders[id], device_ids=[device_id])
+            self.feature_extractors[id] = self.feature_extractors[id].to(device)
+            self.feature_extractors[id] = DDP(
+                self.feature_extractors[id], device_ids=[device_id]
+            )
+            self.decoders[id] = self.decoders[id].to(device)
+            self.decoders[id] = DDP(self.decoders[id], device_ids=[device_id])
+        self.graph_builder = self.graph_builder.to(device)
+        # Note: graph_builder is not wrapped with DDP as it handles graph construction
+        # self.graph_model = DDP(self.graph_model.to(device), device_ids=[device_id])
         self._use_data_parallel = True
+        self.device = device
         return self
 
-    def unwrap_data_parallel(self) -> 'AgentGroup':
+    def unwrap_data_parallel(self) -> "AgentGroup":
+        """Unwrap DistributedDataParallel from models."""
         for id in self.encoders.keys():
-            self.encoders[id] = self.encoders[id].module
-            self.feature_extractors[id] = self.feature_extractors[id].module
-            self.decoders[id] = self.decoders[id].module
-        self.graph_builder = self.graph_builder.module
-        #self.graph_model = self.graph_model.module
+            self.encoders[id] = self.encoders[id].module.cpu()
+            self.feature_extractors[id] = self.feature_extractors[id].module.cpu()
+            self.decoders[id] = self.decoders[id].module.cpu()
+        self.graph_builder = self.graph_builder.cpu()
+        # self.graph_model = self.graph_model.module.cpu()
         self._use_data_parallel = False
+        self.device = "cpu"
         return self
 
-    def save_params(self, path: str) -> 'AgentGroup':
+    def save_params(self, path: str) -> "AgentGroup":
         os.makedirs(path, exist_ok=True)
         for (model_name, enc), (_, fe), (_, dec) in zip(
             self.encoders.items(),
             self.feature_extractors.items(),
-            self.decoders.items()):
+            self.decoders.items(),
+        ):
             model_dir = os.path.join(path, model_name)
             os.makedirs(model_dir, exist_ok=True)
-            torch.save(fe.state_dict(), os.path.join(model_dir, 'feature_extractor.pth'))
-            torch.save(enc.state_dict(), os.path.join(model_dir, 'encoder.pth'))
-            torch.save(dec.state_dict(), os.path.join(model_dir, 'decoder.pth'))
-        torch.save(self.graph_builder.state_dict(), os.path.join(path, 'graph_builder.pth'))
-        torch.save(self.graph_model.state_dict(), os.path.join(path, 'graph_model.pth'))
+            torch.save(
+                fe.state_dict(), os.path.join(model_dir, "feature_extractor.pth")
+            )
+            torch.save(enc.state_dict(), os.path.join(model_dir, "encoder.pth"))
+            torch.save(dec.state_dict(), os.path.join(model_dir, "decoder.pth"))
+        torch.save(
+            self.graph_builder.state_dict(), os.path.join(path, "graph_builder.pth")
+        )
+        torch.save(self.graph_model.state_dict(), os.path.join(path, "graph_model.pth"))
         return self
 
-    def load_params(self, path: str) -> 'AgentGroup':
+    def load_params(self, path: str) -> "AgentGroup":
         for (model_name, enc), (_, fe), (_, dec) in zip(
             self.encoders.items(),
             self.feature_extractors.items(),
-            self.decoders.items()):
+            self.decoders.items(),
+        ):
             model_dir = os.path.join(path, model_name)
-            fe.load_state_dict(torch.load(os.path.join(model_dir, 'feature_extractor.pth'),
-                                          map_location=torch.device('cpu')))
-            enc.load_state_dict(torch.load(os.path.join(model_dir, 'encoder.pth'),
-                                           map_location=torch.device('cpu')))
-            dec.load_state_dict(torch.load(os.path.join(model_dir, 'decoder.pth'),
-                                           map_location=torch.device('cpu')))
-        self.graph_builder.load_state_dict(torch.load(os.path.join(path, 'graph_builder.pth'),
-                                                    map_location=torch.device('cpu')))
-        self.graph_model.load_state_dict(torch.load(os.path.join(path, 'graph_model.pth'),
-                                                    map_location=torch.device('cpu')))
+            fe.load_state_dict(
+                torch.load(
+                    os.path.join(model_dir, "feature_extractor.pth"),
+                    map_location=torch.device("cpu"),
+                )
+            )
+            enc.load_state_dict(
+                torch.load(
+                    os.path.join(model_dir, "encoder.pth"),
+                    map_location=torch.device("cpu"),
+                )
+            )
+            dec.load_state_dict(
+                torch.load(
+                    os.path.join(model_dir, "decoder.pth"),
+                    map_location=torch.device("cpu"),
+                )
+            )
+        self.graph_builder.load_state_dict(
+            torch.load(
+                os.path.join(path, "graph_builder.pth"),
+                map_location=torch.device("cpu"),
+            )
+        )
+        self.graph_model.load_state_dict(
+            torch.load(
+                os.path.join(path, "graph_model.pth"), map_location=torch.device("cpu")
+            )
+        )
         return self
 
-    def compile_models(self) -> 'AgentGroup':
+    def compile_models(self) -> "AgentGroup":
         for id in self.encoders.keys():
             self.encoders[id] = torch.compile(self.encoders[id])
             self.feature_extractors[id] = torch.compile(self.feature_extractors[id])
             self.decoders[id] = torch.compile(self.decoders[id])
-        #self.graph_builder = torch.compile(self.graph_builder)
+        # self.graph_builder = torch.compile(self.graph_builder)
         self.graph_model = torch.compile(self.graph_model)
         self._is_compiled = True
         return self
 
-    def reset(self) -> 'AgentGroup':
+    def reset(self) -> "AgentGroup":
         if isinstance(self.graph_builder, DataParallel):
             self.graph_builder.module.reset()
         else:

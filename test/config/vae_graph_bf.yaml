@@ -223,7 +223,6 @@ trainer_config:
   eval_episodes_to_replay_ratio: 0.25
   workdir: "./test/results/vae_graph_bf/"
   train_device: "cpu"
-  use_data_parallel: false
   compile_models: false
   n_workers: 0
   self_supervised_learning_loss_weight: 0.75

@@ -164,8 +164,8 @@ class TestMsgAggrSMACQMIXTrainer(unittest.TestCase):
         self.config['rollout_config']['n_eval_episodes'] = 2
         self.config['rollout_config']['episode_limit'] = 2
         self.config['replaybuffer_config']['capacity'] = 2
-        self.config['trainer_config']['use_data_parallel'] = True
-        self.config['trainer_config']['train_device'] = 'cuda'
+        # Use a list to enable DistributedDataParallel
+        self.config['trainer_config']['train_device'] = ['cuda:0']
         self.trainer_config = TrainerConfig(self.config)
         with tempfile.TemporaryDirectory() as temp_dir:
             self.trainer = self.trainer_config.create_trainer()
@@ -291,8 +291,8 @@ class TestSeqMsgAggrSMACQMIXTrainer(unittest.TestCase):
         self.config['rollout_config']['n_eval_episodes'] = 2
         self.config['rollout_config']['episode_limit'] = 2
         self.config['replaybuffer_config']['capacity'] = 2
-        self.config['trainer_config']['use_data_parallel'] = True
-        self.config['trainer_config']['train_device'] = 'cuda'
+        # Use a list to enable DistributedDataParallel
+        self.config['trainer_config']['train_device'] = ['cuda:0']
         self.trainer_config = TrainerConfig(self.config)
         with tempfile.TemporaryDirectory() as temp_dir:
             self.trainer = self.trainer_config.create_trainer()
@@ -427,8 +427,8 @@ class TestProbSeqMsgAggrSMACQMIXTrainer(unittest.TestCase):
         self.config['rollout_config']['n_eval_episodes'] = 2
         self.config['rollout_config']['episode_limit'] = 16
         self.config['replaybuffer_config']['capacity'] = 4
-        self.config['trainer_config']['use_data_parallel'] = True
-        self.config['trainer_config']['train_device'] = 'cuda'
+        # Use a list to enable DistributedDataParallel
+        self.config['trainer_config']['train_device'] = ['cuda:0']
         self.trainer_config = TrainerConfig(self.config)
         with tempfile.TemporaryDirectory() as temp_dir:
             self.trainer = self.trainer_config.create_trainer()
@@ -554,8 +554,8 @@ class TestDualPathObsMsgAggrSMACQMIXTrainer(unittest.TestCase):
         self.config['rollout_config']['n_eval_episodes'] = 2
         self.config['rollout_config']['episode_limit'] = 16
         self.config['replaybuffer_config']['capacity'] = 4
-        self.config['trainer_config']['use_data_parallel'] = True
-        self.config['trainer_config']['train_device'] = 'cuda'
+        # Use a list to enable DistributedDataParallel
+        self.config['trainer_config']['train_device'] = ['cuda:0']
         self.trainer_config = TrainerConfig(self.config)
         with tempfile.TemporaryDirectory() as temp_dir:
             self.trainer = self.trainer_config.create_trainer()
