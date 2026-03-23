@@ -547,6 +547,7 @@ class GraphAgentGroup(AgentGroup):
             self.decoders[id] = DDP(self.decoders[id], device_ids=[device_id])
         self.graph_builder = self.graph_builder.to(device)
         # Note: graph_builder is not wrapped with DDP as it handles graph construction
+        self.graph_model = self.graph_model.to(device)
         # self.graph_model = DDP(self.graph_model.to(device), device_ids=[device_id])
         self._use_data_parallel = True
         self.device = device
@@ -559,6 +560,7 @@ class GraphAgentGroup(AgentGroup):
             self.feature_extractors[id] = self.feature_extractors[id].module.cpu()
             self.decoders[id] = self.decoders[id].module.cpu()
         self.graph_builder = self.graph_builder.cpu()
+        self.graph_model = self.graph_model.cpu()
         # self.graph_model = self.graph_model.module.cpu()
         self._use_data_parallel = False
         self.device = "cpu"

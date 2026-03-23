@@ -49,7 +49,7 @@ class MsgAggrQMIXTrainer(Trainer):
         total_loss = 0.0
         total_batches = 0
 
-        # Move models to the appropriate device before wrapping with DataParallel
+        # Move models to the appropriate device before wrapping with DistributedDataParallel
         self.eval_agent_group.to(self.train_device)
         self.eval_critic.to(self.train_device)
         self.target_agent_group.to(self.train_device)
@@ -286,7 +286,7 @@ class ProbMsgAggrQMIXTrainer(Trainer):
         total_loss = 0.0
         total_batches = 0
 
-        # Move models to the appropriate device before wrapping with DataParallel
+        # Move models to the appropriate device before wrapping with DistributedDataParallel
         self.eval_agent_group.to(self.train_device)
         self.eval_critic.to(self.train_device)
         self.target_agent_group.to(self.train_device)

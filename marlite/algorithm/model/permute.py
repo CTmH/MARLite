@@ -7,7 +7,7 @@ class Permute(nn.Module):
         self.order = dims
 
     def forward(self, x: torch.Tensor):
-        # Check if in DataParallel
+        # Check if in DistributedDataParallel (DDP adds an extra batch dimension)
         if x.dim() == len(self.order) + 1:
             adjusted_order = (0,) + tuple(i + 1 for i in self.order)
             return x.permute(*adjusted_order)

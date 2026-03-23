@@ -150,7 +150,7 @@ class G2ANetAgentGroup(GraphAgentGroup):
             )
             self.decoders[id] = self.decoders[id].to(device)
             self.decoders[id] = DDP(self.decoders[id], device_ids=[device_id])
-        # self.graph_builder = self.graph_builder.to(device)
+        self.graph_builder = self.graph_builder.to(device)
         self.graph_model = self.graph_model.to(device)
         self.graph_model = DDP(self.graph_model, device_ids=[device_id])
         self._use_data_parallel = True
@@ -163,7 +163,7 @@ class G2ANetAgentGroup(GraphAgentGroup):
             self.encoders[id] = self.encoders[id].module.cpu()
             self.feature_extractors[id] = self.feature_extractors[id].module.cpu()
             self.decoders[id] = self.decoders[id].module.cpu()
-        # self.graph_builder = self.graph_builder.cpu()
+        self.graph_builder = self.graph_builder.cpu()
         self.graph_model = self.graph_model.module.cpu()
         self._use_data_parallel = False
         self.device = "cpu"
