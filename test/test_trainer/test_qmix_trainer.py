@@ -219,6 +219,9 @@ class TestQMixTrainer(unittest.TestCase):
 
     def test_distributed_data_parallel(self):
         """Test DistributedDataParallel training with multiple devices."""
+        import torch.distributed as dist
+        import os
+
         self.config_path = "test/config/qmix_default.yaml"
         with open(self.config_path, "r") as file:
             self.config = yaml.safe_load(file)
@@ -230,22 +233,34 @@ class TestQMixTrainer(unittest.TestCase):
         # Use a list of devices to enable DDP
         self.config["trainer_config"]["train_device"] = ["cuda:0"]
         self.trainer_config = TrainerConfig(self.config)
-        with tempfile.TemporaryDirectory() as temp_dir:
-            self.trainer = self.trainer_config.create_trainer()
-            self.trainer.workdir = temp_dir
-            self.trainer.logdir = os.path.join(self.trainer.workdir, "logs")
-            self.trainer.checkpointdir = os.path.join(
-                self.trainer.workdir, "checkpoints"
-            )
-            origin_critic_params = deepcopy(self.trainer.target_critic.state_dict())
-            self.trainer.collect_experience(0.9)
-            self.trainer.learn(sample_size=32, batch_size=8, times=1)
-            self.trainer.update_target_model_params()
-            critic_params = self.trainer.target_critic.state_dict()
 
-            for w1, w2 in zip(critic_params.values(), origin_critic_params.values()):
-                if w1.requires_grad:
-                    self.assertFalse(torch.equal(w1, w2))
+        # Initialize DDP process group for testing
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "29511"
+        if not dist.is_initialized():
+            dist.init_process_group("gloo", rank=0, world_size=1)
+
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                self.trainer = self.trainer_config.create_trainer()
+                self.trainer.workdir = temp_dir
+                self.trainer.logdir = os.path.join(self.trainer.workdir, "logs")
+                self.trainer.checkpointdir = os.path.join(
+                    self.trainer.workdir, "checkpoints"
+                )
+                origin_critic_params = deepcopy(self.trainer.target_critic.state_dict())
+                self.trainer.collect_experience(0.9)
+                self.trainer.learn(sample_size=32, batch_size=8, times=1)
+                self.trainer.update_target_model_params()
+                critic_params = self.trainer.target_critic.state_dict()
+
+                for w1, w2 in zip(critic_params.values(), origin_critic_params.values()):
+                    if w1.requires_grad:
+                        self.assertFalse(torch.equal(w1, w2))
+        finally:
+            # Clean up DDP process group
+            if dist.is_initialized():
+                dist.destroy_process_group()
 
     def test_torch_compile(self):
         self.config_path = "test/config/qmix_default.yaml"
