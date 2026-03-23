@@ -334,13 +334,20 @@ class QMIXAgentGroup(AgentGroup):
             device_id: The GPU device ID to use for this process
         """
         device = f"cuda:{device_id}"
+
+        def has_trainable_params(module):
+            """Check if module has any trainable parameters."""
+            return any(p.requires_grad for p in module.parameters())
+
         for id in self.models.keys():
             self.models[id] = self.models[id].to(device)
-            self.models[id] = DDP(self.models[id], device_ids=[device_id])
+            if has_trainable_params(self.models[id]):
+                self.models[id] = DDP(self.models[id], device_ids=[device_id])
             self.feature_extractors[id] = self.feature_extractors[id].to(device)
-            self.feature_extractors[id] = DDP(
-                self.feature_extractors[id], device_ids=[device_id]
-            )
+            if has_trainable_params(self.feature_extractors[id]):
+                self.feature_extractors[id] = DDP(
+                    self.feature_extractors[id], device_ids=[device_id]
+                )
         self._use_data_parallel = True
         self.device = device
         return self
@@ -348,8 +355,14 @@ class QMIXAgentGroup(AgentGroup):
     def unwrap_data_parallel(self) -> "AgentGroup":
         """Unwrap DistributedDataParallel from models."""
         for id in self.models.keys():
-            self.models[id] = self.models[id].module.cpu()
-            self.feature_extractors[id] = self.feature_extractors[id].module.cpu()
+            if isinstance(self.models[id], DDP):
+                self.models[id] = self.models[id].module.cpu()
+            else:
+                self.models[id] = self.models[id].cpu()
+            if isinstance(self.feature_extractors[id], DDP):
+                self.feature_extractors[id] = self.feature_extractors[id].module.cpu()
+            else:
+                self.feature_extractors[id] = self.feature_extractors[id].cpu()
         self._use_data_parallel = False
         self.device = "cpu"
         return self

@@ -141,18 +141,27 @@ class G2ANetAgentGroup(GraphAgentGroup):
             device_id: The GPU device ID to use for this process
         """
         device = f"cuda:{device_id}"
+
+        def has_trainable_params(module):
+            """Check if module has any trainable parameters."""
+            return any(p.requires_grad for p in module.parameters())
+
         for id in self.encoders.keys():
             self.encoders[id] = self.encoders[id].to(device)
-            self.encoders[id] = DDP(self.encoders[id], device_ids=[device_id])
+            if has_trainable_params(self.encoders[id]):
+                self.encoders[id] = DDP(self.encoders[id], device_ids=[device_id])
             self.feature_extractors[id] = self.feature_extractors[id].to(device)
-            self.feature_extractors[id] = DDP(
-                self.feature_extractors[id], device_ids=[device_id]
-            )
+            if has_trainable_params(self.feature_extractors[id]):
+                self.feature_extractors[id] = DDP(
+                    self.feature_extractors[id], device_ids=[device_id]
+                )
             self.decoders[id] = self.decoders[id].to(device)
-            self.decoders[id] = DDP(self.decoders[id], device_ids=[device_id])
+            if has_trainable_params(self.decoders[id]):
+                self.decoders[id] = DDP(self.decoders[id], device_ids=[device_id])
         self.graph_builder = self.graph_builder.to(device)
         self.graph_model = self.graph_model.to(device)
-        self.graph_model = DDP(self.graph_model, device_ids=[device_id])
+        if has_trainable_params(self.graph_model):
+            self.graph_model = DDP(self.graph_model, device_ids=[device_id])
         self._use_data_parallel = True
         self.device = device
         return self
@@ -160,11 +169,23 @@ class G2ANetAgentGroup(GraphAgentGroup):
     def unwrap_data_parallel(self) -> "GraphAgentGroup":
         """Unwrap DistributedDataParallel from models."""
         for id in self.encoders.keys():
-            self.encoders[id] = self.encoders[id].module.cpu()
-            self.feature_extractors[id] = self.feature_extractors[id].module.cpu()
-            self.decoders[id] = self.decoders[id].module.cpu()
+            if isinstance(self.encoders[id], DDP):
+                self.encoders[id] = self.encoders[id].module.cpu()
+            else:
+                self.encoders[id] = self.encoders[id].cpu()
+            if isinstance(self.feature_extractors[id], DDP):
+                self.feature_extractors[id] = self.feature_extractors[id].module.cpu()
+            else:
+                self.feature_extractors[id] = self.feature_extractors[id].cpu()
+            if isinstance(self.decoders[id], DDP):
+                self.decoders[id] = self.decoders[id].module.cpu()
+            else:
+                self.decoders[id] = self.decoders[id].cpu()
         self.graph_builder = self.graph_builder.cpu()
-        self.graph_model = self.graph_model.module.cpu()
+        if isinstance(self.graph_model, DDP):
+            self.graph_model = self.graph_model.module.cpu()
+        else:
+            self.graph_model = self.graph_model.cpu()
         self._use_data_parallel = False
         self.device = "cpu"
         return self

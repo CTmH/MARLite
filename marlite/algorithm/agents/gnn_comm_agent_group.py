@@ -501,26 +501,39 @@ class DualPathBasedGNNCommAgentGroup(GraphAgentGroup):
     def wrap_data_parallel(self, device_id: int = 0) -> "GraphAgentGroup":
         """Wrap all components with DistributedDataParallel"""
         device = f"cuda:{device_id}"
+
+        def has_trainable_params(module):
+            """Check if module has any trainable parameters."""
+            return any(p.requires_grad for p in module.parameters())
+
         super().wrap_data_parallel(device_id)
         for id in self.msg_feature_extractors.keys():
             self.msg_feature_extractors[id] = self.msg_feature_extractors[id].to(device)
-            self.msg_feature_extractors[id] = DDP(
-                self.msg_feature_extractors[id], device_ids=[device_id]
-            )
+            if has_trainable_params(self.msg_feature_extractors[id]):
+                self.msg_feature_extractors[id] = DDP(
+                    self.msg_feature_extractors[id], device_ids=[device_id]
+                )
         for id in self.msg_encoders.keys():
             self.msg_encoders[id] = self.msg_encoders[id].to(device)
-            self.msg_encoders[id] = DDP(self.msg_encoders[id], device_ids=[device_id])
+            if has_trainable_params(self.msg_encoders[id]):
+                self.msg_encoders[id] = DDP(self.msg_encoders[id], device_ids=[device_id])
         return self
 
     def unwrap_data_parallel(self) -> "GraphAgentGroup":
         """Unwrap DistributedDataParallel from all components"""
         super().unwrap_data_parallel()
         for id in self.msg_feature_extractors.keys():
-            self.msg_feature_extractors[id] = self.msg_feature_extractors[
-                id
-            ].module.cpu()
+            if isinstance(self.msg_feature_extractors[id], DDP):
+                self.msg_feature_extractors[id] = self.msg_feature_extractors[
+                    id
+                ].module.cpu()
+            else:
+                self.msg_feature_extractors[id] = self.msg_feature_extractors[id].cpu()
         for id in self.msg_encoders.keys():
-            self.msg_encoders[id] = self.msg_encoders[id].module.cpu()
+            if isinstance(self.msg_encoders[id], DDP):
+                self.msg_encoders[id] = self.msg_encoders[id].module.cpu()
+            else:
+                self.msg_encoders[id] = self.msg_encoders[id].cpu()
         return self
 
     def save_params(self, path: str) -> "GraphAgentGroup":

@@ -463,17 +463,26 @@ class MsgAggrAgentGroup(AgentGroup):
             device_id: The GPU device ID to use for this process
         """
         device = f"cuda:{device_id}"
+
+        def has_trainable_params(module):
+            """Check if module has any trainable parameters."""
+            return any(p.requires_grad for p in module.parameters())
+
         for id in self.encoders.keys():
             self.encoders[id] = self.encoders[id].to(device)
-            self.encoders[id] = DDP(self.encoders[id], device_ids=[device_id])
+            if has_trainable_params(self.encoders[id]):
+                self.encoders[id] = DDP(self.encoders[id], device_ids=[device_id])
             self.feature_extractors[id] = self.feature_extractors[id].to(device)
-            self.feature_extractors[id] = DDP(
-                self.feature_extractors[id], device_ids=[device_id]
-            )
+            if has_trainable_params(self.feature_extractors[id]):
+                self.feature_extractors[id] = DDP(
+                    self.feature_extractors[id], device_ids=[device_id]
+                )
             self.decoders[id] = self.decoders[id].to(device)
-            self.decoders[id] = DDP(self.decoders[id], device_ids=[device_id])
+            if has_trainable_params(self.decoders[id]):
+                self.decoders[id] = DDP(self.decoders[id], device_ids=[device_id])
         self.aggr_model = self.aggr_model.to(device)
-        self.aggr_model = DDP(self.aggr_model, device_ids=[device_id])
+        if has_trainable_params(self.aggr_model):
+            self.aggr_model = DDP(self.aggr_model, device_ids=[device_id])
         self._use_data_parallel = True
         self.device = device
         return self
@@ -481,10 +490,22 @@ class MsgAggrAgentGroup(AgentGroup):
     def unwrap_data_parallel(self) -> "AgentGroup":
         """Unwrap DistributedDataParallel from models."""
         for id in self.encoders.keys():
-            self.encoders[id] = self.encoders[id].module.cpu()
-            self.feature_extractors[id] = self.feature_extractors[id].module.cpu()
-            self.decoders[id] = self.decoders[id].module.cpu()
-        self.aggr_model = self.aggr_model.module.cpu()
+            if isinstance(self.encoders[id], DDP):
+                self.encoders[id] = self.encoders[id].module.cpu()
+            else:
+                self.encoders[id] = self.encoders[id].cpu()
+            if isinstance(self.feature_extractors[id], DDP):
+                self.feature_extractors[id] = self.feature_extractors[id].module.cpu()
+            else:
+                self.feature_extractors[id] = self.feature_extractors[id].cpu()
+            if isinstance(self.decoders[id], DDP):
+                self.decoders[id] = self.decoders[id].module.cpu()
+            else:
+                self.decoders[id] = self.decoders[id].cpu()
+        if isinstance(self.aggr_model, DDP):
+            self.aggr_model = self.aggr_model.module.cpu()
+        else:
+            self.aggr_model = self.aggr_model.cpu()
         self._use_data_parallel = False
         self.device = "cpu"
         return self
@@ -767,26 +788,39 @@ class DualPathBasedMsgAggrAgentGroup(MsgAggrAgentGroup):
     def wrap_data_parallel(self, device_id: int = 0) -> "AgentGroup":
         """Wrap all components with DistributedDataParallel"""
         device = f"cuda:{device_id}"
+
+        def has_trainable_params(module):
+            """Check if module has any trainable parameters."""
+            return any(p.requires_grad for p in module.parameters())
+
         super().wrap_data_parallel(device_id)
         for id in self.msg_feature_extractors.keys():
             self.msg_feature_extractors[id] = self.msg_feature_extractors[id].to(device)
-            self.msg_feature_extractors[id] = DDP(
-                self.msg_feature_extractors[id], device_ids=[device_id]
-            )
+            if has_trainable_params(self.msg_feature_extractors[id]):
+                self.msg_feature_extractors[id] = DDP(
+                    self.msg_feature_extractors[id], device_ids=[device_id]
+                )
         for id in self.msg_encoders.keys():
             self.msg_encoders[id] = self.msg_encoders[id].to(device)
-            self.msg_encoders[id] = DDP(self.msg_encoders[id], device_ids=[device_id])
+            if has_trainable_params(self.msg_encoders[id]):
+                self.msg_encoders[id] = DDP(self.msg_encoders[id], device_ids=[device_id])
         return self
 
     def unwrap_data_parallel(self) -> "AgentGroup":
         """Unwrap DistributedDataParallel from all components"""
         super().unwrap_data_parallel()
         for id in self.msg_feature_extractors.keys():
-            self.msg_feature_extractors[id] = self.msg_feature_extractors[
-                id
-            ].module.cpu()
+            if isinstance(self.msg_feature_extractors[id], DDP):
+                self.msg_feature_extractors[id] = self.msg_feature_extractors[
+                    id
+                ].module.cpu()
+            else:
+                self.msg_feature_extractors[id] = self.msg_feature_extractors[id].cpu()
         for id in self.msg_encoders.keys():
-            self.msg_encoders[id] = self.msg_encoders[id].module.cpu()
+            if isinstance(self.msg_encoders[id], DDP):
+                self.msg_encoders[id] = self.msg_encoders[id].module.cpu()
+            else:
+                self.msg_encoders[id] = self.msg_encoders[id].cpu()
         return self
 
     def save_params(self, path: str) -> "AgentGroup":
