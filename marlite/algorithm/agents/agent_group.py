@@ -7,8 +7,12 @@ import torch
 class AgentGroup(object):
     """Base class for managing a group of agents in a multi-agent reinforcement learning system."""
 
-    def forward(self, observations: Dict[str, np.ndarray], traj_padding_mask: torch.Tensor,
-                alive_mask: torch.Tensor) -> Dict[str, Any]:
+    def forward(
+        self,
+        observations: Dict[str, np.ndarray],
+        traj_padding_mask: torch.Tensor,
+        alive_mask: torch.Tensor,
+    ) -> Dict[str, Any]:
         """
         Forward pass for agent group.
 
@@ -22,8 +26,15 @@ class AgentGroup(object):
         """
         raise NotImplementedError
 
-    def act(self, observations: Dict[str, np.ndarray], state: np.ndarray, avail_actions: Dict[str, Any],
-            traj_padding_mask: np.ndarray, alive_agents: List[str], epsilon: float) -> Dict[str, Any]:
+    def act(
+        self,
+        observations: Dict[str, np.ndarray],
+        state: np.ndarray,
+        avail_actions: Dict[str, Any],
+        traj_padding_mask: np.ndarray,
+        alive_agents: List[str],
+        epsilon: float,
+    ) -> Dict[str, Any]:
         """
         Generate actions for the agent group.
 
@@ -40,8 +51,9 @@ class AgentGroup(object):
         """
         raise NotImplementedError
 
-    def set_agent_group_params(self, model_params: Dict[str, dict],
-                              feature_extractor_params: Dict[str, dict]) -> None:
+    def set_agent_group_params(
+        self, model_params: Dict[str, dict], feature_extractor_params: Dict[str, dict]
+    ) -> None:
         """
         Set parameters for the agent group.
 
@@ -60,7 +72,7 @@ class AgentGroup(object):
         """
         raise NotImplementedError
 
-    def zero_grad(self) -> 'AgentGroup':
+    def zero_grad(self) -> "AgentGroup":
         """
         Zero gradients for all parameters in the agent group.
 
@@ -69,7 +81,7 @@ class AgentGroup(object):
         """
         raise NotImplementedError
 
-    def step(self) -> 'AgentGroup':
+    def step(self) -> "AgentGroup":
         """
         Perform one training step.
 
@@ -78,7 +90,7 @@ class AgentGroup(object):
         """
         raise NotImplementedError
 
-    def lr_scheduler_step(self, reward) -> 'AgentGroup':
+    def lr_scheduler_step(self, reward) -> "AgentGroup":
         """
         Perform a learning rate scheduler step based on epoch and reward.
 
@@ -93,7 +105,7 @@ class AgentGroup(object):
         """
         raise NotImplementedError
 
-    def to_device(self, device) -> 'AgentGroup':
+    def to(self, device: str) -> "AgentGroup":
         """
         Move all tensors to specified device.
 
@@ -105,7 +117,7 @@ class AgentGroup(object):
         """
         raise NotImplementedError
 
-    def eval(self) -> 'AgentGroup':
+    def eval(self) -> "AgentGroup":
         """
         Set the agent group to evaluation mode.
 
@@ -114,7 +126,7 @@ class AgentGroup(object):
         """
         raise NotImplementedError
 
-    def train(self) -> 'AgentGroup':
+    def train(self) -> "AgentGroup":
         """
         Set the agent group to training mode.
 
@@ -123,7 +135,7 @@ class AgentGroup(object):
         """
         raise NotImplementedError
 
-    def share_memory(self) -> 'AgentGroup':
+    def share_memory(self) -> "AgentGroup":
         """
         Share memory between processes.
 
@@ -132,7 +144,7 @@ class AgentGroup(object):
         """
         raise NotImplementedError
 
-    def wrap_data_parallel(self) -> 'AgentGroup':
+    def wrap_data_parallel(self) -> "AgentGroup":
         """
         Wrap the agent group in data parallelism.
 
@@ -141,7 +153,7 @@ class AgentGroup(object):
         """
         raise NotImplementedError
 
-    def unwrap_data_parallel(self) -> 'AgentGroup':
+    def unwrap_data_parallel(self) -> "AgentGroup":
         """
         Unwrap the agent group from data parallelism.
 
@@ -150,7 +162,7 @@ class AgentGroup(object):
         """
         raise NotImplementedError
 
-    def save_params(self, path: str) -> 'AgentGroup':
+    def save_params(self, path: str) -> "AgentGroup":
         """
         Save agent group parameters to disk.
 
@@ -162,7 +174,7 @@ class AgentGroup(object):
         """
         raise NotImplementedError
 
-    def load_params(self, path: str) -> 'AgentGroup':
+    def load_params(self, path: str) -> "AgentGroup":
         """
         Load agent group parameters from disk.
 
@@ -174,7 +186,7 @@ class AgentGroup(object):
         """
         raise NotImplementedError
 
-    def compile_models(self) -> 'AgentGroup':
+    def compile_models(self) -> "AgentGroup":
         """
         Compile models for improved performance.
 
@@ -183,7 +195,7 @@ class AgentGroup(object):
         """
         raise NotImplementedError
 
-    def reset(self) -> 'AgentGroup':
+    def reset(self) -> "AgentGroup":
         """
         Reset the agent group state.
 

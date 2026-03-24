@@ -1,18 +1,20 @@
 import numpy as np
-from copy import deepcopy
 from typing import Callable
 import time
 from marlite.environment.env_config import EnvConfig
 from marlite.algorithm.agents import AgentGroup, GraphAgentGroup
 from marlite.util.env_util import obs_preprocess, ensure_all_agents_present
 
-def multiprocess_rollout(env_config: EnvConfig,
-            agent_group: AgentGroup,
-            rnn_traj_len=5,
-            episode_limit=100,
-            epsilon=0.5,
-            device='cpu',
-            check_victory: Callable = None):
+
+def multiprocess_rollout(
+    env_config: EnvConfig,
+    agent_group: AgentGroup,
+    rnn_traj_len=5,
+    episode_limit=100,
+    epsilon=0.5,
+    device="cpu",
+    check_victory: Callable = None,
+):
     """Execute a rollout using multiprocess environment.
 
     Args:
@@ -35,30 +37,30 @@ def multiprocess_rollout(env_config: EnvConfig,
         print("Create environment failed")
         return None
 
-    agent_group = deepcopy(agent_group).reset().eval().to(device)
+    agent_group = agent_group.reset().eval().to(device)
     possible_agents = env.possible_agents.copy()
 
     # Initialize episode data
     episode = {
-        'alive_mask' : [],
-        'observations': [],
-        'states': [],
-        'edge_indices': [],
-        'actions': [],
-        'rewards': [],
-        'avail_actions': [],
-        'truncations': [],
-        'terminations': [],
-        'next_alive_mask': [],
-        'next_edge_indices': [],
-        'next_states': [],
-        'next_observations': [],
-        'next_avail_actions': [],
-        'infos': [],
-        'all_agents_sum_rewards': [],
-        'episode_reward': 0,
-        'win_tag': False,
-        'episode_length': 0,
+        "alive_mask": [],
+        "observations": [],
+        "states": [],
+        "edge_indices": [],
+        "actions": [],
+        "rewards": [],
+        "avail_actions": [],
+        "truncations": [],
+        "terminations": [],
+        "next_alive_mask": [],
+        "next_edge_indices": [],
+        "next_states": [],
+        "next_observations": [],
+        "next_avail_actions": [],
+        "infos": [],
+        "all_agents_sum_rewards": [],
+        "episode_reward": 0,
+        "win_tag": False,
+        "episode_length": 0,
     }
 
     # Initialize tracking variables
@@ -75,7 +77,7 @@ def multiprocess_rollout(env_config: EnvConfig,
     use_action_mask = False
 
     for i in range(episode_limit + 1):
-         # Reset environment
+        # Reset environment
         if i == 0:
             # Generate random seed based on current time
             seed = int(time.time() * 1000) % (2**24 - 1)
@@ -89,7 +91,9 @@ def multiprocess_rollout(env_config: EnvConfig,
 
             # Determine if action masking is used
             info_item = next(iter(infos.values()), None)
-            if isinstance(info_item, dict) and isinstance(info_item.get('action_mask'), np.ndarray):
+            if isinstance(info_item, dict) and isinstance(
+                info_item.get("action_mask"), np.ndarray
+            ):
                 use_action_mask = True
 
             # Create default observations for each possible agent
@@ -104,32 +108,40 @@ def multiprocess_rollout(env_config: EnvConfig,
             # Create default available actions for each possible agent
             for agent in possible_agents:
                 if use_action_mask:
-                    if agent in infos and 'action_mask' in infos[agent]:
-                        default_avail_actions[agent] = np.ones_like(infos[agent]['action_mask'], dtype=np.int8)
+                    if agent in infos and "action_mask" in infos[agent]:
+                        default_avail_actions[agent] = np.ones_like(
+                            infos[agent]["action_mask"], dtype=np.int8
+                        )
                     else:
                         # Use first available action mask as template
-                        first_mask = next(iter(infos.values()))['action_mask']
-                        default_avail_actions[agent] = np.ones_like(first_mask, dtype=np.int8)
+                        first_mask = next(iter(infos.values()))["action_mask"]
+                        default_avail_actions[agent] = np.ones_like(
+                            first_mask, dtype=np.int8
+                        )
                 else:
                     if agent in env.agents:
                         default_avail_actions[agent] = env.action_space(agent)
                     else:
                         # Use first available action space as template
-                        default_avail_actions[agent] = env.action_space(next(iter(env.agents)))
+                        default_avail_actions[agent] = env.action_space(
+                            next(iter(env.agents))
+                        )
 
         # Step environment
         else:
             # Store transition data
-            episode['alive_mask'].append(alive_mask)
-            episode['observations'].append(observations)
-            episode['states'].append(env.state())
-            episode['edge_indices'].append(edge_indices)
-            episode['actions'].append(all_actions)
-            episode['avail_actions'].append(avail_actions)
-            episode['infos'].append(infos)
+            episode["alive_mask"].append(alive_mask)
+            episode["observations"].append(observations)
+            episode["states"].append(env.state())
+            episode["edge_indices"].append(edge_indices)
+            episode["actions"].append(all_actions)
+            episode["avail_actions"].append(avail_actions)
+            episode["infos"].append(infos)
             # Step environment
             try:
-                observations, rewards, terminations, truncations, infos = env.step(actions)
+                observations, rewards, terminations, truncations, infos = env.step(
+                    actions
+                )
             except Exception as e:
                 # TODO Need log support
                 print(f"Step failed, Return None")
@@ -142,62 +154,77 @@ def multiprocess_rollout(env_config: EnvConfig,
             truncations = ensure_all_agents_present(truncations, default_truncations)
 
             # Store post-step data
-            episode['rewards'].append(rewards)
-            episode['truncations'].append(truncations)
-            episode['terminations'].append(terminations)
-            #episode['next_states'].append(env.state()) # Avoid accessing state when game ends
-            episode['next_observations'].append(observations)
+            episode["rewards"].append(rewards)
+            episode["truncations"].append(truncations)
+            episode["terminations"].append(terminations)
+            # episode['next_states'].append(env.state()) # Avoid accessing state when game ends
+            episode["next_observations"].append(observations)
 
             # Update episode reward
             agent_reward_sum = sum(rewards.values())
-            episode['all_agents_sum_rewards'].append(agent_reward_sum)
+            episode["all_agents_sum_rewards"].append(agent_reward_sum)
             episode_reward += agent_reward_sum
 
             # Check if the game was won using the provided function
             if check_victory is not None:
                 win_tag = check_victory(env, infos)
             if win_tag or not env.agents:
-                episode['next_states'].append(episode['states'][-1])
-                episode['next_avail_actions'].append(default_avail_actions)
-                episode['next_alive_mask'].append(default_alive_mask)
-                episode['next_edge_indices'].append(edge_indices)
+                episode["next_states"].append(episode["states"][-1])
+                episode["next_avail_actions"].append(default_avail_actions)
+                episode["next_alive_mask"].append(default_alive_mask)
+                episode["next_edge_indices"].append(edge_indices)
                 break
-            episode['next_states'].append(env.state())
+            episode["next_states"].append(env.state())
 
         # Update Alive agent mask
-        alive_mask = ensure_all_agents_present({agent: True for agent in env.agents}, default_alive_mask)
+        alive_mask = ensure_all_agents_present(
+            {agent: True for agent in env.agents}, default_alive_mask
+        )
 
         # Create available actions dictionary
         if use_action_mask:
             # Create available actions from action masks
             current_avail_actions = {}
             for agent in env.agents:
-                if agent in infos and 'action_mask' in infos[agent]:
-                    current_avail_actions[agent] = np.array(infos[agent]['action_mask'], dtype=np.int8)
+                if agent in infos and "action_mask" in infos[agent]:
+                    current_avail_actions[agent] = np.array(
+                        infos[agent]["action_mask"], dtype=np.int8
+                    )
         else:
             # Create available actions from action spaces
-            current_avail_actions = {agent: env.action_space(agent) for agent in env.agents}
-        avail_actions = ensure_all_agents_present(current_avail_actions, default_avail_actions)
+            current_avail_actions = {
+                agent: env.action_space(agent) for agent in env.agents
+            }
+        avail_actions = ensure_all_agents_present(
+            current_avail_actions, default_avail_actions
+        )
 
         # Get actions from agent
         processed_obs, traj_padding_mask = obs_preprocess(
-            observations=episode['observations'] + [observations],
+            observations=episode["observations"] + [observations],
             agents=agent_group.agent_model_dict.keys(),
-            rnn_traj_len=rnn_traj_len
+            rnn_traj_len=rnn_traj_len,
         )
 
-        ret = agent_group.act(processed_obs, env.state(), avail_actions, traj_padding_mask, env.agents, epsilon)
-        actions, all_actions = ret['actions'], ret['all_actions']
-        edge_indices = ret.get('edge_indices', np.zeros((2, 0)))
+        ret = agent_group.act(
+            processed_obs,
+            env.state(),
+            avail_actions,
+            traj_padding_mask,
+            env.agents,
+            epsilon,
+        )
+        actions, all_actions = ret["actions"], ret["all_actions"]
+        edge_indices = ret.get("edge_indices", np.zeros((2, 0)))
 
         if i > 0:
-            episode['next_alive_mask'].append(alive_mask)
-            episode['next_avail_actions'].append(avail_actions)
-            episode['next_edge_indices'].append(edge_indices)
+            episode["next_alive_mask"].append(alive_mask)
+            episode["next_avail_actions"].append(avail_actions)
+            episode["next_edge_indices"].append(edge_indices)
 
-    episode['win_tag'] = win_tag
-    episode['episode_length'] = len(episode['observations'])
-    episode['episode_reward'] = episode_reward
+    episode["win_tag"] = win_tag
+    episode["episode_length"] = len(episode["observations"])
+    episode["episode_reward"] = episode_reward
 
     env.close()
     return episode

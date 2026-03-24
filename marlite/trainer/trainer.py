@@ -201,7 +201,7 @@ class Trainer:
         """
         Collect experiences using multiple rollout workers.
         """
-        self.eval_agent_group.eval()
+        self.eval_agent_group.eval().to("cpu")
         manager = self.rolloutmanager_config.create_manager(
             self.eval_agent_group, self.env_config, epsilon
         )
