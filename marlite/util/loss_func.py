@@ -3,8 +3,15 @@ import torch.nn.functional as F
 from torch.nn.modules.loss import _Loss, MSELoss
 from typing import Dict, Type
 
+
 class PITLoss(_Loss):
-    def __init__(self, num_tasks: int, alpha: float = 0.9, eps: float = 1e-8, reduction: str = 'mean'):
+    def __init__(
+        self,
+        num_tasks: int,
+        alpha: float = 0.9,
+        eps: float = 1e-8,
+        reduction: str = "mean",
+    ):
         """
         Probability Integral Transformation Loss (PITLoss)
 
@@ -25,10 +32,14 @@ class PITLoss(_Loss):
 
         # Initialize buffers for moving averages
         # Mean is initialized to 0, variance to 0 (not 1 as in original)
-        self.register_buffer('moving_mean', torch.zeros(num_tasks))
-        self.register_buffer('moving_var', torch.zeros(num_tasks))  # Fixed: was torch.ones()
-        self.register_buffer('step', torch.zeros(1, dtype=torch.long))
-        self.register_buffer('total_var', torch.zeros(num_tasks))  # For unbiased variance estimation
+        self.register_buffer("moving_mean", torch.zeros(num_tasks))
+        self.register_buffer(
+            "moving_var", torch.zeros(num_tasks)
+        )  # Fixed: was torch.ones()
+        self.register_buffer("step", torch.zeros(1, dtype=torch.long))
+        self.register_buffer(
+            "total_var", torch.zeros(num_tasks)
+        )  # For unbiased variance estimation
 
     def forward(self, losses: torch.Tensor) -> torch.Tensor:
         """
@@ -50,13 +61,17 @@ class PITLoss(_Loss):
                     self.moving_mean.copy_(current_losses)
                 else:
                     # Update exponential moving average for mean
-                    self.moving_mean.mul_(self.alpha).add_(current_losses, alpha=1-self.alpha)
+                    self.moving_mean.mul_(self.alpha).add_(
+                        current_losses, alpha=1 - self.alpha
+                    )
 
                     # Calculate difference from current mean
                     diff = current_losses - self.moving_mean
 
                     # Update exponential moving average for variance (unbiased estimate)
-                    self.moving_var.mul_(self.alpha).add_(diff.pow(2), alpha=(1-self.alpha))
+                    self.moving_var.mul_(self.alpha).add_(
+                        diff.pow(2), alpha=(1 - self.alpha)
+                    )
 
         # Calculate unbiased variance estimate
         # This compensates for bias in initial estimates
@@ -74,9 +89,9 @@ class PITLoss(_Loss):
         pit_loss = (cdf_values - 0.5).pow(2)
 
         # Apply reduction
-        if self.reduction == 'mean':
+        if self.reduction == "mean":
             return pit_loss.mean()
-        elif self.reduction == 'sum':
+        elif self.reduction == "sum":
             return pit_loss.sum()
         else:  # 'none'
             return pit_loss
@@ -90,7 +105,8 @@ class InfoNCELoss(_Loss):
     It maximizes the similarity between positive pairs while minimizing similarity
     between negative pairs.
     """
-    def __init__(self, temperature: float = 0.1, reduction: str = 'mean'):
+
+    def __init__(self, temperature: float = 0.1, reduction: str = "mean"):
         """
         Initialize InfoNCE Loss
 
@@ -101,7 +117,12 @@ class InfoNCELoss(_Loss):
         super().__init__(reduction=reduction)
         self.temperature = temperature
 
-    def forward(self, query: torch.Tensor, positive: torch.Tensor, negatives: torch.Tensor = None) -> torch.Tensor:
+    def forward(
+        self,
+        query: torch.Tensor,
+        positive: torch.Tensor,
+        negatives: torch.Tensor = None,
+    ) -> torch.Tensor:
         """
         Compute InfoNCE loss
 
@@ -120,14 +141,18 @@ class InfoNCELoss(_Loss):
         if negatives is None:
             # Use all other samples in batch as negatives
             # Compute similarity matrix between all queries and all positives
-            similarity_matrix = F.cosine_similarity(query.unsqueeze(1), positive.unsqueeze(0), dim=2)
+            similarity_matrix = F.cosine_similarity(
+                query.unsqueeze(1), positive.unsqueeze(0), dim=2
+            )
 
             # Positive pairs are on the diagonal
             positive_similarity = torch.diag(similarity_matrix)
 
             # Create mask to exclude positive pairs
             mask = ~torch.eye(batch_size, dtype=torch.bool, device=query.device)
-            negative_similarities = similarity_matrix[mask].view(batch_size, batch_size - 1)
+            negative_similarities = similarity_matrix[mask].view(
+                batch_size, batch_size - 1
+            )
 
         else:
             # Use provided negatives
@@ -138,9 +163,13 @@ class InfoNCELoss(_Loss):
 
             # Compute negative similarities
             negative_similarities = F.cosine_similarity(
-                query.unsqueeze(1).expand(-1, num_negatives, -1).reshape(-1, query.size(-1)),
-                negatives.unsqueeze(0).expand(batch_size, -1, -1).reshape(-1, negatives.size(-1)),
-                dim=1
+                query.unsqueeze(1)
+                .expand(-1, num_negatives, -1)
+                .reshape(-1, query.size(-1)),
+                negatives.unsqueeze(0)
+                .expand(batch_size, -1, -1)
+                .reshape(-1, negatives.size(-1)),
+                dim=1,
             ).view(batch_size, num_negatives)
 
         # Scale by temperature
@@ -148,21 +177,24 @@ class InfoNCELoss(_Loss):
         negative_similarities = negative_similarities / self.temperature
 
         # Concatenate positive and negative similarities
-        logits = torch.cat([positive_similarity.unsqueeze(1), negative_similarities], dim=1)
+        logits = torch.cat(
+            [positive_similarity.unsqueeze(1), negative_similarities], dim=1
+        )
 
         # Labels: 0 for positive (first position)
         labels = torch.zeros(batch_size, dtype=torch.long, device=query.device)
 
         # Compute cross entropy loss
-        loss = F.cross_entropy(logits, labels, reduction='none')
+        loss = F.cross_entropy(logits, labels, reduction="none")
 
         # Apply reduction
-        if self.reduction == 'mean':
+        if self.reduction == "mean":
             return loss.mean()
-        elif self.reduction == 'sum':
+        elif self.reduction == "sum":
             return loss.sum()
         else:  # 'none'
             return loss
+
 
 class ReconstructionLoss(_Loss):
     """
@@ -178,6 +210,7 @@ class ReconstructionLoss(_Loss):
             Default: 'mean'. Options: 'none', 'mean', 'sum'
         **kwargs: Additional keyword arguments that may be needed by subclasses.
     """
+
     def __init__(self, **kwargs):
         """
         Initialize the reconstruction loss.
@@ -192,7 +225,12 @@ class ReconstructionLoss(_Loss):
         """
         super().__init__(**kwargs)
 
-    def forward(self, pred_set:torch.Tensor, target_set:torch.Tensor, mask:torch.Tensor=None):
+    def forward(
+        self,
+        pred_set: torch.Tensor,
+        target_set: torch.Tensor,
+        mask: torch.Tensor = None,
+    ):
         """
         Compute reconstruction loss between predicted and target sets.
 
@@ -212,6 +250,7 @@ class ReconstructionLoss(_Loss):
         """
         raise NotImplementedError("Subclasses must implement forward method")
 
+
 class ChamferDistanceLoss(ReconstructionLoss):
     """
     Computes Chamfer Distance loss between two sets of points.
@@ -223,11 +262,17 @@ class ChamferDistanceLoss(ReconstructionLoss):
         use_squared_distance (bool, optional): Whether to use squared Euclidean distance.
             Default: True (recommended for better gradient behavior)
     """
-    def __init__(self, reduction='mean', use_squared_distance=True):
+
+    def __init__(self, reduction="mean", use_squared_distance=True):
         super().__init__(reduction=reduction)
         self.use_squared_distance = use_squared_distance
 
-    def forward(self, pred_set:torch.Tensor, target_set:torch.Tensor, mask:torch.Tensor=None):
+    def forward(
+        self,
+        pred_set: torch.Tensor,
+        target_set: torch.Tensor,
+        mask: torch.Tensor = None,
+    ):
         """
         Args:
             pred_set: Predicted set of points (B, N, D)
@@ -240,7 +285,9 @@ class ChamferDistanceLoss(ReconstructionLoss):
         B, N, D = pred_set.shape
 
         # Compute pairwise distances
-        dist_matrix = self._pairwise_distance(pred_set, target_set)  # Removed mask parameter
+        dist_matrix = self._pairwise_distance(
+            pred_set, target_set
+        )  # Removed mask parameter
 
         # Compute min distances in both directions
         min_dist_pred_to_target = dist_matrix.min(dim=2).values  # (B, N)
@@ -258,7 +305,9 @@ class ChamferDistanceLoss(ReconstructionLoss):
             num_valid_target = valid_target.sum(dim=1, keepdim=True).clamp_min(1)
 
             forward_loss = min_dist_pred_to_target.sum(dim=1) / num_valid_pred.squeeze()
-            backward_loss = min_dist_target_to_pred.sum(dim=1) / num_valid_target.squeeze()
+            backward_loss = (
+                min_dist_target_to_pred.sum(dim=1) / num_valid_target.squeeze()
+            )
 
             loss_per_batch = forward_loss + backward_loss
         else:
@@ -270,16 +319,16 @@ class ChamferDistanceLoss(ReconstructionLoss):
             loss_per_batch = forward_loss + backward_loss
 
         # Apply reduction
-        if self.reduction == 'none':
-            return loss_per_batch # (B,)
-        elif self.reduction == 'mean':
+        if self.reduction == "none":
+            return loss_per_batch  # (B,)
+        elif self.reduction == "mean":
             return loss_per_batch.mean()
-        elif self.reduction == 'sum':
+        elif self.reduction == "sum":
             return loss_per_batch.sum()
         else:
             raise ValueError(f"Invalid reduction type: {self.reduction}")
 
-    def _pairwise_distance(self, set1:torch.Tensor, set2:torch.Tensor):
+    def _pairwise_distance(self, set1: torch.Tensor, set2: torch.Tensor):
         """
         Compute pairwise Euclidean distances between two sets of points.
 
@@ -290,10 +339,12 @@ class ChamferDistanceLoss(ReconstructionLoss):
             dist_matrix: (B, N1, N2)
         """
         # Compute squared differences
-        diff = set1.unsqueeze(2) - set2.unsqueeze(1)  # (B, N1, 1, D) - (B, 1, N2, D) -> (B, N1, N2, D)
+        diff = set1.unsqueeze(2) - set2.unsqueeze(
+            1
+        )  # (B, N1, 1, D) - (B, 1, N2, D) -> (B, N1, N2, D)
 
         # Compute squared Euclidean distance
-        dist_sq = (diff ** 2).sum(dim=-1)  # (B, N1, N2)
+        dist_sq = (diff**2).sum(dim=-1)  # (B, N1, N2)
 
         if self.use_squared_distance:
             return dist_sq
@@ -301,7 +352,105 @@ class ChamferDistanceLoss(ReconstructionLoss):
             return dist_sq.clamp_min(1e-12).sqrt()
 
 
+class PointSetMSELoss(ReconstructionLoss):
+    """
+    Computes Mean Squared Error loss for point sets.
+
+    This loss calculates MSE between corresponding points in predicted and target sets,
+    with support for masking out padded/invalid points.
+
+    Input tensors should have shape: (batch_size, n_points, feature_dim)
+
+    Args:
+        reduction (str, optional): Specifies the reduction to apply to the output.
+            Default: 'mean'. Options: 'none', 'mean', 'sum'
+
+    Example:
+        >>> loss_fn = PointSetMSELoss(reduction='mean')
+        >>> pred = torch.randn(2, 10, 3)  # batch=2, 10 points, 3 features each
+        >>> target = torch.randn(2, 10, 3)
+        >>> mask = torch.ones(2, 10, dtype=torch.bool)
+        >>> mask[0, 5:] = False  # First sample has only 5 valid points
+        >>> loss = loss_fn(pred, target, mask)
+    """
+
+    def __init__(self, reduction="mean"):
+        super().__init__(reduction=reduction)
+
+    def forward(
+        self,
+        pred_set: torch.Tensor,
+        target_set: torch.Tensor,
+        mask: torch.Tensor = None,
+    ):
+        """
+        Compute MSE loss between predicted and target point sets.
+
+        Args:
+            pred_set: Predicted set of points (B, N, D) where
+                     B = batch size, N = number of points, D = feature dimension
+            target_set: Target set of points (B, N, D)
+            mask: Optional boolean mask indicating valid points (B, N).
+                  True = valid point, False = padded/invalid point.
+                  If None, all points are considered valid.
+
+        Returns:
+            loss: MSE loss value
+                  - scalar tensor when reduction='mean' or 'sum'
+                  - (B,) tensor when reduction='none'
+
+        Raises:
+            ValueError: If input shapes don't match or invalid reduction type
+        """
+        # Validate input shapes
+        if pred_set.shape != target_set.shape:
+            raise ValueError(
+                f"Shape mismatch: pred_set {pred_set.shape} vs target_set {target_set.shape}"
+            )
+
+        B, N, D = pred_set.shape
+
+        # Compute squared error for each point (average over feature dimension)
+        # (B, N, D) -> (B, N)
+        point_wise_mse = F.mse_loss(pred_set, target_set, reduction="none").mean(dim=-1)
+
+        # Apply mask if provided
+        if mask is not None:
+            # Validate mask shape
+            if mask.shape != (B, N):
+                raise ValueError(
+                    f"Mask shape mismatch: expected {(B, N)}, got {mask.shape}"
+                )
+
+            # Convert mask to float and zero out invalid points
+            mask_float = mask.float()
+            point_wise_mse = point_wise_mse * mask_float
+
+            # Compute number of valid points per batch (avoid division by zero)
+            num_valid = mask_float.sum(dim=1).clamp_min(1)  # (B,)
+
+            # Average over valid points only
+            loss_per_batch = point_wise_mse.sum(dim=1) / num_valid  # (B,)
+        else:
+            # Average over all points
+            loss_per_batch = point_wise_mse.mean(dim=1)  # (B,)
+
+        # Apply reduction
+        if self.reduction == "none":
+            return loss_per_batch  # (B,)
+        elif self.reduction == "mean":
+            return loss_per_batch.mean()  # scalar
+        elif self.reduction == "sum":
+            return loss_per_batch.sum()  # scalar
+        else:
+            raise ValueError(
+                f"Invalid reduction type: {self.reduction}. "
+                f"Expected 'none', 'mean', or 'sum'."
+            )
+
+
 REGISTERED_RECONSTRUCTION_LOSS: Dict[str, Type[_Loss]] = {
     "ChamferDist": ChamferDistanceLoss,
+    "PointSetMSE": PointSetMSELoss,
     "MSE": MSELoss,
 }
