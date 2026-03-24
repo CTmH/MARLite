@@ -48,14 +48,16 @@ class QMixer(Mixer):
     masked Q-values with these global features to produce a centralized value estimate.
     """
 
-    def __init__(self, base_model_config: ModelConfig, feature_extractor_config: ModelConfig):
+    def __init__(
+        self, base_model_config: ModelConfig, feature_extractor_config: ModelConfig
+    ):
         super(QMixer, self).__init__()
         self.base_model = base_model_config.get_model()
         self.feature_extractor = feature_extractor_config.get_model()
         if isinstance(self.feature_extractor, MaskedModel):
-            self.fe_class_name = 'MaskedModel'
+            self.fe_class_name = "MaskedModel"
         else:
-            self.fe_class_name = 'Other'
+            self.fe_class_name = "Other"
 
     def forward(
         self,
@@ -83,7 +85,7 @@ class QMixer(Mixer):
         states = states[:, -1, :]  # (B, T, N, F) -> (B, N, F)
 
         # Extract state features, applying agent masking if supported
-        if self.fe_class_name == 'MaskedModel':
+        if self.fe_class_name == "MaskedModel":
             encoded_states = self.feature_extractor(states, alive_mask)
         else:
             encoded_states = self.feature_extractor(states)
@@ -94,10 +96,7 @@ class QMixer(Mixer):
         # Compute total Q-value using base mixing model
         q_tot = self.base_model(masked_q_values, encoded_states)
 
-        return {
-            "q_tot": q_tot,
-            "state_features": encoded_states
-        }
+        return {"q_tot": q_tot, "state_features": encoded_states}
 
 
 class SeqQMixer(Mixer):
@@ -114,7 +113,7 @@ class SeqQMixer(Mixer):
         base_model_config: ModelConfig,
         feature_extractor_config: ModelConfig,
         seq_model_config: ModelConfig,
-        state_feature_type: str = "Seq"
+        state_feature_type: str = "Seq",
     ):
         """
         Initialize the SeqQMixer.
@@ -133,16 +132,16 @@ class SeqQMixer(Mixer):
         self.state_feature_type = state_feature_type
 
         if isinstance(self.feature_extractor, MaskedModel):
-            self.fe_class_name = 'MaskedModel'
+            self.fe_class_name = "MaskedModel"
         else:
-            self.fe_class_name = 'Other'
+            self.fe_class_name = "Other"
 
         if isinstance(self.seq_model, RNNModel):
-            self.seq_model_class_name = 'RNNModel'
+            self.seq_model_class_name = "RNNModel"
         elif isinstance(self.seq_model, Conv1DModel):
-            self.seq_model_class_name = 'Conv1DModel'
+            self.seq_model_class_name = "Conv1DModel"
         elif isinstance(self.seq_model, AttentionModel):
-            self.seq_model_class_name = 'AttentionModel'
+            self.seq_model_class_name = "AttentionModel"
         else:
             self.seq_model_class_name = self.seq_model.__class__.__name__
 
@@ -173,8 +172,10 @@ class SeqQMixer(Mixer):
         states = states.reshape(bs * ts, *state_shape)
 
         # Extract features for each timestep
-        if self.fe_class_name == 'MaskedModel':
-            encoded_states = self.feature_extractor(states, alive_mask.reshape(bs * ts, -1))
+        if self.fe_class_name == "MaskedModel":
+            encoded_states = self.feature_extractor(
+                states, alive_mask.reshape(bs * ts, -1)
+            )
         else:
             encoded_states = self.feature_extractor(states)
 
@@ -182,13 +183,13 @@ class SeqQMixer(Mixer):
         last_encoded_states = encoded_states[:, -1, :]
 
         # Process sequence with appropriate model
-        if self.seq_model_class_name == 'Conv1DModel':
+        if self.seq_model_class_name == "Conv1DModel":
             # Transpose for Conv1D: (B, T, F) -> (B, F, T)
             encoded_states = encoded_states.permute(0, 2, 1)
             hidden_states = self.seq_model(encoded_states)
-        elif self.seq_model_class_name == 'RNNModel':
+        elif self.seq_model_class_name == "RNNModel":
             hidden_states = self.seq_model(encoded_states)
-        elif self.seq_model_class_name == 'AttentionModel':
+        elif self.seq_model_class_name == "AttentionModel":
             hidden_states = self.seq_model(encoded_states, padding_mask)
         else:
             # Default: use only last timestep
@@ -201,15 +202,12 @@ class SeqQMixer(Mixer):
         q_tot = self.base_model(masked_q_values, hidden_states)
 
         # Select appropriate state features to return
-        if self.state_feature_type == 'State':
+        if self.state_feature_type == "State":
             state_features = last_encoded_states
         else:
             state_features = hidden_states
 
-        return {
-            "q_tot": q_tot,
-            "state_features": state_features
-        }
+        return {"q_tot": q_tot, "state_features": state_features}
 
 
 class ProbQMixer(Mixer):
@@ -219,14 +217,19 @@ class ProbQMixer(Mixer):
     of a Gaussian distribution, enabling stochastic sampling of state features.
     """
 
-    def __init__(self, base_model_config: ModelConfig, feature_extractor_config: ModelConfig, deterministic_eval = True):
+    def __init__(
+        self,
+        base_model_config: ModelConfig,
+        feature_extractor_config: ModelConfig,
+        deterministic_eval=True,
+    ):
         super(ProbQMixer, self).__init__()
         self.base_model = base_model_config.get_model()
         self.feature_extractor = feature_extractor_config.get_model()
         if isinstance(self.feature_extractor, MaskedModel):
-            self.fe_class_name = 'MaskedModel'
+            self.fe_class_name = "MaskedModel"
         else:
-            self.fe_class_name = 'Other'
+            self.fe_class_name = "Other"
 
         self.deterministic_eval = deterministic_eval
 
@@ -257,7 +260,7 @@ class ProbQMixer(Mixer):
         states = states[:, -1, :]  # (B, T, N, F) -> (B, N, F)
 
         # Extract probabilistic state features
-        if self.fe_class_name == 'MaskedModel':
+        if self.fe_class_name == "MaskedModel":
             encoded_states = self.feature_extractor(states, alive_mask)
         else:
             encoded_states = self.feature_extractor(states)
@@ -281,12 +284,7 @@ class ProbQMixer(Mixer):
         masked_q_values = q_value_from_agents * alive_mask
         q_tot = self.base_model(masked_q_values, sample)
 
-        return {
-            "q_tot": q_tot,
-            "state_features": sample,
-            "mu": mu,
-            "std": std
-        }
+        return {"q_tot": q_tot, "state_features": sample, "mu": mu, "std": std}
 
 
 class ProbSeqQMixer(Mixer):
@@ -302,7 +300,7 @@ class ProbSeqQMixer(Mixer):
         feature_extractor_config: ModelConfig,
         seq_model_config: ModelConfig,
         state_feature_type: str = "Seq",
-        deterministic_eval = True
+        deterministic_eval=True,
     ):
         """
         Initialize the Probabilistic Sequential QMixer.
@@ -318,7 +316,7 @@ class ProbSeqQMixer(Mixer):
         self.seq_model = seq_model_config.get_model()
 
         self.state_feature_type = state_feature_type
-        if state_feature_type == 'State':
+        if state_feature_type == "State":
             self.forward_fn = self._forward_with_state_hidden
         else:
             self.forward_fn = self._forward_with_seq_hidden
@@ -326,16 +324,16 @@ class ProbSeqQMixer(Mixer):
         self.deterministic_eval = deterministic_eval
 
         if isinstance(self.feature_extractor, MaskedModel):
-            self.fe_class_name = 'MaskedModel'
+            self.fe_class_name = "MaskedModel"
         else:
-            self.fe_class_name = 'Other'
+            self.fe_class_name = "Other"
 
         if isinstance(self.seq_model, RNNModel):
-            self.seq_model_class_name = 'RNNModel'
+            self.seq_model_class_name = "RNNModel"
         elif isinstance(self.seq_model, Conv1DModel):
-            self.seq_model_class_name = 'Conv1DModel'
+            self.seq_model_class_name = "Conv1DModel"
         elif isinstance(self.seq_model, AttentionModel):
-            self.seq_model_class_name = 'AttentionModel'
+            self.seq_model_class_name = "AttentionModel"
         else:
             self.seq_model_class_name = self.seq_model.__class__.__name__
 
@@ -346,23 +344,16 @@ class ProbSeqQMixer(Mixer):
         alive_mask: torch.Tensor,
         padding_mask: torch.Tensor,
     ) -> Dict[str, torch.Tensor]:
-        # Get device from feature_extractor
-        device = next(self.feature_extractor.parameters()).device
-
-        # Move tensors to feature_extractor's device
-        states = states.to(device)
-        alive_mask = alive_mask.to(device)
-        padding_mask = padding_mask.to(device)
-        q_value_from_agents = q_value_from_agents.to(device)
-
         bs = q_value_from_agents.shape[0]
         ts = states.shape[1]
         state_shape = states.shape[2:]
         states = states.reshape(bs * ts, *state_shape)
 
         # Extract features for each timestep
-        if self.fe_class_name == 'MaskedModel':
-            encoded_states = self.feature_extractor(states, alive_mask.reshape(bs * ts, -1).to(device))
+        if self.fe_class_name == "MaskedModel":
+            encoded_states = self.feature_extractor(
+                states, alive_mask.reshape(bs * ts, -1)
+            )
         else:
             encoded_states = self.feature_extractor(states)
 
@@ -389,12 +380,14 @@ class ProbSeqQMixer(Mixer):
         last_std = std[:, -1, :]
 
         # Process sequence with appropriate model
-        if self.seq_model_class_name == 'Conv1DModel':
-            encoded_states_sample = encoded_states_sample.permute(0, 2, 1)  # (B, T, F) -> (B, F, T)
+        if self.seq_model_class_name == "Conv1DModel":
+            encoded_states_sample = encoded_states_sample.permute(
+                0, 2, 1
+            )  # (B, T, F) -> (B, F, T)
             hidden_states = self.seq_model(encoded_states_sample)
-        elif self.seq_model_class_name == 'RNNModel':
+        elif self.seq_model_class_name == "RNNModel":
             hidden_states = self.seq_model(encoded_states_sample)
-        elif self.seq_model_class_name == 'AttentionModel':
+        elif self.seq_model_class_name == "AttentionModel":
             hidden_states = self.seq_model(encoded_states_sample, padding_mask)
         else:
             hidden_states = self.seq_model(encoded_states_sample[:, -1, :])
@@ -407,7 +400,7 @@ class ProbSeqQMixer(Mixer):
             "q_tot": q_tot,
             "state_features": last_encoded_states_sample,
             "mu": last_mu,
-            "std": last_std
+            "std": last_std,
         }
 
     def _forward_with_seq_hidden(
@@ -417,35 +410,28 @@ class ProbSeqQMixer(Mixer):
         alive_mask: torch.Tensor,
         padding_mask: torch.Tensor,
     ) -> Dict[str, torch.Tensor]:
-        # Get device from feature_extractor
-        device = next(self.feature_extractor.parameters()).device
-
-        # Move tensors to feature_extractor's device
-        states = states.to(device)
-        alive_mask = alive_mask.to(device)
-        padding_mask = padding_mask.to(device)
-        q_value_from_agents = q_value_from_agents.to(device)
-
         bs = q_value_from_agents.shape[0]
         ts = states.shape[1]
         state_shape = states.shape[2:]
         states = states.reshape(bs * ts, *state_shape)
 
         # Extract features for each timestep
-        if self.fe_class_name == 'MaskedModel':
-            encoded_states = self.feature_extractor(states, alive_mask.reshape(bs * ts, -1).to(device))
+        if self.fe_class_name == "MaskedModel":
+            encoded_states = self.feature_extractor(
+                states, alive_mask.reshape(bs * ts, -1)
+            )
         else:
             encoded_states = self.feature_extractor(states)
 
         encoded_states = encoded_states.reshape(bs, ts, -1)
 
         # Process sequence with appropriate model
-        if self.seq_model_class_name == 'Conv1DModel':
-            encoded_states = encoded_states.permute(0, 2, 1) # (B, T, F) -> (B, F, T)
+        if self.seq_model_class_name == "Conv1DModel":
+            encoded_states = encoded_states.permute(0, 2, 1)  # (B, T, F) -> (B, F, T)
             hidden_states = self.seq_model(encoded_states)
-        elif self.seq_model_class_name == 'RNNModel':
+        elif self.seq_model_class_name == "RNNModel":
             hidden_states = self.seq_model(encoded_states)
-        elif self.seq_model_class_name == 'AttentionModel':
+        elif self.seq_model_class_name == "AttentionModel":
             hidden_states = self.seq_model(encoded_states, padding_mask)
         else:
             hidden_states = self.seq_model(encoded_states[:, -1, :])
@@ -469,12 +455,7 @@ class ProbSeqQMixer(Mixer):
         masked_q_values = q_value_from_agents * alive_mask[:, -1, :]
         q_tot = self.base_model(masked_q_values, sample)
 
-        return {
-            "q_tot": q_tot,
-            "state_features": sample,
-            "mu": mu,
-            "std": std
-        }
+        return {"q_tot": q_tot, "state_features": sample, "mu": mu, "std": std}
 
     def forward(
         self,
@@ -499,9 +480,4 @@ class ProbSeqQMixer(Mixer):
                 - "mu": Mean of the latent sequence representation
                 - "std": Standard deviation of the latent sequence representation
         """
-        return self.forward_fn(
-            q_value_from_agents,
-            states,
-            alive_mask,
-            padding_mask
-        )
+        return self.forward_fn(q_value_from_agents, states, alive_mask, padding_mask)
