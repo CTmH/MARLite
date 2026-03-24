@@ -1,6 +1,8 @@
 import numpy as np
 import unittest
-from marlite.util.self_supervised_data_constructor.magent_obs_data_constructor import MagentImageObsDataConstructor
+from marlite.util.self_supervised_data_constructor.magent_obs_data_constructor import (
+    MagentImageObsDataConstructor,
+)
 
 
 class TestMagentImageObsDataConstructor(unittest.TestCase):
@@ -24,13 +26,18 @@ class TestMagentImageObsDataConstructor(unittest.TestCase):
         # NEW DIMENSION: alive_mask is now (batch_size, seq_len, n_agents)
         alive_mask = np.array([[[True, True]]], dtype=bool)  # (1, 1, 2)
 
-        constructor = MagentImageObsDataConstructor(max_entities_perception=16, with_time_seq=False, n_workers=0, channel_first=False)
+        constructor = MagentImageObsDataConstructor(
+            max_entities_perception=16,
+            with_time_seq=False,
+            n_workers=0,
+            channel_first=False,
+        )
 
         result, mask = constructor.process(
             observations=observations,
             states=states,
             edge_indices=edge_indices,
-            alive_mask=alive_mask
+            alive_mask=alive_mask,
         )
 
         # Expected: each agent sees only its own H*W=4 pixels → padded to 16
@@ -68,13 +75,18 @@ class TestMagentImageObsDataConstructor(unittest.TestCase):
         # NEW DIMENSION: alive_mask is now (batch_size, seq_len, n_agents)
         alive_mask = np.array([[[True, True]]], dtype=bool)  # (1, 1, 2)
 
-        constructor = MagentImageObsDataConstructor(max_entities_perception=16, with_time_seq=True, n_workers=0, channel_first=False)
+        constructor = MagentImageObsDataConstructor(
+            max_entities_perception=16,
+            with_time_seq=True,
+            n_workers=0,
+            channel_first=False,
+        )
 
         result, mask = constructor.process(
             observations=observations,
             states=states,
             edge_indices=edge_indices,
-            alive_mask=alive_mask
+            alive_mask=alive_mask,
         )
 
         # Expected: each agent sees only its own H*W=4 pixels → padded to 16, with time dimension preserved
@@ -115,13 +127,18 @@ class TestMagentImageObsDataConstructor(unittest.TestCase):
         edge_indices = [[np.empty((2, 0), dtype=int)]]  # batch 0, time 0: (2, 0)
         alive_mask = np.array([[[True, True]]], dtype=bool)  # (1, 1, 2)
 
-        constructor = MagentImageObsDataConstructor(max_entities_perception=16, with_time_seq=False, n_workers=0, channel_first=True)
+        constructor = MagentImageObsDataConstructor(
+            max_entities_perception=16,
+            with_time_seq=False,
+            n_workers=0,
+            channel_first=True,
+        )
 
         result, mask = constructor.process(
             observations=observations,
             states=states,
             edge_indices=edge_indices,
-            alive_mask=alive_mask
+            alive_mask=alive_mask,
         )
 
         # Expected: same as channel-last case since conversion should happen
@@ -155,19 +172,26 @@ class TestMagentImageObsDataConstructor(unittest.TestCase):
         observations[0, 0, 1, 0, 1, :] = [4.0, 4.0]
 
         # edge_indices: List[List[np.ndarray]] where each time step has (2, 1) shape with one edge from agent1 to agent0
-        edge_indices = [[np.array([[1], [0]], dtype=int)],
-                        [np.array([[1], [0]], dtype=int)]]  # batch 0, time 0: (2, 1), source=1, target=0
+        edge_indices = [
+            [np.array([[1], [0]], dtype=int)],
+            [np.array([[1], [0]], dtype=int)],
+        ]  # batch 0, time 0: (2, 1), source=1, target=0
 
         # NEW DIMENSION: alive_mask is now (batch_size, seq_len, n_agents)
         alive_mask = np.array([[[True, True]]], dtype=bool)  # (1, 1, 2)
 
-        constructor = MagentImageObsDataConstructor(max_entities_perception=16, with_time_seq=False, n_workers=0, channel_first=False)
+        constructor = MagentImageObsDataConstructor(
+            max_entities_perception=16,
+            with_time_seq=False,
+            n_workers=0,
+            channel_first=False,
+        )
 
         result, mask = constructor.process(
             observations=observations,
             states=None,
             edge_indices=edge_indices,
-            alive_mask=alive_mask
+            alive_mask=alive_mask,
         )
 
         # agent0 sees: self (4 pixels) + agent1 (4 pixels) → 8 entities → pad to 16
@@ -218,21 +242,33 @@ class TestMagentImageObsDataConstructor(unittest.TestCase):
         observations[0, 0, 2, 0, 1, :] = [6.0, 6.0]
 
         # Edges: a1->a0 (but a1 is dead, so ignored), a2->a0
-        edge_indices = [[np.array([
-            [1, 2],  # sources
-            [0, 0],  # targets
-        ], dtype=int)]]
+        edge_indices = [
+            [
+                np.array(
+                    [
+                        [1, 2],  # sources
+                        [0, 0],  # targets
+                    ],
+                    dtype=int,
+                )
+            ]
+        ]
 
         # NEW DIMENSION: alive_mask is now (batch_size, seq_len, n_agents)
         alive_mask = np.array([[[True, False, True]]], dtype=bool)  # a1 dead, (1, 1, 3)
 
-        constructor = MagentImageObsDataConstructor(max_entities_perception=16, with_time_seq=False, n_workers=0, channel_first=False)
+        constructor = MagentImageObsDataConstructor(
+            max_entities_perception=16,
+            with_time_seq=False,
+            n_workers=0,
+            channel_first=False,
+        )
 
         result, mask = constructor.process(
             observations=observations,
             states=None,
             edge_indices=edge_indices,
-            alive_mask=alive_mask
+            alive_mask=alive_mask,
         )
 
         # a0 sees: self (4 pixels) + a2 (4 pixels) → 8 entities → exact fit
@@ -298,22 +334,26 @@ class TestMagentImageObsDataConstructor(unittest.TestCase):
             [  # batch 1
                 np.empty((2, 0), dtype=int),  # time 0
                 np.empty((2, 0), dtype=int),  # time 1
-            ]
+            ],
         ]
 
         # NEW DIMENSION: alive_mask is now (batch_size, seq_len, n_agents)
-        alive_mask = np.array([
-            [[True, True], [True, True]],
-            [[True, True], [True, True]]
-        ], dtype=bool)  # (2, 2, 2)
+        alive_mask = np.array(
+            [[[True, True], [True, True]], [[True, True], [True, True]]], dtype=bool
+        )  # (2, 2, 2)
 
         # Test with_time_seq=False
-        constructor_no_time = MagentImageObsDataConstructor(max_entities_perception=16, with_time_seq=False, n_workers=0, channel_first=False)
+        constructor_no_time = MagentImageObsDataConstructor(
+            max_entities_perception=16,
+            with_time_seq=False,
+            n_workers=0,
+            channel_first=False,
+        )
         result_no_time, mask_no_time = constructor_no_time.process(
             observations=observations,
             states=None,
             edge_indices=edge_indices,
-            alive_mask=alive_mask
+            alive_mask=alive_mask,
         )
 
         # Expected shape without time: (2, 2, 16, 2) - only last time step
@@ -322,12 +362,17 @@ class TestMagentImageObsDataConstructor(unittest.TestCase):
         self.assertEqual(mask_no_time.shape, (2, 2, 16))
 
         # Test with_time_seq=True
-        constructor_with_time = MagentImageObsDataConstructor(max_entities_perception=16, with_time_seq=True, n_workers=0, channel_first=False)
+        constructor_with_time = MagentImageObsDataConstructor(
+            max_entities_perception=16,
+            with_time_seq=True,
+            n_workers=0,
+            channel_first=False,
+        )
         result_with_time, mask_with_time = constructor_with_time.process(
             observations=observations,
             states=None,
             edge_indices=edge_indices,
-            alive_mask=alive_mask
+            alive_mask=alive_mask,
         )
 
         # Expected shape with time: (2, 2, 2, 16, 2) - all time steps
@@ -351,14 +396,19 @@ class TestMagentImageObsDataConstructor(unittest.TestCase):
         alive_mask = np.array([[[True, True]]], dtype=bool)  # (1, 1, 2)
 
         # Test with exclude_features=[1] (remove second feature)
-        constructor = MagentImageObsDataConstructor(max_entities_perception=16, with_time_seq=False, n_workers=0,
-                                                  exclude_features=[1], channel_first=False)
+        constructor = MagentImageObsDataConstructor(
+            max_entities_perception=16,
+            with_time_seq=False,
+            n_workers=0,
+            exclude_features=[1],
+            channel_first=False,
+        )
 
         result, mask = constructor.process(
             observations=observations,
             states=states,
             edge_indices=edge_indices,
-            alive_mask=alive_mask
+            alive_mask=alive_mask,
         )
 
         # Should have feature dimension 2 (3-1)
@@ -392,14 +442,19 @@ class TestMagentImageObsDataConstructor(unittest.TestCase):
         alive_mask = np.array([[[True, True]]], dtype=bool)  # (1, 1, 2)
 
         # Test with include_features=[1] (keep only second feature)
-        constructor = MagentImageObsDataConstructor(max_entities_perception=16, with_time_seq=False, n_workers=0,
-                                                  include_features=[1], channel_first=False)
+        constructor = MagentImageObsDataConstructor(
+            max_entities_perception=16,
+            with_time_seq=False,
+            n_workers=0,
+            include_features=[1],
+            channel_first=False,
+        )
 
         result, mask = constructor.process(
             observations=observations,
             states=states,
             edge_indices=edge_indices,
-            alive_mask=alive_mask
+            alive_mask=alive_mask,
         )
 
         # Should have feature dimension 1 (only index 1)
@@ -417,6 +472,77 @@ class TestMagentImageObsDataConstructor(unittest.TestCase):
         np.testing.assert_array_equal(result[0, 0], expected_agent0)
         np.testing.assert_array_equal(result[0, 1], expected_agent1)
 
+    def test_entities_sorted_by_distance_then_angle(self):
+        """Test that entities are sorted by distance (ascending) first, then angle (ascending) for image observations."""
+        # batch_size=1, seq_len=1, 2 agents, H=2, W=2, C=3
+        # Each pixel in HxW grid represents an entity with [rel_x, rel_y, value] features
+        # Grid positions: [0,0], [0,1], [1,0], [1,1] correspond to different relative positions
+        H, W, C = 2, 2, 3
+        observations = np.zeros((1, 1, 2, H, W, C), dtype=np.float32)
 
-if __name__ == '__main__':
+        # Agent 0's observation:
+        # [0,0] = [3.0, 0.0, 1.0] - dist=3
+        # [0,1] = [0.0, 0.0, 0.0] - zero
+        # [1,0] = [1.0, 0.0, 2.0] - dist=1
+        # [1,1] = [0.0, 0.0, 0.0] - zero
+        observations[0, 0, 0, 0, 0, :] = [3.0, 0.0, 1.0]
+        observations[0, 0, 0, 1, 0, :] = [1.0, 0.0, 2.0]
+
+        # Agent 1's observation:
+        # [0,0] = [2.0, 0.0, 3.0] - dist=2
+        # [0,1] = [0.0, 1.0, 4.0] - dist=1, angle=pi/2
+        # [1,0] = [0.0, -1.0, 5.0] - dist=1, angle=-pi/2
+        # [1,1] = [0.0, 0.0, 0.0] - zero
+        observations[0, 0, 1, 0, 0, :] = [2.0, 0.0, 3.0]
+        observations[0, 0, 1, 0, 1, :] = [0.0, 1.0, 4.0]
+        observations[0, 0, 1, 1, 0, :] = [0.0, -1.0, 5.0]
+
+        # Edge: agent1 -> agent0
+        edge_indices = [[np.array([[1], [0]], dtype=int)]]
+        alive_mask = np.array([[[True, True]]], dtype=bool)
+
+        constructor = MagentImageObsDataConstructor(
+            max_entities_perception=5,
+            with_time_seq=False,
+            n_workers=0,
+            channel_first=False,
+        )
+
+        result, mask = constructor.process(
+            observations=observations,
+            states=None,
+            edge_indices=edge_indices,
+            alive_mask=alive_mask,
+        )
+
+        # After reshaping (H,W,C) -> (L,C) where L=H*W=4:
+        # Agent 0's entities: [3,0,1], [0,0,0], [1,0,2], [0,0,0]
+        # Agent 1's entities: [2,0,3], [0,1,4], [0,-1,5], [0,0,0]
+
+        # Combined and sorted by distance, then angle:
+        # 1. [0.0, -1.0, 5.0] - dist=1, angle=-pi/2
+        # 2. [1.0, 0.0, 2.0] - dist=1, angle=0
+        # 3. [0.0, 1.0, 4.0] - dist=1, angle=pi/2
+        # 4. [2.0, 0.0, 3.0] - dist=2, angle=0
+        # 5. [3.0, 0.0, 1.0] - dist=3, angle=0
+
+        expected_agent0 = np.array(
+            [
+                [0.0, -1.0, 5.0],
+                [1.0, 0.0, 2.0],
+                [0.0, 1.0, 4.0],
+                [2.0, 0.0, 3.0],
+                [3.0, 0.0, 1.0],
+            ],
+            dtype=np.float32,
+        )
+
+        np.testing.assert_array_equal(result[0, 0], expected_agent0)
+
+        # Check that all 5 entities are marked as real
+        expected_mask_agent0 = np.array([True, True, True, True, True], dtype=bool)
+        np.testing.assert_array_equal(mask[0, 0], expected_mask_agent0)
+
+
+if __name__ == "__main__":
     unittest.main()

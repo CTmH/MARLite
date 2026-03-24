@@ -1,6 +1,8 @@
 import numpy as np
 import unittest
-from marlite.util.self_supervised_data_constructor.magent_obs_data_constructor import MagentVecObsDataConstructor
+from marlite.util.self_supervised_data_constructor.magent_obs_data_constructor import (
+    MagentVecObsDataConstructor,
+)
 
 
 class TestMagentVecObsDataConstructor(unittest.TestCase):
@@ -9,10 +11,18 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
     def test_process_empty_edges_without_time_seq(self):
         """Test behavior when edge_indices is empty (no communication) without time sequence."""
         # Setup: batch_size=1, seq_len=1, 2 agents, max_observed_entities=2, feature_dim=3, max_entities_perception=4
-        observations = np.array([[
-            [[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]],  # agent 0: two entities at time 0
-            [[7.0, 8.0, 9.0], [0.0, 0.0, 0.0]]],  # agent 1: one real + one zero-padded at time 0
-        ]], dtype=np.float32)  # shape: (1, 1, 2, 2, 3)
+        observations = np.array(
+            [
+                [
+                    [
+                        [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]],
+                        # agent 0: two entities at time 0
+                        [[7.0, 8.0, 9.0], [0.0, 0.0, 0.0]],
+                    ],  # agent 1: one real + one zero-padded at time 0
+                ]
+            ],
+            dtype=np.float32,
+        )  # shape: (1, 1, 2, 2, 3)
 
         states = None
         # Empty edge_indices: List[List[np.ndarray]] where each time step has (2, 0) shape
@@ -20,29 +30,37 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
         # NEW DIMENSION: alive_mask is now (batch_size, seq_len, n_agents)
         alive_mask = np.array([[[True, True]]], dtype=bool)  # (1, 1, 2)
 
-        constructor = MagentVecObsDataConstructor(max_entities_perception=4, with_time_seq=False, n_workers=0)
+        constructor = MagentVecObsDataConstructor(
+            max_entities_perception=4, with_time_seq=False, n_workers=0
+        )
 
         result, mask = constructor.process(
             observations=observations,
             states=states,
             edge_indices=edge_indices,
-            alive_mask=alive_mask
+            alive_mask=alive_mask,
         )
 
         # Expected: each agent sees only its own 2 entities → padded to 4
-        expected_agent0 = np.array([
-            [1.0, 2.0, 3.0],
-            [4.0, 5.0, 6.0],
-            [0.0, 0.0, 0.0],
-            [0.0, 0.0, 0.0],
-        ], dtype=np.float32)
+        expected_agent0 = np.array(
+            [
+                [1.0, 2.0, 3.0],
+                [4.0, 5.0, 6.0],
+                [0.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0],
+            ],
+            dtype=np.float32,
+        )
 
-        expected_agent1 = np.array([
-            [7.0, 8.0, 9.0],
-            [0.0, 0.0, 0.0],
-            [0.0, 0.0, 0.0],
-            [0.0, 0.0, 0.0],
-        ], dtype=np.float32)
+        expected_agent1 = np.array(
+            [
+                [7.0, 8.0, 9.0],
+                [0.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0],
+            ],
+            dtype=np.float32,
+        )
 
         np.testing.assert_array_equal(result[0, 0], expected_agent0)
         np.testing.assert_array_equal(result[0, 1], expected_agent1)
@@ -56,10 +74,18 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
     def test_process_empty_edges_with_time_seq(self):
         """Test behavior when edge_indices is empty (no communication) with time sequence."""
         # Setup: batch_size=1, seq_len=1, 2 agents, max_observed_entities=2, feature_dim=3, max_entities_perception=4
-        observations = np.array([[
-            [[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]],  # agent 0: two entities at time 0
-            [[7.0, 8.0, 9.0], [0.0, 0.0, 0.0]]],  # agent 1: one real + one zero-padded at time 0
-        ]], dtype=np.float32)  # shape: (1, 1, 2, 2, 3)
+        observations = np.array(
+            [
+                [
+                    [
+                        [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]],
+                        # agent 0: two entities at time 0
+                        [[7.0, 8.0, 9.0], [0.0, 0.0, 0.0]],
+                    ],  # agent 1: one real + one zero-padded at time 0
+                ]
+            ],
+            dtype=np.float32,
+        )  # shape: (1, 1, 2, 2, 3)
 
         states = None
         # Empty edge_indices: List[List[np.ndarray]] where each time step has (2, 0) shape
@@ -67,73 +93,101 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
         # NEW DIMENSION: alive_mask is now (batch_size, seq_len, n_agents)
         alive_mask = np.array([[[True, True]]], dtype=bool)  # (1, 1, 2)
 
-        constructor = MagentVecObsDataConstructor(max_entities_perception=4, with_time_seq=True, n_workers=0)
+        constructor = MagentVecObsDataConstructor(
+            max_entities_perception=4, with_time_seq=True, n_workers=0
+        )
 
         result, mask = constructor.process(
             observations=observations,
             states=states,
             edge_indices=edge_indices,
-            alive_mask=alive_mask
+            alive_mask=alive_mask,
         )
 
         # Expected: each agent sees only its own 2 entities → padded to 4, with time dimension preserved
-        expected_result = np.array([
-            [[1.0, 2.0, 3.0],
-            [4.0, 5.0, 6.0],
-            [0.0, 0.0, 0.0],
-            [0.0, 0.0, 0.0]],
-            [[7.0, 8.0, 9.0],
-            [0.0, 0.0, 0.0],
-            [0.0, 0.0, 0.0],
-            [0.0, 0.0, 0.0],]
-        ], dtype=np.float32)
+        expected_result = np.array(
+            [
+                [
+                    [1.0, 2.0, 3.0],
+                    [4.0, 5.0, 6.0],
+                    [0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0],
+                ],
+                [
+                    [7.0, 8.0, 9.0],
+                    [0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0],
+                ],
+            ],
+            dtype=np.float32,
+        )
 
         np.testing.assert_array_equal(result[0][0], expected_result)
 
         # Check mask: first 2 entities should be True (real), last 2 should be False (padded)
-        expected_mask = np.array([[True, True, False, False],[True, False, False, False]], dtype=bool)
+        expected_mask = np.array(
+            [[True, True, False, False], [True, False, False, False]], dtype=bool
+        )
         np.testing.assert_array_equal(mask[0][0], expected_mask)
 
     def test_process_with_incoming_edges_without_time_seq(self):
         """Test with one incoming edge: agent1 -> agent0, without time sequence."""
         # batch_size=1, seq_len=1, 2 agents, max_observed_entities=2, feature_dim=2
-        observations = np.array([[
-            [[[1.0, 1.0], [2.0, 2.0]],  # agent0: [e0, e1] at time 0
-            [[3.0, 3.0], [4.0, 4.0]]],  # agent1: [e2, e3] at time 0
-        ]], dtype=np.float32)  # (1, 1, 2, 2, 2)
+        observations = np.array(
+            [
+                [
+                    [
+                        [[1.0, 1.0], [2.0, 2.0]],  # agent0: [e0, e1] at time 0
+                        [[3.0, 3.0], [4.0, 4.0]],
+                    ],  # agent1: [e2, e3] at time 0
+                ]
+            ],
+            dtype=np.float32,
+        )  # (1, 1, 2, 2, 2)
 
         # edge_indices: List[List[np.ndarray]] where each time step has (2, 1) shape with one edge from agent1 to agent0
-        edge_indices = [[np.array([[1], [0]], dtype=int)]]  # batch 0, time 0: (2, 1), source=1, target=0
+        edge_indices = [
+            [np.array([[1], [0]], dtype=int)]
+        ]  # batch 0, time 0: (2, 1), source=1, target=0
 
         # NEW DIMENSION: alive_mask is now (batch_size, seq_len, n_agents)
         alive_mask = np.array([[[True, True]]], dtype=bool)  # (1, 1, 2)
 
-        constructor = MagentVecObsDataConstructor(max_entities_perception=5, with_time_seq=False, n_workers=0)
+        constructor = MagentVecObsDataConstructor(
+            max_entities_perception=5, with_time_seq=False, n_workers=0
+        )
 
         result, mask = constructor.process(
             observations=observations,
             states=None,
             edge_indices=edge_indices,
-            alive_mask=alive_mask
+            alive_mask=alive_mask,
         )
 
         # agent0 sees: self([1,1],[2,2]) + agent1([3,3],[4,4]) → 4 entities → pad to 5
-        expected_agent0 = np.array([
-            [1.0, 1.0],
-            [2.0, 2.0],
-            [3.0, 3.0],
-            [4.0, 4.0],
-            [0.0, 0.0],
-        ], dtype=np.float32)
+        expected_agent0 = np.array(
+            [
+                [1.0, 1.0],
+                [2.0, 2.0],
+                [3.0, 3.0],
+                [4.0, 4.0],
+                [0.0, 0.0],
+            ],
+            dtype=np.float32,
+        )
 
         # agent1 has no incoming edges → only self
-        expected_agent1 = np.array([
-            [3.0, 3.0],
-            [4.0, 4.0],
-            [0.0, 0.0],
-            [0.0, 0.0],
-            [0.0, 0.0],
-        ], dtype=np.float32)
+        expected_agent1 = np.array(
+            [
+                [3.0, 3.0],
+                [4.0, 4.0],
+                [0.0, 0.0],
+                [0.0, 0.0],
+                [0.0, 0.0],
+            ],
+            dtype=np.float32,
+        )
 
         np.testing.assert_array_equal(result[0, 0], expected_agent0)
         np.testing.assert_array_equal(result[0, 1], expected_agent1)
@@ -147,10 +201,21 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
     def test_process_with_incoming_edges_with_time_seq(self):
         """Test with different edges for each time step, with time sequence."""
         # batch_size=1, 2 agents, seq_len=2, max_observed_entities=2, feature_dim=2
-        observations = np.array([[
-            [[[1.0, 1.0], [2.0, 2.0]], [[3.0, 3.0], [4.0, 4.0]]],  # agent0: [e0, e1] at time 0 and [e0', e1'] at time 1
-            [[[1.1, 1.1], [2.1, 2.1]], [[3.1, 3.1], [4.1, 4.1]]],  # agent1: [e2, e3] at time 0 and [e2', e3'] at time 1
-        ]], dtype=np.float32)  # (1, 2, 2, 2, 2)
+        observations = np.array(
+            [
+                [
+                    [
+                        [[1.0, 1.0], [2.0, 2.0]],
+                        [[3.0, 3.0], [4.0, 4.0]],
+                    ],  # agent0: [e0, e1] at time 0 and [e0', e1'] at time 1
+                    [
+                        [[1.1, 1.1], [2.1, 2.1]],
+                        [[3.1, 3.1], [4.1, 4.1]],
+                    ],  # agent1: [e2, e3] at time 0 and [e2', e3'] at time 1
+                ]
+            ],
+            dtype=np.float32,
+        )  # (1, 2, 2, 2, 2)
 
         # edge_indices: different edges for each time step
         # Time 0: one edge from agent1 to agent0 → [0, 1] means source=1, target=0
@@ -158,56 +223,70 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
         edge_indices = [
             [  # batch 0
                 np.array([[1], [0]], dtype=int),  # time 0: (2, 1), source=1, target=0
-                np.empty((2, 0), dtype=int)       # time 1: (2, 0), no edges
+                np.empty((2, 0), dtype=int),  # time 1: (2, 0), no edges
             ]
         ]
 
         # NEW DIMENSION: alive_mask is now (batch_size, seq_len, n_agents)
         alive_mask = np.array([[[True, True], [True, True]]], dtype=bool)  # (1, 2, 2)
 
-        constructor = MagentVecObsDataConstructor(max_entities_perception=5, with_time_seq=True, n_workers=0)
+        constructor = MagentVecObsDataConstructor(
+            max_entities_perception=5, with_time_seq=True, n_workers=0
+        )
 
         result, mask = constructor.process(
             observations=observations,
             states=None,
             edge_indices=edge_indices,
-            alive_mask=alive_mask
+            alive_mask=alive_mask,
         )
 
         # agent0 sees at time 0: self([1,1],[2,2]) + agent1([3,3],[4,4]) → 4 entities → pad to 5
         # agent0 sees at time 1: only self([1.1,1.1],[2.1,2.1]) since no edges → 2 entities → pad to 5
-        expected_agent0_t0 = np.array([
-            [1.0, 1.0],
-            [2.0, 2.0],
-            [3.0, 3.0],
-            [4.0, 4.0],
-            [0.0, 0.0],
-        ], dtype=np.float32)
+        expected_agent0_t0 = np.array(
+            [
+                [1.0, 1.0],
+                [2.0, 2.0],
+                [3.0, 3.0],
+                [4.0, 4.0],
+                [0.0, 0.0],
+            ],
+            dtype=np.float32,
+        )
 
-        expected_agent0_t1 = np.array([
-            [1.1, 1.1],
-            [2.1, 2.1],
-            [0.0, 0.0],
-            [0.0, 0.0],
-            [0.0, 0.0],
-        ], dtype=np.float32)
+        expected_agent0_t1 = np.array(
+            [
+                [1.1, 1.1],
+                [2.1, 2.1],
+                [0.0, 0.0],
+                [0.0, 0.0],
+                [0.0, 0.0],
+            ],
+            dtype=np.float32,
+        )
 
         # agent1 has no incoming edges at time 0 → only self, at time 1 → only self
-        expected_agent1_t0 = np.array([
-            [3.0, 3.0],
-            [4.0, 4.0],
-            [0.0, 0.0],
-            [0.0, 0.0],
-            [0.0, 0.0],
-        ], dtype=np.float32)
+        expected_agent1_t0 = np.array(
+            [
+                [3.0, 3.0],
+                [4.0, 4.0],
+                [0.0, 0.0],
+                [0.0, 0.0],
+                [0.0, 0.0],
+            ],
+            dtype=np.float32,
+        )
 
-        expected_agent1_t1 = np.array([
-            [3.1, 3.1],
-            [4.1, 4.1],
-            [0.0, 0.0],
-            [0.0, 0.0],
-            [0.0, 0.0],
-        ], dtype=np.float32)
+        expected_agent1_t1 = np.array(
+            [
+                [3.1, 3.1],
+                [4.1, 4.1],
+                [0.0, 0.0],
+                [0.0, 0.0],
+                [0.0, 0.0],
+            ],
+            dtype=np.float32,
+        )
 
         np.testing.assert_array_equal(result[0, 0, 0], expected_agent0_t0)
         np.testing.assert_array_equal(result[0, 1, 0], expected_agent0_t1)
@@ -217,9 +296,15 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
         # Check mask: agent0 has 4 real entities at time 0, 2 real entities at time 1
         # agent1 has 2 real entities at each time step
         expected_mask_agent0_t0 = np.array([True, True, True, True, False], dtype=bool)
-        expected_mask_agent0_t1 = np.array([True, True, False, False, False], dtype=bool)
-        expected_mask_agent1_t0 = np.array([True, True, False, False, False], dtype=bool)
-        expected_mask_agent1_t1 = np.array([True, True, False, False, False], dtype=bool)
+        expected_mask_agent0_t1 = np.array(
+            [True, True, False, False, False], dtype=bool
+        )
+        expected_mask_agent1_t0 = np.array(
+            [True, True, False, False, False], dtype=bool
+        )
+        expected_mask_agent1_t1 = np.array(
+            [True, True, False, False, False], dtype=bool
+        )
         np.testing.assert_array_equal(mask[0, 0, 0], expected_mask_agent0_t0)
         np.testing.assert_array_equal(mask[0, 1, 0], expected_mask_agent0_t1)
         np.testing.assert_array_equal(mask[0, 0, 1], expected_mask_agent1_t0)
@@ -228,40 +313,57 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
     def test_process_with_self_loop_and_duplicates_without_time_seq(self):
         """Test self-loop and duplicate observations across agents without time sequence."""
         # batch_size=1, seq_len=1, 2 agents, max_observed_entities=2, feature_dim=2
-        observations = np.array([[
-            [[[1.0, 1.0], [2.0, 2.0]],  # agent0 at time 0
-            [[1.0, 1.0], [3.0, 3.0]]],  # agent1 at time 0 — shares [1,1] with agent0
-        ]], dtype=np.float32)
+        observations = np.array(
+            [
+                [
+                    [
+                        [[1.0, 1.0], [2.0, 2.0]],  # agent0 at time 0
+                        [[1.0, 1.0], [3.0, 3.0]],
+                    ],  # agent1 at time 0 — shares [1,1] with agent0
+                ]
+            ],
+            dtype=np.float32,
+        )
 
         # Self-loop on agent0 (0->0) + edge from agent1 to agent0 (1->0)
-        edge_indices = [[np.array([[0, 1], [0, 0]], dtype=int)]]  # batch 0, time 0: (2, 2), edges: (0→0) and (1→0)
+        edge_indices = [
+            [np.array([[0, 1], [0, 0]], dtype=int)]
+        ]  # batch 0, time 0: (2, 2), edges: (0→0) and (1→0)
 
         # NEW DIMENSION: alive_mask is now (batch_size, seq_len, n_agents)
         alive_mask = np.array([[[True, True]]], dtype=bool)  # (1, 1, 2)
 
-        constructor = MagentVecObsDataConstructor(max_entities_perception=3, with_time_seq=False, n_workers=0)
+        constructor = MagentVecObsDataConstructor(
+            max_entities_perception=3, with_time_seq=False, n_workers=0
+        )
 
         result, mask = constructor.process(
             observations=observations,
             states=None,
             edge_indices=edge_indices,
-            alive_mask=alive_mask
+            alive_mask=alive_mask,
         )
 
         # agent0 sees: self([1,1],[2,2]) + self-loop([1,1],[2,2]) + agent1([1,1],[3,3])
         # All vectors: [1,1], [2,2], [1,1], [2,2], [1,1], [3,3] → unique: [1,1], [2,2], [3,3] → exactly 3
-        expected_agent0 = np.array([
-            [1.0, 1.0],
-            [2.0, 2.0],
-            [3.0, 3.0],
-        ], dtype=np.float32)
+        expected_agent0 = np.array(
+            [
+                [1.0, 1.0],
+                [2.0, 2.0],
+                [3.0, 3.0],
+            ],
+            dtype=np.float32,
+        )
 
         # agent1 has no incoming edges → only self → [1,1], [3,3] → pad to 3
-        expected_agent1 = np.array([
-            [1.0, 1.0],
-            [3.0, 3.0],
-            [0.0, 0.0],
-        ], dtype=np.float32)
+        expected_agent1 = np.array(
+            [
+                [1.0, 1.0],
+                [3.0, 3.0],
+                [0.0, 0.0],
+            ],
+            dtype=np.float32,
+        )
 
         np.testing.assert_array_equal(result[0, 0], expected_agent0)
         np.testing.assert_array_equal(result[0, 1], expected_agent1)
@@ -275,30 +377,49 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
     def test_process_with_zero_padding_and_truncation_without_time_seq(self):
         """Test removal of zero-padded rows and truncation to max_entities_perception without time sequence."""
         # batch_size=1, seq_len=1, 1 agent, max_observed_entities=4, but only first 2 are non-zero
-        observations = np.array([[[[[1.0, 0.0],  # real
-            [0.0, 1.0],  # real
-            [0.0, 0.0],  # padding
-            [0.0, 0.0],  # padding
-        ]]]], dtype=np.float32)  # (1, 1, 1, 4, 2)
+        observations = np.array(
+            [
+                [
+                    [
+                        [
+                            [1.0, 0.0],  # real
+                            [0.0, 1.0],  # real
+                            [0.0, 0.0],  # padding
+                            [0.0, 0.0],  # padding
+                        ]
+                    ]
+                ]
+            ],
+            dtype=np.float32,
+        )  # (1, 1, 1, 4, 2)
 
         edge_indices = [[np.empty((2, 0), dtype=int)]]  # no edges for time 0
         # NEW DIMENSION: alive_mask is now (batch_size, seq_len, n_agents)
         alive_mask = np.array([[[True]]])  # (1, 1, 1)
 
-        constructor = MagentVecObsDataConstructor(max_entities_perception=2, with_time_seq=False, n_workers=0)
+        constructor = MagentVecObsDataConstructor(
+            max_entities_perception=2, with_time_seq=False, n_workers=0
+        )
 
         result, mask = constructor.process(
             observations=observations,
             states=None,
             edge_indices=edge_indices,
-            alive_mask=alive_mask
+            alive_mask=alive_mask,
         )
 
         # Only [1,0] and [0,1] survive → exactly 2 → no pad needed
-        expected = np.array([[[
-            [1.0, 0.0],
-            [0.0, 1.0],
-        ]]], dtype=np.float32)
+        expected = np.array(
+            [
+                [
+                    [
+                        [1.0, 0.0],
+                        [0.0, 1.0],
+                    ]
+                ]
+            ],
+            dtype=np.float32,
+        )
 
         np.testing.assert_array_equal(result, expected)
 
@@ -309,35 +430,54 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
     def test_process_parallel_vs_sequential_consistency_without_time_seq(self):
         """Ensure n_workers=0 and n_workers=1 produce identical results without time sequence."""
         # Larger test case: batch_size=1, seq_len=1, 3 agents, max_observed_entities=2, feature_dim=2
-        observations = np.array([[[[[1.0, 1.0], [2.0, 2.0]],  # a0 at time 0
-            [[3.0, 3.0], [4.0, 4.0]],  # a1 at time 0
-            [[5.0, 5.0], [6.0, 6.0]]],  # a2 at time 0
-        ]], dtype=np.float32)
+        observations = np.array(
+            [
+                [
+                    [
+                        [[1.0, 1.0], [2.0, 2.0]],  # a0 at time 0
+                        [[3.0, 3.0], [4.0, 4.0]],  # a1 at time 0
+                        [[5.0, 5.0], [6.0, 6.0]],
+                    ],  # a2 at time 0
+                ]
+            ],
+            dtype=np.float32,
+        )
 
         # Edges: a1->a0, a2->a0, a0->a1
-        edge_indices = [[np.array([
-            [1, 2, 0],  # sources
-            [0, 0, 1],  # targets → a0 gets from a1,a2; a1 gets from a0
-        ], dtype=int)]]
+        edge_indices = [
+            [
+                np.array(
+                    [
+                        [1, 2, 0],  # sources
+                        [0, 0, 1],  # targets → a0 gets from a1,a2; a1 gets from a0
+                    ],
+                    dtype=int,
+                )
+            ]
+        ]
 
         # NEW DIMENSION: alive_mask is now (batch_size, seq_len, n_agents)
         alive_mask = np.array([[[True, True, True]]], dtype=bool)  # (1, 1, 3)
 
-        constructor_seq = MagentVecObsDataConstructor(max_entities_perception=6, with_time_seq=False, n_workers=0)
-        constructor_par = MagentVecObsDataConstructor(max_entities_perception=6, with_time_seq=False, n_workers=1)
+        constructor_seq = MagentVecObsDataConstructor(
+            max_entities_perception=6, with_time_seq=False, n_workers=0
+        )
+        constructor_par = MagentVecObsDataConstructor(
+            max_entities_perception=6, with_time_seq=False, n_workers=1
+        )
 
         result_seq, mask_seq = constructor_seq.process(
             observations=observations,
             states=None,
             edge_indices=edge_indices,
-            alive_mask=alive_mask
+            alive_mask=alive_mask,
         )
 
         result_par, mask_par = constructor_par.process(
             observations=observations,
             states=None,
             edge_indices=edge_indices,
-            alive_mask=alive_mask
+            alive_mask=alive_mask,
         )
 
         np.testing.assert_array_equal(result_seq, result_par)
@@ -345,47 +485,70 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
 
     def test_process_dead_agent_ignored_without_time_seq(self):
         """Dead agents contribute no observations and are skipped without time sequence."""
-        observations = np.array([[[[[1.0, 1.0], [2.0, 2.0]],  # a0 (alive) at time 0
-            [[3.0, 3.0], [4.0, 4.0]],  # a1 (dead) at time 0
-            [[5.0, 5.0], [6.0, 6.0]]],  # a2 (alive) at time 0
-        ]], dtype=np.float32)
+        observations = np.array(
+            [
+                [
+                    [
+                        [[1.0, 1.0], [2.0, 2.0]],  # a0 (alive) at time 0
+                        [[3.0, 3.0], [4.0, 4.0]],  # a1 (dead) at time 0
+                        [[5.0, 5.0], [6.0, 6.0]],
+                    ],  # a2 (alive) at time 0
+                ]
+            ],
+            dtype=np.float32,
+        )
 
         # Edges: a1->a0 (but a1 is dead, so ignored), a2->a0
-        edge_indices = [[np.array([
-            [1, 2],  # sources
-            [0, 0],  # targets
-        ], dtype=int)]]
+        edge_indices = [
+            [
+                np.array(
+                    [
+                        [1, 2],  # sources
+                        [0, 0],  # targets
+                    ],
+                    dtype=int,
+                )
+            ]
+        ]
 
         # NEW DIMENSION: alive_mask is now (batch_size, seq_len, n_agents)
         alive_mask = np.array([[[True, False, True]]], dtype=bool)  # a1 dead, (1, 1, 3)
 
-        constructor = MagentVecObsDataConstructor(max_entities_perception=4, with_time_seq=False, n_workers=0)
+        constructor = MagentVecObsDataConstructor(
+            max_entities_perception=4, with_time_seq=False, n_workers=0
+        )
 
         result, mask = constructor.process(
             observations=observations,
             states=None,
             edge_indices=edge_indices,
-            alive_mask=alive_mask
+            alive_mask=alive_mask,
         )
 
         # a0 sees: self([1,1],[2,2]) + a2([5,5],[6,6]) → 4 entities → exact fit
-        expected_a0 = np.array([
-            [1.0, 1.0],
-            [2.0, 2.0],
-            [5.0, 5.0],
-            [6.0, 6.0],
-        ], dtype=np.float32)
+        expected_a0 = np.array(
+            [
+                [1.0, 1.0],
+                [2.0, 2.0],
+                [5.0, 5.0],
+                [6.0, 6.0],
+            ],
+            dtype=np.float32,
+        )
 
         # a1 is dead → all zeros
         expected_a1 = np.zeros((4, 2), dtype=np.float32)
 
         # a2 has no incoming edges → only self → pad to 4
-        expected_a2 = np.array([
-            [5.0, 5.0],
-            [6.0, 6.0],
-            [0.0, 0.0],
-            [0.0, 0.0],
-        ], dtype=np.float32)
+        expected_a2 = np.array(
+            [
+                [5.0, 5.0],
+                [6.0, 6.0],
+                [0.0, 0.0],
+                [0.0, 0.0],
+            ],
+            dtype=np.float32,
+        )
 
         np.testing.assert_array_equal(result[0, 0], expected_a0)
         np.testing.assert_array_equal(result[0, 1], expected_a1)
@@ -402,39 +565,45 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
     def test_with_time_seq_parameter_behavior(self):
         """Test that with_time_seq parameter correctly controls output dimensions."""
         # batch_size=2, seq_len=3, 3 agents, max_observed_entities=2, feature_dim=2
-        observations = np.array([[
-            [  # time 0
-                [[1.0, 1.0], [2.0, 2.0]],  # agent 0
-                [[3.0, 3.0], [4.0, 4.0]],  # agent 1
-                [[5.0, 5.0], [6.0, 6.0]],  # agent 2
+        observations = np.array(
+            [
+                [
+                    [  # time 0
+                        [[1.0, 1.0], [2.0, 2.0]],  # agent 0
+                        [[3.0, 3.0], [4.0, 4.0]],  # agent 1
+                        [[5.0, 5.0], [6.0, 6.0]],  # agent 2
+                    ],
+                    [  # time 1
+                        [[7.0, 7.0], [8.0, 8.0]],  # agent 0
+                        [[9.0, 9.0], [10.0, 10.0]],  # agent 1
+                        [[11.0, 11.0], [12.0, 12.0]],  # agent 2
+                    ],
+                    [  # time 2
+                        [[13.0, 13.0], [14.0, 14.0]],  # agent 0
+                        [[15.0, 15.0], [16.0, 16.0]],  # agent 1
+                        [[17.0, 17.0], [18.0, 18.0]],  # agent 2
+                    ],
+                ],
+                [
+                    [  # time 0
+                        [[1.1, 1.1], [2.1, 2.1]],  # agent 0
+                        [[3.1, 3.1], [4.1, 4.1]],  # agent 1
+                        [[5.1, 5.1], [6.1, 6.1]],  # agent 2
+                    ],
+                    [  # time 1
+                        [[7.1, 7.1], [8.1, 8.1]],  # agent 0
+                        [[9.1, 9.1], [10.1, 10.1]],  # agent 1
+                        [[11.1, 11.1], [12.1, 12.1]],  # agent 2
+                    ],
+                    [  # time 2
+                        [[13.1, 13.1], [14.1, 14.1]],  # agent 0
+                        [[15.1, 15.1], [16.1, 16.1]],  # agent 1
+                        [[17.1, 17.1], [18.1, 18.1]],  # agent 2
+                    ],
+                ],
             ],
-            [  # time 1
-                [[7.0, 7.0], [8.0, 8.0]],  # agent 0
-                [[9.0, 9.0], [10.0, 10.0]],  # agent 1
-                [[11.0, 11.0], [12.0, 12.0]],  # agent 2
-            ],
-            [  # time 2
-                [[13.0, 13.0], [14.0, 14.0]],  # agent 0
-                [[15.0, 15.0], [16.0, 16.0]],  # agent 1
-                [[17.0, 17.0], [18.0, 18.0]],  # agent 2
-            ]
-        ], [
-            [  # time 0
-                [[1.1, 1.1], [2.1, 2.1]],  # agent 0
-                [[3.1, 3.1], [4.1, 4.1]],  # agent 1
-                [[5.1, 5.1], [6.1, 6.1]],  # agent 2
-            ],
-            [  # time 1
-                [[7.1, 7.1], [8.1, 8.1]],  # agent 0
-                [[9.1, 9.1], [10.1, 10.1]],  # agent 1
-                [[11.1, 11.1], [12.1, 12.1]],  # agent 2
-            ],
-            [  # time 2
-                [[13.1, 13.1], [14.1, 14.1]],  # agent 0
-                [[15.1, 15.1], [16.1, 16.1]],  # agent 1
-                [[17.1, 17.1], [18.1, 18.1]],  # agent 2
-            ]
-        ]], dtype=np.float32)  # (2, 3, 3, 2, 2)
+            dtype=np.float32,
+        )  # (2, 3, 3, 2, 2)
 
         # edge_indices: no edges for any time step
         edge_indices = [
@@ -447,20 +616,27 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
                 np.empty((2, 0), dtype=int),  # time 0
                 np.empty((2, 0), dtype=int),  # time 1
                 np.empty((2, 0), dtype=int),  # time 2
-            ]
+            ],
         ]
 
         # NEW DIMENSION: alive_mask is now (batch_size, seq_len, n_agents)
-        alive_mask = np.array([[[True, True, True], [True, True, True], [True, True, True]],
-                               [[True, True, True], [True, True, True], [True, True, True]]], dtype=bool)  # (2, 3, 3)
+        alive_mask = np.array(
+            [
+                [[True, True, True], [True, True, True], [True, True, True]],
+                [[True, True, True], [True, True, True], [True, True, True]],
+            ],
+            dtype=bool,
+        )  # (2, 3, 3)
 
         # Test with_time_seq=False
-        constructor_no_time = MagentVecObsDataConstructor(max_entities_perception=4, with_time_seq=False, n_workers=0)
+        constructor_no_time = MagentVecObsDataConstructor(
+            max_entities_perception=4, with_time_seq=False, n_workers=0
+        )
         result_no_time, mask_no_time = constructor_no_time.process(
             observations=observations,
             states=None,
             edge_indices=edge_indices,
-            alive_mask=alive_mask
+            alive_mask=alive_mask,
         )
 
         # Expected shape without time: (2, 3, 4, 2) - only last time step
@@ -469,12 +645,14 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
         self.assertEqual(mask_no_time.shape, (2, 3, 4))
 
         # Test with_time_seq=True
-        constructor_with_time = MagentVecObsDataConstructor(max_entities_perception=4, with_time_seq=True, n_workers=0)
+        constructor_with_time = MagentVecObsDataConstructor(
+            max_entities_perception=4, with_time_seq=True, n_workers=0
+        )
         result_with_time, mask_with_time = constructor_with_time.process(
             observations=observations,
             states=None,
             edge_indices=edge_indices,
-            alive_mask=alive_mask
+            alive_mask=alive_mask,
         )
 
         # Expected shape with time: (2, 3, 3, 4, 2) - all time steps
@@ -489,23 +667,36 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
     def test_exclude_features_empty_list(self):
         """Test exclude_features=[] (default behavior) - should not change feature dimensions."""
         # Setup: batch_size=1, seq_len=1, 2 agents, max_observed_entities=2, feature_dim=3, max_entities_perception=4
-        observations = np.array([[
-            [[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]],  # agent 0: two entities at time 0
-            [[7.0, 8.0, 9.0], [0.0, 0.0, 0.0]]],  # agent 1: one real + one zero-padded at time 0
-        ]], dtype=np.float32)  # shape: (1, 1, 2, 2, 3)
+        observations = np.array(
+            [
+                [
+                    [
+                        [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]],
+                        # agent 0: two entities at time 0
+                        [[7.0, 8.0, 9.0], [0.0, 0.0, 0.0]],
+                    ],  # agent 1: one real + one zero-padded at time 0
+                ]
+            ],
+            dtype=np.float32,
+        )  # shape: (1, 1, 2, 2, 3)
 
         states = None
         edge_indices = [[np.empty((2, 0), dtype=int)]]  # batch 0, time 0: (2, 0)
         alive_mask = np.array([[[True, True]]], dtype=bool)  # (1, 1, 2)
 
         # Test with empty exclude_features list
-        constructor = MagentVecObsDataConstructor(max_entities_perception=4, with_time_seq=False, n_workers=0, exclude_features=[])
+        constructor = MagentVecObsDataConstructor(
+            max_entities_perception=4,
+            with_time_seq=False,
+            n_workers=0,
+            exclude_features=[],
+        )
 
         result, mask = constructor.process(
             observations=observations,
             states=states,
             edge_indices=edge_indices,
-            alive_mask=alive_mask
+            alive_mask=alive_mask,
         )
 
         # Should have same feature dimension as input (3)
@@ -515,23 +706,36 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
     def test_exclude_features_single_index_without_time_seq(self):
         """Test exclude_features=[1] - should remove the second feature dimension."""
         # Setup: batch_size=1, seq_len=1, 2 agents, max_observed_entities=2, feature_dim=3, max_entities_perception=4
-        observations = np.array([[
-            [[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]],  # agent 0: two entities at time 0
-            [[7.0, 8.0, 9.0], [0.0, 0.0, 0.0]]],  # agent 1: one real + one zero-padded at time 0
-        ]], dtype=np.float32)  # shape: (1, 1, 2, 2, 3)
+        observations = np.array(
+            [
+                [
+                    [
+                        [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]],
+                        # agent 0: two entities at time 0
+                        [[7.0, 8.0, 9.0], [0.0, 0.0, 0.0]],
+                    ],  # agent 1: one real + one zero-padded at time 0
+                ]
+            ],
+            dtype=np.float32,
+        )  # shape: (1, 1, 2, 2, 3)
 
         states = None
         edge_indices = [[np.empty((2, 0), dtype=int)]]  # batch 0, time 0: (2, 0)
         alive_mask = np.array([[[True, True]]], dtype=bool)  # (1, 1, 2)
 
         # Test with exclude_features=[1] (remove second feature)
-        constructor = MagentVecObsDataConstructor(max_entities_perception=4, with_time_seq=False, n_workers=0, exclude_features=[1])
+        constructor = MagentVecObsDataConstructor(
+            max_entities_perception=4,
+            with_time_seq=False,
+            n_workers=0,
+            exclude_features=[1],
+        )
 
         result, mask = constructor.process(
             observations=observations,
             states=states,
             edge_indices=edge_indices,
-            alive_mask=alive_mask
+            alive_mask=alive_mask,
         )
 
         # Should have feature dimension 2 (3-1)
@@ -539,20 +743,26 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
 
         # Check that the remaining features are [0, 2] (first and third)
         # Expected agent0: [[1.0, 3.0], [4.0, 6.0], [0.0, 0.0], [0.0, 0.0]]
-        expected_agent0 = np.array([
-            [1.0, 3.0],
-            [4.0, 6.0],
-            [0.0, 0.0],
-            [0.0, 0.0],
-        ], dtype=np.float32)
+        expected_agent0 = np.array(
+            [
+                [1.0, 3.0],
+                [4.0, 6.0],
+                [0.0, 0.0],
+                [0.0, 0.0],
+            ],
+            dtype=np.float32,
+        )
 
         # Expected agent1: [[7.0, 9.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0]]
-        expected_agent1 = np.array([
-            [7.0, 9.0],
-            [0.0, 0.0],
-            [0.0, 0.0],
-            [0.0, 0.0],
-        ], dtype=np.float32)
+        expected_agent1 = np.array(
+            [
+                [7.0, 9.0],
+                [0.0, 0.0],
+                [0.0, 0.0],
+                [0.0, 0.0],
+            ],
+            dtype=np.float32,
+        )
 
         np.testing.assert_array_equal(result[0, 0], expected_agent0)
         np.testing.assert_array_equal(result[0, 1], expected_agent1)
@@ -560,23 +770,36 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
     def test_exclude_features_multiple_indices_without_time_seq(self):
         """Test exclude_features=[0, 2] - should remove first and third feature dimensions."""
         # Setup: batch_size=1, seq_len=1, 2 agents, max_observed_entities=2, feature_dim=3, max_entities_perception=4
-        observations = np.array([[
-            [[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]],  # agent 0: two entities at time 0
-            [[7.0, 8.0, 9.0], [0.0, 0.0, 0.0]]],  # agent 1: one real + one zero-padded at time 0
-        ]], dtype=np.float32)  # shape: (1, 1, 2, 2, 3)
+        observations = np.array(
+            [
+                [
+                    [
+                        [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0],],
+                        # agent 0: two entities at time 0
+                        [[7.0, 8.0, 9.0], [0.0, 0.0, 0.0]],
+                    ],  # agent 1: one real + one zero-padded at time 0
+                ]
+            ],
+            dtype=np.float32,
+        )  # shape: (1, 1, 2, 2, 3)
 
         states = None
         edge_indices = [[np.empty((2, 0), dtype=int)]]  # batch 0, time 0: (2, 0)
         alive_mask = np.array([[[True, True]]], dtype=bool)  # (1, 1, 2)
 
         # Test with exclude_features=[0, 2] (remove first and third features)
-        constructor = MagentVecObsDataConstructor(max_entities_perception=4, with_time_seq=False, n_workers=0, exclude_features=[0, 2])
+        constructor = MagentVecObsDataConstructor(
+            max_entities_perception=4,
+            with_time_seq=False,
+            n_workers=0,
+            exclude_features=[0, 2],
+        )
 
         result, mask = constructor.process(
             observations=observations,
             states=states,
             edge_indices=edge_indices,
-            alive_mask=alive_mask
+            alive_mask=alive_mask,
         )
 
         # Should have feature dimension 1 (3-2)
@@ -584,20 +807,26 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
 
         # Check that the remaining feature is [1] (second feature)
         # Expected agent0: [[2.0], [5.0], [0.0], [0.0]]
-        expected_agent0 = np.array([
-            [2.0],
-            [5.0],
-            [0.0],
-            [0.0],
-        ], dtype=np.float32)
+        expected_agent0 = np.array(
+            [
+                [2.0],
+                [5.0],
+                [0.0],
+                [0.0],
+            ],
+            dtype=np.float32,
+        )
 
         # Expected agent1: [[8.0], [0.0], [0.0], [0.0]]
-        expected_agent1 = np.array([
-            [8.0],
-            [0.0],
-            [0.0],
-            [0.0],
-        ], dtype=np.float32)
+        expected_agent1 = np.array(
+            [
+                [8.0],
+                [0.0],
+                [0.0],
+                [0.0],
+            ],
+            dtype=np.float32,
+        )
 
         np.testing.assert_array_equal(result[0, 0], expected_agent0)
         np.testing.assert_array_equal(result[0, 1], expected_agent1)
@@ -605,23 +834,36 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
     def test_exclude_features_boundary_indices_without_time_seq(self):
         """Test exclude_features=[0, 2] with feature_dim=3 - should handle boundary indices correctly."""
         # Same setup as above but verify boundary handling
-        observations = np.array([[
-            [[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]],  # agent 0: two entities at time 0
-            [[7.0, 8.0, 9.0], [0.0, 0.0, 0.0]]],  # agent 1: one real + one zero-padded at time 0
-        ]], dtype=np.float32)
+        observations = np.array(
+            [
+                [
+                    [
+                        [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]],
+                        # agent 0: two entities at time 0
+                        [[7.0, 8.0, 9.0], [0.0, 0.0, 0.0]],
+                    ],  # agent 1: one real + one zero-padded at time 0
+                ]
+            ],
+            dtype=np.float32,
+        )
 
         states = None
         edge_indices = [[np.empty((2, 0), dtype=int)]]
         alive_mask = np.array([[[True, True]]], dtype=bool)
 
         # Test exclude_features=[0, 2] (first and last index)
-        constructor = MagentVecObsDataConstructor(max_entities_perception=4, with_time_seq=False, n_workers=0, exclude_features=[0, 2])
+        constructor = MagentVecObsDataConstructor(
+            max_entities_perception=4,
+            with_time_seq=False,
+            n_workers=0,
+            exclude_features=[0, 2],
+        )
 
         result, mask = constructor.process(
             observations=observations,
             states=states,
             edge_indices=edge_indices,
-            alive_mask=alive_mask
+            alive_mask=alive_mask,
         )
 
         # Should have feature dimension 1
@@ -639,14 +881,20 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
         """Test exclude_features works correctly with with_time_seq=True."""
         # Setup: batch_size=1, seq_len=2, 2 agents, max_observed_entities=2, feature_dim=3, max_entities_perception=4
         observations = np.array(
-            [[[[[ 1.,  2.,  3.],
-            [ 4.,  5.,  6.]],
-            [[13., 14., 15.],
-            [16., 17., 18.]]],
-            [[[ 7.,  8.,  9.],
-            [10., 11., 12.]],
-            [[19., 20., 21.],
-            [22., 23., 24.]]]]], dtype=np.float32)
+            [
+                [
+                    [
+                        [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]],
+                        [[13.0, 14.0, 15.0], [16.0, 17.0, 18.0]],
+                    ],
+                    [
+                        [[7.0, 8.0, 9.0], [10.0, 11.0, 12.0]],
+                        [[19.0, 20.0, 21.0], [22.0, 23.0, 24.0]],
+                    ],
+                ]
+            ],
+            dtype=np.float32,
+        )
 
         states = None
         edge_indices = [
@@ -658,33 +906,44 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
         alive_mask = np.array([[[True, True], [True, True]]], dtype=bool)  # (1, 2, 2)
 
         # Test with exclude_features=[1] (remove second feature)
-        constructor = MagentVecObsDataConstructor(max_entities_perception=4, with_time_seq=True, n_workers=0, exclude_features=[1])
+        constructor = MagentVecObsDataConstructor(
+            max_entities_perception=4,
+            with_time_seq=True,
+            n_workers=0,
+            exclude_features=[1],
+        )
 
         result, mask = constructor.process(
             observations=observations,
             states=states,
             edge_indices=edge_indices,
-            alive_mask=alive_mask
+            alive_mask=alive_mask,
         )
 
         # Should have feature dimension 2 (3-1) and time dimension preserved
         self.assertEqual(result.shape, (1, 2, 2, 4, 2))
 
         # Check agent0 at time 0: [[1.0, 3.0], [4.0, 6.0], [0.0, 0.0], [0.0, 0.0]]
-        expected_agent0_t0 = np.array([
-            [1.0, 3.0],
-            [4.0, 6.0],
-            [0.0, 0.0],
-            [0.0, 0.0],
-        ], dtype=np.float32)
+        expected_agent0_t0 = np.array(
+            [
+                [1.0, 3.0],
+                [4.0, 6.0],
+                [0.0, 0.0],
+                [0.0, 0.0],
+            ],
+            dtype=np.float32,
+        )
 
         # Check agent0 at time 1: [[7.0, 9.0], [10.0, 12.0], [0.0, 0.0], [0.0, 0.0]]
-        expected_agent0_t1 = np.array([
-            [7.0, 9.0],
-            [10.0, 12.0],
-            [0.0, 0.0],
-            [0.0, 0.0],
-        ], dtype=np.float32)
+        expected_agent0_t1 = np.array(
+            [
+                [7.0, 9.0],
+                [10.0, 12.0],
+                [0.0, 0.0],
+                [0.0, 0.0],
+            ],
+            dtype=np.float32,
+        )
 
         np.testing.assert_array_equal(result[0, 0, 0], expected_agent0_t0)
         np.testing.assert_array_equal(result[0, 1, 0], expected_agent0_t1)
@@ -692,58 +951,87 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
     def test_exclude_features_invalid_indices_ignored(self):
         """Test that invalid exclude_features indices (out of bounds) are safely ignored."""
         # Setup: feature_dim=3, so valid indices are [0, 1, 2]
-        observations = np.array([[
-            [[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]],  # agent 0: two entities at time 0
-            [[7.0, 8.0, 9.0], [0.0, 0.0, 0.0]]],  # agent 1: one real + one zero-padded at time 0
-        ]], dtype=np.float32)
+        observations = np.array(
+            [
+                [
+                    [
+                        [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]],
+                        # agent 0: two entities at time 0
+                        [[7.0, 8.0, 9.0], [0.0, 0.0, 0.0]],
+                    ],  # agent 1: one real + one zero-padded at time 0
+                ]
+            ],
+            dtype=np.float32,
+        )
 
         states = None
         edge_indices = [[np.empty((2, 0), dtype=int)]]
         alive_mask = np.array([[[True, True]]], dtype=bool)
 
         # Test with invalid indices [1, 5, -1] - should only exclude index 1
-        constructor = MagentVecObsDataConstructor(max_entities_perception=4, with_time_seq=False, n_workers=0, exclude_features=[1, 5, -1])
+        constructor = MagentVecObsDataConstructor(
+            max_entities_perception=4,
+            with_time_seq=False,
+            n_workers=0,
+            exclude_features=[1, 5, -1],
+        )
 
         result, mask = constructor.process(
             observations=observations,
             states=states,
             edge_indices=edge_indices,
-            alive_mask=alive_mask
+            alive_mask=alive_mask,
         )
 
         # Should have feature dimension 2 (3-1, since only index 1 is valid)
         self.assertEqual(result.shape[-1], 2)
 
         # Check that only index 1 was excluded (features [0, 2] remain)
-        expected_agent0 = np.array([
-            [1.0, 3.0],
-            [4.0, 6.0],
-            [0.0, 0.0],
-            [0.0, 0.0],
-        ], dtype=np.float32)
+        expected_agent0 = np.array(
+            [
+                [1.0, 3.0],
+                [4.0, 6.0],
+                [0.0, 0.0],
+                [0.0, 0.0],
+            ],
+            dtype=np.float32,
+        )
 
         np.testing.assert_array_equal(result[0, 0], expected_agent0)
 
     def test_include_features_single_index_without_time_seq(self):
         """Test include_features=[1] - should keep only the second feature dimension."""
         # Setup: batch_size=1, seq_len=1, 2 agents, max_observed_entities=2, feature_dim=3, max_entities_perception=4
-        observations = np.array([[
-            [[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]],  # agent 0: two entities at time 0
-            [[7.0, 8.0, 9.0], [0.0, 0.0, 0.0]]],  # agent 1: one real + one zero-padded at time 0
-        ]], dtype=np.float32)  # shape: (1, 1, 2, 2, 3)
+        observations = np.array(
+            [
+                [
+                    [
+                        [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]],
+                          # agent 0: two entities at time 0
+                        [[7.0, 8.0, 9.0], [0.0, 0.0, 0.0]],
+                    ],  # agent 1: one real + one zero-padded at time 0
+                ]
+            ],
+            dtype=np.float32,
+        )  # shape: (1, 1, 2, 2, 3)
 
         states = None
         edge_indices = [[np.empty((2, 0), dtype=int)]]  # batch 0, time 0: (2, 0)
         alive_mask = np.array([[[True, True]]], dtype=bool)  # (1, 1, 2)
 
         # Test with include_features=[1] (keep only second feature)
-        constructor = MagentVecObsDataConstructor(max_entities_perception=4, with_time_seq=False, n_workers=0, include_features=[1])
+        constructor = MagentVecObsDataConstructor(
+            max_entities_perception=4,
+            with_time_seq=False,
+            n_workers=0,
+            include_features=[1],
+        )
 
         result, mask = constructor.process(
             observations=observations,
             states=states,
             edge_indices=edge_indices,
-            alive_mask=alive_mask
+            alive_mask=alive_mask,
         )
 
         # Should have feature dimension 1 (only index 1)
@@ -751,20 +1039,26 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
 
         # Check that only feature index 1 is kept
         # Expected agent0: [[2.0], [5.0], [0.0], [0.0]]
-        expected_agent0 = np.array([
-            [2.0],
-            [5.0],
-            [0.0],
-            [0.0],
-        ], dtype=np.float32)
+        expected_agent0 = np.array(
+            [
+                [2.0],
+                [5.0],
+                [0.0],
+                [0.0],
+            ],
+            dtype=np.float32,
+        )
 
         # Expected agent1: [[8.0], [0.0], [0.0], [0.0]]
-        expected_agent1 = np.array([
-            [8.0],
-            [0.0],
-            [0.0],
-            [0.0],
-        ], dtype=np.float32)
+        expected_agent1 = np.array(
+            [
+                [8.0],
+                [0.0],
+                [0.0],
+                [0.0],
+            ],
+            dtype=np.float32,
+        )
 
         np.testing.assert_array_equal(result[0, 0], expected_agent0)
         np.testing.assert_array_equal(result[0, 1], expected_agent1)
@@ -772,23 +1066,36 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
     def test_include_features_multiple_indices_without_time_seq(self):
         """Test include_features=[0, 2] - should keep first and third feature dimensions."""
         # Setup: batch_size=1, seq_len=1, 2 agents, max_observed_entities=2, feature_dim=3, max_entities_perception=4
-        observations = np.array([[
-            [[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]],  # agent 0: two entities at time 0
-            [[0.0, 0.0, 0.0], [7.0, 8.0, 9.0]]],  # agent 1: one zero-padded + one real at time 0
-        ]], dtype=np.float32)  # shape: (1, 1, 2, 2, 3)
+        observations = np.array(
+            [
+                [
+                    [
+                        [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]],
+                        # agent 0: two entities at time 0
+                        [[0.0, 0.0, 0.0], [7.0, 8.0, 9.0]],
+                    ],  # agent 1: one zero-padded + one real at time 0
+                ]
+            ],
+            dtype=np.float32,
+        )  # shape: (1, 1, 2, 2, 3)
 
         states = None
         edge_indices = [[np.empty((2, 0), dtype=int)]]  # batch 0, time 0: (2, 0)
         alive_mask = np.array([[[True, True]]], dtype=bool)  # (1, 1, 2)
 
         # Test with include_features=[0, 2] (keep first and third features)
-        constructor = MagentVecObsDataConstructor(max_entities_perception=4, with_time_seq=False, n_workers=0, include_features=[0, 2])
+        constructor = MagentVecObsDataConstructor(
+            max_entities_perception=4,
+            with_time_seq=False,
+            n_workers=0,
+            include_features=[0, 2],
+        )
 
         result, mask = constructor.process(
             observations=observations,
             states=states,
             edge_indices=edge_indices,
-            alive_mask=alive_mask
+            alive_mask=alive_mask,
         )
 
         # Should have feature dimension 2 (indices 0 and 2)
@@ -796,20 +1103,26 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
 
         # Check that features [0, 2] are kept
         # Expected agent0: [[1.0, 3.0], [4.0, 6.0], [0.0, 0.0], [0.0, 0.0]]
-        expected_agent0 = np.array([
-            [1.0, 3.0],
-            [4.0, 6.0],
-            [0.0, 0.0],
-            [0.0, 0.0],
-        ], dtype=np.float32)
+        expected_agent0 = np.array(
+            [
+                [1.0, 3.0],
+                [4.0, 6.0],
+                [0.0, 0.0],
+                [0.0, 0.0],
+            ],
+            dtype=np.float32,
+        )
 
         # Expected agent1: [[7.0, 9.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0]]
-        expected_agent1 = np.array([
-            [7.0, 9.0],
-            [0.0, 0.0],
-            [0.0, 0.0],
-            [0.0, 0.0],
-        ], dtype=np.float32)
+        expected_agent1 = np.array(
+            [
+                [7.0, 9.0],
+                [0.0, 0.0],
+                [0.0, 0.0],
+                [0.0, 0.0],
+            ],
+            dtype=np.float32,
+        )
 
         np.testing.assert_array_equal(result[0, 0], expected_agent0)
         np.testing.assert_array_equal(result[0, 1], expected_agent1)
@@ -818,14 +1131,20 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
         """Test include_features works correctly with with_time_seq=True."""
         # Setup: batch_size=1, seq_len=2, 2 agents, max_observed_entities=2, feature_dim=3, max_entities_perception=4
         observations = np.array(
-            [[[[[ 1.,  2.,  3.],
-            [ 4.,  5.,  6.]],
-            [[13., 14., 15.],
-            [16., 17., 18.]]],
-            [[[ 7.,  8.,  9.],
-            [10., 11., 12.]],
-            [[19., 20., 21.],
-            [22., 23., 24.]]]]], dtype=np.float32)  # shape: (1, 2, 2, 2, 3)
+            [
+                [
+                    [
+                        [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]],
+                        [[13.0, 14.0, 15.0], [16.0, 17.0, 18.0]],
+                    ],
+                    [
+                        [[7.0, 8.0, 9.0], [10.0, 11.0, 12.0]],
+                        [[19.0, 20.0, 21.0], [22.0, 23.0, 24.0]],
+                    ],
+                ]
+            ],
+            dtype=np.float32,
+        )  # shape: (1, 2, 2, 2, 3)
 
         states = None
         edge_indices = [
@@ -837,33 +1156,44 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
         alive_mask = np.array([[[True, True], [True, True]]], dtype=bool)  # (1, 2, 2)
 
         # Test with include_features=[0, 2] (keep first and third features)
-        constructor = MagentVecObsDataConstructor(max_entities_perception=4, with_time_seq=True, n_workers=0, include_features=[0, 2])
+        constructor = MagentVecObsDataConstructor(
+            max_entities_perception=4,
+            with_time_seq=True,
+            n_workers=0,
+            include_features=[0, 2],
+        )
 
         result, mask = constructor.process(
             observations=observations,
             states=states,
             edge_indices=edge_indices,
-            alive_mask=alive_mask
+            alive_mask=alive_mask,
         )
 
         # Should have feature dimension 2 (indices 0 and 2) and time dimension preserved
         self.assertEqual(result.shape, (1, 2, 2, 4, 2))
 
         # Check agent0 at time 0: [[1.0, 3.0], [4.0, 6.0], [0.0, 0.0], [0.0, 0.0]]
-        expected_agent0_t0 = np.array([
-            [1.0, 3.0],
-            [4.0, 6.0],
-            [0.0, 0.0],
-            [0.0, 0.0],
-        ], dtype=np.float32)
+        expected_agent0_t0 = np.array(
+            [
+                [1.0, 3.0],
+                [4.0, 6.0],
+                [0.0, 0.0],
+                [0.0, 0.0],
+            ],
+            dtype=np.float32,
+        )
 
         # Check agent0 at time 1: [[7.0, 9.0], [10.0, 12.0], [0.0, 0.0], [0.0, 0.0]]
-        expected_agent0_t1 = np.array([
-            [7.0, 9.0],
-            [10.0, 12.0],
-            [0.0, 0.0],
-            [0.0, 0.0],
-        ], dtype=np.float32)
+        expected_agent0_t1 = np.array(
+            [
+                [7.0, 9.0],
+                [10.0, 12.0],
+                [0.0, 0.0],
+                [0.0, 0.0],
+            ],
+            dtype=np.float32,
+        )
 
         np.testing.assert_array_equal(result[0, 0, 0], expected_agent0_t0)
         np.testing.assert_array_equal(result[0, 1, 0], expected_agent0_t1)
@@ -871,23 +1201,37 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
     def test_include_features_priority_over_exclude_features(self):
         """Test that include_features takes precedence over exclude_features when both are non-empty."""
         # Setup: batch_size=1, seq_len=1, 2 agents, max_observed_entities=2, feature_dim=3, max_entities_perception=4
-        observations = np.array([[
-            [[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]],  # agent 0: two entities at time 0
-            [[7.0, 8.0, 9.0], [0.0, 0.0, 0.0]]],  # agent 1: one real + one zero-padded at time 0
-        ]], dtype=np.float32)  # shape: (1, 1, 2, 2, 3)
+        observations = np.array(
+            [
+                [
+                    [
+                        [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]],
+                        # agent 0: two entities at time 0
+                        [[7.0, 8.0, 9.0], [0.0, 0.0, 0.0]],
+                    ],  # agent 1: one real + one zero-padded at time 0
+                ]
+            ],
+            dtype=np.float32,
+        )  # shape: (1, 1, 2, 2, 3)
 
         states = None
         edge_indices = [[np.empty((2, 0), dtype=int)]]  # batch 0, time 0: (2, 0)
         alive_mask = np.array([[[True, True]]], dtype=bool)  # (1, 1, 2)
 
         # Test with both include_features=[0] and exclude_features=[1, 2] - should only keep feature 0
-        constructor = MagentVecObsDataConstructor(max_entities_perception=4, with_time_seq=False, n_workers=0, include_features=[0], exclude_features=[1, 2])
+        constructor = MagentVecObsDataConstructor(
+            max_entities_perception=4,
+            with_time_seq=False,
+            n_workers=0,
+            include_features=[0],
+            exclude_features=[1, 2],
+        )
 
         result, mask = constructor.process(
             observations=observations,
             states=states,
             edge_indices=edge_indices,
-            alive_mask=alive_mask
+            alive_mask=alive_mask,
         )
 
         # Should have feature dimension 1 (only index 0, despite exclude_features being specified)
@@ -895,20 +1239,26 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
 
         # Check that only feature index 0 is kept
         # Expected agent0: [[1.0], [4.0], [0.0], [0.0]]
-        expected_agent0 = np.array([
-            [1.0],
-            [4.0],
-            [0.0],
-            [0.0],
-        ], dtype=np.float32)
+        expected_agent0 = np.array(
+            [
+                [1.0],
+                [4.0],
+                [0.0],
+                [0.0],
+            ],
+            dtype=np.float32,
+        )
 
         # Expected agent1: [[7.0], [0.0], [0.0], [0.0]]
-        expected_agent1 = np.array([
-            [7.0],
-            [0.0],
-            [0.0],
-            [0.0],
-        ], dtype=np.float32)
+        expected_agent1 = np.array(
+            [
+                [7.0],
+                [0.0],
+                [0.0],
+                [0.0],
+            ],
+            dtype=np.float32,
+        )
 
         np.testing.assert_array_equal(result[0, 0], expected_agent0)
         np.testing.assert_array_equal(result[0, 1], expected_agent1)
@@ -916,23 +1266,36 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
     def test_include_features_empty_list(self):
         """Test include_features=[] (empty list) - should behave like no filtering (all features kept)."""
         # Setup: batch_size=1, seq_len=1, 2 agents, max_observed_entities=2, feature_dim=3, max_entities_perception=4
-        observations = np.array([[
-            [[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]],  # agent 0: two entities at time 0
-            [[7.0, 8.0, 9.0], [0.0, 0.0, 0.0]]],  # agent 1: one real + one zero-padded at time 0
-        ]], dtype=np.float32)  # shape: (1, 1, 2, 2, 3)
+        observations = np.array(
+            [
+                [
+                    [
+                        [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0],],
+                        # agent 0: two entities at time 0
+                        [[7.0, 8.0, 9.0], [0.0, 0.0, 0.0]],
+                    ],  # agent 1: one real + one zero-padded at time 0
+                ]
+            ],
+            dtype=np.float32,
+        )  # shape: (1, 1, 2, 2, 3)
 
         states = None
         edge_indices = [[np.empty((2, 0), dtype=int)]]  # batch 0, time 0: (2, 0)
         alive_mask = np.array([[[True, True]]], dtype=bool)  # (1, 1, 2)
 
         # Test with empty include_features list
-        constructor = MagentVecObsDataConstructor(max_entities_perception=4, with_time_seq=False, n_workers=0, include_features=[])
+        constructor = MagentVecObsDataConstructor(
+            max_entities_perception=4,
+            with_time_seq=False,
+            n_workers=0,
+            include_features=[],
+        )
 
         result, mask = constructor.process(
             observations=observations,
             states=states,
             edge_indices=edge_indices,
-            alive_mask=alive_mask
+            alive_mask=alive_mask,
         )
 
         # Should have same feature dimension as input (3)
@@ -942,10 +1305,18 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
     def test_include_features_invalid_indices_ignored(self):
         """Test that invalid include_features indices (out of bounds) result in empty result or appropriate behavior."""
         # Setup: feature_dim=3, so valid indices are [0, 1, 2]
-        observations = np.array([[
-            [[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]],  # agent 0: two entities at time 0
-            [[7.0, 8.0, 9.0], [0.0, 0.0, 0.0]]],  # agent 1: one real + one zero-padded at time 0
-        ]], dtype=np.float32)
+        observations = np.array(
+            [
+                [
+                    [
+                        [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]],
+                        # agent 0: two entities at time 0
+                        [[7.0, 8.0, 9.0], [0.0, 0.0, 0.0]],
+                    ],  # agent 1: one real + one zero-padded at time 0
+                ]
+            ],
+            dtype=np.float32,
+        )
 
         states = None
         edge_indices = [[np.empty((2, 0), dtype=int)]]
@@ -953,13 +1324,18 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
 
         # Test with invalid indices [5, 10] - should result in no features (empty array) or appropriate error handling
         # Since our implementation filters by indexing, invalid indices will be ignored and result in empty selection
-        constructor = MagentVecObsDataConstructor(max_entities_perception=4, with_time_seq=False, n_workers=0, include_features=[5, 10])
+        constructor = MagentVecObsDataConstructor(
+            max_entities_perception=4,
+            with_time_seq=False,
+            n_workers=0,
+            include_features=[5, 10],
+        )
 
         result, mask = constructor.process(
             observations=observations,
             states=states,
             edge_indices=edge_indices,
-            alive_mask=alive_mask
+            alive_mask=alive_mask,
         )
 
         # Should have feature dimension 0 (no valid indices)
@@ -968,6 +1344,73 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
         # Verify result is all zeros in the feature dimension
         self.assertTrue(np.all(result == 0))
 
+    def test_entities_sorted_by_distance_then_angle(self):
+        """Test that entities are sorted by distance (ascending) first, then angle (ascending)."""
+        # batch_size=1, seq_len=1, 2 agents, max_observed_entities=3, feature_dim=3
+        # Feature format: [rel_x, rel_y, value]
+        # Agent 0's observations: 3 entities at different distances and angles
+        # Agent 1's observations: will be communicated to agent 0
+        observations = np.array(
+            [
+                [
+                    [
+                        [
+                            [3.0, 0.0, 1.0],  # dist=3, angle=0
+                            [1.0, 0.0, 2.0],  # dist=1, angle=0
+                            [0.0, 0.0, 0.0],
+                        ],  # zero padding
+                        [
+                            [2.0, 0.0, 3.0],  # dist=2, angle=0
+                            [0.0, 1.0, 4.0],  # dist=1, angle=pi/2
+                            [0.0, -1.0, 5.0],
+                        ],  # dist=1, angle=-pi/2
+                    ]
+                ]
+            ],
+            dtype=np.float32,
+        )  # (1, 1, 2, 3, 3)
 
-if __name__ == '__main__':
+        # Edge: agent1 -> agent0 (agent1 communicates its observations to agent0)
+        edge_indices = [[np.array([[1], [0]], dtype=int)]]
+
+        alive_mask = np.array([[[True, True]]], dtype=bool)  # (1, 1, 2)
+
+        constructor = MagentVecObsDataConstructor(
+            max_entities_perception=5, with_time_seq=False, n_workers=0
+        )
+
+        result, mask = constructor.process(
+            observations=observations,
+            states=None,
+            edge_indices=edge_indices,
+            alive_mask=alive_mask,
+        )
+
+        # Agent 0 should see: self entities + agent1's entities = 5 entities
+        # Expected order after sorting by distance, then angle:
+        # 1. [0.0, -1.0, 5.0] - dist=1, angle=-pi/2
+        # 2. [1.0, 0.0, 2.0] - dist=1, angle=0
+        # 3. [0.0, 1.0, 4.0] - dist=1, angle=pi/2
+        # 4. [2.0, 0.0, 3.0] - dist=2, angle=0
+        # 5. [3.0, 0.0, 1.0] - dist=3, angle=0
+
+        expected_agent0 = np.array(
+            [
+                [0.0, -1.0, 5.0],
+                [1.0, 0.0, 2.0],
+                [0.0, 1.0, 4.0],
+                [2.0, 0.0, 3.0],
+                [3.0, 0.0, 1.0],
+            ],
+            dtype=np.float32,
+        )
+
+        np.testing.assert_array_equal(result[0, 0], expected_agent0)
+
+        # Check that all 5 entities are marked as real
+        expected_mask_agent0 = np.array([True, True, True, True, True], dtype=bool)
+        np.testing.assert_array_equal(mask[0, 0], expected_mask_agent0)
+
+
+if __name__ == "__main__":
     unittest.main()

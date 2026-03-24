@@ -147,8 +147,8 @@ class TestQMIXAgentGroup(unittest.TestCase):
                 self.agent_group.feature_extractors.items(),
             ):
                 self.assertIsInstance(model, DDP)
-                self.assertIsInstance(fe, DDP)
-
+                # feature extractor dose not have trainable parameters
+                # and will not be packaged using DDP
             self.agent_group.unwrap_data_parallel()
             for (model_name, model), (_, fe) in zip(
                 self.agent_group.models.items(),
