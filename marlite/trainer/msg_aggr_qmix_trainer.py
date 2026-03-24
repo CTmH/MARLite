@@ -79,7 +79,7 @@ class MsgAggrQMIXTrainer(Trainer):
                     # Extract batch data - now all tensors except next_avail_actions which might be numpy array or tensor
                     alive_mask = batch["alive_mask"].to(dtype=torch.bool)
                     observations = batch["observations"].to(dtype=torch.float32)
-                    obs_padding_mask = batch["obs_padding_mask"].to(dtype=torch.bool)
+                    timestep_padding_mask = batch["timestep_padding_mask"].to(dtype=torch.bool)
                     states = batch["states"].to(dtype=torch.float32)
                     actions = batch["actions"].to(dtype=torch.int)
                     rewards = batch["rewards"].to(dtype=torch.float32)
@@ -87,7 +87,7 @@ class MsgAggrQMIXTrainer(Trainer):
                     next_observations = batch["next_observations"].to(
                         dtype=torch.float32
                     )
-                    next_obs_padding_mask = batch["next_obs_padding_mask"].to(
+                    next_timestep_padding_mask = batch["next_timestep_padding_mask"].to(
                         dtype=torch.bool
                     )
                     next_avail_actions = batch[
@@ -133,13 +133,13 @@ class MsgAggrQMIXTrainer(Trainer):
                         self.train_device
                     )  # (B, N) -> (B) if all agents are terminated then game over
 
-                    # obs_padding_mask = torch.tensor(obs_padding_mask, dtype=torch.bool) # (B, T) # REMOVED: already converted above
-                    obs_padding_mask = torch.stack(
-                        [obs_padding_mask] * n_agents, dim=1
+                    # timestep_padding_mask = torch.tensor(timestep_padding_mask, dtype=torch.bool) # (B, T) # REMOVED: already converted above
+                    timestep_padding_mask = torch.stack(
+                        [timestep_padding_mask] * n_agents, dim=1
                     ).to(self.train_device)  # (B, N, T)
-                    # next_obs_padding_mask = torch.tensor(next_obs_padding_mask, dtype=torch.bool) # REMOVED: already converted above
-                    next_obs_padding_mask = torch.stack(
-                        [next_obs_padding_mask] * n_agents, dim=1
+                    # next_timestep_padding_mask = torch.tensor(next_timestep_padding_mask, dtype=torch.bool) # REMOVED: already converted above
+                    next_timestep_padding_mask = torch.stack(
+                        [next_timestep_padding_mask] * n_agents, dim=1
                     ).to(self.train_device)
 
                     # Compute the Q-tot
@@ -148,7 +148,7 @@ class MsgAggrQMIXTrainer(Trainer):
                         self.train_device
                     )  # obs.shape (B, T, N, F) -> (B, N, T, F)
                     ret = self.eval_agent_group.forward(
-                        observations, obs_padding_mask, alive_mask[:, -1, :]
+                        observations, timestep_padding_mask, alive_mask[:, -1, :]
                     )
                     q_val = ret["q_val"]
                     aggregated_msg = ret["aggregated_msg"]
@@ -160,14 +160,14 @@ class MsgAggrQMIXTrainer(Trainer):
                     states = states.to(self.train_device)
                     self.eval_critic.train()
                     ret = self.eval_critic(
-                        q_val, states, alive_mask, obs_padding_mask[:, 0, :]
+                        q_val, states, alive_mask, timestep_padding_mask[:, 0, :]
                     )
                     q_tot = ret["q_tot"]
                     # Use target model for stablity
                     with torch.no_grad():
                         self.target_critic.eval()
                         ret = self.target_critic(
-                            q_val, states, alive_mask, obs_padding_mask[:, 0, :]
+                            q_val, states, alive_mask, timestep_padding_mask[:, 0, :]
                         )
                         state_features = ret["state_features"]
 
@@ -179,7 +179,7 @@ class MsgAggrQMIXTrainer(Trainer):
                         )  # obs.shape (B, T, N, F) -> (B, N, T, F)
                         ret_next = self.eval_agent_group.forward(
                             next_observations,
-                            next_obs_padding_mask,
+                            next_timestep_padding_mask,
                             next_alive_mask[:, -1, :],
                         )
                         q_val_next = ret_next["q_val"]
@@ -194,7 +194,7 @@ class MsgAggrQMIXTrainer(Trainer):
                             q_val_next,
                             next_states,
                             next_alive_mask,
-                            next_obs_padding_mask[:, 0, :],
+                            next_timestep_padding_mask[:, 0, :],
                         )
                         q_tot_next = ret_next["q_tot"]
                         # state_features_next = ret_next['state_features']
@@ -316,7 +316,7 @@ class ProbMsgAggrQMIXTrainer(Trainer):
                     # Extract batch data
                     alive_mask = batch["alive_mask"].to(dtype=torch.bool)
                     observations = batch["observations"].to(dtype=torch.float32)
-                    obs_padding_mask = batch["obs_padding_mask"].to(dtype=torch.bool)
+                    timestep_padding_mask = batch["timestep_padding_mask"].to(dtype=torch.bool)
                     states = batch["states"].to(dtype=torch.float32)
                     actions = batch["actions"].to(dtype=torch.int)
                     rewards = batch["rewards"].to(dtype=torch.float32)
@@ -324,7 +324,7 @@ class ProbMsgAggrQMIXTrainer(Trainer):
                     next_observations = batch["next_observations"].to(
                         dtype=torch.float32
                     )
-                    next_obs_padding_mask = batch["next_obs_padding_mask"].to(
+                    next_timestep_padding_mask = batch["next_timestep_padding_mask"].to(
                         dtype=torch.bool
                     )
                     next_avail_actions = batch[
@@ -360,13 +360,13 @@ class ProbMsgAggrQMIXTrainer(Trainer):
                         self.train_device
                     )  # (B, N) -> (B) if all agents are terminated then game over
 
-                    # obs_padding_mask = torch.tensor(obs_padding_mask, dtype=torch.bool) # (B, T) # REMOVED: already converted above
-                    obs_padding_mask = torch.stack(
-                        [obs_padding_mask] * n_agents, dim=1
+                    # timestep_padding_mask = torch.tensor(timestep_padding_mask, dtype=torch.bool) # (B, T) # REMOVED: already converted above
+                    timestep_padding_mask = torch.stack(
+                        [timestep_padding_mask] * n_agents, dim=1
                     ).to(self.train_device)  # (B, N, T)
-                    # next_obs_padding_mask = torch.tensor(next_obs_padding_mask, dtype=torch.bool) # REMOVED: already converted above
-                    next_obs_padding_mask = torch.stack(
-                        [next_obs_padding_mask] * n_agents, dim=1
+                    # next_timestep_padding_mask = torch.tensor(next_timestep_padding_mask, dtype=torch.bool) # REMOVED: already converted above
+                    next_timestep_padding_mask = torch.stack(
+                        [next_timestep_padding_mask] * n_agents, dim=1
                     ).to(self.train_device)
 
                     # Compute the Q-tot
@@ -375,7 +375,7 @@ class ProbMsgAggrQMIXTrainer(Trainer):
                         self.train_device
                     )  # obs.shape (B, T, N, F) -> (B, N, T, F)
                     ret = self.eval_agent_group.forward(
-                        observations, obs_padding_mask, alive_mask[:, -1, :]
+                        observations, timestep_padding_mask, alive_mask[:, -1, :]
                     )  # obs.shape (B, N, T, F)
                     q_val = ret["q_val"]
                     ag_mu = ret["mu"]
@@ -388,14 +388,14 @@ class ProbMsgAggrQMIXTrainer(Trainer):
                     states = states.to(self.train_device)
                     self.eval_critic.train()
                     ret = self.eval_critic(
-                        q_val, states, alive_mask, obs_padding_mask[:, 0, :]
+                        q_val, states, alive_mask, timestep_padding_mask[:, 0, :]
                     )
                     q_tot = ret["q_tot"]
                     # Use target model for stablity
                     with torch.no_grad():
                         self.target_critic.eval()
                         ret = self.target_critic(
-                            q_val, states, alive_mask, obs_padding_mask[:, 0, :]
+                            q_val, states, alive_mask, timestep_padding_mask[:, 0, :]
                         )
                         critic_mu = ret["mu"]
                         critic_std = ret["std"]
@@ -411,7 +411,7 @@ class ProbMsgAggrQMIXTrainer(Trainer):
                         )  # obs.shape (B, T, N, F) -> (B, N, T, F)
                         ret_next = self.target_agent_group.forward(
                             next_observations,
-                            next_obs_padding_mask,
+                            next_timestep_padding_mask,
                             next_alive_mask[:, -1, :],
                         )
                         q_val_next = ret_next["q_val"]
@@ -426,7 +426,7 @@ class ProbMsgAggrQMIXTrainer(Trainer):
                             q_val_next,
                             next_states,
                             next_alive_mask,
-                            next_obs_padding_mask[:, 0, :],
+                            next_timestep_padding_mask[:, 0, :],
                         )
                         q_tot_next = ret_next["q_tot"]
 

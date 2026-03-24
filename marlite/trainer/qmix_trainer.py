@@ -61,7 +61,7 @@ class QMIXTrainer(Trainer):
                     # Extract batch data
                     alive_mask = batch["alive_mask"].to(dtype=torch.bool)
                     observations = batch["observations"].to(dtype=torch.float32)
-                    obs_padding_mask = batch["obs_padding_mask"].to(dtype=torch.bool)
+                    timestep_padding_mask = batch["timestep_padding_mask"].to(dtype=torch.bool)
                     states = batch["states"].to(dtype=torch.float32)
                     actions = batch["actions"].to(dtype=torch.int)
                     rewards = batch["rewards"].to(dtype=torch.float32)
@@ -69,7 +69,7 @@ class QMIXTrainer(Trainer):
                     next_observations = batch["next_observations"].to(
                         dtype=torch.float32
                     )
-                    next_obs_padding_mask = batch["next_obs_padding_mask"].to(
+                    next_timestep_padding_mask = batch["next_timestep_padding_mask"].to(
                         dtype=torch.bool
                     )
                     next_avail_actions = batch["next_avail_actions"]  # Numpy array
@@ -102,13 +102,13 @@ class QMIXTrainer(Trainer):
                         self.train_device
                     )  # (B, N) -> (B) if all agents are terminated then game over
 
-                    # obs_padding_mask = torch.tensor(obs_padding_mask, dtype=torch.bool) # (B, T) # REMOVED: already converted above
-                    obs_padding_mask = torch.stack(
-                        [obs_padding_mask] * n_agents, dim=1
+                    # timestep_padding_mask = torch.tensor(timestep_padding_mask, dtype=torch.bool) # (B, T) # REMOVED: already converted above
+                    timestep_padding_mask = torch.stack(
+                        [timestep_padding_mask] * n_agents, dim=1
                     ).to(self.train_device)  # (B, N, T)
-                    # next_obs_padding_mask = torch.tensor(next_obs_padding_mask, dtype=torch.bool) # REMOVED: already converted above
-                    next_obs_padding_mask = torch.stack(
-                        [next_obs_padding_mask] * n_agents, dim=1
+                    # next_timestep_padding_mask = torch.tensor(next_timestep_padding_mask, dtype=torch.bool) # REMOVED: already converted above
+                    next_timestep_padding_mask = torch.stack(
+                        [next_timestep_padding_mask] * n_agents, dim=1
                     ).to(self.train_device)
 
                     # Compute the Q-tot
@@ -117,7 +117,7 @@ class QMIXTrainer(Trainer):
                         self.train_device
                     )  # obs.shape (B, T, N, F) -> (B, N, T, F)
                     ret = self.eval_agent_group.forward(
-                        observations, obs_padding_mask, alive_mask[:, -1, :]
+                        observations, timestep_padding_mask, alive_mask[:, -1, :]
                     )
                     q_val = ret["q_val"]
                     actions = actions[:, -1].to(
@@ -130,7 +130,7 @@ class QMIXTrainer(Trainer):
                     states = states.to(self.train_device)
                     self.eval_critic.train()
                     ret = self.eval_critic(
-                        q_val, states, alive_mask, obs_padding_mask[:, 0, :]
+                        q_val, states, alive_mask, timestep_padding_mask[:, 0, :]
                     )
                     q_tot = ret["q_tot"]
 
@@ -142,7 +142,7 @@ class QMIXTrainer(Trainer):
                         )  # obs.shape (B, T, N, F) -> (B, N, T, F)
                         ret_next = self.target_agent_group.forward(
                             next_observations,
-                            next_obs_padding_mask,
+                            next_timestep_padding_mask,
                             next_alive_mask[:, -1, :],
                         )
                         q_val_next = ret_next["q_val"]
@@ -157,7 +157,7 @@ class QMIXTrainer(Trainer):
                             q_val_next,
                             next_states,
                             next_alive_mask,
-                            next_obs_padding_mask[:, 0, :],
+                            next_timestep_padding_mask[:, 0, :],
                         )
                         q_tot_next = ret_next["q_tot"]
 

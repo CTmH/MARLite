@@ -61,7 +61,7 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
             data = self.replaybuffer.sample(sample_size)
             data = list(data)
             alive_mask = np.stack([e["alive_mask"] for e in data])
-            obs_padding_mask = np.stack([e["obs_padding_mask"] for e in data])
+            timestep_padding_mask = np.stack([e["timestep_padding_mask"] for e in data])
             observations = np.stack([e["observations"] for e in data]).astype(
                 np.float32
             )
@@ -81,11 +81,11 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
             observations = torch.tensor(observations)
             formatted_obs = torch.tensor(formatted_obs)
             construct_padding_mask = torch.tensor(construct_padding_mask)
-            obs_padding_mask = torch.tensor(obs_padding_mask)
+            timestep_padding_mask = torch.tensor(timestep_padding_mask)
             edge_indices_idx = torch.arange(len(edge_indices), dtype=torch.int)
             dataset = TensorDataset(
                 observations,
-                obs_padding_mask,
+                timestep_padding_mask,
                 formatted_obs,
                 edge_indices_idx,
                 construct_padding_mask,

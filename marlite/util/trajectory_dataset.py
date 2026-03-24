@@ -27,8 +27,8 @@ DICT_ATTR = [
     'truncations',
 ]
 PADDING_ATTR = [
-    'obs_padding_mask',
-    'next_obs_padding_mask',
+    'timestep_padding_mask',
+    'next_timestep_padding_mask',
 ]
 
 NUMERIC_ATTR = [
@@ -40,10 +40,10 @@ NUMERIC_ATTR = [
     'rewards',
     'terminations',
     'truncations',
-    'obs_padding_mask',
+    'timestep_padding_mask',
     'next_alive_mask',
     'next_observations',
-    'next_obs_padding_mask',
+    'next_timestep_padding_mask',
 ]
 
 DYNAMIC_LEN_ATTR = [
