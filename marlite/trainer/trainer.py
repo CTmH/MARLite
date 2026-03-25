@@ -23,6 +23,8 @@ from marlite.util.distributed_utils import (
     is_ddp_model,
     average_loss,
     get_local_device_id,
+    setup_ddp,
+    cleanup_ddp,
 )
 from marlite.analyzer import AnalyzerConfig
 
@@ -47,6 +49,7 @@ class Trainer:
         eval_episodes_to_replay_ratio: float = 0.25,
         workdir: str = "",
         train_device: Union[str, List[str]] = "cpu",
+        local_rank: int = 0,
         n_workers=1,
         compile_models: bool = False,
         sample_mode: str = "ratio",
@@ -125,11 +128,17 @@ class Trainer:
         self.train_device_config = train_device
         self.device_list, self.use_ddp = get_device_list(train_device)
 
+        self._ddp_initialized = False
         if self.use_ddp:
-            # Multi-GPU DDP training - use the first device as primary
-            self.train_device = self.device_list[0]
+            # Initialize DDP process group
+            # Try to get rank from environment variable first, fallback to parameter
+            self.local_rank = int(os.environ.get("LOCAL_RANK", local_rank))
+            world_size = len(self.device_list)
+            setup_ddp(self.local_rank, world_size)
+            self._ddp_initialized = True
+            self.train_device = self.device_list[self.local_rank]
             logging.info(
-                f"Using DistributedDataParallel with devices: {self.device_list}"
+                f"Using DistributedDataParallel with rank={self.local_rank}, world_size={world_size}, devices: {self.device_list}"
             )
         else:
             # Single device training
@@ -387,6 +396,10 @@ class Trainer:
         logging.info(
             f"Intermediate results saved for epoch {epoch}. Results saved to {yaml_path}"
         )
+
+    def __del__(self):
+        if self._ddp_initialized:
+            cleanup_ddp()
 
 
 """

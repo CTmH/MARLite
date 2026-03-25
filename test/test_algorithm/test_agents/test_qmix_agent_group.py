@@ -3,6 +3,7 @@ import torch
 import yaml
 import numpy as np
 import tempfile
+import os
 from mpe2 import simple_spread_v3
 from torch.nn.parallel import DistributedDataParallel as DDP
 from marlite.algorithm.agents import AgentGroupConfig
@@ -130,25 +131,14 @@ class TestQMIXAgentGroup(unittest.TestCase):
 
     def test_wrap_distributed_data_parallel(self):
         """Test wrapping models with DistributedDataParallel."""
-        import torch.distributed as dist
-        import os
-
-        # Initialize DDP process group for testing
-        os.environ["MASTER_ADDR"] = "localhost"
-        os.environ["MASTER_PORT"] = "29500"
-        if not dist.is_initialized():
-            dist.init_process_group("gloo", rank=0, world_size=1)
-
         try:
-            # Test DDP wrapping
+            os.environ["LOCAL_RANK"] = "0"
             self.agent_group.wrap_data_parallel(device_id=0)
             for (model_name, model), (_, fe) in zip(
                 self.agent_group.models.items(),
                 self.agent_group.feature_extractors.items(),
             ):
                 self.assertIsInstance(model, DDP)
-                # feature extractor dose not have trainable parameters
-                # and will not be packaged using DDP
             self.agent_group.unwrap_data_parallel()
             for (model_name, model), (_, fe) in zip(
                 self.agent_group.models.items(),
@@ -159,9 +149,8 @@ class TestQMIXAgentGroup(unittest.TestCase):
                 self.assertIsInstance(model, torch.nn.Module)
                 self.assertIsInstance(fe, torch.nn.Module)
         finally:
-            # Clean up DDP process group
-            if dist.is_initialized():
-                dist.destroy_process_group()
+            if "LOCAL_RANK" in os.environ:
+                del os.environ["LOCAL_RANK"]
 
     def test_save_load_params(self):
         # Create a temporary directory to save parameters
