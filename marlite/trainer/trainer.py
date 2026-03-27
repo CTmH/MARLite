@@ -7,7 +7,7 @@ import datetime
 import numpy as np
 from copy import deepcopy
 from absl import logging
-from typing import List, Union
+from typing import List, Union, Optional
 
 from marlite.environment import EnvConfig
 from marlite.rollout import RolloutManagerConfig
@@ -50,6 +50,9 @@ class Trainer:
         workdir: str = "",
         train_device: Union[str, List[str]] = "cpu",
         local_rank: int = 0,
+        master_addr: Optional[str] = None,
+        master_port: Optional[str] = None,
+        ddp_backend: str = "nccl",
         n_workers=1,
         compile_models: bool = False,
         sample_mode: str = "ratio",
@@ -133,8 +136,25 @@ class Trainer:
             # Initialize DDP process group
             # Try to get rank from environment variable first, fallback to parameter
             self.local_rank = int(os.environ.get("LOCAL_RANK", local_rank))
+            self.master_addr = (
+                master_addr
+                if master_addr is not None
+                else os.environ.get("MASTER_ADDR")
+            )
+            self.master_port = (
+                master_port
+                if master_port is not None
+                else os.environ.get("MASTER_PORT")
+            )
+            self.ddp_backend = ddp_backend
             world_size = len(self.device_list)
-            setup_ddp(self.local_rank, world_size)
+            setup_ddp(
+                self.local_rank,
+                world_size,
+                backend=self.ddp_backend,
+                master_addr=self.master_addr,
+                master_port=self.master_port,
+            )
             self._ddp_initialized = True
             self.train_device = self.device_list[self.local_rank]
             logging.info(

@@ -12,7 +12,13 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from typing import Union, List, Optional
 
 
-def setup_ddp(rank: int, world_size: int, backend: str = "nccl") -> None:
+def setup_ddp(
+    rank: int,
+    world_size: int,
+    backend: str = "nccl",
+    master_addr: Optional[str] = None,
+    master_port: Optional[str] = None,
+) -> None:
     """
     Initialize the distributed environment.
 
@@ -20,9 +26,19 @@ def setup_ddp(rank: int, world_size: int, backend: str = "nccl") -> None:
         rank: Rank of the current process
         world_size: Total number of processes
         backend: Backend to use ('nccl' for GPU, 'gloo' for CPU)
+        master_addr: Master address for distributed training (defaults to environment variable or 'localhost')
+        master_port: Master port for distributed training (defaults to environment variable or '12355')
     """
-    os.environ["MASTER_ADDR"] = os.environ.get("MASTER_ADDR", "localhost")
-    os.environ["MASTER_PORT"] = os.environ.get("MASTER_PORT", "12355")
+    os.environ["MASTER_ADDR"] = (
+        master_addr
+        if master_addr is not None
+        else os.environ.get("MASTER_ADDR", "localhost")
+    )
+    os.environ["MASTER_PORT"] = (
+        master_port
+        if master_port is not None
+        else os.environ.get("MASTER_PORT", "12355")
+    )
 
     dist.init_process_group(backend, rank=rank, world_size=world_size)
 
