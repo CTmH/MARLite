@@ -217,17 +217,23 @@ class BaseWorker:
             return False
 
         elif cmd == "SYNC_FROM_MAIN":
+            print(f"Worker {self.worker_id}: Received SYNC_FROM_MAIN", flush=True)
             shared_memory = param_queue.get()
+            print(f"Worker {self.worker_id}: Got shared_memory", flush=True)
             self.sync_params_from_shared_memory(shared_memory)
+            print(f"Worker {self.worker_id}: Putting ACK", flush=True)
             param_queue.put("ACK")
+            print(f"Worker {self.worker_id}: ACK sent", flush=True)
 
         elif cmd == "BROADCAST":
             shared_memory = param_queue.get()
             self.sync_params_from_shared_memory(shared_memory)
 
         elif cmd == "SYNC_TO_MAIN":
+            print(f"Worker {self.worker_id}: Received SYNC_TO_MAIN", flush=True)
             shared_memory = {}
             self.write_params_to_shared_memory(shared_memory)
+            print(f"Worker {self.worker_id}: Putting params to param_queue", flush=True)
             param_queue.put(shared_memory)
 
         elif cmd == "TRAIN_STEP":
