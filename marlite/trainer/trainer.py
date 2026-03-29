@@ -106,6 +106,7 @@ class Trainer:
         self.analyzer = analyzer_config.create_analyzer()
 
         # Agent group
+        self.agent_group_config = agent_group_config
         self.eval_agent_group = agent_group_config.get_agent_group()
         self.target_agent_group = agent_group_config.get_agent_group()
         self.best_agent_group_params = self.eval_agent_group.get_agent_group_params()

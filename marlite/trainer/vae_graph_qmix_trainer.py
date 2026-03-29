@@ -30,7 +30,7 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
 
         return GraphWorkerGroup(
             device_ids=list(range(len(self.device_list))),
-            agent_group_config=self.eval_agent_group,
+            agent_group_config=self.agent_group_config,
             critic_config=self.critic_config,
             critic_optimizer_config=self.critic_optimizer_config,
             agent_group_optimizer_config=self.eval_agent_group.optimizer,
@@ -45,7 +45,7 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
         return VAESSLWorkerGroup(
             device_ids=list(range(len(self.device_list))),
             ssl_model_config=self.ssl_model_config,
-            agent_group_config=self.eval_agent_group,
+            agent_group_config=self.agent_group_config,
             ssl_optimizer_config=self.ssl_optimizer_config,
             agent_group_optimizer_config=self.eval_agent_group.optimizer,
             reconstruction_loss=self.reconstruction_loss,
