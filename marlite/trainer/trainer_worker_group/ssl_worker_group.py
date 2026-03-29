@@ -97,7 +97,7 @@ class SSLWorkerGroup(BaseWorkerGroup):
         trainable_params_cpu = _dict_to_cpu(trainable_params)
 
         for i in range(self.world_size):
-            self.cmd_queue.put("SYNC_FROM_MAIN")
+            self.cmd_queues[i].put("SYNC_FROM_MAIN")
             self.param_queues[i].put(trainable_params_cpu)
 
         if blocking:
@@ -108,12 +108,12 @@ class SSLWorkerGroup(BaseWorkerGroup):
 
     def broadcast_params(self):
         """Broadcast current SSL and agent group parameters to all workers."""
-        self.cmd_queue.put("SYNC_TO_MAIN")
+        self.cmd_queues[0].put("SYNC_TO_MAIN")
         latest_params = self.param_queues[0].get()
         latest_params_cpu = _dict_to_cpu(latest_params)
 
         for i in range(self.world_size):
-            self.cmd_queue.put("BROADCAST")
+            self.cmd_queues[i].put("BROADCAST")
             self.param_queues[i].put(latest_params_cpu)
 
     def read_params_from_worker0(self) -> tuple:
@@ -123,7 +123,7 @@ class SSLWorkerGroup(BaseWorkerGroup):
         Returns:
             Tuple of (ssl_model_params, agent_group_params)
         """
-        self.cmd_queue.put("SYNC_TO_MAIN")
+        self.cmd_queues[0].put("SYNC_TO_MAIN")
         params = self.param_queues[0].get()
 
         return params.get("ssl_model"), params.get("eval_agent_group")
@@ -143,8 +143,8 @@ class SSLWorkerGroup(BaseWorkerGroup):
         """
         batch_slices = _slice_batch(batch, self.world_size)
         for i in range(self.world_size):
-            self.cmd_queue.put("SSL_TRAIN_STEP")
-            self.data_queue.put(batch_slices[i])
+            self.cmd_queues[i].put("SSL_TRAIN_STEP")
+            self.data_queues[i].put(batch_slices[i])
 
         # Collect losses from all workers
         losses = []

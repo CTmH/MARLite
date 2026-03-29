@@ -26,9 +26,9 @@ def is_port_available(port: int) -> bool:
 
 def _dict_to_cpu(data: Any) -> Any:
     """Recursively convert all tensors in a dict/list to CPU."""
-    if isinstance(data, torch.Tensor):
+    if isinstance(data, (torch.Tensor, torch.nn.Parameter)):
         return data.detach().clone().cpu() if data.is_cuda else data
-    elif isinstance(data, dict):
+    elif hasattr(data, "items"):  # Handle dict, OrderedDict, etc.
         return {k: _dict_to_cpu(v) for k, v in data.items()}
     elif isinstance(data, (list, tuple)):
         return type(data)(_dict_to_cpu(x) for x in data)
@@ -183,9 +183,7 @@ class BaseWorkerGroup(ABC):
 
         # Worker processes and queues
         self.workers = []
-        self.data_queue = None
         self.loss_queue = None
-        self.cmd_queue = None
         self.ready_events = []
 
     def _create_worker_kwargs(self) -> Dict[str, Any]:
@@ -216,14 +214,16 @@ class BaseWorkerGroup(ABC):
         2. Creates model copies on its assigned GPU
         3. Waits for commands from main process
         """
-        self.cmd_queue = self.mp_ctx.Queue()
-        self.data_queue = self.mp_ctx.Queue()
         self.loss_queue = self.mp_ctx.Queue()
 
-        # Create separate param queues for each worker to avoid race conditions
+        # Create separate queues for each worker to avoid race conditions
+        self.cmd_queues = []
         self.param_queues = []
+        self.data_queues = []
         for _ in range(self.world_size):
+            self.cmd_queues.append(self.mp_ctx.Queue())
             self.param_queues.append(self.mp_ctx.Queue())
+            self.data_queues.append(self.mp_ctx.Queue())
 
         worker_class = self._get_worker_class()
 
@@ -254,9 +254,9 @@ class BaseWorkerGroup(ABC):
                     worker_class,
                     worker_kwargs,
                     self.param_queues[i],
-                    self.data_queue,
+                    self.data_queues[i],
                     self.loss_queue,
-                    self.cmd_queue,
+                    self.cmd_queues[i],
                     ready_event,
                 ),
             )
@@ -284,7 +284,7 @@ class BaseWorkerGroup(ABC):
         """
         trainable_params_cpu = _dict_to_cpu(trainable_params)
         for i in range(self.world_size):
-            self.cmd_queue.put("SYNC_FROM_MAIN")
+            self.cmd_queues[i].put("SYNC_FROM_MAIN")
             self.param_queues[i].put(trainable_params_cpu)
 
         if blocking:
@@ -300,12 +300,12 @@ class BaseWorkerGroup(ABC):
         Called before training starts to ensure workers have latest parameters
         (e.g., after loading from checkpoint).
         """
-        self.cmd_queue.put("SYNC_TO_MAIN")
+        self.cmd_queues[0].put("SYNC_TO_MAIN")
         latest_params = self.param_queues[0].get()
         latest_params_cpu = _dict_to_cpu(latest_params)
 
         for i in range(self.world_size):
-            self.cmd_queue.put("BROADCAST")
+            self.cmd_queues[i].put("BROADCAST")
             self.param_queues[i].put(latest_params_cpu)
 
     def read_params_from_worker0(self) -> Dict[str, Any]:
@@ -318,7 +318,7 @@ class BaseWorkerGroup(ABC):
         Returns:
             Dictionary containing latest model parameters
         """
-        self.cmd_queue.put("SYNC_TO_MAIN")
+        self.cmd_queues[0].put("SYNC_TO_MAIN")
         params = self.param_queues[0].get()
 
         return params
@@ -338,8 +338,8 @@ class BaseWorkerGroup(ABC):
         """
         batch_slices = _slice_batch(batch, self.world_size)
         for i in range(self.world_size):
-            self.cmd_queue.put("TRAIN_STEP")
-            self.data_queue.put(batch_slices[i])
+            self.cmd_queues[i].put("TRAIN_STEP")
+            self.data_queues[i].put(batch_slices[i])
 
         losses = []
         for _ in range(self.world_size):
@@ -352,8 +352,8 @@ class BaseWorkerGroup(ABC):
         """
         Stop all worker processes and clean up resources.
         """
-        for _ in range(self.world_size):
-            self.cmd_queue.put("STOP")
+        for i in range(self.world_size):
+            self.cmd_queues[i].put("STOP")
 
         for p in self.workers:
             p.join(timeout=5)

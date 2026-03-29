@@ -306,3 +306,11 @@ class VAESSLWorker(SSLWorker):
             )
         else:
             return self.reconstruction_loss(pred_set, target_set)
+
+    def handle_command(self, cmd, param_queue, data_queue, loss_queue):
+        if cmd == "SSL_TRAIN_STEP":
+            batch = data_queue.get()
+            loss = self.ssl_train_step(batch)
+            loss_queue.put(loss)
+            return True
+        return super().handle_command(cmd, param_queue, data_queue, loss_queue)
