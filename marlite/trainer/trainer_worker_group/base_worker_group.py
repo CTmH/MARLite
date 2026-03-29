@@ -33,7 +33,42 @@ def _dict_to_cpu(data: Any) -> Any:
     elif isinstance(data, (list, tuple)):
         return type(data)(_dict_to_cpu(x) for x in data)
     return data
-    return result
+
+
+def _slice_batch(batch: Dict[str, Any], num_slices: int) -> List[Dict[str, Any]]:
+    """
+    Slice a batch into multiple sub-batches for data parallelism.
+
+    Args:
+        batch: Dictionary containing batch data
+        num_slices: Number of slices to create
+
+    Returns:
+        List of batch slices
+    """
+    slices = [{} for _ in range(num_slices)]
+
+    for key, value in batch.items():
+        if isinstance(value, torch.Tensor):
+            # Slice tensor along batch dimension
+            step = value.shape[0] // num_slices
+            for i in range(num_slices):
+                slices[i][key] = value[
+                    i * step : (i + 1) * step if i < num_slices - 1 else None
+                ]
+        elif isinstance(value, (list, tuple)):
+            # Slice list - divide indices evenly
+            step = len(value) // num_slices
+            for i in range(num_slices):
+                start = i * step
+                end = (i + 1) * step if i < num_slices - 1 else len(value)
+                slices[i][key] = value[start:end]
+        else:
+            # Non-sliceable data (scalars, strings, etc.) - keep as is
+            for i in range(num_slices):
+                slices[i][key] = value
+
+    return slices
 
 
 def worker_loop(
@@ -292,8 +327,8 @@ class BaseWorkerGroup(ABC):
         """
         Execute one training step across all workers.
 
-        Distributes the batch to workers, which each compute gradients on
-        their data slice, then synchronizes via all_reduce.
+        Distributes the batch slices to workers, each computes gradients on
+        its data slice, then synchronizes via all_reduce.
 
         Args:
             batch: Full batch from DataLoader
@@ -301,9 +336,10 @@ class BaseWorkerGroup(ABC):
         Returns:
             Average loss across all workers
         """
-        for _ in range(self.world_size):
+        batch_slices = _slice_batch(batch, self.world_size)
+        for i in range(self.world_size):
             self.cmd_queue.put("TRAIN_STEP")
-            self.data_queue.put(batch)
+            self.data_queue.put(batch_slices[i])
 
         losses = []
         for _ in range(self.world_size):

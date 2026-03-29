@@ -8,6 +8,7 @@ from typing import Any, Dict
 from marlite.trainer.trainer_worker_group.base_worker_group import (
     BaseWorkerGroup,
     _dict_to_cpu,
+    _slice_batch,
 )
 from marlite.trainer.trainer_worker.ssl_worker import SSLWorker
 
@@ -109,10 +110,11 @@ class SSLWorkerGroup(BaseWorkerGroup):
         """Broadcast current SSL and agent group parameters to all workers."""
         self.cmd_queue.put("SYNC_TO_MAIN")
         latest_params = self.param_queues[0].get()
+        latest_params_cpu = _dict_to_cpu(latest_params)
 
         for i in range(self.world_size):
             self.cmd_queue.put("BROADCAST")
-            self.param_queues[i].put(latest_params.copy())
+            self.param_queues[i].put(latest_params_cpu)
 
     def read_params_from_worker0(self) -> tuple:
         """
@@ -130,16 +132,19 @@ class SSLWorkerGroup(BaseWorkerGroup):
         """
         Execute one SSL training step across all workers.
 
+        Distributes the batch slices to workers, each computes gradients on
+        its data slice, then synchronizes via all_reduce.
+
         Args:
             batch: Full batch from DataLoader
 
         Returns:
             Average SSL loss across all workers
         """
-        # Send train command to all workers
-        for _ in range(self.world_size):
+        batch_slices = _slice_batch(batch, self.world_size)
+        for i in range(self.world_size):
             self.cmd_queue.put("SSL_TRAIN_STEP")
-            self.data_queue.put(batch)
+            self.data_queue.put(batch_slices[i])
 
         # Collect losses from all workers
         losses = []

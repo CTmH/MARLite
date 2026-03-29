@@ -223,16 +223,15 @@ class VAESSLWorker(SSLWorker):
         obs = batch["observations"].to(dtype=torch.float32)
         obs_mask = batch["timestep_padding_mask"].to(dtype=torch.bool)
         formatted = batch["formatted_obs"]
-        edge_idx = batch["edge_indices_idx"]
         construct_mask = batch["construct_padding_mask"]
 
         bs = obs.shape[0]
         n_agents = batch.get("n_agents", obs.shape[2] if len(obs.shape) > 2 else 1)
 
-        # Process edge indices
+        # Process edge indices - edge_indices is already sliced per batch
         edge_indices = batch.get("edge_indices", None)
         if edge_indices is not None:
-            last_ts_edges = [edge_indices[i][-1] for i in edge_idx.tolist()]
+            last_ts_edges = [edges[-1] for edges in edge_indices]
         else:
             last_ts_edges = None
 

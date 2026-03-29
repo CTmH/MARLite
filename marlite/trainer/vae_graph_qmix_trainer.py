@@ -222,9 +222,8 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
                         "observations": obs,
                         "timestep_padding_mask": obs_mask,
                         "formatted_obs": formatted,
-                        "edge_indices_idx": edge_idx,
                         "construct_padding_mask": construct_mask,
-                        "edge_indices": edge_indices,
+                        "edge_indices": [edge_indices[i] for i in edge_idx.tolist()],
                         "n_agents": n_agents,
                         "epoch": self.current_epoch,
                     }
