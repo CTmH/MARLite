@@ -216,10 +216,10 @@ class BaseWorkerGroup(ABC):
 
         if blocking:
             # Wait for workers to acknowledge
-            for _ in range(self.world_size):
+            for i in range(self.world_size):
                 ack = self.param_queue.get()
                 if ack != "ACK":
-                    raise RuntimeError(f"Expected ACK from worker, got {ack}")
+                    raise RuntimeError(f"Worker {i}: Expected ACK, got {ack}")
 
     def broadcast_params(self):
         """

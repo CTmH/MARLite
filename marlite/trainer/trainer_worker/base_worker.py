@@ -219,25 +219,40 @@ class BaseWorker:
         elif cmd == "SYNC_FROM_MAIN":
             # Main process is sending initial parameters
             shared_memory = param_queue.get()
-            self.sync_params_from_shared_memory(shared_memory)
-            param_queue.put("ACK")
+            try:
+                self.sync_params_from_shared_memory(shared_memory)
+                param_queue.put("ACK")
+            except Exception as e:
+                param_queue.put(f"ERROR: {e}")
 
         elif cmd == "BROADCAST":
             # Receiving broadcasted parameters from main
             shared_memory = param_queue.get()
-            self.sync_params_from_shared_memory(shared_memory)
+            try:
+                self.sync_params_from_shared_memory(shared_memory)
+            except Exception as e:
+                param_queue.put(f"ERROR: {e}")
 
         elif cmd == "SYNC_TO_MAIN":
             # Main process wants to read our parameters
             shared_memory = {}
-            self.write_params_to_shared_memory(shared_memory)
-            param_queue.put(shared_memory)
+            try:
+                self.write_params_to_shared_memory(shared_memory)
+                param_queue.put(shared_memory)
+            except Exception as e:
+                param_queue.put(f"ERROR: {e}")
 
         elif cmd == "TRAIN_STEP":
             # Execute training step
             batch = data_queue.get()
-            loss = self.train_step(batch)
-            loss_queue.put(loss)
+            try:
+                loss = self.train_step(batch)
+                loss_queue.put(loss)
+            except Exception as e:
+                loss_queue.put(f"ERROR: {e}")
+
+        else:
+            param_queue.put(f"UNKNOWN_CMD: {cmd}")
 
         return True
 
