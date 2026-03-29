@@ -235,19 +235,13 @@ class BaseWorkerGroup(ABC):
                 - target_critic: Target critic state dict
             blocking: Whether to wait for workers to acknowledge
         """
-        print(f"[MAIN] Sending SYNC_FROM_MAIN to all workers via cmd_queue")
         for i in range(self.world_size):
             self.cmd_queue.put("SYNC_FROM_MAIN")
-            print(f"[MAIN] Sending params to worker {i} via param_queues[{i}]")
-
-        for i in range(self.world_size):
             self.param_queues[i].put(trainable_params.copy())
 
         if blocking:
             for i in range(self.world_size):
-                print(f"[MAIN] Waiting for ACK from worker {i}")
                 ack = self.param_queues[i].get()
-                print(f"[MAIN] Worker {i} returned: {type(ack)}")
                 if ack != "ACK":
                     raise RuntimeError(f"Worker {i}: Expected ACK, got {ack}")
 

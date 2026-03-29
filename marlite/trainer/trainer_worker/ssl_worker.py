@@ -126,24 +126,21 @@ class SSLWorker(BaseWorker):
                 dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
                 param.grad.data /= self.world_size
 
-    def write_params_to_shared_memory(self):
+    def write_params_to_shared_memory(self, shared_memory: Dict[str, Any]):
         """Write current parameters to shared memory including ssl_model."""
-        self.shared_memory["eval_agent_group"] = (
+        shared_memory["eval_agent_group"] = (
             self.eval_agent_group.get_agent_group_params()
         )
-        self.shared_memory["ssl_model"] = self.ssl_model.state_dict()
-        self.shared_memory["version"] = self.params_version
+        shared_memory["ssl_model"] = self.ssl_model.state_dict()
 
-    def sync_params_from_shared_memory(self, version: int):
+    def sync_params_from_shared_memory(self, shared_memory: Dict[str, Any]):
         """Synchronize parameters from shared memory."""
-        if version > self.params_version:
-            if "eval_agent_group" in self.shared_memory:
-                self.eval_agent_group.set_agent_group_params(
-                    self.shared_memory["eval_agent_group"]
-                )
-            if "ssl_model" in self.shared_memory:
-                self.ssl_model.load_state_dict(self.shared_memory["ssl_model"])
-            self.params_version = version
+        if "eval_agent_group" in shared_memory:
+            self.eval_agent_group.set_agent_group_params(
+                shared_memory["eval_agent_group"]
+            )
+        if "ssl_model" in shared_memory:
+            self.ssl_model.load_state_dict(shared_memory["ssl_model"])
 
 
 class VAESSLWorker(SSLWorker):

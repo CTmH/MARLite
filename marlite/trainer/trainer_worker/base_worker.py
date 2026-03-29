@@ -63,9 +63,6 @@ class BaseWorker:
         self.critic_optimizer = None
         self.agent_group_optimizer = None
 
-        # Parameter version for tracking updates
-        self.params_version = 0
-
     def _setup_distributed(self):
         """Initialize distributed communication for this worker."""
         torch.cuda.set_device(self.device_id)
@@ -139,8 +136,6 @@ class BaseWorker:
             self.eval_critic.load_state_dict(shared_memory["eval_critic"])
         if "target_critic" in shared_memory:
             self.target_critic.load_state_dict(shared_memory["target_critic"])
-        if "version" in shared_memory:
-            self.params_version = shared_memory["version"]
 
     def write_params_to_shared_memory(self, shared_memory: Dict[str, Any]):
         """
@@ -157,7 +152,6 @@ class BaseWorker:
         )
         shared_memory["eval_critic"] = self.eval_critic.state_dict()
         shared_memory["target_critic"] = self.target_critic.state_dict()
-        shared_memory["version"] = self.params_version
 
     def reduce_gradients(self):
         """
@@ -217,23 +211,17 @@ class BaseWorker:
             return False
 
         elif cmd == "SYNC_FROM_MAIN":
-            print(f"Worker {self.worker_id}: Received SYNC_FROM_MAIN", flush=True)
             shared_memory = param_queue.get()
-            print(f"Worker {self.worker_id}: Got shared_memory", flush=True)
             self.sync_params_from_shared_memory(shared_memory)
-            print(f"Worker {self.worker_id}: Putting ACK", flush=True)
             param_queue.put("ACK")
-            print(f"Worker {self.worker_id}: ACK sent", flush=True)
 
         elif cmd == "BROADCAST":
             shared_memory = param_queue.get()
             self.sync_params_from_shared_memory(shared_memory)
 
         elif cmd == "SYNC_TO_MAIN":
-            print(f"Worker {self.worker_id}: Received SYNC_TO_MAIN", flush=True)
             shared_memory = {}
             self.write_params_to_shared_memory(shared_memory)
-            print(f"Worker {self.worker_id}: Putting params to param_queue", flush=True)
             param_queue.put(shared_memory)
 
         elif cmd == "TRAIN_STEP":
