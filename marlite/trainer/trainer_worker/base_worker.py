@@ -167,10 +167,11 @@ class BaseWorker:
                 dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
                 param.grad.data /= self.world_size
 
-        for param in self.eval_agent_group.parameters():
-            if param.grad is not None:
-                dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
-                param.grad.data /= self.world_size
+        for param_group in self.eval_agent_group.params_to_optimize:
+            for param in param_group["params"]:
+                if param.grad is not None:
+                    dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
+                    param.grad.data /= self.world_size
 
     def train_step(self, batch: Dict[str, Any]) -> float:
         """

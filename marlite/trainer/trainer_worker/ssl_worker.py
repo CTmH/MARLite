@@ -120,11 +120,12 @@ class SSLWorker(BaseWorker):
                 dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
                 param.grad.data /= self.world_size
 
-        # Agent group gradients
-        for param in self.eval_agent_group.parameters():
-            if param.grad is not None:
-                dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
-                param.grad.data /= self.world_size
+        # Agent group gradients - params_to_optimize is a list of dicts
+        for param_group in self.eval_agent_group.params_to_optimize:
+            for param in param_group["params"]:
+                if param.grad is not None:
+                    dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
+                    param.grad.data /= self.world_size
 
     def write_params_to_shared_memory(self, shared_memory: Dict[str, Any]):
         """Write current parameters to shared memory including ssl_model."""
