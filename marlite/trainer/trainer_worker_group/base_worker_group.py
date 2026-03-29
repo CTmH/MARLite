@@ -24,6 +24,18 @@ def is_port_available(port: int) -> bool:
         return False
 
 
+def _dict_to_cpu(data: Any) -> Any:
+    """Recursively convert all tensors in a dict/list to CPU."""
+    if isinstance(data, torch.Tensor):
+        return data.detach().clone().cpu() if data.is_cuda else data
+    elif isinstance(data, dict):
+        return {k: _dict_to_cpu(v) for k, v in data.items()}
+    elif isinstance(data, (list, tuple)):
+        return type(data)(_dict_to_cpu(x) for x in data)
+    return data
+    return result
+
+
 def worker_loop(
     worker_id,
     device_id,
@@ -235,9 +247,10 @@ class BaseWorkerGroup(ABC):
                 - target_critic: Target critic state dict
             blocking: Whether to wait for workers to acknowledge
         """
+        trainable_params_cpu = _dict_to_cpu(trainable_params)
         for i in range(self.world_size):
             self.cmd_queue.put("SYNC_FROM_MAIN")
-            self.param_queues[i].put(trainable_params.copy())
+            self.param_queues[i].put(trainable_params_cpu)
 
         if blocking:
             for i in range(self.world_size):
@@ -254,10 +267,11 @@ class BaseWorkerGroup(ABC):
         """
         self.cmd_queue.put("SYNC_TO_MAIN")
         latest_params = self.param_queues[0].get()
+        latest_params_cpu = _dict_to_cpu(latest_params)
 
         for i in range(self.world_size):
             self.cmd_queue.put("BROADCAST")
-            self.param_queues[i].put(latest_params.copy())
+            self.param_queues[i].put(latest_params_cpu)
 
     def read_params_from_worker0(self) -> Dict[str, Any]:
         """

@@ -5,7 +5,10 @@ This module provides SSLWorkerGroup that manages SSL workers for multi-GPU train
 """
 
 from typing import Any, Dict
-from marlite.trainer.trainer_worker_group.base_worker_group import BaseWorkerGroup
+from marlite.trainer.trainer_worker_group.base_worker_group import (
+    BaseWorkerGroup,
+    _dict_to_cpu,
+)
 from marlite.trainer.trainer_worker.ssl_worker import SSLWorker
 
 
@@ -90,10 +93,11 @@ class SSLWorkerGroup(BaseWorkerGroup):
             "ssl_model": ssl_model_params,
             "eval_agent_group": agent_group_params,
         }
+        trainable_params_cpu = _dict_to_cpu(trainable_params)
 
         for i in range(self.world_size):
             self.cmd_queue.put("SYNC_FROM_MAIN")
-            self.param_queues[i].put(trainable_params.copy())
+            self.param_queues[i].put(trainable_params_cpu)
 
         if blocking:
             for i in range(self.world_size):
