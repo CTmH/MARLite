@@ -71,9 +71,12 @@ class QMIXWorker(BaseWorker):
         self.critic_optimizer = critic_optimizer_config.get_optimizer(
             self.eval_critic.parameters()
         )
-        self.agent_group_optimizer = agent_group_optimizer_config.get_optimizer(
-            self.eval_agent_group.params_to_optimize
-        )
+        if hasattr(agent_group_optimizer_config, "get_optimizer"):
+            self.agent_group_optimizer = agent_group_optimizer_config.get_optimizer(
+                self.eval_agent_group.params_to_optimize
+            )
+        else:
+            self.agent_group_optimizer = agent_group_optimizer_config
 
     def train_step(self, batch: Dict[str, Any]) -> float:
         """

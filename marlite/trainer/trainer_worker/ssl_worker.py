@@ -65,9 +65,12 @@ class SSLWorker(BaseWorker):
             self.eval_agent_group = None
 
         if ssl_optimizer_config is not None and self.ssl_model is not None:
-            self.ssl_optimizer = ssl_optimizer_config.get_optimizer(
-                self.ssl_model.parameters()
-            )
+            if hasattr(ssl_optimizer_config, "get_optimizer"):
+                self.ssl_optimizer = ssl_optimizer_config.get_optimizer(
+                    self.ssl_model.parameters()
+                )
+            else:
+                self.ssl_optimizer = ssl_optimizer_config
         else:
             self.ssl_optimizer = None
 
@@ -75,9 +78,12 @@ class SSLWorker(BaseWorker):
             agent_group_optimizer_config is not None
             and self.eval_agent_group is not None
         ):
-            self.agent_group_optimizer = agent_group_optimizer_config.get_optimizer(
-                self.eval_agent_group.params_to_optimize
-            )
+            if hasattr(agent_group_optimizer_config, "get_optimizer"):
+                self.agent_group_optimizer = agent_group_optimizer_config.get_optimizer(
+                    self.eval_agent_group.params_to_optimize
+                )
+            else:
+                self.agent_group_optimizer = agent_group_optimizer_config
         else:
             self.agent_group_optimizer = None
 
