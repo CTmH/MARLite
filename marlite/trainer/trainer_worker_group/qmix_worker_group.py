@@ -1,0 +1,73 @@
+"""
+QMIX worker group implementation.
+
+This module provides QMIXWorkerGroup that manages QMIX workers for multi-GPU training.
+"""
+
+from typing import Any, Dict
+from marlite.trainer.trainer_worker_group.base_worker_group import BaseWorkerGroup
+from marlite.trainer.trainer_worker.qmix_worker import QMIXWorker
+
+
+class QMIXWorkerGroup(BaseWorkerGroup):
+    """
+    Worker group for QMIX algorithm multi-GPU training.
+
+    This group manages QMIXWorker instances, each holding copies of:
+    - eval_agent_group
+    - target_agent_group
+    - eval_critic
+    - target_critic
+    """
+
+    def __init__(
+        self,
+        device_ids: list,
+        agent_group_config,
+        critic_config,
+        critic_optimizer_config,
+        gamma: float = 0.9,
+        init_method: str = "tcp://localhost:29500",
+    ):
+        """
+        Initialize QMIX worker group.
+
+        Args:
+            device_ids: List of CUDA device IDs
+            agent_group_config: Configuration for agent group
+            critic_config: Configuration for critic
+            critic_optimizer_config: Configuration for critic optimizer
+            gamma: Discount factor
+            init_method: URL for distributed initialization
+        """
+        self.agent_group_config = agent_group_config
+        self.critic_config = critic_config
+        self.critic_optimizer_config = critic_optimizer_config
+        self.gamma = gamma
+
+        super().__init__(
+            device_ids=device_ids,
+            world_size=len(device_ids),
+            init_method=init_method,
+        )
+
+    def _get_worker_class(self):
+        """Return QMIXWorker class."""
+        return QMIXWorker
+
+    def _create_worker_kwargs(self) -> Dict[str, Any]:
+        """Create kwargs for QMIXWorker initialization."""
+        kwargs = super()._create_worker_kwargs()
+        kwargs["gamma"] = self.gamma
+        return kwargs
+
+    def set_worker_models(self):
+        """
+        Set up model copies for all workers.
+
+        This should be called after start_workers() to initialize
+        model copies on each worker process.
+        """
+        # Each worker will create its own model copies via its constructor
+        # This method can be overridden if needed for custom initialization
+        pass

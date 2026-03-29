@@ -2,13 +2,12 @@ import torch
 import numpy as np
 import time
 import absl.logging as logging
-from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import TensorDataset, DataLoader
 from tqdm import tqdm
 
 from marlite.trainer.self_supervised_qmix_trainer import SelfSupervisedQMIXTrainer
 from marlite.trainer.graph_qmix_trainer import GraphQMIXTrainer
-from marlite.util.distributed_utils import get_local_device_id, average_loss
+from marlite.trainer.trainer_worker_group import GraphWorkerGroup, VAESSLWorkerGroup
 
 
 class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
@@ -21,41 +20,56 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
     """
 
     def __init__(self, kl_divergence_weight=1.0, **kwargs):
-
         super().__init__(**kwargs)
         self.kl_divergence_weight = kl_divergence_weight
 
-    def _init_ssl_optimizer(self):
-        # Create separate optimizers for self-supervised learning
-        ssl_params_optim = [
-            {"params": self.ssl_model.parameters()},
-        ]
-        self.ssl_optimizer = self.ssl_optimizer_config.get_optimizer(ssl_params_optim)
-        return self
+    def _create_worker_group(self):
+        """Create GraphWorkerGroup for multi-GPU RL training."""
+        if not self.use_multi_gpu:
+            return None
+
+        return GraphWorkerGroup(
+            device_ids=list(range(len(self.device_list))),
+            agent_group_config=self.eval_agent_group,
+            critic_config=self.critic_config,
+            critic_optimizer_config=self.critic_optimizer_config,
+            agent_group_optimizer_config=self.eval_agent_group.optimizer,
+            gamma=self.gamma,
+        )
+
+    def _create_ssl_worker_group(self):
+        """Create VAESSLWorkerGroup for multi-GPU SSL training."""
+        if not self.use_multi_gpu:
+            return None
+
+        return VAESSLWorkerGroup(
+            device_ids=list(range(len(self.device_list))),
+            ssl_model_config=self.ssl_model_config,
+            agent_group_config=self.eval_agent_group,
+            ssl_optimizer_config=self.ssl_optimizer_config,
+            agent_group_optimizer_config=self.eval_agent_group.optimizer,
+            reconstruction_loss=self.reconstruction_loss,
+            kl_divergence_weight=self.kl_divergence_weight,
+            data_constructor=self.data_constructor,
+        )
 
     def learn(self, sample_size, batch_size: int, times: int = 1):
+        """RL learning delegates to GraphQMIXTrainer's implementation."""
         return GraphQMIXTrainer.learn(self, sample_size, batch_size, times)
 
     def self_supervised_learn(self, sample_size, batch_size: int, times: int = 1):
+        if not self.use_multi_gpu:
+            return self._ssl_learn_single_gpu(sample_size, batch_size, times)
+        return self._ssl_learn_multi_gpu(sample_size, batch_size, times)
+
+    def _ssl_learn_single_gpu(self, sample_size, batch_size: int, times: int = 1):
+        """Single GPU SSL learning."""
         total_loss = 0.0
         total_batches = 0
 
-        # Check if DDP is enabled
-        if self.use_ddp:
-            # Multi-GPU DDP training
-            device_id = get_local_device_id(self.train_device)
+        self.eval_agent_group.to(self.train_device)
+        self.ssl_model.to(self.train_device)
 
-            # Move models to device and wrap with DDP
-            self.eval_agent_group.wrap_data_parallel(device_id)
-            self.ssl_model = DDP(
-                self.ssl_model.to(self.train_device), device_ids=[device_id]
-            )
-        else:
-            # Single device training
-            self.eval_agent_group.to(self.train_device)
-            self.ssl_model.to(self.train_device)
-
-        # VAE self supervised learning
         self.eval_agent_group.train()
         for t in range(times):
             data = self.replaybuffer.sample(sample_size)
@@ -104,7 +118,7 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
                     obs_mask = obs_mask.to(dtype=torch.bool)
                     obs_mask = torch.stack([obs_mask] * n_agents, dim=1).to(
                         self.train_device
-                    )  # (B, N, T)
+                    )
                     formatted = formatted.to(self.train_device, dtype=torch.float32)
                     construct_mask = construct_mask.to(
                         self.train_device, dtype=torch.bool
@@ -125,26 +139,16 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
                         formatted.view(-1, *formatted.shape[2:]),
                         construct_mask.view(-1, *construct_mask.shape[2:]),
                     )
-                    # Calculate KL divergence loss
-                    # KL divergence between the learned distribution q(z|x) and prior p(z)
-                    # For Gaussian prior N(0, I) and posterior N(mu, std^2), KL divergence is:
-                    # If log_var is provided, use it directly for better numerical stability
-                    # KL(q(z|x) || p(z)) = 0.5 * sum(1 + log_var - mu^2 - exp(log_var))
 
                     kl_divergence = -0.5 * torch.sum(
                         1 + log_var - mu.pow(2) - torch.exp(log_var), dim=-1
-                    )  # Sum over feature dimension
+                    )
+                    kl_divergence = torch.mean(kl_divergence)
 
-                    kl_divergence = torch.mean(
-                        kl_divergence
-                    )  # Average over batch and agents
-
-                    # Total VAE loss: reconstruction loss + KL divergence loss
                     vae_loss = (
                         reconstruction_loss + self.kl_divergence_weight * kl_divergence
                     )
 
-                    # Optimize the networks - only use the main optimizer since it includes both critic and decoder params
                     self.eval_agent_group.zero_grad()
                     self.ssl_model.zero_grad()
 
@@ -160,13 +164,77 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
 
                     pbar.update(bs)
 
-        if self.use_ddp:
-            self.eval_agent_group.unwrap_data_parallel()
-            self.ssl_model = self.ssl_model.module.cpu()
-        else:
-            self.eval_agent_group.to("cpu")
-            self.ssl_model.to("cpu")
+        self.eval_agent_group.to("cpu")
+        self.ssl_model.to("cpu")
 
         torch.cuda.empty_cache()
+
+        return total_loss / total_batches
+
+    def _ssl_learn_multi_gpu(self, sample_size, batch_size: int, times: int = 1):
+        """Multi-GPU SSL learning via worker processes."""
+        total_loss = 0.0
+        total_batches = 0
+
+        for t in range(times):
+            data = self.replaybuffer.sample(sample_size)
+            data = list(data)
+            alive_mask = np.stack([e["alive_mask"] for e in data])
+            timestep_padding_mask = np.stack([e["timestep_padding_mask"] for e in data])
+            observations = np.stack([e["observations"] for e in data]).astype(
+                np.float32
+            )
+            states = np.stack([e["states"] for e in data])
+            edge_indices = [e["edge_indices"] for e in data]
+
+            start_time = time.time()
+            formatted_obs, construct_padding_mask = self.data_constructor.process(
+                observations, states, edge_indices, alive_mask
+            )
+            end_time = time.time()
+            processing_time = end_time - start_time
+            logging.info(
+                f"Processing the self-supervised learning data takes {processing_time:.4f} seconds."
+            )
+
+            observations = torch.tensor(observations)
+            formatted_obs = torch.tensor(formatted_obs)
+            construct_padding_mask = torch.tensor(construct_padding_mask)
+            timestep_padding_mask = torch.tensor(timestep_padding_mask)
+            edge_indices_idx = torch.arange(len(edge_indices), dtype=torch.int)
+            dataset = TensorDataset(
+                observations,
+                timestep_padding_mask,
+                formatted_obs,
+                edge_indices_idx,
+                construct_padding_mask,
+            )
+            dataloader = DataLoader(
+                dataset, batch_size=batch_size, shuffle=True, num_workers=self.n_workers
+            )
+            n_agents = alive_mask.shape[2]
+
+            with tqdm(
+                total=sample_size, desc=f"SSL Times {t + 1}/{times}", unit="batch"
+            ) as pbar:
+                for obs, obs_mask, formatted, edge_idx, construct_mask in dataloader:
+                    batch = {
+                        "observations": obs,
+                        "timestep_padding_mask": obs_mask,
+                        "formatted_obs": formatted,
+                        "edge_indices_idx": edge_idx,
+                        "construct_padding_mask": construct_mask,
+                        "edge_indices": edge_indices,
+                        "n_agents": n_agents,
+                        "epoch": self.current_epoch,
+                    }
+
+                    loss = self.ssl_worker_group.ssl_train_step(batch)
+
+                    total_loss += loss
+                    total_batches += 1
+
+                    bs = obs.shape[0]
+                    pbar.update(bs)
 
         return total_loss / total_batches

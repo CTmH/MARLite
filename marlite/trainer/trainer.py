@@ -8,6 +8,7 @@ import numpy as np
 from copy import deepcopy
 from absl import logging
 from typing import List, Union, Optional
+from abc import abstractmethod
 
 from marlite.environment import EnvConfig
 from marlite.rollout import RolloutManagerConfig
@@ -18,18 +19,48 @@ from marlite.rollout import RolloutManagerConfig
 from marlite.util.optimizer_config import OptimizerConfig
 from marlite.util.lr_scheduler_config import LRSchedulerConfig
 from marlite.util.scheduler import Scheduler
-from marlite.util.distributed_utils import (
-    get_device_list,
-    is_ddp_model,
-    average_loss,
-    get_local_device_id,
-    setup_ddp,
-    cleanup_ddp,
-)
 from marlite.analyzer import AnalyzerConfig
 
 
+def get_device_list(train_device: Union[str, List[str]]) -> tuple:
+    """
+    Parse train_device configuration and return device list.
+
+    Args:
+        train_device: Either a string (single device) or a list of strings (multiple devices)
+            - "cpu": CPU training
+            - "cuda" or "cuda:0": Single GPU training
+            - ["cuda:0", "cuda:1", ...]: Multi-GPU training with worker processes
+
+    Returns:
+        tuple of (device_list, use_multi_gpu):
+            - device_list: List of device strings
+            - use_multi_gpu: Whether to use multi-GPU training
+    """
+    if isinstance(train_device, str):
+        if train_device == "cuda":
+            return ["cuda:0"], False
+        else:
+            return [train_device], False
+    elif isinstance(train_device, list):
+        if len(train_device) == 0:
+            raise ValueError("train_device list cannot be empty")
+        return train_device, True
+    else:
+        raise ValueError(
+            f"train_device must be a string or a list of strings, got {type(train_device)}"
+        )
+
+
 class Trainer:
+    """
+    Base Trainer class for multi-agent reinforcement learning.
+
+    Supports two training modes:
+    1. Single-GPU/CPU training: Models stay on main process
+    2. Multi-GPU training: Uses worker processes for parallel gradient computation
+    """
+
     def __init__(
         self,
         env_config: EnvConfig,
@@ -49,15 +80,10 @@ class Trainer:
         eval_episodes_to_replay_ratio: float = 0.25,
         workdir: str = "",
         train_device: Union[str, List[str]] = "cpu",
-        local_rank: int = 0,
-        master_addr: Optional[str] = None,
-        master_port: Optional[str] = None,
-        ddp_backend: str = "nccl",
-        n_workers=1,
+        n_workers: int = 1,
         compile_models: bool = False,
         sample_mode: str = "ratio",
     ):
-
         self.env_config = env_config
         self.critic_config = critic_config
         self.sample_ratio = sample_ratio_scheduler
@@ -68,10 +94,8 @@ class Trainer:
         self.gamma = gamma
         self.n_workers = n_workers
         self.eval_metric_list = eval_metric_list
-        # New attribute to control sampling mode
-        self.sample_mode = sample_mode  # 'ratio' or 'direct'
+        self.sample_mode = sample_mode
 
-        # Validate sample_mode
         if self.sample_mode not in ["ratio", "direct"]:
             raise ValueError(
                 f"Invalid sample_mode: {self.sample_mode}. Must be 'ratio' or 'direct'"
@@ -85,9 +109,7 @@ class Trainer:
         self.eval_agent_group = agent_group_config.get_agent_group()
         self.target_agent_group = agent_group_config.get_agent_group()
         self.best_agent_group_params = self.eval_agent_group.get_agent_group_params()
-        self.target_agent_group.set_agent_group_params(
-            self.best_agent_group_params
-        )  # Load the model parameters to eval agent group
+        self.target_agent_group.set_agent_group_params(self.best_agent_group_params)
         self._cached_agent_group_params = self.best_agent_group_params
 
         # Critic
@@ -116,52 +138,25 @@ class Trainer:
 
         # Configure absl logging
         os.makedirs(self.logdir, exist_ok=True)
-        # Set the log file (absl will automatically add timestamps and process info)
         logging.get_absl_handler().use_absl_log_file("training", self.logdir)
-        # Set log level
         logging.set_verbosity(logging.INFO)
-        logging.get_absl_handler().python_handler.stream = (
-            sys.stdout
-        )  # Ensure output to console
+        logging.get_absl_handler().python_handler.stream = sys.stdout
 
         # Device configuration
-        # train_device can be:
-        # - str: "cpu", "cuda", or "cuda:0" for single device training
-        # - List[str]: ["cuda:0", "cuda:1", ...] for multi-GPU training with DDP
         self.train_device_config = train_device
-        self.device_list, self.use_ddp = get_device_list(train_device)
+        self.device_list, self.use_multi_gpu = get_device_list(train_device)
 
-        self._ddp_initialized = False
-        if self.use_ddp:
-            # Initialize DDP process group
-            # Try to get rank from environment variable first, fallback to parameter
-            self.local_rank = int(os.environ.get("LOCAL_RANK", local_rank))
-            self.master_addr = (
-                master_addr
-                if master_addr is not None
-                else os.environ.get("MASTER_ADDR")
-            )
-            self.master_port = (
-                master_port
-                if master_port is not None
-                else os.environ.get("MASTER_PORT")
-            )
-            self.ddp_backend = ddp_backend
-            world_size = len(self.device_list)
-            setup_ddp(
-                self.local_rank,
-                world_size,
-                backend=self.ddp_backend,
-                master_addr=self.master_addr,
-                master_port=self.master_port,
-            )
-            self._ddp_initialized = True
-            self.train_device = self.device_list[self.local_rank]
+        # Multi-GPU worker group (to be created by subclasses)
+        self.worker_group = None
+
+        if self.use_multi_gpu:
+            self.train_device = self.device_list[0]
+            self.worker_group = self._create_worker_group()
+            self._write_initial_params_to_workers()
             logging.info(
-                f"Using DistributedDataParallel with rank={self.local_rank}, world_size={world_size}, devices: {self.device_list}"
+                f"Using multi-GPU training with {len(self.device_list)} devices: {self.device_list}"
             )
         else:
-            # Single device training
             self.train_device = self.device_list[0]
             logging.info(f"Using single device: {self.train_device}")
 
@@ -186,6 +181,62 @@ class Trainer:
         self.best_metrics = {key: -np.inf for key in self.eval_metric_list}
 
         self.current_epoch = 0
+
+    @abstractmethod
+    def _create_worker_group(self):
+        """
+        Create and return the appropriate worker group for this trainer.
+
+        Subclasses should override this to create their specific worker group.
+
+        Returns:
+            WorkerGroup instance or None if not using multi-GPU
+        """
+        pass
+
+    def _write_initial_params_to_workers(self):
+        """Write initial model parameters to all workers."""
+        if self.worker_group is None:
+            return
+
+        trainable_params = {
+            "eval_agent_group": self.eval_agent_group.get_agent_group_params(),
+            "target_agent_group": self.target_agent_group.get_agent_group_params(),
+            "eval_critic": self.eval_critic.state_dict(),
+            "target_critic": self.target_critic.state_dict(),
+        }
+        self.worker_group.write_params_to_workers(trainable_params)
+
+    def _sync_params_from_workers(self):
+        """
+        Synchronize model parameters from workers to trainer.
+
+        Called before evaluation or checkpoint saving to get the latest
+        parameters from workers.
+        """
+        if self.worker_group is None:
+            return
+
+        trainable_params = self.worker_group.read_params_from_worker0()
+        self.eval_agent_group.set_agent_group_params(
+            trainable_params["eval_agent_group"]
+        )
+        self.target_agent_group.set_agent_group_params(
+            trainable_params["target_agent_group"]
+        )
+        self.eval_critic.load_state_dict(trainable_params["eval_critic"])
+        self.target_critic.load_state_dict(trainable_params["target_critic"])
+
+    def _broadcast_params_to_workers(self):
+        """
+        Broadcast current trainer parameters to all workers.
+
+        Called before training to sync parameters that may have been
+        updated externally (e.g., after loading checkpoint).
+        """
+        if self.worker_group is None:
+            return
+        self.worker_group.broadcast_params()
 
     def learn(self, sample_size, batch_size: int, times: int):
         raise NotImplementedError
@@ -247,9 +298,7 @@ class Trainer:
     def update_target_model_params(self):
         agent_group_params = self.eval_agent_group.get_agent_group_params()
         self.target_agent_group.set_agent_group_params(agent_group_params)
-        critic_params = deepcopy(
-            self.eval_critic.state_dict()
-        )  # Update critic parameters
+        critic_params = deepcopy(self.eval_critic.state_dict())
         self.target_critic.load_state_dict(critic_params)
         return self
 
@@ -259,13 +308,11 @@ class Trainer:
             self.eval_agent_group, self.env_config, self.eval_epsilon
         )
 
-        # logging.info(f"Evaluating model...")
         episodes = manager.generate_episodes()
         manager.cleanup()
 
         result = self.analyzer(episodes)
 
-        # logging.info(f"Evaluation results: Mean reward {mean_reward:.4f}, Std reward {std_reward:.4f}, Win rate {win_rate:.4f}")
         logging.info(f"Evaluation results:")
         for key in self.eval_metric_list:
             logging.info(
@@ -275,10 +322,8 @@ class Trainer:
         self.eval_agent_group.to("cpu")
         torch.cuda.empty_cache()
 
-        # Sample episodes based on eval_episodes_to_replay_ratio
         num_episodes_to_add = int(len(episodes) * self.eval_episodes_to_replay_ratio)
         if num_episodes_to_add > 0:
-            # Randomly sample episodes
             sampled_indices = random.sample(range(len(episodes)), num_episodes_to_add)
             for i in sampled_indices:
                 self.replaybuffer.add_episode(episodes[i])
@@ -294,7 +339,6 @@ class Trainer:
         batch_size=64,
         learning_times_per_epoch=1,
     ):
-        # Training loop
         for epoch in range(epochs):
             self.current_epoch = epoch
 
@@ -305,7 +349,7 @@ class Trainer:
                 sample_ratio = self.sample_ratio.get_value(epoch)
                 sample_size = len(self.replaybuffer.buffer) * sample_ratio
                 sample_size = round(sample_size)
-            else:  # self.sample_mode == 'direct'
+            else:
                 sample_size = round(self.sample_ratio.get_value(epoch))
             sample_size = min(sample_size, len(self.replaybuffer.buffer))
 
@@ -318,12 +362,19 @@ class Trainer:
             logging.info(
                 f"Epoch {epoch}: Learning {learning_times_per_epoch} times per epoch ..."
             )
+
+            # Broadcast params if using multi-GPU (e.g., after checkpoint load)
+            self._broadcast_params_to_workers()
+
             loss = self.learn(
                 sample_size=sample_size,
                 batch_size=batch_size,
                 times=learning_times_per_epoch,
             )
             logging.info(f"Epoch {epoch}: Loss {loss:.4f}")
+
+            # Sync params from workers before evaluation
+            self._sync_params_from_workers()
 
             # Save checkpoint
             checkpoint_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -350,14 +401,13 @@ class Trainer:
             for metric_name in self.eval_metric_list:
                 metric = metrics[metric_name]
                 best_metric = self.best_metrics[metric_name]
-                # if mean_reward >= self.best_mean_reward * (1 - self.eval_threshold)
                 cache_params.append(
                     (metric - best_metric) / max(abs(best_metric), 1)
                     >= -self.eval_threshold
                 )
                 update_best.append(metric >= best_metric)
-            cache_params = np.array(cache_params, dtype=np.bool)
-            update_best = np.array(update_best, dtype=np.bool)
+            cache_params = np.array(cache_params, dtype=np.bool_)
+            update_best = np.array(update_best, dtype=np.bool_)
 
             if cache_params.any():
                 self._cached_agent_group_params = (
@@ -408,7 +458,6 @@ class Trainer:
 
     def save_intermediate_results(self, epoch, metrics):
         self.training_history[epoch] = metrics
-        # Save metrics to YAML file
         os.makedirs(self.logdir, exist_ok=True)
         yaml_path = os.path.join(self.logdir, "results.yaml")
         with open(yaml_path, "w") as file:
@@ -418,18 +467,5 @@ class Trainer:
         )
 
     def __del__(self):
-        if self._ddp_initialized:
-            cleanup_ddp()
-
-
-"""
-    def save_results_to_csv(self):
-        os.makedirs(self.logdir, exist_ok=True)
-        csv_path = os.path.join(self.logdir, 'results.csv')
-        with open(csv_path, 'w', newline='') as file:
-            writer = csv.writer(file)
-            writer.writerow(['Epoch', 'Mean_Reward', 'Reward_Std', 'Win_Rate'])
-            for epoch, result in self.training_history.items():
-                writer.writerow([epoch, result['mean_reward'], result['reward_std'], result['win_rate']])
-        logging.info(f"Results saved to {csv_path}")
-"""
+        if self.worker_group is not None:
+            self.worker_group.shutdown()

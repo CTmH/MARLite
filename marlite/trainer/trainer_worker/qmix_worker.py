@@ -1,0 +1,214 @@
+"""
+QMIX worker implementation for multi-GPU training.
+
+This module provides the QMIXWorker class that implements the training logic
+for QMIX algorithm in a multi-GPU setting.
+"""
+
+import torch
+import torch.distributed as dist
+from typing import Any, Dict
+from marlite.trainer.trainer_worker.base_worker import BaseWorker
+
+
+class QMIXWorker(BaseWorker):
+    """
+    Worker for QMIX algorithm multi-GPU training.
+
+    Implements train_step() method that executes one batch of QMIX training:
+    1. Forward pass through eval_agent_group and eval_critic
+    2. Compute target Q values using target networks
+    3. Compute TD error loss
+    4. Backward pass with gradient synchronization
+    5. Optimizer step
+    """
+
+    def __init__(
+        self,
+        worker_id: int,
+        device_id: int,
+        rank: int,
+        world_size: int,
+        init_method: str,
+        agent_group_config=None,
+        critic_config=None,
+        critic_optimizer_config=None,
+        agent_group_optimizer_config=None,
+        gamma: float = 0.9,
+        **kwargs,
+    ):
+        """
+        Initialize QMIX worker.
+
+        Args:
+            worker_id: Unique worker identifier
+            device_id: CUDA device ID
+            rank: Global rank in distributed training
+            world_size: Total number of processes
+            init_method: URL for distributed initialization
+            agent_group_config: Configuration for agent group
+            critic_config: Configuration for critic
+            critic_optimizer_config: Configuration for critic optimizer
+            agent_group_optimizer_config: Configuration for agent group optimizer
+            gamma: Discount factor
+        """
+        super().__init__(worker_id, device_id, rank, world_size, init_method)
+        self.gamma = gamma
+
+        # Create model copies on this worker's device
+        self.eval_agent_group = agent_group_config.get_agent_group().to(self.device)
+        self.target_agent_group = agent_group_config.get_agent_group().to(self.device)
+        self.eval_critic = critic_config.get_critic().to(self.device)
+        self.target_critic = critic_config.get_critic().to(self.device)
+
+        # Set models to appropriate mode
+        self.eval_agent_group.train()
+        self.target_agent_group.eval()
+        self.eval_critic.train()
+        self.target_critic.eval()
+
+        # Create optimizers
+        self.critic_optimizer = critic_optimizer_config.get_optimizer(
+            self.eval_critic.parameters()
+        )
+        self.agent_group_optimizer = agent_group_optimizer_config.get_optimizer(
+            self.eval_agent_group.params_to_optimize
+        )
+
+    def train_step(self, batch: Dict[str, Any]) -> float:
+        """
+        Execute one training step on the given batch.
+
+        Implements QMIX training logic:
+        - Forward pass through agent group to get Q values
+        - Compute target Q values using target networks
+        - Calculate TD error and backpropagate
+        - Synchronize gradients across workers
+
+        Args:
+            batch: Dictionary containing:
+                - alive_mask: Agent alive masks
+                - observations: Observation sequences
+                - timestep_padding_mask: Padding masks
+                - states: State sequences
+                - actions: Action sequences
+                - rewards: Reward sequences
+                - next_states: Next state sequences
+                - next_observations: Next observation sequences
+                - next_timestep_padding_mask: Padding masks for next states
+                - next_avail_actions: Available actions for next states
+                - next_alive_mask: Alive masks for next states
+                - terminations: Termination flags
+
+        Returns:
+            loss: Computed critic loss value
+        """
+        # Extract batch data
+        alive_mask = batch["alive_mask"].to(dtype=torch.bool)
+        observations = batch["observations"].to(dtype=torch.float32)
+        timestep_padding_mask = batch["timestep_padding_mask"].to(dtype=torch.bool)
+        states = batch["states"].to(dtype=torch.float32)
+        actions = batch["actions"].to(dtype=torch.int)
+        rewards = batch["rewards"].to(dtype=torch.float32)
+        next_states = batch["next_states"].to(dtype=torch.float32)
+        next_observations = batch["next_observations"].to(dtype=torch.float32)
+        next_timestep_padding_mask = batch["next_timestep_padding_mask"].to(
+            dtype=torch.bool
+        )
+        next_avail_actions = batch["next_avail_actions"]
+        next_alive_mask = batch["next_alive_mask"].to(dtype=torch.bool)
+        terminations = batch["terminations"].to(dtype=torch.bool)
+
+        bs = states.shape[0]  # Actual batch size
+        n_agents = rewards.shape[2]
+
+        # Prepare masks and move to device
+        next_alive_mask = next_alive_mask.to(self.device)
+        alive_mask = alive_mask.to(self.device)
+
+        # Handle action mask
+        if isinstance(next_avail_actions, torch.Tensor):
+            use_action_mask = True
+            next_avail_actions = next_avail_actions[:, -1, :, :]
+            next_avail_actions = next_avail_actions.to(
+                dtype=torch.bool, device=self.device
+            )
+        else:
+            use_action_mask = False
+
+        # Process rewards and terminations
+        rewards = rewards[:, -1]  # (B, T, N) -> (B, N)
+        rewards = rewards.sum(dim=1).to(self.device)  # (B, N) -> (B)
+        terminations = terminations[:, -1]  # (B, T, N) -> (B, N)
+        terminations = terminations.prod(dim=1).to(self.device)  # (B, N) -> (B)
+
+        # Process padding masks
+        timestep_padding_mask = torch.stack(
+            [timestep_padding_mask] * n_agents, dim=1
+        ).to(self.device)  # (B, N, T)
+        next_timestep_padding_mask = torch.stack(
+            [next_timestep_padding_mask] * n_agents, dim=1
+        ).to(self.device)
+
+        # Compute Q-tot for current state
+        self.eval_agent_group.train()
+        observations = torch.transpose(observations, 1, 2).to(self.device)
+        ret = self.eval_agent_group.forward(
+            observations, timestep_padding_mask, alive_mask[:, -1, :]
+        )
+        q_val = ret["q_val"]
+        actions = actions[:, -1].to(device=self.device, dtype=torch.int64)
+        q_val = torch.gather(q_val, dim=-1, index=actions.unsqueeze(-1))
+        q_val = q_val.squeeze(-1)  # (B, N, 1) -> (B, N)
+        states = states.to(self.device)
+        self.eval_critic.train()
+        ret = self.eval_critic(
+            q_val, states, alive_mask, timestep_padding_mask[:, 0, :]
+        )
+        q_tot = ret["q_tot"]
+
+        # Compute TD targets
+        with torch.no_grad():
+            self.target_agent_group.eval()
+            next_observations = torch.transpose(next_observations, 1, 2).to(self.device)
+            ret_next = self.target_agent_group.forward(
+                next_observations,
+                next_timestep_padding_mask,
+                next_alive_mask[:, -1, :],
+            )
+            q_val_next = ret_next["q_val"]
+            if use_action_mask:
+                q_val_next = torch.masked_fill(
+                    q_val_next, ~next_avail_actions, -torch.inf
+                )
+            q_val_next = q_val_next.max(dim=-1).values
+            next_states = next_states.to(self.device)
+            self.target_critic.eval()
+            ret_next = self.target_critic(
+                q_val_next,
+                next_states,
+                next_alive_mask,
+                next_timestep_padding_mask[:, 0, :],
+            )
+            q_tot_next = ret_next["q_tot"]
+
+        # Compute TD target
+        y_tot = rewards + (1 - terminations) * self.gamma * q_tot_next
+
+        # Compute critic loss
+        critic_loss = torch.nn.functional.mse_loss(q_tot, y_tot.detach())
+
+        # Backward pass
+        self.eval_agent_group.zero_grad()
+        self.eval_critic.zero_grad()
+        critic_loss.backward()
+
+        # Synchronize gradients across all workers
+        self.reduce_gradients()
+
+        # Clip gradients and optimize
+        torch.nn.utils.clip_grad_norm_(self.eval_critic.parameters(), max_norm=5.0)
+        self.critic_optimizer.step()
+        self.eval_agent_group.step()
+
+        return critic_loss.detach().cpu().item()
