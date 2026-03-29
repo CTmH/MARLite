@@ -50,11 +50,6 @@ def worker_loop(
         cmd_queue: Queue for receiving commands
         ready_event: Event to signal worker is ready
     """
-    print(f"Worker {worker_id}: Starting worker_loop", flush=True)
-    print(
-        f"Worker {worker_id}: queues - param_queue={param_queue}, cmd_queue={cmd_queue}",
-        flush=True,
-    )
     # Create worker instance
     worker = worker_class(**worker_kwargs)
 
@@ -112,7 +107,6 @@ class BaseWorkerGroup(ABC):
 
         # Worker processes and queues
         self.workers = []
-        self.param_queue = None
         self.data_queue = None
         self.loss_queue = None
         self.cmd_queue = None
@@ -146,22 +140,22 @@ class BaseWorkerGroup(ABC):
         2. Creates model copies on its assigned GPU
         3. Waits for commands from main process
         """
-        self.param_queue = self.mp_ctx.Queue()
+        self.cmd_queue = self.mp_ctx.Queue()
         self.data_queue = self.mp_ctx.Queue()
         self.loss_queue = self.mp_ctx.Queue()
-        self.cmd_queue = self.mp_ctx.Queue()
+
+        # Create separate param queues for each worker to avoid race conditions
+        self.param_queues = []
+        for _ in range(self.world_size):
+            self.param_queues.append(self.mp_ctx.Queue())
 
         worker_class = self._get_worker_class()
 
         for i, device_id in enumerate(self.device_ids):
-            # Calculate global rank
-            rank = i  # Assuming sequential ranks starting from 0
-
-            # Create ready event for this worker
+            rank = i
             ready_event = self.mp_ctx.Event()
             self.ready_events.append(ready_event)
 
-            # Prepare kwargs for worker
             worker_kwargs = self._create_worker_kwargs()
             worker_kwargs.update(
                 {
@@ -173,7 +167,6 @@ class BaseWorkerGroup(ABC):
                 }
             )
 
-            # Start worker process
             p = self.mp_ctx.Process(
                 target=worker_loop,
                 args=(
@@ -184,7 +177,7 @@ class BaseWorkerGroup(ABC):
                     self.init_method,
                     worker_class,
                     worker_kwargs,
-                    self.param_queue,
+                    self.param_queues[i],
                     self.data_queue,
                     self.loss_queue,
                     self.cmd_queue,
@@ -194,7 +187,6 @@ class BaseWorkerGroup(ABC):
             p.start()
             self.workers.append(p)
 
-        # Wait for all workers to be ready
         for event in self.ready_events:
             event.wait()
 
@@ -214,15 +206,13 @@ class BaseWorkerGroup(ABC):
                 - target_critic: Target critic state dict
             blocking: Whether to wait for workers to acknowledge
         """
-        # Send initial parameters to all workers
-        for _ in range(self.world_size):
+        for i in range(self.world_size):
             self.cmd_queue.put("SYNC_FROM_MAIN")
-            self.param_queue.put(trainable_params.copy())
+            self.param_queues[i].put(trainable_params.copy())
 
         if blocking:
-            # Wait for workers to acknowledge
             for i in range(self.world_size):
-                ack = self.param_queue.get()
+                ack = self.param_queues[i].get()
                 if ack != "ACK":
                     raise RuntimeError(f"Worker {i}: Expected ACK, got {ack}")
 
@@ -233,14 +223,12 @@ class BaseWorkerGroup(ABC):
         Called before training starts to ensure workers have latest parameters
         (e.g., after loading from checkpoint).
         """
-        # Get latest parameters from worker 0
         self.cmd_queue.put("SYNC_TO_MAIN")
-        latest_params = self.param_queue.get()
+        latest_params = self.param_queues[0].get()
 
-        # Broadcast to all workers
-        for _ in range(self.world_size):
+        for i in range(self.world_size):
             self.cmd_queue.put("BROADCAST")
-            self.param_queue.put(latest_params.copy())
+            self.param_queues[i].put(latest_params.copy())
 
     def read_params_from_worker0(self) -> Dict[str, Any]:
         """
@@ -252,15 +240,8 @@ class BaseWorkerGroup(ABC):
         Returns:
             Dictionary containing latest model parameters
         """
-        # Signal Worker 0 to write its parameters
         self.cmd_queue.put("SYNC_TO_MAIN")
-
-        # Receive parameters from Worker 0
-        params = self.param_queue.get()
-
-        # Other workers also send ACKs
-        for _ in range(self.world_size - 1):
-            self.param_queue.get()
+        params = self.param_queues[0].get()
 
         return params
 
@@ -277,12 +258,10 @@ class BaseWorkerGroup(ABC):
         Returns:
             Average loss across all workers
         """
-        # Send train command to all workers
         for _ in range(self.world_size):
             self.cmd_queue.put("TRAIN_STEP")
             self.data_queue.put(batch)
 
-        # Collect losses from all workers
         losses = []
         for _ in range(self.world_size):
             loss = self.loss_queue.get()
@@ -294,11 +273,9 @@ class BaseWorkerGroup(ABC):
         """
         Stop all worker processes and clean up resources.
         """
-        # Send stop command to all workers
         for _ in range(self.world_size):
             self.cmd_queue.put("STOP")
 
-        # Wait for workers to exit
         for p in self.workers:
             p.join(timeout=5)
             if p.is_alive():

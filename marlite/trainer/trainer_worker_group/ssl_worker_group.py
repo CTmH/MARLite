@@ -91,27 +91,24 @@ class SSLWorkerGroup(BaseWorkerGroup):
             "eval_agent_group": agent_group_params,
         }
 
-        # Send initial parameters to all workers
-        for _ in range(self.world_size):
+        for i in range(self.world_size):
             self.cmd_queue.put("SYNC_FROM_MAIN")
-            self.param_queue.put(trainable_params.copy())
+            self.param_queues[i].put(trainable_params.copy())
 
         if blocking:
-            for _ in range(self.world_size):
-                ack = self.param_queue.get()
+            for i in range(self.world_size):
+                ack = self.param_queues[i].get()
                 if ack != "ACK":
-                    raise RuntimeError(f"Expected ACK from worker, got {ack}")
+                    raise RuntimeError(f"Worker {i}: Expected ACK, got {ack}")
 
     def broadcast_params(self):
         """Broadcast current SSL and agent group parameters to all workers."""
-        # Get latest parameters from worker 0
         self.cmd_queue.put("SYNC_TO_MAIN")
-        latest_params = self.param_queue.get()
+        latest_params = self.param_queues[0].get()
 
-        # Broadcast to all workers
-        for _ in range(self.world_size):
+        for i in range(self.world_size):
             self.cmd_queue.put("BROADCAST")
-            self.param_queue.put(latest_params.copy())
+            self.param_queues[i].put(latest_params.copy())
 
     def read_params_from_worker0(self) -> tuple:
         """
@@ -121,11 +118,7 @@ class SSLWorkerGroup(BaseWorkerGroup):
             Tuple of (ssl_model_params, agent_group_params)
         """
         self.cmd_queue.put("SYNC_TO_MAIN")
-        params = self.param_queue.get()
-
-        # Other workers also send ACKs
-        for _ in range(self.world_size - 1):
-            self.param_queue.get()
+        params = self.param_queues[0].get()
 
         return params.get("ssl_model"), params.get("eval_agent_group")
 
