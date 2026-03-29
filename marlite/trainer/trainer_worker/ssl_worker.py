@@ -21,16 +21,18 @@ class SSLWorker(BaseWorker):
 
     def __init__(
         self,
-        worker_id,
-        device_id,
-        rank,
-        world_size,
-        init_method,
-        ssl_model=None,
-        ssl_optimizer=None,
-        agent_group_optimizer=None,
+        worker_id: int,
+        device_id: int,
+        rank: int,
+        world_size: int,
+        init_method: str,
+        ssl_model_config=None,
+        agent_group_config=None,
+        ssl_optimizer_config=None,
+        agent_group_optimizer_config=None,
         reconstruction_loss=None,
-        kl_divergence_weight=1.0,
+        kl_divergence_weight: float = 1.0,
+        **kwargs,
     ):
         """
         Initialize SSL worker.
@@ -41,18 +43,43 @@ class SSLWorker(BaseWorker):
             rank: Global rank in distributed training
             world_size: Total number of processes
             init_method: URL for distributed initialization
-            ssl_model: Self-supervised model (VAE decoder)
-            ssl_optimizer: Optimizer for ssl_model parameters
-            agent_group_optimizer: Optimizer for agent group parameters
+            ssl_model_config: Configuration for SSL model
+            agent_group_config: Configuration for agent group
+            ssl_optimizer_config: Configuration for SSL optimizer
+            agent_group_optimizer_config: Configuration for agent group optimizer
             reconstruction_loss: Loss function for reconstruction
             kl_divergence_weight: Weight for KL divergence loss
         """
         super().__init__(worker_id, device_id, rank, world_size, init_method)
-        self.ssl_model = ssl_model
-        self.ssl_optimizer = ssl_optimizer
-        self.agent_group_optimizer = agent_group_optimizer
         self.reconstruction_loss = reconstruction_loss
         self.kl_divergence_weight = kl_divergence_weight
+
+        if ssl_model_config is not None:
+            self.ssl_model = ssl_model_config.get_model().to(self.device)
+        else:
+            self.ssl_model = None
+
+        if agent_group_config is not None:
+            self.eval_agent_group = agent_group_config.get_agent_group().to(self.device)
+        else:
+            self.eval_agent_group = None
+
+        if ssl_optimizer_config is not None and self.ssl_model is not None:
+            self.ssl_optimizer = ssl_optimizer_config.get_optimizer(
+                self.ssl_model.parameters()
+            )
+        else:
+            self.ssl_optimizer = None
+
+        if (
+            agent_group_optimizer_config is not None
+            and self.eval_agent_group is not None
+        ):
+            self.agent_group_optimizer = agent_group_optimizer_config.get_optimizer(
+                self.eval_agent_group.params_to_optimize
+            )
+        else:
+            self.agent_group_optimizer = None
 
     def set_ssl_models(
         self,
@@ -123,17 +150,19 @@ class VAESSLWorker(SSLWorker):
 
     def __init__(
         self,
-        worker_id,
-        device_id,
-        rank,
-        world_size,
-        init_method,
-        ssl_model=None,
-        ssl_optimizer=None,
-        agent_group_optimizer=None,
+        worker_id: int,
+        device_id: int,
+        rank: int,
+        world_size: int,
+        init_method: str,
+        ssl_model_config=None,
+        agent_group_config=None,
+        ssl_optimizer_config=None,
+        agent_group_optimizer_config=None,
         reconstruction_loss=None,
-        kl_divergence_weight=1.0,
+        kl_divergence_weight: float = 1.0,
         data_constructor=None,
+        **kwargs,
     ):
         """
         Initialize VAE SSL worker.
@@ -144,9 +173,10 @@ class VAESSLWorker(SSLWorker):
             rank: Global rank in distributed training
             world_size: Total number of processes
             init_method: URL for distributed initialization
-            ssl_model: VAE decoder model
-            ssl_optimizer: Optimizer for ssl_model
-            agent_group_optimizer: Optimizer for agent group
+            ssl_model_config: Configuration for VAE SSL model
+            agent_group_config: Configuration for agent group
+            ssl_optimizer_config: Configuration for SSL optimizer
+            agent_group_optimizer_config: Configuration for agent group optimizer
             reconstruction_loss: Loss function for reconstruction
             kl_divergence_weight: Weight for KL divergence loss
             data_constructor: Data constructor for processing observations
@@ -157,11 +187,13 @@ class VAESSLWorker(SSLWorker):
             rank,
             world_size,
             init_method,
-            ssl_model,
-            ssl_optimizer,
-            agent_group_optimizer,
+            ssl_model_config,
+            agent_group_config,
+            ssl_optimizer_config,
+            agent_group_optimizer_config,
             reconstruction_loss,
             kl_divergence_weight,
+            **kwargs,
         )
         self.data_constructor = data_constructor
 

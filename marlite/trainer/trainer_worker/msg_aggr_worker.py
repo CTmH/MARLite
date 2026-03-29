@@ -20,13 +20,19 @@ class MsgAggrWorker(BaseWorker):
 
     def __init__(
         self,
-        worker_id,
-        device_id,
-        rank,
-        world_size,
-        init_method,
-        warmup_epochs=0,
-        msg_aggr_weight=1.0,
+        worker_id: int,
+        device_id: int,
+        rank: int,
+        world_size: int,
+        init_method: str,
+        agent_group_config=None,
+        critic_config=None,
+        critic_optimizer_config=None,
+        agent_group_optimizer_config=None,
+        gamma: float = 0.9,
+        warmup_epochs: int = 0,
+        msg_aggr_weight: float = 1.0,
+        **kwargs,
     ):
         """
         Initialize MsgAggr worker.
@@ -37,13 +43,35 @@ class MsgAggrWorker(BaseWorker):
             rank: Global rank in distributed training
             world_size: Total number of processes
             init_method: URL for distributed initialization
+            agent_group_config: Configuration for agent group
+            critic_config: Configuration for critic
+            critic_optimizer_config: Configuration for critic optimizer
+            agent_group_optimizer_config: Configuration for agent group optimizer
+            gamma: Discount factor
             warmup_epochs: Number of warmup epochs before message aggregation loss is used
             msg_aggr_weight: Weight for message aggregation loss
         """
         super().__init__(worker_id, device_id, rank, world_size, init_method)
-        self.gamma = 0.9
+        self.gamma = gamma
         self.warmup_epochs = warmup_epochs
         self.msg_aggr_weight = msg_aggr_weight
+
+        self.eval_agent_group = agent_group_config.get_agent_group().to(self.device)
+        self.target_agent_group = agent_group_config.get_agent_group().to(self.device)
+        self.eval_critic = critic_config.get_critic().to(self.device)
+        self.target_critic = critic_config.get_critic().to(self.device)
+
+        self.eval_agent_group.train()
+        self.target_agent_group.eval()
+        self.eval_critic.train()
+        self.target_critic.eval()
+
+        self.critic_optimizer = critic_optimizer_config.get_optimizer(
+            self.eval_critic.parameters()
+        )
+        self.agent_group_optimizer = agent_group_optimizer_config.get_optimizer(
+            self.eval_agent_group.params_to_optimize
+        )
 
     def train_step(self, batch: Dict[str, Any]) -> float:
         """
@@ -168,7 +196,7 @@ class MsgAggrWorker(BaseWorker):
         # Only compute message aggregation losses after warmup period
         current_epoch = batch.get("epoch", 0)
         if current_epoch >= self.warmup_epochs:
-            msg_aggr_loss = torch.functional.F.smooth_l1_loss(
+            msg_aggr_loss = torch.nn.functional.smooth_l1_loss(
                 aggregated_msg, state_features.detach()
             )
             critic_loss = td_error + self.msg_aggr_weight * msg_aggr_loss
@@ -200,13 +228,19 @@ class ProbMsgAggrWorker(MsgAggrWorker):
 
     def __init__(
         self,
-        worker_id,
-        device_id,
-        rank,
-        world_size,
-        init_method,
-        warmup_epochs=0,
-        msg_aggr_weight=1.0,
+        worker_id: int,
+        device_id: int,
+        rank: int,
+        world_size: int,
+        init_method: str,
+        agent_group_config=None,
+        critic_config=None,
+        critic_optimizer_config=None,
+        agent_group_optimizer_config=None,
+        gamma: float = 0.9,
+        warmup_epochs: int = 0,
+        msg_aggr_weight: float = 1.0,
+        **kwargs,
     ):
         """
         Initialize ProbMsgAggr worker.
@@ -217,6 +251,11 @@ class ProbMsgAggrWorker(MsgAggrWorker):
             rank: Global rank in distributed training
             world_size: Total number of processes
             init_method: URL for distributed initialization
+            agent_group_config: Configuration for agent group
+            critic_config: Configuration for critic
+            critic_optimizer_config: Configuration for critic optimizer
+            agent_group_optimizer_config: Configuration for agent group optimizer
+            gamma: Discount factor
             warmup_epochs: Number of warmup epochs before message aggregation loss is used
             msg_aggr_weight: Weight for message aggregation loss
         """
@@ -226,8 +265,14 @@ class ProbMsgAggrWorker(MsgAggrWorker):
             rank,
             world_size,
             init_method,
+            agent_group_config,
+            critic_config,
+            critic_optimizer_config,
+            agent_group_optimizer_config,
+            gamma,
             warmup_epochs,
             msg_aggr_weight,
+            **kwargs,
         )
         from torch.distributions import Normal, kl_divergence
 

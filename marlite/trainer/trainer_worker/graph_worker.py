@@ -23,7 +23,20 @@ class GraphWorker(BaseWorker):
     5. Optimizer step
     """
 
-    def __init__(self, worker_id, device_id, rank, world_size, init_method):
+    def __init__(
+        self,
+        worker_id: int,
+        device_id: int,
+        rank: int,
+        world_size: int,
+        init_method: str,
+        agent_group_config=None,
+        critic_config=None,
+        critic_optimizer_config=None,
+        agent_group_optimizer_config=None,
+        gamma: float = 0.9,
+        **kwargs,
+    ):
         """
         Initialize Graph worker.
 
@@ -33,9 +46,31 @@ class GraphWorker(BaseWorker):
             rank: Global rank in distributed training
             world_size: Total number of processes
             init_method: URL for distributed initialization
+            agent_group_config: Configuration for agent group
+            critic_config: Configuration for critic
+            critic_optimizer_config: Configuration for critic optimizer
+            agent_group_optimizer_config: Configuration for agent group optimizer
+            gamma: Discount factor
         """
         super().__init__(worker_id, device_id, rank, world_size, init_method)
-        self.gamma = 0.9
+        self.gamma = gamma
+
+        self.eval_agent_group = agent_group_config.get_agent_group().to(self.device)
+        self.target_agent_group = agent_group_config.get_agent_group().to(self.device)
+        self.eval_critic = critic_config.get_critic().to(self.device)
+        self.target_critic = critic_config.get_critic().to(self.device)
+
+        self.eval_agent_group.train()
+        self.target_agent_group.eval()
+        self.eval_critic.train()
+        self.target_critic.eval()
+
+        self.critic_optimizer = critic_optimizer_config.get_optimizer(
+            self.eval_critic.parameters()
+        )
+        self.agent_group_optimizer = agent_group_optimizer_config.get_optimizer(
+            self.eval_agent_group.params_to_optimize
+        )
 
     def train_step(self, batch: Dict[str, Any]) -> float:
         """

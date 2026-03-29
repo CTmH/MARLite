@@ -152,7 +152,9 @@ class Trainer:
         if self.use_multi_gpu:
             self.train_device = self.device_list[0]
             self.worker_group = self._create_worker_group()
-            self._write_initial_params_to_workers()
+            if self.worker_group is not None:
+                self.worker_group.start_workers()
+                self._write_initial_params_to_workers()
             logging.info(
                 f"Using multi-GPU training with {len(self.device_list)} devices: {self.device_list}"
             )

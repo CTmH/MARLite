@@ -64,7 +64,9 @@ class SelfSupervisedQMIXTrainer(Trainer):
         self.ssl_worker_group = None
         if self.use_multi_gpu:
             self.ssl_worker_group = self._create_ssl_worker_group()
-            self._write_ssl_params_to_workers()
+            if self.ssl_worker_group is not None:
+                self.ssl_worker_group.start_workers()
+                self._write_ssl_params_to_workers()
 
     def _init_ssl_optimizer(self):
         ssl_params_optim = [
