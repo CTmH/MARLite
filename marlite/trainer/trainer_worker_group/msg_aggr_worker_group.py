@@ -35,7 +35,7 @@ class MsgAggrWorkerGroup(BaseWorkerGroup):
         warmup_epochs: int = 0,
         msg_aggr_weight: float = 1.0,
         is_probabilistic: bool = False,
-        init_method: str = "tcp://localhost:29500",
+        init_method: str = None,
     ):
         """
         Initialize MsgAggr worker group.

@@ -28,7 +28,7 @@ class QMIXWorkerGroup(BaseWorkerGroup):
         critic_optimizer_config,
         agent_group_optimizer_config,
         gamma: float = 0.9,
-        init_method: str = "tcp://localhost:29500",
+        init_method: str = None,
     ):
         """
         Initialize QMIX worker group.

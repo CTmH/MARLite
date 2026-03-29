@@ -31,7 +31,7 @@ class VAESSLWorkerGroup(SSLWorkerGroup):
         reconstruction_loss=None,
         kl_divergence_weight: float = 1.0,
         data_constructor=None,
-        init_method: str = "tcp://localhost:29500",
+        init_method: str = None,
     ):
         """
         Initialize VAE SSL worker group.

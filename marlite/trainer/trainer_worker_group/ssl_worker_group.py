@@ -29,7 +29,7 @@ class SSLWorkerGroup(BaseWorkerGroup):
         agent_group_optimizer_config,
         reconstruction_loss=None,
         kl_divergence_weight: float = 1.0,
-        init_method: str = "tcp://localhost:29500",
+        init_method: str = None,
     ):
         """
         Initialize SSL worker group.

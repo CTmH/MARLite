@@ -5,11 +5,23 @@ This module provides the BaseWorkerGroup class that manages multiple worker proc
 for parallel training across multiple GPUs.
 """
 
-import os
+import socket
+import threading
+from abc import ABC, abstractmethod
+from typing import Any, Dict, List, Optional
+
 import torch
 import torch.multiprocessing as mp
-from typing import Any, Dict, List, Optional
-from abc import ABC, abstractmethod
+
+
+def is_port_available(port: int) -> bool:
+    """Check if a port is available for use."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("localhost", port))
+            return True
+    except OSError:
+        return False
 
 
 def worker_loop(
@@ -84,11 +96,15 @@ class BaseWorkerGroup(ABC):
     - _get_worker_class(): Return the worker class to use
     """
 
+    _port_counter = 22100
+    _port_lock = threading.Lock()
+    _max_port = 65535
+
     def __init__(
         self,
         device_ids: List[int],
         world_size: int,
-        init_method: str,
+        init_method: str = None,
     ):
         """
         Initialize the worker group.
@@ -96,11 +112,24 @@ class BaseWorkerGroup(ABC):
         Args:
             device_ids: List of CUDA device IDs to use
             world_size: Total number of processes (should match len(device_ids))
-            init_method: URL for distributed initialization
+            init_method: URL for distributed initialization. If None, auto-selects an available port.
         """
         self.device_ids = device_ids
         self.world_size = world_size
-        self.init_method = init_method
+
+        if init_method is None:
+            with BaseWorkerGroup._port_lock:
+                port = BaseWorkerGroup._port_counter
+                while not is_port_available(port):
+                    port += 1
+                    if port > BaseWorkerGroup._max_port:
+                        raise RuntimeError(
+                            f"Port counter exceeded maximum port number {BaseWorkerGroup._max_port}"
+                        )
+                BaseWorkerGroup._port_counter = port + 1
+            self.init_method = f"tcp://localhost:{port}"
+        else:
+            self.init_method = init_method
 
         # Multiprocessing context
         self.mp_ctx = mp.get_context("spawn")

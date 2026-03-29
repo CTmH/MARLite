@@ -20,8 +20,8 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
     """
 
     def __init__(self, kl_divergence_weight=1.0, **kwargs):
-        super().__init__(**kwargs)
         self.kl_divergence_weight = kl_divergence_weight
+        super().__init__(**kwargs)
 
     def _create_worker_group(self):
         """Create GraphWorkerGroup for multi-GPU RL training."""
