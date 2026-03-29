@@ -212,17 +212,46 @@ class BaseWorker:
         Returns:
             True if should continue, False if should stop
         """
+        print(
+            f"Worker {self.worker_id}: handle_command called with cmd={repr(cmd)}",
+            flush=True,
+        )
         if cmd == "STOP":
             self.cleanup()
             return False
 
         elif cmd == "SYNC_FROM_MAIN":
             # Main process is sending initial parameters
+            import sys
+
+            print(f"Worker {self.worker_id}: Received SYNC_FROM_MAIN", flush=True)
+            print(
+                f"Worker {self.worker_id}: cmd type={type(cmd)}, repr={repr(cmd)}",
+                flush=True,
+            )
             shared_memory = param_queue.get()
+            print(
+                f"Worker {self.worker_id}: Got shared_memory type={type(shared_memory)}, keys={list(shared_memory.keys()) if isinstance(shared_memory, dict) else 'not a dict'}",
+                flush=True,
+            )
             try:
+                print(
+                    f"Worker {self.worker_id}: Calling sync_params_from_shared_memory...",
+                    flush=True,
+                )
                 self.sync_params_from_shared_memory(shared_memory)
+                print(
+                    f"Worker {self.worker_id}: Putting ACK on param_queue", flush=True
+                )
                 param_queue.put("ACK")
+                print(f"Worker {self.worker_id}: ACK sent successfully", flush=True)
             except Exception as e:
+                import traceback
+
+                print(
+                    f"Worker {self.worker_id}: ERROR in SYNC_FROM_MAIN: {e}", flush=True
+                )
+                traceback.print_exc(file=sys.stdout)
                 param_queue.put(f"ERROR: {e}")
 
         elif cmd == "BROADCAST":
@@ -252,6 +281,7 @@ class BaseWorker:
                 loss_queue.put(f"ERROR: {e}")
 
         else:
+            print(f"Worker {self.worker_id}: Unknown command: {repr(cmd)}", flush=True)
             param_queue.put(f"UNKNOWN_CMD: {cmd}")
 
         return True

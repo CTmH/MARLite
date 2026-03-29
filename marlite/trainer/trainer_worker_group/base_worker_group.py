@@ -50,6 +50,11 @@ def worker_loop(
         cmd_queue: Queue for receiving commands
         ready_event: Event to signal worker is ready
     """
+    print(f"Worker {worker_id}: Starting worker_loop", flush=True)
+    print(
+        f"Worker {worker_id}: queues - param_queue={param_queue}, cmd_queue={cmd_queue}",
+        flush=True,
+    )
     # Create worker instance
     worker = worker_class(**worker_kwargs)
 
