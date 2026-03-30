@@ -55,7 +55,11 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
 
     def learn(self, sample_size, batch_size: int, times: int = 1):
         """RL learning delegates to GraphQMIXTrainer's implementation."""
-        return GraphQMIXTrainer.learn(self, sample_size, batch_size, times)
+        if not self.use_multi_gpu:
+            return GraphQMIXTrainer._learn_single_gpu(
+                self, sample_size, batch_size, times
+            )
+        return GraphQMIXTrainer._learn_multi_gpu(self, sample_size, batch_size, times)
 
     def self_supervised_learn(self, sample_size, batch_size: int, times: int = 1):
         if not self.use_multi_gpu:

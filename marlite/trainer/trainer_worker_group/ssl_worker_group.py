@@ -152,4 +152,7 @@ class SSLWorkerGroup(BaseWorkerGroup):
             loss = self.loss_queue.get()
             losses.append(loss)
 
+        # Synchronize updated parameters across workers
+        self.broadcast_params()
+
         return sum(losses) / len(losses)
