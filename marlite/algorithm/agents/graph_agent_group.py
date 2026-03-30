@@ -1,8 +1,6 @@
 import numpy as np
 import torch
 import torch.nn as nn
-import os
-from copy import deepcopy
 from typing import Dict, List, Any
 from torch_geometric.data import Batch, Data
 from torch_geometric.utils import unbatch
@@ -41,8 +39,8 @@ class GraphAgentGroup(AgentGroup):
         for model_name, config in decoder_configs.items():
             self.decoders[model_name] = config.get_model()
 
-        self.graph_model = graph_model_config.get_model()
-        self.graph_builder = graph_builder_config.get_graph_builder()
+        self.add_module("graph_model", graph_model_config.get_model())
+        self.add_module("graph_builder", graph_builder_config.get_graph_builder())
 
         # Initialize model_to_agent dictionary and model_to_agent_indices dictionary
         self.model_to_agents = {model_name: [] for model_name in encoder_configs.keys()}
@@ -390,111 +388,6 @@ class GraphAgentGroup(AgentGroup):
             "edge_indices": ret["edge_indices"][0],
         }
 
-    def set_agent_group_params(self, params: Dict[str, dict]) -> "GraphAgentGroup":
-        feature_extractor_params = params.get("feature_extractor", {})
-        encoder_params = params.get("encoder", {})
-        decoder_params = params.get("decoder", {})
-        graph_builder_params = params.get("graph_builder", {})
-        graph_model_params = params.get("graph_model", {})
-        for (model_name, enc), (_, fe), (_, dec) in zip(
-            self.encoders.items(),
-            self.feature_extractors.items(),
-            self.decoders.items(),
-        ):
-            enc.load_state_dict(encoder_params[model_name])
-            fe.load_state_dict(feature_extractor_params[model_name])
-            dec.load_state_dict(decoder_params[model_name])
-
-        self.graph_builder.load_state_dict(graph_builder_params)
-        self.graph_model.load_state_dict(graph_model_params)
-
-        return self
-
-    def get_agent_group_params(self) -> Dict[str, dict]:
-        feature_extractor_params = {
-            model_name: deepcopy(fe.state_dict())
-            for model_name, fe in self.feature_extractors.items()
-        }
-        encoder_params = {
-            model_name: deepcopy(model.state_dict())
-            for model_name, model in self.encoders.items()
-        }
-        decoder_params = {
-            model_name: deepcopy(dec.state_dict())
-            for model_name, dec in self.decoders.items()
-        }
-        graph_builder_params = deepcopy(self.graph_builder.state_dict())
-        comm_model_params = deepcopy(self.graph_model.state_dict())
-        params = {
-            "encoder": encoder_params,
-            "feature_extractor": feature_extractor_params,
-            "decoder": decoder_params,
-            "graph_builder": graph_builder_params,
-            "graph_model": comm_model_params,
-        }
-        return params
-
-    def save_params(self, path: str) -> "GraphAgentGroup":
-        os.makedirs(path, exist_ok=True)
-        for (model_name, enc), (_, fe), (_, dec) in zip(
-            self.encoders.items(),
-            self.feature_extractors.items(),
-            self.decoders.items(),
-        ):
-            model_dir = os.path.join(path, model_name)
-            os.makedirs(model_dir, exist_ok=True)
-            torch.save(
-                fe.state_dict(), os.path.join(model_dir, "feature_extractor.pth")
-            )
-            torch.save(enc.state_dict(), os.path.join(model_dir, "encoder.pth"))
-            torch.save(dec.state_dict(), os.path.join(model_dir, "decoder.pth"))
-        torch.save(
-            self.graph_builder.state_dict(), os.path.join(path, "graph_builder.pth")
-        )
-        torch.save(self.graph_model.state_dict(), os.path.join(path, "graph_model.pth"))
-        return self
-
-    def load_params(self, path: str) -> "GraphAgentGroup":
-        for (model_name, enc), (_, fe), (_, dec) in zip(
-            self.encoders.items(),
-            self.feature_extractors.items(),
-            self.decoders.items(),
-        ):
-            model_dir = os.path.join(path, model_name)
-            fe.load_state_dict(
-                torch.load(
-                    os.path.join(model_dir, "feature_extractor.pth"),
-                    map_location=torch.device("cpu"),
-                )
-            )
-            enc.load_state_dict(
-                torch.load(
-                    os.path.join(model_dir, "encoder.pth"),
-                    map_location=torch.device("cpu"),
-                )
-            )
-            dec.load_state_dict(
-                torch.load(
-                    os.path.join(model_dir, "decoder.pth"),
-                    map_location=torch.device("cpu"),
-                )
-            )
-        self.graph_builder.load_state_dict(
-            torch.load(
-                os.path.join(path, "graph_builder.pth"),
-                map_location=torch.device("cpu"),
-            )
-        )
-        self.graph_model.load_state_dict(
-            torch.load(
-                os.path.join(path, "graph_model.pth"), map_location=torch.device("cpu")
-            )
-        )
-        return self
-
     def reset(self) -> "GraphAgentGroup":
-        if hasattr(self.graph_builder, "module"):
-            self.graph_builder.module.reset()
-        else:
-            self.graph_builder.reset()
+        self.graph_builder.reset()
         return self

@@ -71,6 +71,7 @@ class Trainer:
         critic_optimizer_config: OptimizerConfig,
         agent_optimizer_config: OptimizerConfig,
         lr_scheduler_conf: LRSchedulerConfig,
+        agent_lr_scheduler_conf: Optional[LRSchedulerConfig],
         rolloutmanager_config: RolloutManagerConfig,
         replaybuffer_config: ReplayBufferConfig,
         analyzer_config: AnalyzerConfig,
@@ -111,8 +112,8 @@ class Trainer:
         self.agent_group_config = agent_group_config
         self.eval_agent_group = agent_group_config.get_agent_group()
         self.target_agent_group = agent_group_config.get_agent_group()
-        self.best_agent_group_params = self.eval_agent_group.get_agent_group_params()
-        self.target_agent_group.set_agent_group_params(self.best_agent_group_params)
+        self.best_agent_group_params = deepcopy(self.eval_agent_group.state_dict())
+        self.target_agent_group.load_state_dict(self.best_agent_group_params)
         self._cached_agent_group_params = self.best_agent_group_params
 
         # Critic
@@ -123,6 +124,7 @@ class Trainer:
         self._cached_critic_params = deepcopy(self.eval_critic.state_dict())
         self.critic_optimizer_config = critic_optimizer_config
         self.lr_scheduler_conf = lr_scheduler_conf
+        self.agent_lr_scheduler_conf = agent_lr_scheduler_conf
 
         self.optimizer = self.critic_optimizer_config.get_optimizer(
             self.eval_critic.parameters()
@@ -134,11 +136,14 @@ class Trainer:
 
         if lr_scheduler_conf:
             self.lr_scheduler = self.lr_scheduler_conf.get_lr_scheduler(self.optimizer)
-            self.agent_lr_scheduler = self.lr_scheduler_conf.get_lr_scheduler(
+        else:
+            self.lr_scheduler = None
+
+        if agent_lr_scheduler_conf:
+            self.agent_lr_scheduler = self.agent_lr_scheduler_conf.get_lr_scheduler(
                 self.agent_optimizer
             )
         else:
-            self.lr_scheduler = None
             self.agent_lr_scheduler = None
 
         # Work directory
@@ -214,8 +219,8 @@ class Trainer:
             return
 
         trainable_params = {
-            "eval_agent_group": self.eval_agent_group.get_agent_group_params(),
-            "target_agent_group": self.target_agent_group.get_agent_group_params(),
+            "eval_agent_group": deepcopy(self.eval_agent_group.state_dict()),
+            "target_agent_group": deepcopy(self.target_agent_group.state_dict()),
             "eval_critic": self.eval_critic.state_dict(),
             "target_critic": self.target_critic.state_dict(),
         }
@@ -232,12 +237,8 @@ class Trainer:
             return
 
         trainable_params = self.worker_group.read_params_from_worker0()
-        self.eval_agent_group.set_agent_group_params(
-            trainable_params["eval_agent_group"]
-        )
-        self.target_agent_group.set_agent_group_params(
-            trainable_params["target_agent_group"]
-        )
+        self.eval_agent_group.load_state_dict(trainable_params["eval_agent_group"])
+        self.target_agent_group.load_state_dict(trainable_params["target_agent_group"])
         self.eval_critic.load_state_dict(trainable_params["eval_critic"])
         self.target_critic.load_state_dict(trainable_params["target_critic"])
 
@@ -259,7 +260,8 @@ class Trainer:
         agent_path = os.path.join(self.checkpointdir, checkpoint, "agent")
         os.makedirs(agent_path, exist_ok=True)
         self.eval_agent_group.to("cpu")
-        self.eval_agent_group.save_params(agent_path)
+        agent_params = self.eval_agent_group.state_dict()
+        torch.save(agent_params, os.path.join(agent_path, "agent.pth"))
 
         critic_path = os.path.join(self.checkpointdir, checkpoint, "critic")
         os.makedirs(critic_path, exist_ok=True)
@@ -270,23 +272,23 @@ class Trainer:
 
     def load_checkpoint(self, checkpoint: str):
         self.best_metrics = {key: -np.inf for key in self.eval_metric_list}
-        agent_path = os.path.join(self.checkpointdir, checkpoint, "agent")
+        agent_path = os.path.join(self.checkpointdir, checkpoint, "agent", "agent.pth")
         self.eval_agent_group.to("cpu")
         self.eval_critic.to("cpu")
-        self.eval_agent_group.load_params(agent_path)
+        self.eval_agent_group.load_state_dict(torch.load(agent_path, weights_only=True))
         critic_path = os.path.join(
             self.checkpointdir, checkpoint, "critic", "critic.pth"
         )
         self.eval_critic.load_state_dict(torch.load(critic_path, weights_only=True))
-        self.best_agent_group_params = self.eval_agent_group.get_agent_group_params()
+        self.best_agent_group_params = deepcopy(self.eval_agent_group.state_dict())
         self.best_critic_params = deepcopy(self.eval_critic.state_dict())
-        self._cached_agent_group_params = self.eval_agent_group.get_agent_group_params()
+        self._cached_agent_group_params = deepcopy(self.eval_agent_group.state_dict())
         self._cached_critic_params = deepcopy(self.eval_critic.state_dict())
         self.update_target_model_params()
         return self
 
     def save_best_model(self):
-        self.eval_agent_group.set_agent_group_params(self.best_agent_group_params)
+        self.eval_agent_group.load_state_dict(self.best_agent_group_params)
         self.eval_critic.load_state_dict(self.best_critic_params)
         self.save_current_model(checkpoint="best")
         return self
@@ -310,8 +312,9 @@ class Trainer:
         return self
 
     def update_target_model_params(self):
-        agent_group_params = self.eval_agent_group.get_agent_group_params()
-        self.target_agent_group.set_agent_group_params(agent_group_params)
+        self.target_agent_group.load_state_dict(
+            deepcopy(self.eval_agent_group.state_dict())
+        )
         critic_params = deepcopy(self.eval_critic.state_dict())
         self.target_critic.load_state_dict(critic_params)
         return self
@@ -430,8 +433,8 @@ class Trainer:
             update_best = np.array(update_best, dtype=np.bool_)
 
             if cache_params.any():
-                self._cached_agent_group_params = (
-                    self.eval_agent_group.get_agent_group_params()
+                self._cached_agent_group_params = deepcopy(
+                    self.eval_agent_group.state_dict()
                 )
                 self._cached_critic_params = deepcopy(self.eval_critic.state_dict())
                 logging.info(
@@ -440,8 +443,8 @@ class Trainer:
 
             if update_best.any():
                 self.best_metrics = metrics
-                self.best_agent_group_params = (
-                    self.eval_agent_group.get_agent_group_params()
+                self.best_agent_group_params = deepcopy(
+                    self.eval_agent_group.state_dict()
                 )
                 self.best_critic_params = deepcopy(self.eval_critic.state_dict())
                 logging.info(
@@ -455,9 +458,7 @@ class Trainer:
                 break
 
             if epoch % eval_interval == 0:
-                self.eval_agent_group.set_agent_group_params(
-                    self._cached_agent_group_params
-                )
+                self.eval_agent_group.load_state_dict(self._cached_agent_group_params)
                 self.eval_critic.load_state_dict(self._cached_critic_params)
                 self.update_target_model_params()
                 logging.info(

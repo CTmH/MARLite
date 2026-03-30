@@ -112,9 +112,8 @@ class TestQMixTrainer(unittest.TestCase):
             original_target_critic_params = deepcopy(
                 self.trainer.target_critic.state_dict()
             )
-
-            original_target_agent_group_params = (
-                self.trainer.target_agent_group.get_agent_group_params()
+            original_target_agent_group_params = deepcopy(
+                self.trainer.target_agent_group.state_dict()
             )
 
             # 执行参数更新
@@ -141,32 +140,23 @@ class TestQMixTrainer(unittest.TestCase):
                 )
 
             # 验证 agent group 参数更新及深拷贝正确性
-            eval_agent_group_models = {
-                "feature_extractor": self.trainer.eval_agent_group.feature_extractors,
-                "model": self.trainer.eval_agent_group.models,
-            }
-            new_target_agent_group_params = (
-                self.trainer.target_agent_group.get_agent_group_params()
+            new_target_agent_group_params = deepcopy(
+                self.trainer.target_agent_group.state_dict()
             )
-            for key in eval_agent_group_models.keys():
-                for model_name in self.trainer.eval_agent_group.models.keys():
-                    for name in original_target_agent_group_params[key][model_name]:
-                        self.assertTrue(
-                            torch.equal(
-                                new_target_agent_group_params[key][model_name][name],
-                                eval_agent_group_models[key][model_name].state_dict()[
-                                    name
-                                ],
-                            )
-                        )
-                        self.assertFalse(
-                            torch.equal(
-                                new_target_agent_group_params[key][model_name][name],
-                                original_target_agent_group_params[key][model_name][
-                                    name
-                                ],
-                            )
-                        )
+            eval_agent_group_state_dict = self.trainer.eval_agent_group.state_dict()
+            for name in original_target_agent_group_params:
+                self.assertTrue(
+                    torch.equal(
+                        new_target_agent_group_params[name],
+                        eval_agent_group_state_dict[name],
+                    )
+                )
+                self.assertFalse(
+                    torch.equal(
+                        new_target_agent_group_params[name],
+                        original_target_agent_group_params[name],
+                    )
+                )
 
             # 验证深拷贝有效性：修改eval参数不应影响target
             for param in self.trainer.eval_critic.parameters():
@@ -194,28 +184,22 @@ class TestQMixTrainer(unittest.TestCase):
                 for param in model.parameters():
                     torch.nn.init.normal_(param)
 
-            new_target_agent_group_params = (
-                self.trainer.target_agent_group.get_agent_group_params()
+            new_target_agent_group_params = deepcopy(
+                self.trainer.target_agent_group.state_dict()
             )
-            for key in eval_agent_group_models.keys():
-                for model_name in self.trainer.eval_agent_group.models.keys():
-                    for name in original_target_agent_group_params[key][model_name]:
-                        self.assertFalse(
-                            torch.equal(
-                                new_target_agent_group_params[key][model_name][name],
-                                eval_agent_group_models[key][model_name].state_dict()[
-                                    name
-                                ],
-                            )
-                        )
-                        self.assertFalse(
-                            torch.equal(
-                                new_target_agent_group_params[key][model_name][name],
-                                original_target_agent_group_params[key][model_name][
-                                    name
-                                ],
-                            )
-                        )
+            for name in original_target_agent_group_params:
+                self.assertFalse(
+                    torch.equal(
+                        new_target_agent_group_params[name],
+                        eval_agent_group_state_dict[name],
+                    )
+                )
+                self.assertFalse(
+                    torch.equal(
+                        new_target_agent_group_params[name],
+                        original_target_agent_group_params[name],
+                    )
+                )
 
     def test_distributed_data_parallel(self):
         """Test DistributedDataParallel training with multiple devices."""

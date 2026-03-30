@@ -308,6 +308,8 @@ class AgentGroupConfig(object):
     def __init__(self, **kwargs):
         self.agent_group_config = deepcopy(kwargs)
         self.ag_type = self.agent_group_config.pop("type")
+        self.agent_group_config.pop("optimizer", None)
+        self.agent_group_config.pop("lr_scheduler", None)
         if self.ag_type not in registered_agent_groups:
             raise ValueError(f"Agent group type {self.ag_type} not registered.")
 

@@ -60,48 +60,6 @@ class AgentGroup(nn.Module):
         """
         raise NotImplementedError
 
-    def set_agent_group_params(self, params: Dict[str, dict]) -> "AgentGroup":
-        """
-        Set parameters for the agent group.
-
-        Args:
-            params: Dictionary containing model and feature extractor parameters
-        """
-        raise NotImplementedError
-
-    def get_agent_group_params(self) -> Dict[str, dict]:
-        """
-        Get current parameters of the agent group.
-
-        Returns:
-            Dictionary containing model and feature extractor parameters
-        """
-        raise NotImplementedError
-
-    def save_params(self, path: str) -> "AgentGroup":
-        """
-        Save agent group parameters to disk.
-
-        Args:
-            path: Path to save parameters
-
-        Returns:
-            Self reference for method chaining
-        """
-        raise NotImplementedError
-
-    def load_params(self, path: str) -> "AgentGroup":
-        """
-        Load agent group parameters from disk.
-
-        Args:
-            path: Path to load parameters from
-
-        Returns:
-            Self reference for method chaining
-        """
-        raise NotImplementedError
-
     def reset(self) -> "AgentGroup":
         """
         Reset the agent group state.

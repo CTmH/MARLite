@@ -90,7 +90,7 @@ class SelfSupervisedQMIXTrainer(Trainer):
 
         ssl_params = {
             "ssl_model": self.ssl_model.state_dict(),
-            "eval_agent_group": self.eval_agent_group.get_agent_group_params(),
+            "eval_agent_group": deepcopy(self.eval_agent_group.state_dict()),
         }
         self.ssl_worker_group.write_params_to_workers(
             ssl_params["ssl_model"], ssl_params["eval_agent_group"]
@@ -103,7 +103,7 @@ class SelfSupervisedQMIXTrainer(Trainer):
 
         ssl_params, agent_params = self.ssl_worker_group.read_params_from_worker0()
         self.ssl_model.load_state_dict(ssl_params)
-        self.eval_agent_group.set_agent_group_params(agent_params)
+        self.eval_agent_group.load_state_dict(agent_params)
 
     def _broadcast_ssl_params_to_workers(self):
         """Broadcast current SSL parameters to workers."""
@@ -116,7 +116,8 @@ class SelfSupervisedQMIXTrainer(Trainer):
         agent_path = os.path.join(self.checkpointdir, checkpoint, "agent")
         os.makedirs(agent_path, exist_ok=True)
         self.eval_agent_group.to("cpu")
-        self.eval_agent_group.save_params(agent_path)
+        agent_params = self.eval_agent_group.state_dict()
+        torch.save(agent_params, os.path.join(agent_path, "agent.pth"))
 
         critic_path = os.path.join(self.checkpointdir, checkpoint, "critic")
         os.makedirs(critic_path, exist_ok=True)
@@ -138,11 +139,11 @@ class SelfSupervisedQMIXTrainer(Trainer):
     def load_checkpoint(self, checkpoint: str):
         """Load checkpoint including self_supervised_model parameters"""
         self.best_metrics = {key: -np.inf for key in self.eval_metric_list}
-        agent_path = os.path.join(self.checkpointdir, checkpoint, "agent")
+        agent_path = os.path.join(self.checkpointdir, checkpoint, "agent", "agent.pth")
         self.eval_agent_group.to("cpu")
         self.eval_critic.to("cpu")
         self.ssl_model.to("cpu")
-        self.eval_agent_group.load_params(agent_path)
+        self.eval_agent_group.load_state_dict(torch.load(agent_path, weights_only=True))
         critic_path = os.path.join(
             self.checkpointdir, checkpoint, "critic", "critic.pth"
         )
@@ -159,10 +160,10 @@ class SelfSupervisedQMIXTrainer(Trainer):
                 torch.load(ssl_model_path, weights_only=True)
             )
 
-        self.best_agent_group_params = self.eval_agent_group.get_agent_group_params()
+        self.best_agent_group_params = deepcopy(self.eval_agent_group.state_dict())
         self.best_critic_params = deepcopy(self.eval_critic.state_dict())
         self.best_ssl_model_params = deepcopy(self.ssl_model.state_dict())
-        self._cached_agent_group_params = self.eval_agent_group.get_agent_group_params()
+        self._cached_agent_group_params = deepcopy(self.eval_agent_group.state_dict())
         self._cached_critic_params = deepcopy(self.eval_critic.state_dict())
         self._cached_ssl_model_params = deepcopy(self.ssl_model.state_dict())
         self.update_target_model_params()
@@ -170,7 +171,7 @@ class SelfSupervisedQMIXTrainer(Trainer):
 
     def save_best_model(self):
         """Save best model including self_supervised_model parameters"""
-        self.eval_agent_group.set_agent_group_params(self.best_agent_group_params)
+        self.eval_agent_group.load_state_dict(self.best_agent_group_params)
         self.eval_critic.load_state_dict(self.best_critic_params)
         self.ssl_model.load_state_dict(self.best_ssl_model_params)
         self.save_current_model(checkpoint="best")
@@ -178,12 +179,13 @@ class SelfSupervisedQMIXTrainer(Trainer):
 
     def update_target_model_params(self):
         """Update target model parameters including self_supervised_model"""
-        agent_group_params = self.eval_agent_group.get_agent_group_params()
-        self.target_agent_group.set_agent_group_params(agent_group_params)
+        self.target_agent_group.load_state_dict(
+            deepcopy(self.eval_agent_group.state_dict())
+        )
         critic_params = deepcopy(self.eval_critic.state_dict())
         self.target_critic.load_state_dict(critic_params)
         ssl_model_params = deepcopy(self.ssl_model.state_dict())
-        self.ssl_model.load_state_dict(ssl_model_params)
+        self.target_critic.load_state_dict(ssl_model_params)
         return self
 
     def train(
@@ -297,8 +299,8 @@ class SelfSupervisedQMIXTrainer(Trainer):
             update_best = np.array(update_best, dtype=np.bool_)
 
             if cache_params.any():
-                self._cached_agent_group_params = (
-                    self.eval_agent_group.get_agent_group_params()
+                self._cached_agent_group_params = deepcopy(
+                    self.eval_agent_group.state_dict()
                 )
                 self._cached_critic_params = deepcopy(self.eval_critic.state_dict())
                 self._cached_ssl_model_params = deepcopy(self.ssl_model.state_dict())
@@ -308,8 +310,8 @@ class SelfSupervisedQMIXTrainer(Trainer):
 
             if update_best.any():
                 self.best_metrics = metrics
-                self.best_agent_group_params = (
-                    self.eval_agent_group.get_agent_group_params()
+                self.best_agent_group_params = deepcopy(
+                    self.eval_agent_group.state_dict()
                 )
                 self.best_critic_params = deepcopy(self.eval_critic.state_dict())
                 self.best_ssl_model_params = deepcopy(self.ssl_model.state_dict())
@@ -324,9 +326,7 @@ class SelfSupervisedQMIXTrainer(Trainer):
                 break
 
             if epoch % eval_interval == 0:
-                self.eval_agent_group.set_agent_group_params(
-                    self._cached_agent_group_params
-                )
+                self.eval_agent_group.load_state_dict(self._cached_agent_group_params)
                 self.eval_critic.load_state_dict(self._cached_critic_params)
                 self.ssl_model.load_state_dict(self._cached_ssl_model_params)
                 self.update_target_model_params()

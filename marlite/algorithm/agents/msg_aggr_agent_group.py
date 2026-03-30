@@ -1,8 +1,6 @@
 import numpy as np
 import torch
 import torch.nn as nn
-import os
-from copy import deepcopy
 from typing import Dict, Any, List
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.nn.init as init
@@ -40,7 +38,7 @@ class MsgAggrAgentGroup(AgentGroup):
         for model_name, config in decoder_configs.items():
             self.decoders[model_name] = config.get_model()
 
-        self.aggr_model = aggr_model_config.get_model()  # Message aggregator model
+        self.add_module("aggr_model", aggr_model_config.get_model())
 
         # Initialize model_to_agent dictionary and model_to_agent_indices dictionary
         self.model_to_agents = {model_name: [] for model_name in encoder_configs.keys()}
@@ -331,96 +329,7 @@ class MsgAggrAgentGroup(AgentGroup):
 
         return {"actions": actual_actions, "all_actions": all_actions}
 
-    def set_agent_group_params(self, params: Dict[str, dict]) -> "AgentGroup":
-        feature_extractor_params = params.get("feature_extractor", {})
-        encoder_params = params.get("encoder", {})
-        decoder_params = params.get("decoder", {})
-        aggr_model_params = params.get("aggr_model", {})
-        for (model_name, enc), (_, fe), (_, dec) in zip(
-            self.encoders.items(),
-            self.feature_extractors.items(),
-            self.decoders.items(),
-        ):
-            enc.load_state_dict(encoder_params[model_name])
-            fe.load_state_dict(feature_extractor_params[model_name])
-            dec.load_state_dict(decoder_params[model_name])
-
-        self.aggr_model.load_state_dict(aggr_model_params)
-
-        return self
-
-    def get_agent_group_params(self) -> Dict[str, dict]:
-        feature_extractor_params = {
-            model_name: deepcopy(fe.state_dict())
-            for model_name, fe in self.feature_extractors.items()
-        }
-        encoder_params = {
-            model_name: deepcopy(model.state_dict())
-            for model_name, model in self.encoders.items()
-        }
-        decoder_params = {
-            model_name: deepcopy(dec.state_dict())
-            for model_name, dec in self.decoders.items()
-        }
-        aggr_model_params = deepcopy(self.aggr_model.state_dict())
-        params = {
-            "encoder": encoder_params,
-            "feature_extractor": feature_extractor_params,
-            "decoder": decoder_params,
-            "aggr_model": aggr_model_params,
-        }
-        return params
-
-    def save_params(self, path: str) -> "AgentGroup":
-        os.makedirs(path, exist_ok=True)
-        for (model_name, enc), (_, fe), (_, dec) in zip(
-            self.encoders.items(),
-            self.feature_extractors.items(),
-            self.decoders.items(),
-        ):
-            model_dir = os.path.join(path, model_name)
-            os.makedirs(model_dir, exist_ok=True)
-            torch.save(
-                fe.state_dict(), os.path.join(model_dir, "feature_extractor.pth")
-            )
-            torch.save(enc.state_dict(), os.path.join(model_dir, "encoder.pth"))
-            torch.save(dec.state_dict(), os.path.join(model_dir, "decoder.pth"))
-        torch.save(self.aggr_model.state_dict(), os.path.join(path, "aggr_model.pth"))
-        return self
-
-    def load_params(self, path: str) -> "AgentGroup":
-        for (model_name, enc), (_, fe), (_, dec) in zip(
-            self.encoders.items(),
-            self.feature_extractors.items(),
-            self.decoders.items(),
-        ):
-            model_dir = os.path.join(path, model_name)
-            fe.load_state_dict(
-                torch.load(
-                    os.path.join(model_dir, "feature_extractor.pth"),
-                    map_location=torch.device("cpu"),
-                )
-            )
-            enc.load_state_dict(
-                torch.load(
-                    os.path.join(model_dir, "encoder.pth"),
-                    map_location=torch.device("cpu"),
-                )
-            )
-            dec.load_state_dict(
-                torch.load(
-                    os.path.join(model_dir, "decoder.pth"),
-                    map_location=torch.device("cpu"),
-                )
-            )
-        self.aggr_model.load_state_dict(
-            torch.load(
-                os.path.join(path, "aggr_model.pth"), map_location=torch.device("cpu")
-            )
-        )
-        return self
-
-    def reset(self) -> "AgentGroup":
+    def reset(self) -> "MsgAggrAgentGroup":
         return self
 
     def _process_decoders(self, hidden_states):
@@ -564,77 +473,8 @@ class DualPathBasedMsgAggrAgentGroup(MsgAggrAgentGroup):
 
         return msg, local_obs
 
-    def set_agent_group_params(self, params: Dict[str, dict]) -> "AgentGroup":
-        """Override to handle message feature extractors"""
-        super().set_agent_group_params(params)
-
-        msg_feature_extractor_params = params.get("msg_feature_extractor", {})
-        for model_name, fe in self.msg_feature_extractors.items():
-            if model_name in msg_feature_extractor_params:
-                fe.load_state_dict(msg_feature_extractor_params[model_name])
-        msg_encoders_params = params.get("msg_encoders", {})
-        for model_name, fe in self.msg_encoders.items():
-            if model_name in msg_encoders_params:
-                fe.load_state_dict(msg_encoders_params[model_name])
-
+    def reset(self) -> "DualPathBasedMsgAggrAgentGroup":
         return self
-
-    def get_agent_group_params(self) -> Dict[str, dict]:
-        """Override to include message feature extractors"""
-        params = super().get_agent_group_params()
-        msg_feature_extractor_params = {
-            model_name: deepcopy(fe.state_dict())
-            for model_name, fe in self.msg_feature_extractors.items()
-        }
-        msg_encoders_params = {
-            model_name: deepcopy(fe.state_dict())
-            for model_name, fe in self.msg_encoders.items()
-        }
-        if self.msg_feature_extractors:
-            params["msg_feature_extractor"] = msg_feature_extractor_params
-        if self.msg_encoders:
-            params["msg_encoders"] = msg_encoders_params
-        return params
-
-    def save_params(self, path: str) -> "AgentGroup":
-        """Save all parameters including message feature extractors and encoders"""
-        super().save_params(path)
-        os.makedirs(path, exist_ok=True)
-        for model_name, fe in self.msg_feature_extractors.items():
-            model_dir = os.path.join(path, model_name)
-            os.makedirs(model_dir, exist_ok=True)
-            torch.save(
-                fe.state_dict(), os.path.join(model_dir, "msg_feature_extractor.pth")
-            )
-        for model_name, enc in self.msg_encoders.items():
-            model_dir = os.path.join(path, model_name)
-            os.makedirs(model_dir, exist_ok=True)
-            torch.save(enc.state_dict(), os.path.join(model_dir, "msg_encoder.pth"))
-        return self
-
-    def load_params(self, path: str) -> "AgentGroup":
-        """Load all parameters including message feature extractors and encoders"""
-        super().load_params(path)
-        for model_name, fe in self.msg_feature_extractors.items():
-            model_dir = os.path.join(path, model_name)
-            fe.load_state_dict(
-                torch.load(
-                    os.path.join(model_dir, "msg_feature_extractor.pth"),
-                    map_location=torch.device("cpu"),
-                )
-            )
-        for model_name, enc in self.msg_encoders.items():
-            model_dir = os.path.join(path, model_name)
-            enc.load_state_dict(
-                torch.load(
-                    os.path.join(model_dir, "msg_encoder.pth"),
-                    map_location=torch.device("cpu"),
-                )
-            )
-        return self
-
-    def reset(self) -> "AgentGroup":
-        raise NotImplementedError
 
 
 class ObsMsgAggrAgentGroup(MsgAggrAgentGroup):

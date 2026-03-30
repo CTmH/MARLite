@@ -8,17 +8,21 @@ from marlite.util.victory_checker import always_lose
 from marlite.environment import EnvConfig
 from marlite.algorithm.agents import AgentGroupConfig
 
+
 def init_weights(m):
     if isinstance(m, nn.Linear):
         init.constant_(m.weight, 0.5)
         if m.bias is not None:
             init.constant_(m.bias, 0)
 
-class TestPersistentEnvRolloutManager(unittest.TestCase):
 
+class TestPersistentEnvRolloutManager(unittest.TestCase):
     def setUp(self):
         # Environment setup and model configuration
-        self.env_config = {"module_name": "pettingzoo.mpe", "env_name": "simple_spread_v3"}
+        self.env_config = {
+            "module_name": "pettingzoo.mpe",
+            "env_name": "simple_spread_v3",
+        }
         self.env_config = EnvConfig(**self.env_config)
         # Agent group configuration
         config = """
@@ -44,7 +48,7 @@ class TestPersistentEnvRolloutManager(unittest.TestCase):
                     weight_decay: 0.0001
         """
         config = yaml.safe_load(config)
-        self.agent_group_config = AgentGroupConfig(**config['agent_group_config'])
+        self.agent_group_config = AgentGroupConfig(**config["agent_group_config"])
 
         # Initialize QMIXAgents models parameters
         self.agent_group = self.agent_group_config.get_agent_group()
@@ -52,29 +56,31 @@ class TestPersistentEnvRolloutManager(unittest.TestCase):
             model.apply(init_weights)
         for fe in self.agent_group.feature_extractors.values():
             fe.apply(init_weights)
-        self.agent_model_params, self.agent_fe_params = self.agent_group.get_agent_group_params()
 
         self.traj_len = 5
         self.n_episodes = 2
         self.episode_limit = 7
         self.n_workers = 2
         self.agent_group = self.agent_group_config.get_agent_group()
-        self.manager = PersistentEnvRolloutManager(worker_func=persistent_env_rollout,
-                                                  env_config=self.env_config,
-                                                  agent_group=self.agent_group,
-                                                  n_workers=self.n_workers,
-                                                  n_episodes=self.n_episodes,
-                                                  traj_len=self.traj_len,
-                                                  episode_limit=self.episode_limit,
-                                                  epsilon=0.9,
-                                                  device='cpu',
-                                                  check_victory=always_lose)
+        self.manager = PersistentEnvRolloutManager(
+            worker_func=persistent_env_rollout,
+            env_config=self.env_config,
+            agent_group=self.agent_group,
+            n_workers=self.n_workers,
+            n_episodes=self.n_episodes,
+            traj_len=self.traj_len,
+            episode_limit=self.episode_limit,
+            epsilon=0.9,
+            device="cpu",
+            check_victory=always_lose,
+        )
 
     def test_generate_episodes(self):
         episodes = self.manager.generate_episodes()
         self.assertEqual(len(episodes), self.n_episodes)
         for episode in episodes:
-            self.assertEqual(len(episode['rewards']), self.episode_limit)
+            self.assertEqual(len(episode["rewards"]), self.episode_limit)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()

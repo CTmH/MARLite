@@ -2,26 +2,28 @@ import numpy as np
 from typing import Dict, Any, List
 from marlite.algorithm.agents.agent_group import AgentGroup
 
+
 class RandomAgentGroup(AgentGroup):
-    '''
+    """
     agents: Dict[(agent_name(str), model_name(str))]
     model_configs: Dict[model_name(str), ModelConfig]
-    '''
+    """
+
     def __init__(self, agents: Dict[str, str]) -> None:
         self.agents = list(agents.keys())
 
     def forward(self, observations) -> Dict[str, Any]:
-        return {'q_val': None}
+        return {"q_val": None}
 
     def act(
-            self,
-            observations: Dict[str, np.ndarray],
-            state: np.ndarray,
-            avail_actions: Dict[str, Any],
-            traj_padding_mask: np.ndarray,
-            alive_agents: List[str],
-            epsilon: float = .0
-        ) -> Dict[str, Any]:
+        self,
+        observations: Dict[str, np.ndarray],
+        state: np.ndarray,
+        avail_actions: Dict[str, Any],
+        traj_padding_mask: np.ndarray,
+        alive_agents: List[str],
+        epsilon: float = 0.0,
+    ) -> Dict[str, Any]:
         """
         Select actions based on Q-values and exploration with action masking.
 
@@ -48,17 +50,17 @@ class RandomAgentGroup(AgentGroup):
                 - 'all_actions': Dictionary mapping all agents to their selected actions (including dead ones)
         """
         if isinstance(next(iter(avail_actions.values())), np.ndarray):
-            action_masks = np.array([avail_actions[agent_id] for agent_id in self.agents])
+            action_masks = np.array(
+                [avail_actions[agent_id] for agent_id in self.agents]
+            )
             mask_probs = action_masks / np.sum(action_masks, axis=1, keepdims=True)
-            random_actions = np.array([
-                np.random.choice(len(probs), p=probs)
-                for probs in mask_probs
-            ]).astype(np.int64)
+            random_actions = np.array(
+                [np.random.choice(len(probs), p=probs) for probs in mask_probs]
+            ).astype(np.int64)
         else:
-            random_actions = {agent: avail_actions[agent].sample() for agent in avail_actions.keys()}
+            random_actions = {
+                agent: avail_actions[agent].sample() for agent in avail_actions.keys()
+            }
         actions = {agent: random_actions[agent] for agent in alive_agents}
 
-        return {'actions': actions, 'all_actions': random_actions}
-
-    def set_agent_group_params(self, model_params: Dict[str, dict], feature_extractor_params: Dict[str, dict]) -> 'AgentGroup':
-        return self
+        return {"actions": actions, "all_actions": random_actions}

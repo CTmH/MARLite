@@ -1,10 +1,12 @@
 # marlite/analyzer/analyzer.py
 import os
+import torch
 from absl import logging
 from marlite.environment import EnvConfig
 from marlite.rollout import RolloutManagerConfig
 from marlite.algorithm.agents import AgentGroupConfig
 from marlite.analyzer.analyzer import Analyzer
+
 
 class ExperimentAnalyzer:
     def __init__(
@@ -32,8 +34,8 @@ class ExperimentAnalyzer:
         self.checkpoint = checkpoint
 
         # Directory paths
-        self.checkpointdir = os.path.join(workdir, 'checkpoints')
-        self.logdir = os.path.join(workdir, 'logs')
+        self.checkpointdir = os.path.join(workdir, "checkpoints")
+        self.logdir = os.path.join(workdir, "logs")
 
         # Create agent group
         self.agent_group = agent_group_config.get_agent_group()
@@ -46,8 +48,10 @@ class ExperimentAnalyzer:
 
     def load_checkpoint_model(self):
         """Load model parameters from the specified checkpoint"""
-        agent_path = os.path.join(self.checkpointdir, self.checkpoint, 'agent')
-        self.agent_group.load_params(agent_path)
+        agent_path = os.path.join(
+            self.checkpointdir, self.checkpoint, "agent", "agent.pth"
+        )
+        self.agent_group.load_state_dict(torch.load(agent_path, weights_only=True))
         logging.info(f"Successfully loaded model from checkpoint: {agent_path}")
 
     def generate_episodes(self, epsilon: float = 0.01):
@@ -66,7 +70,9 @@ class ExperimentAnalyzer:
             epsilon,
         )
 
-        logging.info(f"Generating {manager.n_episodes} episodes using the best model...")
+        logging.info(
+            f"Generating {manager.n_episodes} episodes using the best model..."
+        )
         episodes = manager.generate_episodes()
         manager.cleanup()
 

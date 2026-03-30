@@ -128,4 +128,4 @@ class G2ANetAgentGroup(GraphAgentGroup):
         return {"q_val": q_val, "edge_indices": edge_indices}
 
     def reset(self) -> "G2ANetAgentGroup":
-        raise NotImplementedError
+        return self

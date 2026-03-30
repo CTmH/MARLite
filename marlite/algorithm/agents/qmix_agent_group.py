@@ -1,8 +1,6 @@
 import numpy as np
 import torch
 import torch.nn as nn
-import os
-from copy import deepcopy
 from typing import Dict, Any, List
 from marlite.algorithm.model.model_config import ModelConfig
 from marlite.algorithm.model import TimeSeqModel, RNNModel, Conv1DModel, AttentionModel
@@ -230,55 +228,6 @@ class QMIXAgentGroup(AgentGroup):
         actual_actions = {agent: all_actions[agent] for agent in alive_agents}
 
         return {"actions": actual_actions, "all_actions": all_actions}
-
-    def set_agent_group_params(self, params: Dict[str, dict]) -> "QMIXAgentGroup":
-        feature_extractor_params = params.get("feature_extractor", {})
-        model_params = params.get("model", {})
-        for (model_name, fe), (_, model) in zip(
-            self.feature_extractors.items(), self.models.items()
-        ):
-            fe.load_state_dict(feature_extractor_params[model_name])
-            model.load_state_dict(model_params[model_name])
-        return self
-
-    def get_agent_group_params(self) -> Dict[str, dict]:
-        feature_extractor_params = {
-            model_name: deepcopy(fe.state_dict())
-            for model_name, fe in self.feature_extractors.items()
-        }
-        model_params = {
-            model_name: deepcopy(model.state_dict())
-            for model_name, model in self.models.items()
-        }
-        params = {
-            "feature_extractor": feature_extractor_params,
-            "model": model_params,
-        }
-        return params
-
-    def save_params(self, path: str) -> "QMIXAgentGroup":
-        os.makedirs(path, exist_ok=True)
-        for (model_name, model), (_, fe) in zip(
-            self.models.items(), self.feature_extractors.items()
-        ):
-            model_dir = os.path.join(path, model_name)
-            os.makedirs(model_dir, exist_ok=True)
-            torch.save(
-                fe.state_dict(), os.path.join(model_dir, "feature_extractor.pth")
-            )
-            torch.save(model.state_dict(), os.path.join(model_dir, "model.pth"))
-        return self
-
-    def load_params(self, path: str) -> "QMIXAgentGroup":
-        for (model_name, model), (_, fe) in zip(
-            self.models.items(), self.feature_extractors.items()
-        ):
-            model_dir = os.path.join(path, model_name)
-            fe.load_state_dict(
-                torch.load(os.path.join(model_dir, "feature_extractor.pth"))
-            )
-            model.load_state_dict(torch.load(os.path.join(model_dir, "model.pth")))
-        return self
 
     def reset(self) -> "QMIXAgentGroup":
         return self

@@ -2,8 +2,6 @@ import unittest
 import torch
 import yaml
 import numpy as np
-import tempfile
-import os
 from mpe2 import simple_spread_v3
 from torch.nn.parallel import DistributedDataParallel as DDP
 from marlite.algorithm.agents import AgentGroupConfig
@@ -128,13 +126,6 @@ class TestQMIXAgentGroup(unittest.TestCase):
         ):
             self.assertTrue(model.training)
             self.assertTrue(fe.training)
-
-    def test_save_load_params(self):
-        # Create a temporary directory to save parameters
-        with tempfile.TemporaryDirectory() as tmpdirname:
-            # Save the agent group parameters
-            self.agent_group.save_params(tmpdirname)
-            self.agent_group.load_params(tmpdirname)
 
 
 if __name__ == "__main__":

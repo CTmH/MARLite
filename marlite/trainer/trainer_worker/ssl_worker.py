@@ -7,6 +7,7 @@ for self-supervised learning in a multi-GPU setting.
 
 import torch
 import torch.distributed as dist
+from copy import deepcopy
 from typing import Any, Dict
 from marlite.trainer.trainer_worker.base_worker import BaseWorker
 
@@ -125,17 +126,13 @@ class SSLWorker(BaseWorker):
 
     def write_params_to_shared_memory(self, shared_memory: Dict[str, Any]):
         """Write current parameters to shared memory including ssl_model."""
-        shared_memory["eval_agent_group"] = (
-            self.eval_agent_group.get_agent_group_params()
-        )
+        shared_memory["eval_agent_group"] = deepcopy(self.eval_agent_group.state_dict())
         shared_memory["ssl_model"] = self.ssl_model.state_dict()
 
     def sync_params_from_shared_memory(self, shared_memory: Dict[str, Any]):
         """Synchronize parameters from shared memory."""
         if "eval_agent_group" in shared_memory:
-            self.eval_agent_group.set_agent_group_params(
-                shared_memory["eval_agent_group"]
-            )
+            self.eval_agent_group.load_state_dict(shared_memory["eval_agent_group"])
         if "ssl_model" in shared_memory:
             self.ssl_model.load_state_dict(shared_memory["ssl_model"])
 

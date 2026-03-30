@@ -2,7 +2,6 @@ import unittest
 import torch
 import yaml
 import numpy as np
-import tempfile
 
 from marlite.algorithm.agents import AgentGroupConfig
 from marlite.environment import EnvConfig
@@ -132,13 +131,6 @@ class TestSeqMsgAggrAgentGroup(unittest.TestCase):
             self.assertTrue(fe.training)
             self.assertTrue(encoder.training)
             self.assertTrue(decoder.training)
-
-    def test_save_load_params(self):
-        # Create a temporary directory to save parameters
-        with tempfile.TemporaryDirectory() as tmpdirname:
-            # Save the agent group parameters
-            self.agent_group.save_params(tmpdirname)
-            self.agent_group.load_params(tmpdirname)
 
 
 if __name__ == "__main__":

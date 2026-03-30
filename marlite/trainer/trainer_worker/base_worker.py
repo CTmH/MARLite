@@ -9,6 +9,7 @@ and holds copies of models for parallel training.
 import os
 import torch
 import torch.distributed as dist
+from copy import deepcopy
 from typing import Any, Dict, Optional
 
 
@@ -125,13 +126,9 @@ class BaseWorker:
             shared_memory: Dictionary containing parameter data
         """
         if "eval_agent_group" in shared_memory:
-            self.eval_agent_group.set_agent_group_params(
-                shared_memory["eval_agent_group"]
-            )
+            self.eval_agent_group.load_state_dict(shared_memory["eval_agent_group"])
         if "target_agent_group" in shared_memory:
-            self.target_agent_group.set_agent_group_params(
-                shared_memory["target_agent_group"]
-            )
+            self.target_agent_group.load_state_dict(shared_memory["target_agent_group"])
         if "eval_critic" in shared_memory:
             self.eval_critic.load_state_dict(shared_memory["eval_critic"])
         if "target_critic" in shared_memory:
@@ -144,11 +141,9 @@ class BaseWorker:
         Args:
             shared_memory: Dictionary to store parameter data
         """
-        shared_memory["eval_agent_group"] = (
-            self.eval_agent_group.get_agent_group_params()
-        )
-        shared_memory["target_agent_group"] = (
-            self.target_agent_group.get_agent_group_params()
+        shared_memory["eval_agent_group"] = deepcopy(self.eval_agent_group.state_dict())
+        shared_memory["target_agent_group"] = deepcopy(
+            self.target_agent_group.state_dict()
         )
         shared_memory["eval_critic"] = self.eval_critic.state_dict()
         shared_memory["target_critic"] = self.target_critic.state_dict()

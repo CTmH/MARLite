@@ -1,9 +1,7 @@
-import os
 import numpy as np
 import torch
 import torch.nn as nn
 from typing import Dict, List, Any
-from copy import deepcopy
 from torch.nn.parallel import DistributedDataParallel as DDP
 from marlite.algorithm.model.model_config import ModelConfig
 from marlite.algorithm.agents.graph_agent_group import GraphAgentGroup
@@ -407,78 +405,6 @@ class DualPathBasedGNNCommAgentGroup(GraphAgentGroup):
         local_obs = local_obs.permute(1, 0, 2)  # (B, N, F)
 
         return msg, local_obs
-
-    def set_agent_group_params(self, params: Dict[str, dict]) -> "GraphAgentGroup":
-        """Override to handle message feature extractors"""
-        super().set_agent_group_params(params)
-
-        msg_feature_extractor_params = params.get("msg_feature_extractor", {})
-        for model_name, fe in self.msg_feature_extractors.items():
-            if model_name in msg_feature_extractor_params:
-                fe.load_state_dict(msg_feature_extractor_params[model_name])
-        msg_encoders_params = params.get("msg_encoders", {})
-        for model_name, fe in self.msg_encoders.items():
-            if model_name in msg_encoders_params:
-                fe.load_state_dict(msg_encoders_params[model_name])
-
-        return self
-
-    def get_agent_group_params(self) -> Dict[str, dict]:
-        """Override to include message feature extractors"""
-        params = super().get_agent_group_params()
-        msg_feature_extractor_params = {
-            model_name: deepcopy(fe.state_dict())
-            for model_name, fe in self.msg_feature_extractors.items()
-        }
-        msg_encoders_params = {
-            model_name: deepcopy(fe.state_dict())
-            for model_name, fe in self.msg_encoders.items()
-        }
-        if self.msg_feature_extractors:
-            params["msg_feature_extractor"] = msg_feature_extractor_params
-        if self.msg_encoders:
-            params["msg_encoders"] = msg_encoders_params
-        return params
-
-    def save_params(self, path: str) -> "GraphAgentGroup":
-        """Save all parameters including message feature extractors and encoders"""
-        super().save_params(path)
-        os.makedirs(path, exist_ok=True)
-        for model_name, fe in self.msg_feature_extractors.items():
-            model_dir = os.path.join(path, model_name)
-            os.makedirs(model_dir, exist_ok=True)
-            torch.save(
-                fe.state_dict(), os.path.join(model_dir, "msg_feature_extractor.pth")
-            )
-        for model_name, enc in self.msg_encoders.items():
-            model_dir = os.path.join(path, model_name)
-            os.makedirs(model_dir, exist_ok=True)
-            torch.save(enc.state_dict(), os.path.join(model_dir, "msg_encoder.pth"))
-        return self
-
-    def load_params(self, path: str) -> "GraphAgentGroup":
-        """Load all parameters including message feature extractors and encoders"""
-        super().load_params(path)
-        for model_name, fe in self.msg_feature_extractors.items():
-            model_dir = os.path.join(path, model_name)
-            fe.load_state_dict(
-                torch.load(
-                    os.path.join(model_dir, "msg_feature_extractor.pth"),
-                    map_location=torch.device("cpu"),
-                )
-            )
-        for model_name, enc in self.msg_encoders.items():
-            model_dir = os.path.join(path, model_name)
-            enc.load_state_dict(
-                torch.load(
-                    os.path.join(model_dir, "msg_encoder.pth"),
-                    map_location=torch.device("cpu"),
-                )
-            )
-        return self
-
-    def reset(self) -> "GraphAgentGroup":
-        raise NotImplementedError
 
 
 class DualPathObsGNNCommAgentGroup(DualPathBasedGNNCommAgentGroup):
