@@ -20,7 +20,7 @@ class GraphQMIXTrainer(Trainer):
             agent_group_config=self.agent_group_config,
             critic_config=self.critic_config,
             critic_optimizer_config=self.critic_optimizer_config,
-            agent_group_optimizer_config=self.eval_agent_group.optimizer,
+            agent_optimizer_config=self.agent_optimizer_config,
             gamma=self.gamma,
         )
 
@@ -158,14 +158,17 @@ class GraphQMIXTrainer(Trainer):
                     y_tot = rewards + (1 - terminations) * self.gamma * q_tot_next
                     critic_loss = torch.nn.functional.mse_loss(q_tot, y_tot.detach())
 
-                    self.eval_agent_group.zero_grad()
+                    self.agent_optimizer.zero_grad()
                     self.eval_critic.zero_grad()
                     critic_loss.backward()
                     torch.nn.utils.clip_grad_norm_(
                         self.eval_critic.parameters(), max_norm=5.0
                     )
+                    torch.nn.utils.clip_grad_norm_(
+                        self.eval_agent_group.parameters(), max_norm=5.0
+                    )
                     self.optimizer.step()
-                    self.eval_agent_group.step()
+                    self.agent_optimizer.step()
 
                     total_loss += critic_loss.detach().cpu().item()
                     total_batches += 1

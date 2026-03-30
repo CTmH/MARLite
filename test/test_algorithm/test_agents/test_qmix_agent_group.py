@@ -129,35 +129,6 @@ class TestQMIXAgentGroup(unittest.TestCase):
             self.assertTrue(model.training)
             self.assertTrue(fe.training)
 
-    def test_wrap_distributed_data_parallel(self):
-        """Test wrapping models with DistributedDataParallel."""
-        import torch.distributed as dist
-
-        os.environ["MASTER_ADDR"] = "localhost"
-        os.environ["MASTER_PORT"] = "29500"
-        if not dist.is_initialized():
-            dist.init_process_group("gloo", rank=0, world_size=1)
-
-        try:
-            self.agent_group.wrap_data_parallel(device_id=0)
-            for (model_name, model), (_, fe) in zip(
-                self.agent_group.models.items(),
-                self.agent_group.feature_extractors.items(),
-            ):
-                self.assertIsInstance(model, DDP)
-            self.agent_group.unwrap_data_parallel()
-            for (model_name, model), (_, fe) in zip(
-                self.agent_group.models.items(),
-                self.agent_group.feature_extractors.items(),
-            ):
-                self.assertNotIsInstance(model, DDP)
-                self.assertNotIsInstance(fe, DDP)
-                self.assertIsInstance(model, torch.nn.Module)
-                self.assertIsInstance(fe, torch.nn.Module)
-        finally:
-            if dist.is_initialized():
-                dist.destroy_process_group()
-
     def test_save_load_params(self):
         # Create a temporary directory to save parameters
         with tempfile.TemporaryDirectory() as tmpdirname:

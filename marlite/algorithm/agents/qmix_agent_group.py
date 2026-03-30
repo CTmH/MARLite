@@ -1,14 +1,12 @@
 import numpy as np
 import torch
+import torch.nn as nn
 import os
 from copy import deepcopy
 from typing import Dict, Any, List
-from torch.nn.parallel import DistributedDataParallel as DDP
 from marlite.algorithm.model.model_config import ModelConfig
 from marlite.algorithm.model import TimeSeqModel, RNNModel, Conv1DModel, AttentionModel
 from marlite.algorithm.agents.agent_group import AgentGroup
-from marlite.util.optimizer_config import OptimizerConfig
-from marlite.util.lr_scheduler_config import LRSchedulerConfig
 
 
 class QMIXAgentGroup(AgentGroup):
@@ -17,32 +15,19 @@ class QMIXAgentGroup(AgentGroup):
         agent_model_dict: Dict[str, str],
         model_configs: Dict[str, ModelConfig],
         feature_extractors_configs: Dict[str, ModelConfig],
-        optimizer_config: OptimizerConfig,
-        lr_scheduler_config: LRSchedulerConfig = None,
         device="cpu",
     ) -> None:
         super().__init__()
         self.device = device
         self.agent_model_dict = agent_model_dict
-        self.models = {
-            model_name: config.get_model()
-            for model_name, config in model_configs.items()
-        }
-        self.feature_extractors = {
-            model_name: config.get_model()
-            for model_name, config in feature_extractors_configs.items()
-        }
-        self.params_to_optimize = [
-            {"params": model.parameters()} for model in self.models.values()
-        ]
-        self.params_to_optimize += [
-            {"params": extractor.parameters()}
-            for extractor in self.feature_extractors.values()
-        ]
-        self.optimizer = optimizer_config.get_optimizer(self.params_to_optimize)
-        self.lr_scheduler = None
-        if lr_scheduler_config:
-            self.lr_scheduler = lr_scheduler_config.get_lr_scheduler(self.optimizer)
+
+        self.models = nn.ModuleDict()
+        for model_name, config in model_configs.items():
+            self.models[model_name] = config.get_model()
+
+        self.feature_extractors = nn.ModuleDict()
+        for model_name, config in feature_extractors_configs.items():
+            self.feature_extractors[model_name] = config.get_model()
 
         # Initialize model_to_agent dictionary and model_to_agent_indices dictionary
         self.model_to_agents = {model_name: [] for model_name in model_configs.keys()}
@@ -55,9 +40,6 @@ class QMIXAgentGroup(AgentGroup):
             )
             self.model_to_agents[model_name].append(agent_name)
             self.model_to_agent_indices[model_name].append(i)
-
-        self._use_data_parallel = False
-        self._is_compiled = False
 
         self.model_class_names = {}
         for model_name, model in self.models.items():
@@ -249,7 +231,7 @@ class QMIXAgentGroup(AgentGroup):
 
         return {"actions": actual_actions, "all_actions": all_actions}
 
-    def set_agent_group_params(self, params: Dict[str, dict]) -> "AgentGroup":
+    def set_agent_group_params(self, params: Dict[str, dict]) -> "QMIXAgentGroup":
         feature_extractor_params = params.get("feature_extractor", {})
         model_params = params.get("model", {})
         for (model_name, fe), (_, model) in zip(
@@ -257,7 +239,6 @@ class QMIXAgentGroup(AgentGroup):
         ):
             fe.load_state_dict(feature_extractor_params[model_name])
             model.load_state_dict(model_params[model_name])
-
         return self
 
     def get_agent_group_params(self) -> Dict[str, dict]:
@@ -275,99 +256,7 @@ class QMIXAgentGroup(AgentGroup):
         }
         return params
 
-    def zero_grad(self) -> "AgentGroup":
-        self.optimizer.zero_grad()
-        return self
-
-    def step(self) -> "AgentGroup":
-        for p in self.params_to_optimize:
-            torch.nn.utils.clip_grad_norm_(p["params"], max_norm=5.0)
-        self.optimizer.step()
-        return self
-
-    def lr_scheduler_step(self, reward) -> "AgentGroup":
-        if not self.lr_scheduler:
-            return self
-        if isinstance(self.lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
-            self.lr_scheduler.step(reward)
-        else:
-            self.lr_scheduler.step()
-        return self
-
-    def to(self, device: str) -> "AgentGroup":
-        for (_, model), (_, fe) in zip(
-            self.models.items(), self.feature_extractors.items()
-        ):
-            model.to(device)
-            fe.to(device)
-        self.device = device
-        return self
-
-    def eval(self) -> "AgentGroup":
-        for (_, model), (_, fe) in zip(
-            self.models.items(), self.feature_extractors.items()
-        ):
-            model.eval()
-            fe.eval()
-        return self
-
-    def train(self) -> "AgentGroup":
-        for (_, model), (_, fe) in zip(
-            self.models.items(), self.feature_extractors.items()
-        ):
-            model.train()
-            fe.train()
-        return self
-
-    def share_memory(self) -> "AgentGroup":
-        for (_, model), (_, fe) in zip(
-            self.models.items(), self.feature_extractors.items()
-        ):
-            model.share_memory()
-            fe.share_memory()
-        return self
-
-    def wrap_data_parallel(self, device_id: int = 0) -> "AgentGroup":
-        """Wrap models with DistributedDataParallel.
-
-        Args:
-            device_id: The GPU device ID to use for this process
-        """
-        device = f"cuda:{device_id}"
-
-        def has_trainable_params(module):
-            """Check if module has any trainable parameters."""
-            return any(p.requires_grad for p in module.parameters())
-
-        for id in self.models.keys():
-            self.models[id] = self.models[id].to(device)
-            if has_trainable_params(self.models[id]):
-                self.models[id] = DDP(self.models[id], device_ids=[device_id])
-            self.feature_extractors[id] = self.feature_extractors[id].to(device)
-            if has_trainable_params(self.feature_extractors[id]):
-                self.feature_extractors[id] = DDP(
-                    self.feature_extractors[id], device_ids=[device_id]
-                )
-        self._use_data_parallel = True
-        self.device = device
-        return self
-
-    def unwrap_data_parallel(self) -> "AgentGroup":
-        """Unwrap DistributedDataParallel from models."""
-        for id in self.models.keys():
-            if isinstance(self.models[id], DDP):
-                self.models[id] = self.models[id].module.cpu()
-            else:
-                self.models[id] = self.models[id].cpu()
-            if isinstance(self.feature_extractors[id], DDP):
-                self.feature_extractors[id] = self.feature_extractors[id].module.cpu()
-            else:
-                self.feature_extractors[id] = self.feature_extractors[id].cpu()
-        self._use_data_parallel = False
-        self.device = "cpu"
-        return self
-
-    def save_params(self, path: str) -> "AgentGroup":
+    def save_params(self, path: str) -> "QMIXAgentGroup":
         os.makedirs(path, exist_ok=True)
         for (model_name, model), (_, fe) in zip(
             self.models.items(), self.feature_extractors.items()
@@ -380,7 +269,7 @@ class QMIXAgentGroup(AgentGroup):
             torch.save(model.state_dict(), os.path.join(model_dir, "model.pth"))
         return self
 
-    def load_params(self, path: str) -> "AgentGroup":
+    def load_params(self, path: str) -> "QMIXAgentGroup":
         for (model_name, model), (_, fe) in zip(
             self.models.items(), self.feature_extractors.items()
         ):
@@ -391,12 +280,5 @@ class QMIXAgentGroup(AgentGroup):
             model.load_state_dict(torch.load(os.path.join(model_dir, "model.pth")))
         return self
 
-    def compile_models(self) -> "AgentGroup":
-        for id in self.models.keys():
-            self.models[id] = torch.compile(self.models[id])
-            self.feature_extractors[id] = torch.compile(self.feature_extractors[id])
-        self._is_compiled = True
-        return self
-
-    def reset(self) -> "AgentGroup":
+    def reset(self) -> "QMIXAgentGroup":
         return self

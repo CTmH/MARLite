@@ -26,7 +26,7 @@ class QMIXWorkerGroup(BaseWorkerGroup):
         agent_group_config,
         critic_config,
         critic_optimizer_config,
-        agent_group_optimizer_config,
+        agent_optimizer_config,
         gamma: float = 0.9,
         init_method: str = None,
     ):
@@ -38,14 +38,14 @@ class QMIXWorkerGroup(BaseWorkerGroup):
             agent_group_config: Configuration for agent group
             critic_config: Configuration for critic
             critic_optimizer_config: Configuration for critic optimizer
-            agent_group_optimizer_config: Optimizer config or optimizer instance for agent group
+            agent_optimizer_config: Optimizer config for agent group
             gamma: Discount factor
             init_method: URL for distributed initialization
         """
         self.agent_group_config = agent_group_config
         self.critic_config = critic_config
         self.critic_optimizer_config = critic_optimizer_config
-        self.agent_group_optimizer_config = agent_group_optimizer_config
+        self.agent_optimizer_config = agent_optimizer_config
         self.gamma = gamma
 
         super().__init__(
@@ -65,7 +65,7 @@ class QMIXWorkerGroup(BaseWorkerGroup):
         kwargs["agent_group_config"] = self.agent_group_config
         kwargs["critic_config"] = self.critic_config
         kwargs["critic_optimizer_config"] = self.critic_optimizer_config
-        kwargs["agent_group_optimizer_config"] = self.agent_group_optimizer_config
+        kwargs["agent_optimizer_config"] = self.agent_optimizer_config
         return kwargs
 
     def set_worker_models(self):

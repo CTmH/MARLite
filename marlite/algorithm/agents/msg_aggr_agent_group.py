@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+import torch.nn as nn
 import os
 from copy import deepcopy
 from typing import Dict, Any, List
@@ -8,8 +9,6 @@ import torch.nn.init as init
 from marlite.algorithm.model.model_config import ModelConfig
 from marlite.algorithm.model import RNNModel, Conv1DModel, AttentionModel, MaskedModel
 from marlite.algorithm.agents.agent_group import AgentGroup
-from marlite.util.optimizer_config import OptimizerConfig
-from marlite.util.lr_scheduler_config import LRSchedulerConfig
 from marlite.util.prob_util import process_probabilistic_output
 
 
@@ -21,42 +20,27 @@ class MsgAggrAgentGroup(AgentGroup):
         encoder_configs: Dict[str, ModelConfig],
         decoder_configs: Dict[str, ModelConfig],
         aggr_model_config: ModelConfig,
-        optimizer_config: OptimizerConfig,
-        lr_scheduler_config: LRSchedulerConfig = None,
         device="cpu",
     ) -> None:
         super().__init__()
         self.device = device
         self.agent_model_dict = agent_model_dict
-        self.feature_extractors = {
-            model_name: config.get_model()
-            for model_name, config in feature_extractor_configs.items()
-        }
-        self.encoders = {
-            model_name: config.get_model()
-            for model_name, config in encoder_configs.items()
-        }
+
+        self.feature_extractors = nn.ModuleDict()
+        for model_name, config in feature_extractor_configs.items():
+            self.feature_extractors[model_name] = config.get_model()
+
+        self.encoders = nn.ModuleDict()
+        for model_name, config in encoder_configs.items():
+            self.encoders[model_name] = config.get_model()
+
         self.models = self.encoders  # For compatibility
-        self.decoders = {
-            model_name: config.get_model()
-            for model_name, config in decoder_configs.items()
-        }
+
+        self.decoders = nn.ModuleDict()
+        for model_name, config in decoder_configs.items():
+            self.decoders[model_name] = config.get_model()
+
         self.aggr_model = aggr_model_config.get_model()  # Message aggregator model
-        self.params_to_optimize = [
-            {"params": extractor.parameters()}
-            for extractor in self.feature_extractors.values()
-        ]
-        self.params_to_optimize += [
-            {"params": encoder.parameters()} for encoder in self.encoders.values()
-        ]
-        self.params_to_optimize += [
-            {"params": decoder.parameters()} for decoder in self.decoders.values()
-        ]
-        self.params_to_optimize += [{"params": self.aggr_model.parameters()}]
-        self.optimizer = optimizer_config.get_optimizer(self.params_to_optimize)
-        self.lr_scheduler = None
-        if lr_scheduler_config:
-            self.lr_scheduler = lr_scheduler_config.get_lr_scheduler(self.optimizer)
 
         # Initialize model_to_agent dictionary and model_to_agent_indices dictionary
         self.model_to_agents = {model_name: [] for model_name in encoder_configs.keys()}
@@ -71,7 +55,6 @@ class MsgAggrAgentGroup(AgentGroup):
             self.model_to_agent_indices[model_name].append(i)
 
         self._use_data_parallel = False
-        self._is_compiled = False
 
         self.model_class_names = {}
         for model_name, model in self.encoders.items():
@@ -388,128 +371,6 @@ class MsgAggrAgentGroup(AgentGroup):
         }
         return params
 
-    def zero_grad(self) -> "AgentGroup":
-        self.optimizer.zero_grad()
-        return self
-
-    def step(self) -> "AgentGroup":
-        for p in self.params_to_optimize:
-            torch.nn.utils.clip_grad_norm_(p["params"], max_norm=5.0)
-        self.optimizer.step()
-        return self
-
-    def lr_scheduler_step(self, reward) -> "AgentGroup":
-        if not self.lr_scheduler:
-            return self
-        if isinstance(self.lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
-            self.lr_scheduler.step(reward)
-        else:
-            self.lr_scheduler.step()
-        return self
-
-    def to(self, device: str) -> "AgentGroup":
-        for (_, enc), (_, fe), (_, dec) in zip(
-            self.encoders.items(),
-            self.feature_extractors.items(),
-            self.decoders.items(),
-        ):
-            enc.to(device)
-            fe.to(device)
-            dec.to(device)
-        self.aggr_model.to(device)
-        self.device = device
-        return self
-
-    def eval(self) -> "AgentGroup":
-        for (_, enc), (_, fe), (_, dec) in zip(
-            self.encoders.items(),
-            self.feature_extractors.items(),
-            self.decoders.items(),
-        ):
-            enc.eval()
-            fe.eval()
-            dec.eval()
-        self.aggr_model.eval()
-        return self
-
-    def train(self) -> "AgentGroup":
-        for (_, enc), (_, fe), (_, dec) in zip(
-            self.encoders.items(),
-            self.feature_extractors.items(),
-            self.decoders.items(),
-        ):
-            enc.train()
-            fe.train()
-            dec.train()
-        self.aggr_model.train()
-        return self
-
-    def share_memory(self) -> "AgentGroup":
-        for (_, enc), (_, fe), (_, dec) in zip(
-            self.encoders.items(),
-            self.feature_extractors.items(),
-            self.decoders.items(),
-        ):
-            enc.share_memory()
-            fe.share_memory()
-            dec.share_memory()
-        self.aggr_model.share_memory()
-        return self
-
-    def wrap_data_parallel(self, device_id: int = 0) -> "AgentGroup":
-        """Wrap models with DistributedDataParallel.
-
-        Args:
-            device_id: The GPU device ID to use for this process
-        """
-        device = f"cuda:{device_id}"
-
-        def has_trainable_params(module):
-            """Check if module has any trainable parameters."""
-            return any(p.requires_grad for p in module.parameters())
-
-        for id in self.encoders.keys():
-            self.encoders[id] = self.encoders[id].to(device)
-            if has_trainable_params(self.encoders[id]):
-                self.encoders[id] = DDP(self.encoders[id], device_ids=[device_id])
-            self.feature_extractors[id] = self.feature_extractors[id].to(device)
-            if has_trainable_params(self.feature_extractors[id]):
-                self.feature_extractors[id] = DDP(
-                    self.feature_extractors[id], device_ids=[device_id]
-                )
-            self.decoders[id] = self.decoders[id].to(device)
-            if has_trainable_params(self.decoders[id]):
-                self.decoders[id] = DDP(self.decoders[id], device_ids=[device_id])
-        self.aggr_model = self.aggr_model.to(device)
-        if has_trainable_params(self.aggr_model):
-            self.aggr_model = DDP(self.aggr_model, device_ids=[device_id])
-        self._use_data_parallel = True
-        self.device = device
-        return self
-
-    def unwrap_data_parallel(self) -> "AgentGroup":
-        """Unwrap DistributedDataParallel from models."""
-        for id in self.encoders.keys():
-            if isinstance(self.encoders[id], DDP):
-                self.encoders[id] = self.encoders[id].module.cpu()
-            else:
-                self.encoders[id] = self.encoders[id].cpu()
-            if isinstance(self.feature_extractors[id], DDP):
-                self.feature_extractors[id] = self.feature_extractors[id].module.cpu()
-            else:
-                self.feature_extractors[id] = self.feature_extractors[id].cpu()
-            if isinstance(self.decoders[id], DDP):
-                self.decoders[id] = self.decoders[id].module.cpu()
-            else:
-                self.decoders[id] = self.decoders[id].cpu()
-        if isinstance(self.aggr_model, DDP):
-            self.aggr_model = self.aggr_model.module.cpu()
-        else:
-            self.aggr_model = self.aggr_model.cpu()
-        self._use_data_parallel = False
-        self.device = "cpu"
-        return self
-
     def save_params(self, path: str) -> "AgentGroup":
         os.makedirs(path, exist_ok=True)
         for (model_name, enc), (_, fe), (_, dec) in zip(
@@ -559,15 +420,6 @@ class MsgAggrAgentGroup(AgentGroup):
         )
         return self
 
-    def compile_models(self) -> "AgentGroup":
-        for id in self.encoders.keys():
-            self.encoders[id] = torch.compile(self.encoders[id])
-            self.feature_extractors[id] = torch.compile(self.feature_extractors[id])
-            self.decoders[id] = torch.compile(self.decoders[id])
-        self.aggr_model = torch.compile(self.aggr_model)
-        self._is_compiled = True
-        return self
-
     def reset(self) -> "AgentGroup":
         return self
 
@@ -611,8 +463,6 @@ class DualPathBasedMsgAggrAgentGroup(MsgAggrAgentGroup):
         encoder_configs: Dict[str, ModelConfig],
         decoder_configs: Dict[str, ModelConfig],
         aggr_model_config: ModelConfig,
-        optimizer_config: OptimizerConfig,
-        lr_scheduler_config: LRSchedulerConfig = None,
         enable_rl_grad_to_msg_aggr: bool = True,
         device="cpu",
     ) -> None:
@@ -622,14 +472,11 @@ class DualPathBasedMsgAggrAgentGroup(MsgAggrAgentGroup):
             encoder_configs=encoder_configs,
             decoder_configs=decoder_configs,
             aggr_model_config=aggr_model_config,
-            optimizer_config=optimizer_config,
-            lr_scheduler_config=lr_scheduler_config,
             device=device,
         )
 
-        # Separate feature extractors for message generation
-        self.msg_feature_extractors = {}
-        self.msg_encoders = {}
+        self.msg_feature_extractors = nn.ModuleDict()
+        self.msg_encoders = nn.ModuleDict()
 
         self.enable_rl_grad_to_msg_aggr = enable_rl_grad_to_msg_aggr
 
@@ -749,80 +596,6 @@ class DualPathBasedMsgAggrAgentGroup(MsgAggrAgentGroup):
             params["msg_encoders"] = msg_encoders_params
         return params
 
-    def to(self, device: str) -> "AgentGroup":
-        """Move all components to device"""
-        super().to(device)
-        for _, fe in self.msg_feature_extractors.items():
-            fe.to(device)
-        for _, enc in self.msg_encoders.items():
-            enc.to(device)
-        return self
-
-    def eval(self) -> "AgentGroup":
-        """Set all components to evaluation mode"""
-        super().eval()
-        for _, fe in self.msg_feature_extractors.items():
-            fe.eval()
-        for _, enc in self.msg_encoders.items():
-            enc.eval()
-        return self
-
-    def train(self) -> "AgentGroup":
-        """Set all components to training mode"""
-        super().train()
-        for _, fe in self.msg_feature_extractors.items():
-            fe.train()
-        for _, enc in self.msg_encoders.items():
-            enc.train()
-        return self
-
-    def share_memory(self) -> "AgentGroup":
-        """Share memory for all components"""
-        super().share_memory()
-        for _, fe in self.msg_feature_extractors.items():
-            fe.share_memory()
-        for _, enc in self.msg_encoders.items():
-            enc.share_memory()
-        return self
-
-    def wrap_data_parallel(self, device_id: int = 0) -> "AgentGroup":
-        """Wrap all components with DistributedDataParallel"""
-        device = f"cuda:{device_id}"
-
-        def has_trainable_params(module):
-            """Check if module has any trainable parameters."""
-            return any(p.requires_grad for p in module.parameters())
-
-        super().wrap_data_parallel(device_id)
-        for id in self.msg_feature_extractors.keys():
-            self.msg_feature_extractors[id] = self.msg_feature_extractors[id].to(device)
-            if has_trainable_params(self.msg_feature_extractors[id]):
-                self.msg_feature_extractors[id] = DDP(
-                    self.msg_feature_extractors[id], device_ids=[device_id]
-                )
-        for id in self.msg_encoders.keys():
-            self.msg_encoders[id] = self.msg_encoders[id].to(device)
-            if has_trainable_params(self.msg_encoders[id]):
-                self.msg_encoders[id] = DDP(self.msg_encoders[id], device_ids=[device_id])
-        return self
-
-    def unwrap_data_parallel(self) -> "AgentGroup":
-        """Unwrap DistributedDataParallel from all components"""
-        super().unwrap_data_parallel()
-        for id in self.msg_feature_extractors.keys():
-            if isinstance(self.msg_feature_extractors[id], DDP):
-                self.msg_feature_extractors[id] = self.msg_feature_extractors[
-                    id
-                ].module.cpu()
-            else:
-                self.msg_feature_extractors[id] = self.msg_feature_extractors[id].cpu()
-        for id in self.msg_encoders.keys():
-            if isinstance(self.msg_encoders[id], DDP):
-                self.msg_encoders[id] = self.msg_encoders[id].module.cpu()
-            else:
-                self.msg_encoders[id] = self.msg_encoders[id].cpu()
-        return self
-
     def save_params(self, path: str) -> "AgentGroup":
         """Save all parameters including message feature extractors and encoders"""
         super().save_params(path)
@@ -860,16 +633,8 @@ class DualPathBasedMsgAggrAgentGroup(MsgAggrAgentGroup):
             )
         return self
 
-    def compile_models(self) -> "AgentGroup":
-        """Compile all models for performance"""
-        super().compile_models()
-        for id in self.msg_feature_extractors.keys():
-            self.msg_feature_extractors[id] = torch.compile(
-                self.msg_feature_extractors[id]
-            )
-        for id in self.msg_encoders.keys():
-            self.msg_encoders[id] = torch.compile(self.msg_encoders[id])
-        return self
+    def reset(self) -> "AgentGroup":
+        raise NotImplementedError
 
 
 class ObsMsgAggrAgentGroup(MsgAggrAgentGroup):
@@ -942,8 +707,6 @@ class ProbObsMsgAggrAgentGroup(MsgAggrAgentGroup):
         encoder_configs: Dict[str, ModelConfig],
         decoder_configs: Dict[str, ModelConfig],
         aggr_model_config: ModelConfig,
-        optimizer_config: OptimizerConfig,
-        lr_scheduler_config: LRSchedulerConfig = None,
         deterministic_eval: bool = True,
         device="cpu",
     ) -> None:
@@ -953,8 +716,6 @@ class ProbObsMsgAggrAgentGroup(MsgAggrAgentGroup):
             encoder_configs=encoder_configs,
             decoder_configs=decoder_configs,
             aggr_model_config=aggr_model_config,
-            optimizer_config=optimizer_config,
-            lr_scheduler_config=lr_scheduler_config,
             device=device,
         )
         self.deterministic_eval = deterministic_eval
@@ -1006,8 +767,6 @@ class ProbSeqMsgAggrAgentGroup(MsgAggrAgentGroup):
         encoder_configs: Dict[str, ModelConfig],
         decoder_configs: Dict[str, ModelConfig],
         aggr_model_config: ModelConfig,
-        optimizer_config: OptimizerConfig,
-        lr_scheduler_config: LRSchedulerConfig = None,
         deterministic_eval: bool = True,
         device="cpu",
     ) -> None:
@@ -1017,8 +776,6 @@ class ProbSeqMsgAggrAgentGroup(MsgAggrAgentGroup):
             encoder_configs=encoder_configs,
             decoder_configs=decoder_configs,
             aggr_model_config=aggr_model_config,
-            optimizer_config=optimizer_config,
-            lr_scheduler_config=lr_scheduler_config,
             device=device,
         )
         self.deterministic_eval = deterministic_eval
@@ -1071,8 +828,6 @@ class DualPathObsMsgAggrAgentGroup(DualPathBasedMsgAggrAgentGroup):
         encoder_configs: Dict[str, ModelConfig],
         decoder_configs: Dict[str, ModelConfig],
         aggr_model_config: ModelConfig,
-        optimizer_config: OptimizerConfig,
-        lr_scheduler_config: LRSchedulerConfig = None,
         enable_rl_grad_to_msg_aggr: bool = True,
         device="cpu",
     ) -> None:
@@ -1082,29 +837,13 @@ class DualPathObsMsgAggrAgentGroup(DualPathBasedMsgAggrAgentGroup):
             encoder_configs=encoder_configs,
             decoder_configs=decoder_configs,
             aggr_model_config=aggr_model_config,
-            optimizer_config=optimizer_config,
-            lr_scheduler_config=lr_scheduler_config,
             enable_rl_grad_to_msg_aggr=enable_rl_grad_to_msg_aggr,
             device=device,
         )
 
-        # Separate feature extractors for message generation
-        self.msg_feature_extractors = {
-            model_name: config.get_model()
-            for model_name, config in msg_feature_extractor_configs.items()
-        }
-
-        # Add message feature extractors to parameters to optimize
-        self.params_to_optimize += [
-            {"params": extractor.parameters()}
-            for extractor in self.msg_feature_extractors.values()
-        ]
-
-        # Recreate optimizer with all parameters
-        self.optimizer = optimizer_config.get_optimizer(self.params_to_optimize)
-        self.lr_scheduler = None
-        if lr_scheduler_config:
-            self.lr_scheduler = lr_scheduler_config.get_lr_scheduler(self.optimizer)
+        self.msg_feature_extractors = nn.ModuleDict()
+        for model_name, config in msg_feature_extractor_configs.items():
+            self.msg_feature_extractors[model_name] = config.get_model()
 
     def forward(
         self,
@@ -1166,8 +905,6 @@ class DualPathProbObsMsgAggrAgentGroup(DualPathObsMsgAggrAgentGroup):
         encoder_configs: Dict[str, ModelConfig],
         decoder_configs: Dict[str, ModelConfig],
         aggr_model_config: ModelConfig,
-        optimizer_config: OptimizerConfig,
-        lr_scheduler_config: LRSchedulerConfig = None,
         enable_rl_grad_to_msg_aggr: bool = True,
         deterministic_eval: bool = True,
         device="cpu",
@@ -1179,8 +916,6 @@ class DualPathProbObsMsgAggrAgentGroup(DualPathObsMsgAggrAgentGroup):
             encoder_configs=encoder_configs,
             decoder_configs=decoder_configs,
             aggr_model_config=aggr_model_config,
-            optimizer_config=optimizer_config,
-            lr_scheduler_config=lr_scheduler_config,
             enable_rl_grad_to_msg_aggr=enable_rl_grad_to_msg_aggr,
             device=device,
         )

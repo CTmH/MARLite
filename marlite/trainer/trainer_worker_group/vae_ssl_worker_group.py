@@ -27,7 +27,7 @@ class VAESSLWorkerGroup(SSLWorkerGroup):
         ssl_model_config,
         agent_group_config,
         ssl_optimizer_config,
-        agent_group_optimizer_config,
+        agent_optimizer_config,
         reconstruction_loss=None,
         kl_divergence_weight: float = 1.0,
         data_constructor=None,
@@ -41,7 +41,7 @@ class VAESSLWorkerGroup(SSLWorkerGroup):
             ssl_model_config: Configuration for VAE SSL model
             agent_group_config: Configuration for agent group
             ssl_optimizer_config: Configuration for SSL optimizer
-            agent_group_optimizer_config: Configuration for agent group optimizer
+            agent_optimizer_config: Configuration for agent group optimizer
             reconstruction_loss: Loss function for reconstruction
             kl_divergence_weight: Weight for KL divergence loss
             data_constructor: Data constructor for processing observations
@@ -54,7 +54,7 @@ class VAESSLWorkerGroup(SSLWorkerGroup):
             ssl_model_config=ssl_model_config,
             agent_group_config=agent_group_config,
             ssl_optimizer_config=ssl_optimizer_config,
-            agent_group_optimizer_config=agent_group_optimizer_config,
+            agent_optimizer_config=agent_optimizer_config,
             reconstruction_loss=reconstruction_loss,
             kl_divergence_weight=kl_divergence_weight,
             init_method=init_method,

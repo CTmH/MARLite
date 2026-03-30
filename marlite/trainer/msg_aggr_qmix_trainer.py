@@ -42,7 +42,7 @@ class MsgAggrQMIXTrainer(Trainer):
             agent_group_config=self.agent_group_config,
             critic_config=self.critic_config,
             critic_optimizer_config=self.critic_optimizer_config,
-            agent_group_optimizer_config=self.eval_agent_group.optimizer,
+            agent_optimizer_config=self.agent_optimizer_config,
             gamma=self.gamma,
             warmup_epochs=self.warmup_epochs,
             msg_aggr_weight=self.msg_aggr_weight,
@@ -200,14 +200,17 @@ class MsgAggrQMIXTrainer(Trainer):
                     else:
                         critic_loss = td_error
 
-                    self.eval_agent_group.zero_grad()
+                    self.agent_optimizer.zero_grad()
                     self.eval_critic.zero_grad()
                     critic_loss.backward()
                     torch.nn.utils.clip_grad_norm_(
                         self.eval_critic.parameters(), max_norm=5.0
                     )
+                    torch.nn.utils.clip_grad_norm_(
+                        self.eval_agent_group.parameters(), max_norm=5.0
+                    )
                     self.optimizer.step()
-                    self.eval_agent_group.step()
+                    self.agent_optimizer.step()
 
                     total_loss += critic_loss.detach().cpu().item()
                     total_batches += 1
@@ -274,7 +277,7 @@ class ProbMsgAggrQMIXTrainer(Trainer):
             agent_group_config=self.agent_group_config,
             critic_config=self.critic_config,
             critic_optimizer_config=self.critic_optimizer_config,
-            agent_group_optimizer_config=self.eval_agent_group.optimizer,
+            agent_optimizer_config=self.agent_optimizer_config,
             gamma=self.gamma,
             warmup_epochs=self.warmup_epochs,
             msg_aggr_weight=self.msg_aggr_weight,
@@ -431,14 +434,17 @@ class ProbMsgAggrQMIXTrainer(Trainer):
                     else:
                         critic_loss = self.compute_critic_loss(td_error, msg_aggr_loss)
 
-                    self.eval_agent_group.zero_grad()
+                    self.agent_optimizer.zero_grad()
                     self.eval_critic.zero_grad()
                     critic_loss.backward()
                     torch.nn.utils.clip_grad_norm_(
                         self.eval_critic.parameters(), max_norm=5.0
                     )
+                    torch.nn.utils.clip_grad_norm_(
+                        self.eval_agent_group.parameters(), max_norm=5.0
+                    )
                     self.optimizer.step()
-                    self.eval_agent_group.step()
+                    self.agent_optimizer.step()
 
                     total_loss += critic_loss.detach().cpu().item()
                     total_batches += 1

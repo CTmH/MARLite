@@ -29,7 +29,7 @@ class SSLWorker(BaseWorker):
         ssl_model_config=None,
         agent_group_config=None,
         ssl_optimizer_config=None,
-        agent_group_optimizer_config=None,
+        agent_optimizer_config=None,
         reconstruction_loss=None,
         kl_divergence_weight: float = 1.0,
         **kwargs,
@@ -46,7 +46,7 @@ class SSLWorker(BaseWorker):
             ssl_model_config: Configuration for SSL model
             agent_group_config: Configuration for agent group
             ssl_optimizer_config: Configuration for SSL optimizer
-            agent_group_optimizer_config: Configuration for agent group optimizer
+            agent_optimizer_config: Configuration for agent group optimizer
             reconstruction_loss: Loss function for reconstruction
             kl_divergence_weight: Weight for KL divergence loss
         """
@@ -74,18 +74,15 @@ class SSLWorker(BaseWorker):
         else:
             self.ssl_optimizer = None
 
-        if (
-            agent_group_optimizer_config is not None
-            and self.eval_agent_group is not None
-        ):
-            if hasattr(agent_group_optimizer_config, "get_optimizer"):
-                self.agent_group_optimizer = agent_group_optimizer_config.get_optimizer(
-                    self.eval_agent_group.params_to_optimize
+        if agent_optimizer_config is not None and self.eval_agent_group is not None:
+            if hasattr(agent_optimizer_config, "get_optimizer"):
+                self.agent_optimizer = agent_optimizer_config.get_optimizer(
+                    self.eval_agent_group.parameters()
                 )
             else:
-                self.agent_group_optimizer = agent_group_optimizer_config
+                self.agent_optimizer = agent_optimizer_config
         else:
-            self.agent_group_optimizer = None
+            self.agent_optimizer = None
 
     def set_ssl_models(
         self,
@@ -161,7 +158,7 @@ class VAESSLWorker(SSLWorker):
         ssl_model_config=None,
         agent_group_config=None,
         ssl_optimizer_config=None,
-        agent_group_optimizer_config=None,
+        agent_optimizer_config=None,
         reconstruction_loss=None,
         kl_divergence_weight: float = 1.0,
         data_constructor=None,
@@ -179,7 +176,7 @@ class VAESSLWorker(SSLWorker):
             ssl_model_config: Configuration for VAE SSL model
             agent_group_config: Configuration for agent group
             ssl_optimizer_config: Configuration for SSL optimizer
-            agent_group_optimizer_config: Configuration for agent group optimizer
+            agent_optimizer_config: Configuration for agent group optimizer
             reconstruction_loss: Loss function for reconstruction
             kl_divergence_weight: Weight for KL divergence loss
             data_constructor: Data constructor for processing observations
@@ -193,7 +190,7 @@ class VAESSLWorker(SSLWorker):
             ssl_model_config,
             agent_group_config,
             ssl_optimizer_config,
-            agent_group_optimizer_config,
+            agent_optimizer_config,
             reconstruction_loss,
             kl_divergence_weight,
             **kwargs,

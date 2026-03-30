@@ -1,14 +1,13 @@
 import os
 import numpy as np
 import torch
+import torch.nn as nn
 from typing import Dict, List, Any
 from copy import deepcopy
 from torch.nn.parallel import DistributedDataParallel as DDP
 from marlite.algorithm.model.model_config import ModelConfig
 from marlite.algorithm.agents.graph_agent_group import GraphAgentGroup
 from marlite.algorithm.graph_builder import GraphBuilderConfig
-from marlite.util.optimizer_config import OptimizerConfig
-from marlite.util.lr_scheduler_config import LRSchedulerConfig
 from marlite.util.prob_util import process_probabilistic_output
 
 
@@ -21,8 +20,6 @@ class ObsGNNCommAgentGroup(GraphAgentGroup):
         decoder_configs: Dict[str, ModelConfig],
         graph_builder_config: GraphBuilderConfig,
         graph_model_config: ModelConfig,
-        optimizer_config: OptimizerConfig,
-        lr_scheduler_config: LRSchedulerConfig = None,
         device="cpu",
     ) -> None:
         super().__init__(
@@ -32,8 +29,6 @@ class ObsGNNCommAgentGroup(GraphAgentGroup):
             decoder_configs,
             graph_builder_config,
             graph_model_config,
-            optimizer_config,
-            lr_scheduler_config,
             device=device,
         )
 
@@ -50,7 +45,7 @@ class ObsGNNCommAgentGroup(GraphAgentGroup):
 
     def forward(
         self,
-        observations: Dict[str, np.ndarray],
+        observations: torch.Tensor,
         states: np.ndarray,
         traj_padding_mask: torch.Tensor,
         alive_mask: torch.Tensor,
@@ -88,8 +83,6 @@ class SeqGNNCommAgentGroup(GraphAgentGroup):
         decoder_configs: Dict[str, ModelConfig],
         graph_builder_config: GraphBuilderConfig,
         graph_model_config: ModelConfig,
-        optimizer_config: OptimizerConfig,
-        lr_scheduler_config: LRSchedulerConfig = None,
         device="cpu",
     ) -> None:
         super().__init__(
@@ -99,8 +92,6 @@ class SeqGNNCommAgentGroup(GraphAgentGroup):
             decoder_configs,
             graph_builder_config,
             graph_model_config,
-            optimizer_config,
-            lr_scheduler_config,
             device=device,
         )
 
@@ -161,8 +152,6 @@ class ProbObsGNNCommAgentGroup(ObsGNNCommAgentGroup):
         decoder_configs: Dict[str, ModelConfig],
         graph_builder_config: GraphBuilderConfig,
         graph_model_config: ModelConfig,
-        optimizer_config: OptimizerConfig,
-        lr_scheduler_config: LRSchedulerConfig = None,
         deterministic_eval: bool = True,
         device="cpu",
     ) -> None:
@@ -173,8 +162,6 @@ class ProbObsGNNCommAgentGroup(ObsGNNCommAgentGroup):
             decoder_configs=decoder_configs,
             graph_builder_config=graph_builder_config,
             graph_model_config=graph_model_config,
-            optimizer_config=optimizer_config,
-            lr_scheduler_config=lr_scheduler_config,
             device=device,
         )
         self.deterministic_eval = deterministic_eval
@@ -241,8 +228,6 @@ class ProbSeqGNNCommAgentGroup(SeqGNNCommAgentGroup):
         decoder_configs: Dict[str, ModelConfig],
         graph_builder_config: GraphBuilderConfig,
         graph_model_config: ModelConfig,
-        optimizer_config: OptimizerConfig,
-        lr_scheduler_config: LRSchedulerConfig = None,
         deterministic_eval: bool = True,
         device="cpu",
     ) -> None:
@@ -253,8 +238,6 @@ class ProbSeqGNNCommAgentGroup(SeqGNNCommAgentGroup):
             decoder_configs=decoder_configs,
             graph_builder_config=graph_builder_config,
             graph_model_config=graph_model_config,
-            optimizer_config=optimizer_config,
-            lr_scheduler_config=lr_scheduler_config,
             device=device,
         )
         self.deterministic_eval = deterministic_eval
@@ -323,8 +306,6 @@ class DualPathBasedGNNCommAgentGroup(GraphAgentGroup):
         decoder_configs: Dict[str, ModelConfig],
         graph_builder_config: GraphBuilderConfig,
         graph_model_config: ModelConfig,
-        optimizer_config: OptimizerConfig,
-        lr_scheduler_config: LRSchedulerConfig = None,
         enable_rl_grad_to_msg_aggr: bool = True,
         device="cpu",
     ) -> None:
@@ -335,14 +316,11 @@ class DualPathBasedGNNCommAgentGroup(GraphAgentGroup):
             decoder_configs=decoder_configs,
             graph_builder_config=graph_builder_config,
             graph_model_config=graph_model_config,
-            optimizer_config=optimizer_config,
-            lr_scheduler_config=lr_scheduler_config,
             device=device,
         )
 
-        # Separate feature extractors for message generation
-        self.msg_feature_extractors = {}
-        self.msg_encoders = {}
+        self.msg_feature_extractors = nn.ModuleDict()
+        self.msg_encoders = nn.ModuleDict()
 
         self.enable_rl_grad_to_msg_aggr = enable_rl_grad_to_msg_aggr
 
@@ -462,80 +440,6 @@ class DualPathBasedGNNCommAgentGroup(GraphAgentGroup):
             params["msg_encoders"] = msg_encoders_params
         return params
 
-    def to(self, device: str) -> "GraphAgentGroup":
-        """Move all components to device"""
-        super().to(device)
-        for _, fe in self.msg_feature_extractors.items():
-            fe.to(device)
-        for _, enc in self.msg_encoders.items():
-            enc.to(device)
-        return self
-
-    def eval(self) -> "GraphAgentGroup":
-        """Set all components to evaluation mode"""
-        super().eval()
-        for _, fe in self.msg_feature_extractors.items():
-            fe.eval()
-        for _, enc in self.msg_encoders.items():
-            enc.eval()
-        return self
-
-    def train(self) -> "GraphAgentGroup":
-        """Set all components to training mode"""
-        super().train()
-        for _, fe in self.msg_feature_extractors.items():
-            fe.train()
-        for _, enc in self.msg_encoders.items():
-            enc.train()
-        return self
-
-    def share_memory(self) -> "GraphAgentGroup":
-        """Share memory for all components"""
-        super().share_memory()
-        for _, fe in self.msg_feature_extractors.items():
-            fe.share_memory()
-        for _, enc in self.msg_encoders.items():
-            enc.share_memory()
-        return self
-
-    def wrap_data_parallel(self, device_id: int = 0) -> "GraphAgentGroup":
-        """Wrap all components with DistributedDataParallel"""
-        device = f"cuda:{device_id}"
-
-        def has_trainable_params(module):
-            """Check if module has any trainable parameters."""
-            return any(p.requires_grad for p in module.parameters())
-
-        super().wrap_data_parallel(device_id)
-        for id in self.msg_feature_extractors.keys():
-            self.msg_feature_extractors[id] = self.msg_feature_extractors[id].to(device)
-            if has_trainable_params(self.msg_feature_extractors[id]):
-                self.msg_feature_extractors[id] = DDP(
-                    self.msg_feature_extractors[id], device_ids=[device_id]
-                )
-        for id in self.msg_encoders.keys():
-            self.msg_encoders[id] = self.msg_encoders[id].to(device)
-            if has_trainable_params(self.msg_encoders[id]):
-                self.msg_encoders[id] = DDP(self.msg_encoders[id], device_ids=[device_id])
-        return self
-
-    def unwrap_data_parallel(self) -> "GraphAgentGroup":
-        """Unwrap DistributedDataParallel from all components"""
-        super().unwrap_data_parallel()
-        for id in self.msg_feature_extractors.keys():
-            if isinstance(self.msg_feature_extractors[id], DDP):
-                self.msg_feature_extractors[id] = self.msg_feature_extractors[
-                    id
-                ].module.cpu()
-            else:
-                self.msg_feature_extractors[id] = self.msg_feature_extractors[id].cpu()
-        for id in self.msg_encoders.keys():
-            if isinstance(self.msg_encoders[id], DDP):
-                self.msg_encoders[id] = self.msg_encoders[id].module.cpu()
-            else:
-                self.msg_encoders[id] = self.msg_encoders[id].cpu()
-        return self
-
     def save_params(self, path: str) -> "GraphAgentGroup":
         """Save all parameters including message feature extractors and encoders"""
         super().save_params(path)
@@ -573,16 +477,8 @@ class DualPathBasedGNNCommAgentGroup(GraphAgentGroup):
             )
         return self
 
-    def compile_models(self) -> "GraphAgentGroup":
-        """Compile all models for performance"""
-        super().compile_models()
-        for id in self.msg_feature_extractors.keys():
-            self.msg_feature_extractors[id] = torch.compile(
-                self.msg_feature_extractors[id]
-            )
-        for id in self.msg_encoders.keys():
-            self.msg_encoders[id] = torch.compile(self.msg_encoders[id])
-        return self
+    def reset(self) -> "GraphAgentGroup":
+        raise NotImplementedError
 
 
 class DualPathObsGNNCommAgentGroup(DualPathBasedGNNCommAgentGroup):
@@ -600,8 +496,6 @@ class DualPathObsGNNCommAgentGroup(DualPathBasedGNNCommAgentGroup):
         decoder_configs: Dict[str, ModelConfig],
         graph_builder_config: GraphBuilderConfig,
         graph_model_config: ModelConfig,
-        optimizer_config: OptimizerConfig,
-        lr_scheduler_config: LRSchedulerConfig = None,
         enable_rl_grad_to_msg_aggr: bool = True,
         device="cpu",
     ) -> None:
@@ -612,29 +506,13 @@ class DualPathObsGNNCommAgentGroup(DualPathBasedGNNCommAgentGroup):
             decoder_configs=decoder_configs,
             graph_builder_config=graph_builder_config,
             graph_model_config=graph_model_config,
-            optimizer_config=optimizer_config,
-            lr_scheduler_config=lr_scheduler_config,
             enable_rl_grad_to_msg_aggr=enable_rl_grad_to_msg_aggr,
             device=device,
         )
 
-        # Separate feature extractors for message generation
-        self.msg_feature_extractors = {
-            model_name: config.get_model()
-            for model_name, config in msg_feature_extractor_configs.items()
-        }
-
-        # Add message feature extractors to parameters to optimize
-        self.params_to_optimize += [
-            {"params": extractor.parameters()}
-            for extractor in self.msg_feature_extractors.values()
-        ]
-
-        # Recreate optimizer with all parameters
-        self.optimizer = optimizer_config.get_optimizer(self.params_to_optimize)
-        self.lr_scheduler = None
-        if lr_scheduler_config:
-            self.lr_scheduler = lr_scheduler_config.get_lr_scheduler(self.optimizer)
+        self.msg_feature_extractors = nn.ModuleDict()
+        for model_name, config in msg_feature_extractor_configs.items():
+            self.msg_feature_extractors[model_name] = config.get_model()
 
     def _compute_local_state_estimates(self, msg, edge_indices):
         """Compute local state estimates from messages and local observations."""
@@ -696,8 +574,6 @@ class DualPathProbObsGNNCommAgentGroup(DualPathObsGNNCommAgentGroup):
         decoder_configs: Dict[str, ModelConfig],
         graph_builder_config: GraphBuilderConfig,
         graph_model_config: ModelConfig,
-        optimizer_config: OptimizerConfig,
-        lr_scheduler_config: LRSchedulerConfig = None,
         enable_rl_grad_to_msg_aggr: bool = True,
         deterministic_eval: bool = True,
         device="cpu",
@@ -710,8 +586,6 @@ class DualPathProbObsGNNCommAgentGroup(DualPathObsGNNCommAgentGroup):
             decoder_configs=decoder_configs,
             graph_builder_config=graph_builder_config,
             graph_model_config=graph_model_config,
-            optimizer_config=optimizer_config,
-            lr_scheduler_config=lr_scheduler_config,
             enable_rl_grad_to_msg_aggr=enable_rl_grad_to_msg_aggr,
             device=device,
         )

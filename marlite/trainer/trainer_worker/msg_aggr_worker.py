@@ -28,7 +28,7 @@ class MsgAggrWorker(BaseWorker):
         agent_group_config=None,
         critic_config=None,
         critic_optimizer_config=None,
-        agent_group_optimizer_config=None,
+        agent_optimizer_config=None,
         gamma: float = 0.9,
         warmup_epochs: int = 0,
         msg_aggr_weight: float = 1.0,
@@ -46,7 +46,7 @@ class MsgAggrWorker(BaseWorker):
             agent_group_config: Configuration for agent group
             critic_config: Configuration for critic
             critic_optimizer_config: Configuration for critic optimizer
-            agent_group_optimizer_config: Configuration for agent group optimizer
+            agent_optimizer_config: Configuration for agent group optimizer
             gamma: Discount factor
             warmup_epochs: Number of warmup epochs before message aggregation loss is used
             msg_aggr_weight: Weight for message aggregation loss
@@ -69,12 +69,9 @@ class MsgAggrWorker(BaseWorker):
         self.critic_optimizer = critic_optimizer_config.get_optimizer(
             self.eval_critic.parameters()
         )
-        if hasattr(agent_group_optimizer_config, "get_optimizer"):
-            self.agent_group_optimizer = agent_group_optimizer_config.get_optimizer(
-                self.eval_agent_group.params_to_optimize
-            )
-        else:
-            self.agent_group_optimizer = agent_group_optimizer_config
+        self.agent_optimizer = agent_optimizer_config.get_optimizer(
+            self.eval_agent_group.parameters()
+        )
 
     def train_step(self, batch: Dict[str, Any]) -> float:
         """
@@ -207,7 +204,7 @@ class MsgAggrWorker(BaseWorker):
             critic_loss = td_error
 
         # Backward pass
-        self.eval_agent_group.zero_grad()
+        self.agent_optimizer.zero_grad()
         self.eval_critic.zero_grad()
         critic_loss.backward()
 
@@ -216,8 +213,9 @@ class MsgAggrWorker(BaseWorker):
 
         # Clip gradients and optimize
         torch.nn.utils.clip_grad_norm_(self.eval_critic.parameters(), max_norm=5.0)
+        torch.nn.utils.clip_grad_norm_(self.eval_agent_group.parameters(), max_norm=5.0)
         self.critic_optimizer.step()
-        self.eval_agent_group.step()
+        self.agent_optimizer.step()
 
         return critic_loss.detach().cpu().item()
 
@@ -239,7 +237,7 @@ class ProbMsgAggrWorker(MsgAggrWorker):
         agent_group_config=None,
         critic_config=None,
         critic_optimizer_config=None,
-        agent_group_optimizer_config=None,
+        agent_optimizer_config=None,
         gamma: float = 0.9,
         warmup_epochs: int = 0,
         msg_aggr_weight: float = 1.0,
@@ -257,7 +255,7 @@ class ProbMsgAggrWorker(MsgAggrWorker):
             agent_group_config: Configuration for agent group
             critic_config: Configuration for critic
             critic_optimizer_config: Configuration for critic optimizer
-            agent_group_optimizer_config: Configuration for agent group optimizer
+            agent_optimizer_config: Configuration for agent group optimizer
             gamma: Discount factor
             warmup_epochs: Number of warmup epochs before message aggregation loss is used
             msg_aggr_weight: Weight for message aggregation loss
@@ -271,7 +269,7 @@ class ProbMsgAggrWorker(MsgAggrWorker):
             agent_group_config,
             critic_config,
             critic_optimizer_config,
-            agent_group_optimizer_config,
+            agent_optimizer_config,
             gamma,
             warmup_epochs,
             msg_aggr_weight,
@@ -412,7 +410,7 @@ class ProbMsgAggrWorker(MsgAggrWorker):
             critic_loss = td_error
 
         # Backward pass
-        self.eval_agent_group.zero_grad()
+        self.agent_optimizer.zero_grad()
         self.eval_critic.zero_grad()
         critic_loss.backward()
 
@@ -421,7 +419,8 @@ class ProbMsgAggrWorker(MsgAggrWorker):
 
         # Clip gradients and optimize
         torch.nn.utils.clip_grad_norm_(self.eval_critic.parameters(), max_norm=5.0)
+        torch.nn.utils.clip_grad_norm_(self.eval_agent_group.parameters(), max_norm=5.0)
         self.critic_optimizer.step()
-        self.eval_agent_group.step()
+        self.agent_optimizer.step()
 
         return critic_loss.detach().cpu().item()

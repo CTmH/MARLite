@@ -4,19 +4,38 @@ from marlite.algorithm.agents.agent_group import AgentGroup
 from marlite.algorithm.agents.qmix_agent_group import QMIXAgentGroup
 from marlite.algorithm.agents.gnn_agent_group import GNNAgentGroup
 from marlite.algorithm.agents.random_agent_group import RandomAgentGroup
-from marlite.algorithm.agents.magent_agent_group import MAgentPreyAgentGroup, MAgentBattleAgentGroup
-from marlite.algorithm.agents.msg_aggr_agent_group import ObsMsgAggrAgentGroup, SeqMsgAggrAgentGroup
-from marlite.algorithm.agents.msg_aggr_agent_group import ProbObsMsgAggrAgentGroup, ProbSeqMsgAggrAgentGroup
+from marlite.algorithm.agents.magent_agent_group import (
+    MAgentPreyAgentGroup,
+    MAgentBattleAgentGroup,
+)
+from marlite.algorithm.agents.msg_aggr_agent_group import (
+    ObsMsgAggrAgentGroup,
+    SeqMsgAggrAgentGroup,
+)
+from marlite.algorithm.agents.msg_aggr_agent_group import (
+    ProbObsMsgAggrAgentGroup,
+    ProbSeqMsgAggrAgentGroup,
+)
 from marlite.algorithm.agents.msg_aggr_agent_group import DualPathObsMsgAggrAgentGroup
-from marlite.algorithm.agents.msg_aggr_agent_group import DualPathProbObsMsgAggrAgentGroup
-from marlite.algorithm.agents.gnn_comm_agent_group import ObsGNNCommAgentGroup, SeqGNNCommAgentGroup
-from marlite.algorithm.agents.gnn_comm_agent_group import ProbObsGNNCommAgentGroup, ProbSeqGNNCommAgentGroup
-from marlite.algorithm.agents.gnn_comm_agent_group import DualPathObsGNNCommAgentGroup, DualPathProbObsGNNCommAgentGroup
+from marlite.algorithm.agents.msg_aggr_agent_group import (
+    DualPathProbObsMsgAggrAgentGroup,
+)
+from marlite.algorithm.agents.gnn_comm_agent_group import (
+    ObsGNNCommAgentGroup,
+    SeqGNNCommAgentGroup,
+)
+from marlite.algorithm.agents.gnn_comm_agent_group import (
+    ProbObsGNNCommAgentGroup,
+    ProbSeqGNNCommAgentGroup,
+)
+from marlite.algorithm.agents.gnn_comm_agent_group import (
+    DualPathObsGNNCommAgentGroup,
+    DualPathProbObsGNNCommAgentGroup,
+)
 from marlite.algorithm.agents.g2anet_agent_group import G2ANetAgentGroup
 from marlite.algorithm.model import ModelConfig
 from marlite.algorithm.graph_builder import GraphBuilderConfig
-from marlite.util.optimizer_config import OptimizerConfig
-from marlite.util.lr_scheduler_config import LRSchedulerConfig
+
 
 def create_qmix_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
     agents = agent_group_config.pop("agent_list")
@@ -24,59 +43,73 @@ def create_qmix_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
     model_configs = {}
     feature_extractor_configs = {}
     for model_id, conf in text_model_configs.items():
-        feature_extractor_configs[model_id] = ModelConfig(**conf['feature_extractor'])
-        model_configs[model_id] = ModelConfig(**conf['model'])
-    optimizer_config = OptimizerConfig(**agent_group_config.pop("optimizer"))
-    lr_scheduler_config = agent_group_config.pop("lr_scheduler", None)
-    if lr_scheduler_config:
-        lr_scheduler_config = LRSchedulerConfig(**lr_scheduler_config)
+        feature_extractor_configs[model_id] = ModelConfig(**conf["feature_extractor"])
+        model_configs[model_id] = ModelConfig(**conf["model"])
     return QMIXAgentGroup(
-        agents, model_configs,
-        feature_extractor_configs,
-        optimizer_config,
-        lr_scheduler_config,
-        **agent_group_config)
+        agents, model_configs, feature_extractor_configs, **agent_group_config
+    )
+
 
 def create_gnn_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
     return _create_gnn_agent_group(GNNAgentGroup, agent_group_config)
 
+
 def create_obs_gnn_comm_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
     return _create_gnn_agent_group(ObsGNNCommAgentGroup, agent_group_config)
+
 
 def create_seq_gnn_comm_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
     return _create_gnn_agent_group(SeqGNNCommAgentGroup, agent_group_config)
 
-def create_prob_obs_gnn_comm_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
+
+def create_prob_obs_gnn_comm_agent_group(
+    agent_group_config: Dict[str, Any],
+) -> AgentGroup:
     return _create_gnn_agent_group(ProbObsGNNCommAgentGroup, agent_group_config)
 
-def create_prob_seq_gnn_comm_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
+
+def create_prob_seq_gnn_comm_agent_group(
+    agent_group_config: Dict[str, Any],
+) -> AgentGroup:
     return _create_gnn_agent_group(ProbSeqGNNCommAgentGroup, agent_group_config)
 
-def create_dual_path_obs_gnn_comm_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
-    return _create_dual_path_gnn_agent_group(DualPathObsGNNCommAgentGroup, agent_group_config)
 
-def create_dual_path_prob_obs_gnn_comm_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
-    return _create_dual_path_gnn_agent_group(DualPathProbObsGNNCommAgentGroup, agent_group_config)
+def create_dual_path_obs_gnn_comm_agent_group(
+    agent_group_config: Dict[str, Any],
+) -> AgentGroup:
+    return _create_dual_path_gnn_agent_group(
+        DualPathObsGNNCommAgentGroup, agent_group_config
+    )
+
+
+def create_dual_path_prob_obs_gnn_comm_agent_group(
+    agent_group_config: Dict[str, Any],
+) -> AgentGroup:
+    return _create_dual_path_gnn_agent_group(
+        DualPathProbObsGNNCommAgentGroup, agent_group_config
+    )
+
 
 def create_g2anet_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
     return _create_gnn_agent_group(G2ANetAgentGroup, agent_group_config)
 
-def _create_gnn_agent_group(agent_group_class: Type[AgentGroup], agent_group_config: Dict[str, Any]) -> AgentGroup:
+
+def _create_gnn_agent_group(
+    agent_group_class: Type[AgentGroup], agent_group_config: Dict[str, Any]
+) -> AgentGroup:
     agents = agent_group_config.pop("agent_list")
     text_model_configs = agent_group_config.pop("model_configs")
     encoder_configs = {}
     feature_extractor_configs = {}
     decoder_configs = {}
     for model_id, conf in text_model_configs.items():
-        feature_extractor_configs[model_id] = ModelConfig(**conf['feature_extractor'])
-        encoder_configs[model_id] = ModelConfig(**conf['encoder'])
-        decoder_configs[model_id] = ModelConfig(**conf['decoder'])
+        feature_extractor_configs[model_id] = ModelConfig(**conf["feature_extractor"])
+        encoder_configs[model_id] = ModelConfig(**conf["encoder"])
+        decoder_configs[model_id] = ModelConfig(**conf["decoder"])
     graph_model_config = ModelConfig(**agent_group_config.pop("graph_model_config"))
-    graph_builder_config = GraphBuilderConfig(**agent_group_config.pop("graph_builder_config"))
-    optimizer_config = OptimizerConfig(**agent_group_config.pop("optimizer"))
-    lr_scheduler_config = agent_group_config.pop("lr_scheduler", None)
-    if lr_scheduler_config:
-        lr_scheduler_config = LRSchedulerConfig(**lr_scheduler_config)
+    graph_builder_config = GraphBuilderConfig(
+        **agent_group_config.pop("graph_builder_config")
+    )
     return agent_group_class(
         agents,
         feature_extractor_configs,
@@ -84,37 +117,60 @@ def _create_gnn_agent_group(agent_group_class: Type[AgentGroup], agent_group_con
         decoder_configs,
         graph_builder_config,
         graph_model_config,
-        optimizer_config,
-        lr_scheduler_config,
-        **agent_group_config)
+        **agent_group_config,
+    )
+
 
 def create_obs_msg_aggr_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
     return _create_msg_agent_group(ObsMsgAggrAgentGroup, agent_group_config)
 
+
 def create_seq_msg_aggr_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
     return _create_msg_agent_group(SeqMsgAggrAgentGroup, agent_group_config)
 
-def create_prob_obs_msg_aggr_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
+
+def create_prob_obs_msg_aggr_agent_group(
+    agent_group_config: Dict[str, Any],
+) -> AgentGroup:
     return _create_msg_agent_group(ProbObsMsgAggrAgentGroup, agent_group_config)
 
-def create_prob_seq_msg_aggr_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
+
+def create_prob_seq_msg_aggr_agent_group(
+    agent_group_config: Dict[str, Any],
+) -> AgentGroup:
     return _create_msg_agent_group(ProbSeqMsgAggrAgentGroup, agent_group_config)
 
-def create_dual_path_obs_msg_aggr_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
-    return _create_dual_path_msg_agent_group(DualPathObsMsgAggrAgentGroup, agent_group_config)
-'''
+
+def create_dual_path_obs_msg_aggr_agent_group(
+    agent_group_config: Dict[str, Any],
+) -> AgentGroup:
+    return _create_dual_path_msg_agent_group(
+        DualPathObsMsgAggrAgentGroup, agent_group_config
+    )
+
+
+"""
 def create_dual_path_seq_msg_aggr_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
     return _create_dual_path_msg_agent_group(DualPathSeqMsgAggrAgentGroup, agent_group_config)
-'''
-def create_dual_path_prob_obs_msg_aggr_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
-    return _create_dual_path_msg_agent_group(DualPathProbObsMsgAggrAgentGroup, agent_group_config)
-'''
+"""
+
+
+def create_dual_path_prob_obs_msg_aggr_agent_group(
+    agent_group_config: Dict[str, Any],
+) -> AgentGroup:
+    return _create_dual_path_msg_agent_group(
+        DualPathProbObsMsgAggrAgentGroup, agent_group_config
+    )
+
+
+"""
 def create_dual_path_prob_seq_msg_aggr_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
     return _create_dual_path_msg_agent_group(DualPathProbSeqMsgAggrAgentGroup, agent_group_config)
-'''
+"""
+
+
 def _create_msg_agent_group(
-    agent_group_class: Type[AgentGroup],
-    agent_group_config: Dict[str, Any]
+    agent_group_class: Type[AgentGroup], agent_group_config: Dict[str, Any]
 ) -> AgentGroup:
     agents = agent_group_config.pop("agent_list")
     text_model_configs = agent_group_config.pop("model_configs")
@@ -124,16 +180,11 @@ def _create_msg_agent_group(
     decoder_configs = {}
 
     for model_id, conf in text_model_configs.items():
-        feature_extractor_configs[model_id] = ModelConfig(**conf['feature_extractor'])
-        encoder_configs[model_id] = ModelConfig(**conf['encoder'])
-        decoder_configs[model_id] = ModelConfig(**conf['decoder'])
+        feature_extractor_configs[model_id] = ModelConfig(**conf["feature_extractor"])
+        encoder_configs[model_id] = ModelConfig(**conf["encoder"])
+        decoder_configs[model_id] = ModelConfig(**conf["decoder"])
 
     aggr_model_config = ModelConfig(**agent_group_config.pop("aggr_model_config"))
-    optimizer_config = OptimizerConfig(**agent_group_config.pop("optimizer"))
-
-    lr_scheduler_config = agent_group_config.pop("lr_scheduler", None)
-    if lr_scheduler_config:
-        lr_scheduler_config = LRSchedulerConfig(**lr_scheduler_config)
 
     return agent_group_class(
         agent_model_dict=agents,
@@ -141,14 +192,12 @@ def _create_msg_agent_group(
         encoder_configs=encoder_configs,
         decoder_configs=decoder_configs,
         aggr_model_config=aggr_model_config,
-        optimizer_config=optimizer_config,
-        lr_scheduler_config=lr_scheduler_config,
-        **agent_group_config
+        **agent_group_config,
     )
 
+
 def _create_dual_path_msg_agent_group(
-    agent_group_class: Type[AgentGroup],
-    agent_group_config: Dict[str, Any]
+    agent_group_class: Type[AgentGroup], agent_group_config: Dict[str, Any]
 ) -> AgentGroup:
     agents = agent_group_config.pop("agent_list")
     text_model_configs = agent_group_config.pop("model_configs")
@@ -159,17 +208,14 @@ def _create_dual_path_msg_agent_group(
     decoder_configs = {}
 
     for model_id, conf in text_model_configs.items():
-        feature_extractor_configs[model_id] = ModelConfig(**conf['feature_extractor'])
-        msg_feature_extractor_configs[model_id] = ModelConfig(**conf['msg_feature_extractor'])
-        encoder_configs[model_id] = ModelConfig(**conf['encoder'])
-        decoder_configs[model_id] = ModelConfig(**conf['decoder'])
+        feature_extractor_configs[model_id] = ModelConfig(**conf["feature_extractor"])
+        msg_feature_extractor_configs[model_id] = ModelConfig(
+            **conf["msg_feature_extractor"]
+        )
+        encoder_configs[model_id] = ModelConfig(**conf["encoder"])
+        decoder_configs[model_id] = ModelConfig(**conf["decoder"])
 
     aggr_model_config = ModelConfig(**agent_group_config.pop("aggr_model_config"))
-    optimizer_config = OptimizerConfig(**agent_group_config.pop("optimizer"))
-
-    lr_scheduler_config = agent_group_config.pop("lr_scheduler", None)
-    if lr_scheduler_config:
-        lr_scheduler_config = LRSchedulerConfig(**lr_scheduler_config)
 
     return agent_group_class(
         agent_model_dict=agents,
@@ -178,14 +224,12 @@ def _create_dual_path_msg_agent_group(
         encoder_configs=encoder_configs,
         decoder_configs=decoder_configs,
         aggr_model_config=aggr_model_config,
-        optimizer_config=optimizer_config,
-        lr_scheduler_config=lr_scheduler_config,
-        **agent_group_config
+        **agent_group_config,
     )
 
+
 def _create_dual_path_gnn_agent_group(
-    agent_group_class: Type[AgentGroup],
-    agent_group_config: Dict[str, Any]
+    agent_group_class: Type[AgentGroup], agent_group_config: Dict[str, Any]
 ) -> AgentGroup:
     agents = agent_group_config.pop("agent_list")
     text_model_configs = agent_group_config.pop("model_configs")
@@ -196,17 +240,17 @@ def _create_dual_path_gnn_agent_group(
     decoder_configs = {}
 
     for model_id, conf in text_model_configs.items():
-        feature_extractor_configs[model_id] = ModelConfig(**conf['feature_extractor'])
-        msg_feature_extractor_configs[model_id] = ModelConfig(**conf['msg_feature_extractor'])
-        encoder_configs[model_id] = ModelConfig(**conf['encoder'])
-        decoder_configs[model_id] = ModelConfig(**conf['decoder'])
+        feature_extractor_configs[model_id] = ModelConfig(**conf["feature_extractor"])
+        msg_feature_extractor_configs[model_id] = ModelConfig(
+            **conf["msg_feature_extractor"]
+        )
+        encoder_configs[model_id] = ModelConfig(**conf["encoder"])
+        decoder_configs[model_id] = ModelConfig(**conf["decoder"])
 
     graph_model_config = ModelConfig(**agent_group_config.pop("graph_model_config"))
-    graph_builder_config = GraphBuilderConfig(**agent_group_config.pop("graph_builder_config"))
-    optimizer_config = OptimizerConfig(**agent_group_config.pop("optimizer"))
-    lr_scheduler_config = agent_group_config.pop("lr_scheduler", None)
-    if lr_scheduler_config:
-        lr_scheduler_config = LRSchedulerConfig(**lr_scheduler_config)
+    graph_builder_config = GraphBuilderConfig(
+        **agent_group_config.pop("graph_builder_config")
+    )
     return agent_group_class(
         agent_model_dict=agents,
         feature_extractor_configs=feature_extractor_configs,
@@ -215,23 +259,25 @@ def _create_dual_path_gnn_agent_group(
         decoder_configs=decoder_configs,
         graph_builder_config=graph_builder_config,
         graph_model_config=graph_model_config,
-        optimizer_config=optimizer_config,
-        lr_scheduler_config=lr_scheduler_config,
-        **agent_group_config
+        **agent_group_config,
     )
+
 
 def create_random_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
     agents = agent_group_config["agent_list"]
     return RandomAgentGroup(agents)
 
+
 def create_magent_prey_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
     agents = agent_group_config["agent_list"]
     return MAgentPreyAgentGroup(agents)
+
 
 def create_magent_battle_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
     agents = agent_group_config["agent_list"]
     strategy = agent_group_config.get("strategy", "advanced")
     return MAgentBattleAgentGroup(agents, strategy)
+
 
 registered_agent_groups = {
     "QMIX": create_qmix_agent_group,
@@ -241,9 +287,9 @@ registered_agent_groups = {
     "ProbObsMsgAggr": create_prob_obs_msg_aggr_agent_group,
     "ProbSeqMsgAggr": create_prob_seq_msg_aggr_agent_group,
     "DualPathObsMsgAggr": create_dual_path_obs_msg_aggr_agent_group,
-    #"DualPathSeqMsgAggr": create_dual_path_seq_msg_aggr_agent_group,
+    # "DualPathSeqMsgAggr": create_dual_path_seq_msg_aggr_agent_group,
     "DualPathProbObsMsgAggr": create_dual_path_prob_obs_msg_aggr_agent_group,
-    #"DualPathProbSeqMsgAggr": create_dual_path_prob_seq_msg_aggr_agent_group,
+    # "DualPathProbSeqMsgAggr": create_dual_path_prob_seq_msg_aggr_agent_group,
     "GNN": create_gnn_agent_group,
     "ObsGNNComm": create_obs_gnn_comm_agent_group,
     "SeqGNNComm": create_seq_gnn_comm_agent_group,
@@ -254,8 +300,9 @@ registered_agent_groups = {
     "G2ANet": create_g2anet_agent_group,
     "Random": create_random_agent_group,
     "MAgentPrey": create_magent_prey_agent_group,
-    "MAgentBattle": create_magent_battle_agent_group
+    "MAgentBattle": create_magent_battle_agent_group,
 }
+
 
 class AgentGroupConfig(object):
     def __init__(self, **kwargs):

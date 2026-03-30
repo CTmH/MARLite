@@ -2,14 +2,23 @@
 from typing import Dict, List, Any, Optional
 import numpy as np
 import torch
+import torch.nn as nn
 
 
-class AgentGroup(object):
-    """Base class for managing a group of agents in a multi-agent reinforcement learning system."""
+class AgentGroup(nn.Module):
+    """Base class for managing a group of agents in a multi-agent reinforcement learning system.
+
+    This class inherits from nn.Module, enabling direct use of nn.Module's parameter
+    management, device handling, and state_dict/load_state_dict functionality.
+    Optimizer management is handled by the Trainer class instead of within AgentGroup.
+    """
+
+    def __init__(self):
+        super().__init__()
 
     def forward(
         self,
-        observations: Dict[str, np.ndarray],
+        observations: torch.Tensor,
         traj_padding_mask: torch.Tensor,
         alive_mask: torch.Tensor,
     ) -> Dict[str, Any]:
@@ -51,15 +60,12 @@ class AgentGroup(object):
         """
         raise NotImplementedError
 
-    def set_agent_group_params(
-        self, model_params: Dict[str, dict], feature_extractor_params: Dict[str, dict]
-    ) -> None:
+    def set_agent_group_params(self, params: Dict[str, dict]) -> "AgentGroup":
         """
         Set parameters for the agent group.
 
         Args:
-            model_params: Parameters for the main model
-            feature_extractor_params: Parameters for the feature extractor
+            params: Dictionary containing model and feature extractor parameters
         """
         raise NotImplementedError
 
@@ -69,111 +75,6 @@ class AgentGroup(object):
 
         Returns:
             Dictionary containing model and feature extractor parameters
-        """
-        raise NotImplementedError
-
-    def parameters(self):
-        """
-        Get an iterator over all trainable parameters in the agent group.
-
-        Returns:
-            Iterator over torch.nn.Parameter objects
-        """
-        params_to_optimize = getattr(self, "params_to_optimize", None)
-        if params_to_optimize:
-            for param_group in params_to_optimize:
-                for param in param_group["params"]:
-                    yield param
-        else:
-            return iter([])
-
-    def zero_grad(self) -> "AgentGroup":
-        """
-        Zero gradients for all parameters in the agent group.
-
-        Returns:
-            Self reference for method chaining
-        """
-        raise NotImplementedError
-
-    def step(self) -> "AgentGroup":
-        """
-        Perform one training step.
-
-        Returns:
-            Self reference for method chaining
-        """
-        raise NotImplementedError
-
-    def lr_scheduler_step(self, reward) -> "AgentGroup":
-        """
-        Perform a learning rate scheduler step based on epoch and reward.
-
-        This method is typically called at the end of each training epoch to adjust
-        the learning rate according to a predefined schedule or performance metric.
-
-        Args:
-            epoch: Current training epoch number
-            reward: Reward signal used for adjusting the learning rate, often representing
-                   the performance of the agent group in the current epoch
-
-        """
-        raise NotImplementedError
-
-    def to(self, device: str) -> "AgentGroup":
-        """
-        Move all tensors to specified device.
-
-        Args:
-            device: Target device (e.g., 'cuda', 'cpu')
-
-        Returns:
-            Self reference for method chaining
-        """
-        raise NotImplementedError
-
-    def eval(self) -> "AgentGroup":
-        """
-        Set the agent group to evaluation mode.
-
-        Returns:
-            Self reference for method chaining
-        """
-        raise NotImplementedError
-
-    def train(self) -> "AgentGroup":
-        """
-        Set the agent group to training mode.
-
-        Returns:
-            Self reference for method chaining
-        """
-        raise NotImplementedError
-
-    def share_memory(self) -> "AgentGroup":
-        """
-        Share memory between processes.
-
-        Returns:
-            Self reference for method chaining
-        """
-        raise NotImplementedError
-
-    def wrap_data_parallel(self) -> "AgentGroup":
-        """
-        Wrap the agent group in data parallelism.
-
-        Returns:
-            Self reference for method chaining
-        """
-        raise NotImplementedError
-
-    def unwrap_data_parallel(self) -> "AgentGroup":
-        """
-        Unwrap the agent group from data parallelism.
-
-        Returns:
-            Self reference for method chaining
         """
         raise NotImplementedError
 
@@ -195,15 +96,6 @@ class AgentGroup(object):
 
         Args:
             path: Path to load parameters from
-
-        Returns:
-            Self reference for method chaining
-        """
-        raise NotImplementedError
-
-    def compile_models(self) -> "AgentGroup":
-        """
-        Compile models for improved performance.
 
         Returns:
             Self reference for method chaining

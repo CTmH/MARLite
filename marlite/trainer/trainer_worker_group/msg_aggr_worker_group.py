@@ -30,7 +30,7 @@ class MsgAggrWorkerGroup(BaseWorkerGroup):
         agent_group_config,
         critic_config,
         critic_optimizer_config,
-        agent_group_optimizer_config,
+        agent_optimizer_config,
         gamma: float = 0.9,
         warmup_epochs: int = 0,
         msg_aggr_weight: float = 1.0,
@@ -45,7 +45,7 @@ class MsgAggrWorkerGroup(BaseWorkerGroup):
             agent_group_config: Configuration for agent group
             critic_config: Configuration for critic
             critic_optimizer_config: Configuration for critic optimizer
-            agent_group_optimizer_config: Configuration for agent group optimizer
+            agent_optimizer_config: Configuration for agent group optimizer
             gamma: Discount factor
             warmup_epochs: Number of warmup epochs before message aggregation loss
             msg_aggr_weight: Weight for message aggregation loss
@@ -55,7 +55,7 @@ class MsgAggrWorkerGroup(BaseWorkerGroup):
         self.agent_group_config = agent_group_config
         self.critic_config = critic_config
         self.critic_optimizer_config = critic_optimizer_config
-        self.agent_group_optimizer_config = agent_group_optimizer_config
+        self.agent_optimizer_config = agent_optimizer_config
         self.gamma = gamma
         self.warmup_epochs = warmup_epochs
         self.msg_aggr_weight = msg_aggr_weight
@@ -80,5 +80,5 @@ class MsgAggrWorkerGroup(BaseWorkerGroup):
         kwargs["agent_group_config"] = self.agent_group_config
         kwargs["critic_config"] = self.critic_config
         kwargs["critic_optimizer_config"] = self.critic_optimizer_config
-        kwargs["agent_group_optimizer_config"] = self.agent_group_optimizer_config
+        kwargs["agent_optimizer_config"] = self.agent_optimizer_config
         return kwargs

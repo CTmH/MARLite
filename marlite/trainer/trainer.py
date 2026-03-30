@@ -69,6 +69,7 @@ class Trainer:
         epsilon_scheduler: Scheduler,
         sample_ratio_scheduler: Scheduler,
         critic_optimizer_config: OptimizerConfig,
+        agent_optimizer_config: OptimizerConfig,
         lr_scheduler_conf: LRSchedulerConfig,
         rolloutmanager_config: RolloutManagerConfig,
         replaybuffer_config: ReplayBufferConfig,
@@ -86,6 +87,7 @@ class Trainer:
     ):
         self.env_config = env_config
         self.critic_config = critic_config
+        self.agent_optimizer_config = agent_optimizer_config
         self.sample_ratio = sample_ratio_scheduler
         self.epsilon = epsilon_scheduler
         self.eval_epsilon = eval_epsilon
@@ -125,10 +127,19 @@ class Trainer:
         self.optimizer = self.critic_optimizer_config.get_optimizer(
             self.eval_critic.parameters()
         )
+
+        self.agent_optimizer = self.agent_optimizer_config.get_optimizer(
+            self.eval_agent_group.parameters()
+        )
+
         if lr_scheduler_conf:
             self.lr_scheduler = self.lr_scheduler_conf.get_lr_scheduler(self.optimizer)
+            self.agent_lr_scheduler = self.lr_scheduler_conf.get_lr_scheduler(
+                self.agent_optimizer
+            )
         else:
             self.lr_scheduler = None
+            self.agent_lr_scheduler = None
 
         # Work directory
         self.workdir = workdir
@@ -167,12 +178,12 @@ class Trainer:
         self.compile_models = compile_models
         if self.compile_models:
             logging.info(f"Compiling models...")
-            self.eval_agent_group = (
-                self.eval_agent_group.to(self.train_device).compile_models().to("cpu")
-            )
-            self.target_agent_group = (
-                self.target_agent_group.to(self.train_device).compile_models().to("cpu")
-            )
+            self.eval_agent_group = torch.compile(
+                self.eval_agent_group.to(self.train_device)
+            ).to("cpu")
+            self.target_agent_group = torch.compile(
+                self.target_agent_group.to(self.train_device)
+            ).to("cpu")
             self.eval_critic = torch.compile(self.eval_critic.to(self.train_device)).to(
                 "cpu"
             )
@@ -357,7 +368,7 @@ class Trainer:
             sample_size = min(sample_size, len(self.replaybuffer.buffer))
 
             # Learn and update eval model
-            agent_group_lr = self.eval_agent_group.optimizer.param_groups[0]["lr"]
+            agent_group_lr = self.agent_optimizer.param_groups[0]["lr"]
             critic_lr = self.optimizer.param_groups[0]["lr"]
             logging.info(
                 f"Epoch {epoch}: Batch size: {batch_size}, Critic learning rate: {critic_lr:.8f}, Agent learning rate: {agent_group_lr:.8f}"
@@ -397,7 +408,13 @@ class Trainer:
                 self.lr_scheduler.step(first_metric)
             elif isinstance(self.lr_scheduler, torch.optim.lr_scheduler.LRScheduler):
                 self.lr_scheduler.step()
-            self.eval_agent_group.lr_scheduler_step(first_metric)
+            if self.agent_lr_scheduler:
+                if isinstance(
+                    self.agent_lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau
+                ):
+                    self.agent_lr_scheduler.step(first_metric)
+                else:
+                    self.agent_lr_scheduler.step()
 
             cache_params = []
             update_best = []

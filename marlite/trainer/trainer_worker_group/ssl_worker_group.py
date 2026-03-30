@@ -30,7 +30,7 @@ class SSLWorkerGroup(BaseWorkerGroup):
         ssl_model_config,
         agent_group_config,
         ssl_optimizer_config,
-        agent_group_optimizer_config,
+        agent_optimizer_config,
         reconstruction_loss=None,
         kl_divergence_weight: float = 1.0,
         init_method: str = None,
@@ -43,7 +43,7 @@ class SSLWorkerGroup(BaseWorkerGroup):
             ssl_model_config: Configuration for SSL model
             agent_group_config: Configuration for agent group
             ssl_optimizer_config: Configuration for SSL optimizer
-            agent_group_optimizer_config: Configuration for agent group optimizer
+            agent_optimizer_config: Configuration for agent group optimizer
             reconstruction_loss: Loss function for reconstruction
             kl_divergence_weight: Weight for KL divergence loss
             init_method: URL for distributed initialization
@@ -51,7 +51,7 @@ class SSLWorkerGroup(BaseWorkerGroup):
         self.ssl_model_config = ssl_model_config
         self.agent_group_config = agent_group_config
         self.ssl_optimizer_config = ssl_optimizer_config
-        self.agent_group_optimizer_config = agent_group_optimizer_config
+        self.agent_optimizer_config = agent_optimizer_config
         self.reconstruction_loss = reconstruction_loss
         self.kl_divergence_weight = kl_divergence_weight
 
@@ -71,7 +71,7 @@ class SSLWorkerGroup(BaseWorkerGroup):
         kwargs["ssl_model_config"] = self.ssl_model_config
         kwargs["agent_group_config"] = self.agent_group_config
         kwargs["ssl_optimizer_config"] = self.ssl_optimizer_config
-        kwargs["agent_group_optimizer_config"] = self.agent_group_optimizer_config
+        kwargs["agent_optimizer_config"] = self.agent_optimizer_config
         kwargs["reconstruction_loss"] = self.reconstruction_loss
         kwargs["kl_divergence_weight"] = self.kl_divergence_weight
         return kwargs

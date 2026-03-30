@@ -33,7 +33,7 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
             agent_group_config=self.agent_group_config,
             critic_config=self.critic_config,
             critic_optimizer_config=self.critic_optimizer_config,
-            agent_group_optimizer_config=self.eval_agent_group.optimizer,
+            agent_optimizer_config=self.agent_optimizer_config,
             gamma=self.gamma,
         )
 
@@ -47,7 +47,23 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
             ssl_model_config=self.ssl_model_config,
             agent_group_config=self.agent_group_config,
             ssl_optimizer_config=self.ssl_optimizer_config,
-            agent_group_optimizer_config=self.eval_agent_group.optimizer,
+            agent_optimizer_config=self.agent_optimizer_config,
+            reconstruction_loss=self.reconstruction_loss,
+            kl_divergence_weight=self.kl_divergence_weight,
+            data_constructor=self.data_constructor,
+        )
+
+    def _create_ssl_worker_group(self):
+        """Create VAESSLWorkerGroup for multi-GPU SSL training."""
+        if not self.use_multi_gpu:
+            return None
+
+        return VAESSLWorkerGroup(
+            device_ids=list(range(len(self.device_list))),
+            ssl_model_config=self.ssl_model_config,
+            agent_group_config=self.agent_group_config,
+            ssl_optimizer_config=self.ssl_optimizer_config,
+            agent_optimizer_config=self.agent_optimizer_config,
             reconstruction_loss=self.reconstruction_loss,
             kl_divergence_weight=self.kl_divergence_weight,
             data_constructor=self.data_constructor,
@@ -153,15 +169,18 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
                         reconstruction_loss + self.kl_divergence_weight * kl_divergence
                     )
 
-                    self.eval_agent_group.zero_grad()
+                    self.agent_optimizer.zero_grad()
                     self.ssl_model.zero_grad()
 
                     vae_loss.backward()
                     torch.nn.utils.clip_grad_norm_(
                         list(self.ssl_model.parameters()), max_norm=5.0
                     )
+                    torch.nn.utils.clip_grad_norm_(
+                        self.eval_agent_group.parameters(), max_norm=5.0
+                    )
                     self.ssl_optimizer.step()
-                    self.eval_agent_group.step()
+                    self.agent_optimizer.step()
 
                     total_loss += vae_loss.detach().cpu().item()
                     total_batches += 1

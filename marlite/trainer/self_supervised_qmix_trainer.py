@@ -211,7 +211,7 @@ class SelfSupervisedQMIXTrainer(Trainer):
                 sample_size = round(self.sample_ratio.get_value(epoch))
             sample_size = min(sample_size, len(self.replaybuffer.buffer))
 
-            agent_group_lr = self.eval_agent_group.optimizer.param_groups[0]["lr"]
+            agent_group_lr = self.agent_optimizer.param_groups[0]["lr"]
             critic_lr = self.optimizer.param_groups[0]["lr"]
             ssl_lr = self.ssl_optimizer.param_groups[0]["lr"]
             logging.info(
@@ -275,7 +275,13 @@ class SelfSupervisedQMIXTrainer(Trainer):
             ):
                 self.ssl_lr_scheduler.step()
 
-            self.eval_agent_group.lr_scheduler_step(first_metric)
+            if self.agent_lr_scheduler:
+                if isinstance(
+                    self.agent_lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau
+                ):
+                    self.agent_lr_scheduler.step(first_metric)
+                else:
+                    self.agent_lr_scheduler.step()
 
             cache_params = []
             update_best = []

@@ -10,7 +10,7 @@ class RandomAgentGroup(AgentGroup):
     def __init__(self, agents: Dict[str, str]) -> None:
         self.agents = list(agents.keys())
 
-    def forward(self, observations: Dict[str, np.ndarray]) -> Dict[str, Any]:
+    def forward(self, observations) -> Dict[str, Any]:
         return {'q_val': None}
 
     def act(
