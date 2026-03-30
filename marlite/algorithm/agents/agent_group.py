@@ -72,6 +72,21 @@ class AgentGroup(object):
         """
         raise NotImplementedError
 
+    def parameters(self):
+        """
+        Get an iterator over all trainable parameters in the agent group.
+
+        Returns:
+            Iterator over torch.nn.Parameter objects
+        """
+        params_to_optimize = getattr(self, "params_to_optimize", None)
+        if params_to_optimize:
+            for param_group in params_to_optimize:
+                for param in param_group["params"]:
+                    yield param
+        else:
+            return iter([])
+
     def zero_grad(self) -> "AgentGroup":
         """
         Zero gradients for all parameters in the agent group.
