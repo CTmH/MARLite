@@ -19,10 +19,8 @@ class GraphAgentGroup(AgentGroup):
         decoder_configs: Dict[str, ModelConfig],
         graph_builder_config: GraphBuilderConfig,
         graph_model_config: ModelConfig,
-        device="cpu",
     ) -> None:
         super().__init__()
-        self.device = device
         self.agent_model_dict = agent_model_dict
 
         self.feature_extractors = nn.ModuleDict()

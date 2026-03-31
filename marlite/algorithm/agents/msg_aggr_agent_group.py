@@ -18,10 +18,8 @@ class MsgAggrAgentGroup(AgentGroup):
         encoder_configs: Dict[str, ModelConfig],
         decoder_configs: Dict[str, ModelConfig],
         aggr_model_config: ModelConfig,
-        device="cpu",
     ) -> None:
         super().__init__()
-        self.device = device
         self.agent_model_dict = agent_model_dict
 
         self.feature_extractors = nn.ModuleDict()
@@ -373,7 +371,6 @@ class DualPathBasedMsgAggrAgentGroup(MsgAggrAgentGroup):
         decoder_configs: Dict[str, ModelConfig],
         aggr_model_config: ModelConfig,
         enable_rl_grad_to_msg_aggr: bool = True,
-        device="cpu",
     ) -> None:
         super().__init__(
             agent_model_dict=agent_model_dict,
@@ -381,7 +378,6 @@ class DualPathBasedMsgAggrAgentGroup(MsgAggrAgentGroup):
             encoder_configs=encoder_configs,
             decoder_configs=decoder_configs,
             aggr_model_config=aggr_model_config,
-            device=device,
         )
 
         self.msg_feature_extractors = nn.ModuleDict()
@@ -548,7 +544,6 @@ class ProbObsMsgAggrAgentGroup(MsgAggrAgentGroup):
         decoder_configs: Dict[str, ModelConfig],
         aggr_model_config: ModelConfig,
         deterministic_eval: bool = True,
-        device="cpu",
     ) -> None:
         super().__init__(
             agent_model_dict=agent_model_dict,
@@ -556,7 +551,6 @@ class ProbObsMsgAggrAgentGroup(MsgAggrAgentGroup):
             encoder_configs=encoder_configs,
             decoder_configs=decoder_configs,
             aggr_model_config=aggr_model_config,
-            device=device,
         )
         self.deterministic_eval = deterministic_eval
 
@@ -608,7 +602,6 @@ class ProbSeqMsgAggrAgentGroup(MsgAggrAgentGroup):
         decoder_configs: Dict[str, ModelConfig],
         aggr_model_config: ModelConfig,
         deterministic_eval: bool = True,
-        device="cpu",
     ) -> None:
         super().__init__(
             agent_model_dict=agent_model_dict,
@@ -616,7 +609,6 @@ class ProbSeqMsgAggrAgentGroup(MsgAggrAgentGroup):
             encoder_configs=encoder_configs,
             decoder_configs=decoder_configs,
             aggr_model_config=aggr_model_config,
-            device=device,
         )
         self.deterministic_eval = deterministic_eval
 
@@ -669,7 +661,6 @@ class DualPathObsMsgAggrAgentGroup(DualPathBasedMsgAggrAgentGroup):
         decoder_configs: Dict[str, ModelConfig],
         aggr_model_config: ModelConfig,
         enable_rl_grad_to_msg_aggr: bool = True,
-        device="cpu",
     ) -> None:
         super().__init__(
             agent_model_dict=agent_model_dict,
@@ -678,7 +669,6 @@ class DualPathObsMsgAggrAgentGroup(DualPathBasedMsgAggrAgentGroup):
             decoder_configs=decoder_configs,
             aggr_model_config=aggr_model_config,
             enable_rl_grad_to_msg_aggr=enable_rl_grad_to_msg_aggr,
-            device=device,
         )
 
         self.msg_feature_extractors = nn.ModuleDict()
@@ -747,7 +737,6 @@ class DualPathProbObsMsgAggrAgentGroup(DualPathObsMsgAggrAgentGroup):
         aggr_model_config: ModelConfig,
         enable_rl_grad_to_msg_aggr: bool = True,
         deterministic_eval: bool = True,
-        device="cpu",
     ) -> None:
         super().__init__(
             agent_model_dict=agent_model_dict,
@@ -757,7 +746,6 @@ class DualPathProbObsMsgAggrAgentGroup(DualPathObsMsgAggrAgentGroup):
             decoder_configs=decoder_configs,
             aggr_model_config=aggr_model_config,
             enable_rl_grad_to_msg_aggr=enable_rl_grad_to_msg_aggr,
-            device=device,
         )
         self.deterministic_eval = deterministic_eval
 

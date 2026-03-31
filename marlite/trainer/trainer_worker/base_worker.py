@@ -188,6 +188,7 @@ class BaseWorker:
         param_queue,
         data_queue,
         loss_queue,
+        ack_queue=None,
     ) -> bool:
         """
         Handle a command from the main process.
@@ -195,8 +196,9 @@ class BaseWorker:
         Args:
             cmd: Command string
             param_queue: Queue for parameter exchange
-            data_queue: Queue for training data
+            data_queue: Queue for receiving training data
             loss_queue: Queue for returning loss values
+            ack_queue: Queue for sending ACK signals back to main process
 
         Returns:
             True if should continue, False if should stop
@@ -208,7 +210,7 @@ class BaseWorker:
         elif cmd == "SYNC_FROM_MAIN":
             shared_memory = param_queue.get()
             self.sync_params_from_shared_memory(shared_memory)
-            param_queue.put("ACK")
+            ack_queue.put("ACK")
 
         elif cmd == "BROADCAST":
             shared_memory = param_queue.get()

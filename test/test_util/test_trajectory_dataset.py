@@ -56,14 +56,10 @@ class TestTrajectoryDataset(unittest.TestCase):
             "RNN1": ModelConfig(model_type="Identity"),
         }
 
-        self.optimizer_config = OptimizerConfig(type="Adam", lr=0.001)
-
         # Initialize QMIXAgents
         self.agent_group = QMIXAgentGroup(agent_model_dict=self.agents,
                                           model_configs=self.model_configs,
-                                          feature_extractors_configs=self.feature_extractor_configs,
-                                          optimizer_config=self.optimizer_config,
-                                          device='cpu')
+                                          feature_extractors_configs=self.feature_extractor_configs)
         self.episode_limit=10
         self.epsilon=0.5
         self.n_episodes = 5
@@ -136,14 +132,10 @@ class TestTrajectoryDataloader(unittest.TestCase):
             "RNN1": ModelConfig(model_type="Identity"),
         }
 
-        self.optimizer_config = OptimizerConfig(type="Adam", lr=0.001)
-
         # Initialize QMIXAgents
         self.agent_group = QMIXAgentGroup(agent_model_dict=self.agents,
                                           model_configs=self.model_configs,
-                                          feature_extractors_configs=self.feature_extractor_configs,
-                                          optimizer_config=self.optimizer_config,
-                                          device='cpu')
+                                          feature_extractors_configs=self.feature_extractor_configs)
 
         self.episode_limit=10
         self.epsilon=0.5

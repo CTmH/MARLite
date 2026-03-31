@@ -182,10 +182,9 @@ class SelfSupervisedQMIXTrainer(Trainer):
         self.target_agent_group.load_state_dict(
             deepcopy(self.eval_agent_group.state_dict())
         )
-        critic_params = deepcopy(self.eval_critic.state_dict())
-        self.target_critic.load_state_dict(critic_params)
-        ssl_model_params = deepcopy(self.ssl_model.state_dict())
-        self.target_critic.load_state_dict(ssl_model_params)
+        self.target_critic.load_state_dict(
+            deepcopy(self.eval_critic.state_dict())
+        )
         return self
 
     def train(

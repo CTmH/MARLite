@@ -268,8 +268,8 @@ class VAESSLWorker(SSLWorker):
         vae_loss = reconstruction_loss + self.kl_divergence_weight * kl_divergence
 
         # Backward pass
-        self.eval_agent_group.zero_grad()
-        self.ssl_model.zero_grad()
+        self.agent_optimizer.zero_grad()
+        self.ssl_optimizer.zero_grad()
         vae_loss.backward()
 
         # Synchronize gradients
@@ -278,7 +278,7 @@ class VAESSLWorker(SSLWorker):
         # Clip and optimize
         torch.nn.utils.clip_grad_norm_(list(self.ssl_model.parameters()), max_norm=5.0)
         self.ssl_optimizer.step()
-        self.eval_agent_group.step()
+        self.agent_optimizer.step()
 
         return vae_loss.detach().cpu().item()
 
@@ -301,10 +301,12 @@ class VAESSLWorker(SSLWorker):
         else:
             return self.reconstruction_loss(pred_set, target_set)
 
-    def handle_command(self, cmd, param_queue, data_queue, loss_queue):
+    def handle_command(self, cmd, param_queue, data_queue, loss_queue, ack_queue):
         if cmd == "SSL_TRAIN_STEP":
             batch = data_queue.get()
             loss = self.ssl_train_step(batch)
             loss_queue.put(loss)
             return True
-        return super().handle_command(cmd, param_queue, data_queue, loss_queue)
+        return super().handle_command(
+            cmd, param_queue, data_queue, loss_queue, ack_queue
+        )

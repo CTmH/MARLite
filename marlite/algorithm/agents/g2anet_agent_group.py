@@ -15,7 +15,6 @@ class G2ANetAgentGroup(GraphAgentGroup):
         decoder_configs: Dict[str, ModelConfig],
         graph_builder_config: GraphBuilderConfig,
         graph_model_config: ModelConfig,
-        device="cpu",
     ) -> None:
         super().__init__(
             agent_model_dict,
@@ -24,7 +23,6 @@ class G2ANetAgentGroup(GraphAgentGroup):
             decoder_configs,
             graph_builder_config,
             graph_model_config,
-            device=device,
         )
 
     def forward(

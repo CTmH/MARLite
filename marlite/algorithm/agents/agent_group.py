@@ -16,6 +16,13 @@ class AgentGroup(nn.Module):
     def __init__(self):
         super().__init__()
 
+    @property
+    def device(self):
+        try:
+            return next(self.parameters()).device
+        except StopIteration:
+            return torch.device("cpu")
+
     def forward(
         self,
         observations: torch.Tensor,

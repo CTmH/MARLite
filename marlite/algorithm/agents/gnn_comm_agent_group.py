@@ -18,7 +18,6 @@ class ObsGNNCommAgentGroup(GraphAgentGroup):
         decoder_configs: Dict[str, ModelConfig],
         graph_builder_config: GraphBuilderConfig,
         graph_model_config: ModelConfig,
-        device="cpu",
     ) -> None:
         super().__init__(
             agent_model_dict,
@@ -27,7 +26,6 @@ class ObsGNNCommAgentGroup(GraphAgentGroup):
             decoder_configs,
             graph_builder_config,
             graph_model_config,
-            device=device,
         )
 
     def _compute_local_state_estimates(self, msg, edge_indices):
@@ -81,7 +79,6 @@ class SeqGNNCommAgentGroup(GraphAgentGroup):
         decoder_configs: Dict[str, ModelConfig],
         graph_builder_config: GraphBuilderConfig,
         graph_model_config: ModelConfig,
-        device="cpu",
     ) -> None:
         super().__init__(
             agent_model_dict,
@@ -90,7 +87,6 @@ class SeqGNNCommAgentGroup(GraphAgentGroup):
             decoder_configs,
             graph_builder_config,
             graph_model_config,
-            device=device,
         )
 
     def _compute_local_state_estimates(self, msg, edge_indices):
@@ -151,7 +147,6 @@ class ProbObsGNNCommAgentGroup(ObsGNNCommAgentGroup):
         graph_builder_config: GraphBuilderConfig,
         graph_model_config: ModelConfig,
         deterministic_eval: bool = True,
-        device="cpu",
     ) -> None:
         super().__init__(
             agent_model_dict=agent_model_dict,
@@ -160,7 +155,6 @@ class ProbObsGNNCommAgentGroup(ObsGNNCommAgentGroup):
             decoder_configs=decoder_configs,
             graph_builder_config=graph_builder_config,
             graph_model_config=graph_model_config,
-            device=device,
         )
         self.deterministic_eval = deterministic_eval
 
@@ -227,7 +221,6 @@ class ProbSeqGNNCommAgentGroup(SeqGNNCommAgentGroup):
         graph_builder_config: GraphBuilderConfig,
         graph_model_config: ModelConfig,
         deterministic_eval: bool = True,
-        device="cpu",
     ) -> None:
         super().__init__(
             agent_model_dict=agent_model_dict,
@@ -236,7 +229,6 @@ class ProbSeqGNNCommAgentGroup(SeqGNNCommAgentGroup):
             decoder_configs=decoder_configs,
             graph_builder_config=graph_builder_config,
             graph_model_config=graph_model_config,
-            device=device,
         )
         self.deterministic_eval = deterministic_eval
 
@@ -305,7 +297,6 @@ class DualPathBasedGNNCommAgentGroup(GraphAgentGroup):
         graph_builder_config: GraphBuilderConfig,
         graph_model_config: ModelConfig,
         enable_rl_grad_to_msg_aggr: bool = True,
-        device="cpu",
     ) -> None:
         super().__init__(
             agent_model_dict=agent_model_dict,
@@ -314,7 +305,6 @@ class DualPathBasedGNNCommAgentGroup(GraphAgentGroup):
             decoder_configs=decoder_configs,
             graph_builder_config=graph_builder_config,
             graph_model_config=graph_model_config,
-            device=device,
         )
 
         self.msg_feature_extractors = nn.ModuleDict()
@@ -423,7 +413,6 @@ class DualPathObsGNNCommAgentGroup(DualPathBasedGNNCommAgentGroup):
         graph_builder_config: GraphBuilderConfig,
         graph_model_config: ModelConfig,
         enable_rl_grad_to_msg_aggr: bool = True,
-        device="cpu",
     ) -> None:
         super().__init__(
             agent_model_dict=agent_model_dict,
@@ -433,7 +422,6 @@ class DualPathObsGNNCommAgentGroup(DualPathBasedGNNCommAgentGroup):
             graph_builder_config=graph_builder_config,
             graph_model_config=graph_model_config,
             enable_rl_grad_to_msg_aggr=enable_rl_grad_to_msg_aggr,
-            device=device,
         )
 
         self.msg_feature_extractors = nn.ModuleDict()
@@ -502,7 +490,6 @@ class DualPathProbObsGNNCommAgentGroup(DualPathObsGNNCommAgentGroup):
         graph_model_config: ModelConfig,
         enable_rl_grad_to_msg_aggr: bool = True,
         deterministic_eval: bool = True,
-        device="cpu",
     ) -> None:
         super().__init__(
             agent_model_dict=agent_model_dict,
@@ -513,7 +500,6 @@ class DualPathProbObsGNNCommAgentGroup(DualPathObsGNNCommAgentGroup):
             graph_builder_config=graph_builder_config,
             graph_model_config=graph_model_config,
             enable_rl_grad_to_msg_aggr=enable_rl_grad_to_msg_aggr,
-            device=device,
         )
         self.deterministic_eval = deterministic_eval
 

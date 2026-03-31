@@ -13,10 +13,8 @@ class QMIXAgentGroup(AgentGroup):
         agent_model_dict: Dict[str, str],
         model_configs: Dict[str, ModelConfig],
         feature_extractors_configs: Dict[str, ModelConfig],
-        device="cpu",
     ) -> None:
         super().__init__()
-        self.device = device
         self.agent_model_dict = agent_model_dict
 
         self.models = nn.ModuleDict()

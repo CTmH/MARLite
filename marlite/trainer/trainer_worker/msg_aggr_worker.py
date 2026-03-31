@@ -166,7 +166,7 @@ class MsgAggrWorker(BaseWorker):
         with torch.no_grad():
             self.target_agent_group.eval()
             next_observations = torch.transpose(next_observations, 1, 2).to(self.device)
-            ret_next = self.eval_agent_group.forward(
+            ret_next = self.target_agent_group.forward(
                 next_observations,
                 next_timestep_padding_mask,
                 next_alive_mask[:, -1, :],

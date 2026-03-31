@@ -203,6 +203,13 @@ class TestQMixTrainer(unittest.TestCase):
 
     def test_distributed_data_parallel(self):
         """Test DistributedDataParallel training with multiple devices."""
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA not available, skipping multi-GPU test")
+
+        gpu_count = torch.cuda.device_count()
+        if gpu_count < 2:
+            self.skipTest(f"Need at least 2 GPUs for multi-GPU test, found {gpu_count}")
+
         self.config_path = "test/config/qmix_default.yaml"
         with open(self.config_path, "r") as file:
             self.config = yaml.safe_load(file)
@@ -211,7 +218,8 @@ class TestQMixTrainer(unittest.TestCase):
         self.config["rollout_config"]["n_eval_episodes"] = 2
         self.config["rollout_config"]["episode_limit"] = 2
         self.config["replaybuffer_config"]["capacity"] = 2
-        self.config["trainer_config"]["train_device"] = ["cuda:0"]
+        device_list = [f"cuda:{i}" for i in range(gpu_count)]
+        self.config["trainer_config"]["train_device"] = device_list
         self.trainer_config = TrainerConfig(self.config)
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -221,6 +229,12 @@ class TestQMixTrainer(unittest.TestCase):
             self.trainer.checkpointdir = os.path.join(
                 self.trainer.workdir, "checkpoints"
             )
+
+            self.assertTrue(self.trainer.use_multi_gpu)
+            self.assertEqual(len(self.trainer.device_list), gpu_count)
+            self.assertIsNotNone(self.trainer.worker_group)
+            self.assertEqual(self.trainer.worker_group.world_size, gpu_count)
+
             origin_critic_params = deepcopy(self.trainer.target_critic.state_dict())
             self.trainer.collect_experience(0.9)
             self.trainer.learn(sample_size=32, batch_size=8, times=1)

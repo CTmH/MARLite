@@ -83,6 +83,7 @@ def worker_loop(
     data_queue,
     loss_queue,
     cmd_queue,
+    ack_queue,
     ready_event,
 ):
     """
@@ -107,6 +108,7 @@ def worker_loop(
         data_queue: Queue for receiving training data
         loss_queue: Queue for sending loss values back to main process
         cmd_queue: Queue for receiving commands
+        ack_queue: Queue for sending ACK signals back to main process
         ready_event: Event to signal worker is ready
     """
     # Create worker instance
@@ -121,7 +123,7 @@ def worker_loop(
 
         # Handle command via worker's handle_command method
         should_continue = worker.handle_command(
-            cmd, param_queue, data_queue, loss_queue
+            cmd, param_queue, data_queue, loss_queue, ack_queue
         )
 
         if not should_continue:
@@ -220,10 +222,12 @@ class BaseWorkerGroup(ABC):
         self.cmd_queues = []
         self.param_queues = []
         self.data_queues = []
+        self.ack_queues = []
         for _ in range(self.world_size):
             self.cmd_queues.append(self.mp_ctx.Queue())
             self.param_queues.append(self.mp_ctx.Queue())
             self.data_queues.append(self.mp_ctx.Queue())
+            self.ack_queues.append(self.mp_ctx.Queue())
 
         worker_class = self._get_worker_class()
 
@@ -257,6 +261,7 @@ class BaseWorkerGroup(ABC):
                     self.data_queues[i],
                     self.loss_queue,
                     self.cmd_queues[i],
+                    self.ack_queues[i],
                     ready_event,
                 ),
             )
@@ -289,7 +294,7 @@ class BaseWorkerGroup(ABC):
 
         if blocking:
             for i in range(self.world_size):
-                ack = self.param_queues[i].get()
+                ack = self.ack_queues[i].get()
                 if ack != "ACK":
                     raise RuntimeError(f"Worker {i}: Expected ACK, got {ack}")
 
@@ -346,8 +351,15 @@ class BaseWorkerGroup(ABC):
             loss = self.loss_queue.get()
             losses.append(loss)
 
-        # Synchronize updated parameters across workers
-        self.broadcast_params()
+        # Get updated parameters from worker 0 (which has the optimized parameters)
+        self.cmd_queues[0].put("SYNC_TO_MAIN")
+        updated_params = self.param_queues[0].get()
+        updated_params_cpu = _dict_to_cpu(updated_params)
+
+        # Broadcast updated parameters from worker 0 to all workers and main process
+        for i in range(self.world_size):
+            self.cmd_queues[i].put("BROADCAST")
+            self.param_queues[i].put(updated_params_cpu)
 
         return sum(losses) / len(losses)
 

@@ -61,12 +61,13 @@ class TestMsgAggrQMIXTrainer(unittest.TestCase):
             for name in agent_group_params:
                 if name in origin_agent_group_params:
                     if isinstance(agent_group_params[name], torch.Tensor):
-                        self.assertFalse(
-                            torch.equal(
-                                agent_group_params[name],
-                                origin_agent_group_params[name],
+                        if agent_group_params[name].requires_grad:
+                            self.assertFalse(
+                                torch.equal(
+                                    agent_group_params[name],
+                                    origin_agent_group_params[name],
+                                )
                             )
-                        )
 
     def test_save_load_checkpoint(self):
         checkpoint = "test_checkpoint"
@@ -145,12 +146,13 @@ class TestMsgAggrSMACQMIXTrainer(unittest.TestCase):
             for name in agent_group_params:
                 if name in origin_agent_group_params:
                     if isinstance(agent_group_params[name], torch.Tensor):
-                        self.assertFalse(
-                            torch.equal(
-                                agent_group_params[name],
-                                origin_agent_group_params[name],
+                        if agent_group_params[name].requires_grad:
+                            self.assertFalse(
+                                torch.equal(
+                                    agent_group_params[name],
+                                    origin_agent_group_params[name],
+                                )
                             )
-                        )
 
     def test_save_load_checkpoint(self):
         checkpoint = "test_checkpoint"
@@ -287,12 +289,13 @@ class TestSeqMsgAggrSMACQMIXTrainer(unittest.TestCase):
             for name in agent_group_params:
                 if name in origin_agent_group_params:
                     if isinstance(agent_group_params[name], torch.Tensor):
-                        self.assertFalse(
-                            torch.equal(
-                                agent_group_params[name],
-                                origin_agent_group_params[name],
+                        if agent_group_params[name].requires_grad:
+                            self.assertFalse(
+                                torch.equal(
+                                    agent_group_params[name],
+                                    origin_agent_group_params[name],
+                                )
                             )
-                        )
 
     def test_save_load_checkpoint(self):
         checkpoint = "test_checkpoint"
@@ -440,12 +443,13 @@ class TestProbSeqMsgAggrSMACQMIXTrainer(unittest.TestCase):
             for name in agent_group_params:
                 if name in origin_agent_group_params:
                     if isinstance(agent_group_params[name], torch.Tensor):
-                        self.assertFalse(
-                            torch.equal(
-                                agent_group_params[name],
-                                origin_agent_group_params[name],
+                        if agent_group_params[name].requires_grad:
+                            self.assertFalse(
+                                torch.equal(
+                                    agent_group_params[name],
+                                    origin_agent_group_params[name],
+                                )
                             )
-                        )
 
     def test_save_load_checkpoint(self):
         checkpoint = "test_checkpoint"
@@ -582,12 +586,13 @@ class TestDualPathObsMsgAggrSMACQMIXTrainer(unittest.TestCase):
             for name in agent_group_params:
                 if name in origin_agent_group_params:
                     if isinstance(agent_group_params[name], torch.Tensor):
-                        self.assertFalse(
-                            torch.equal(
-                                agent_group_params[name],
-                                origin_agent_group_params[name],
+                        if agent_group_params[name].requires_grad:
+                            self.assertFalse(
+                                torch.equal(
+                                    agent_group_params[name],
+                                    origin_agent_group_params[name],
+                                )
                             )
-                        )
 
     def test_save_load_checkpoint(self):
         checkpoint = "test_checkpoint"

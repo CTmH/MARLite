@@ -102,7 +102,7 @@ class SSLWorkerGroup(BaseWorkerGroup):
 
         if blocking:
             for i in range(self.world_size):
-                ack = self.param_queues[i].get()
+                ack = self.ack_queues[i].get()
                 if ack != "ACK":
                     raise RuntimeError(f"Worker {i}: Expected ACK, got {ack}")
 
