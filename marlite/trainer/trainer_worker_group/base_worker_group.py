@@ -24,14 +24,19 @@ def is_port_available(port: int) -> bool:
         return False
 
 
-def _dict_to_cpu(data: Any) -> Any:
+def _dict_to_cpu(data: Any, clone: bool = False) -> Any:
     """Recursively convert all tensors in a dict/list to CPU."""
     if isinstance(data, (torch.Tensor, torch.nn.Parameter)):
-        return data.detach().clone().cpu() if data.is_cuda else data
-    elif hasattr(data, "items"):  # Handle dict, OrderedDict, etc.
-        return {k: _dict_to_cpu(v) for k, v in data.items()}
+        if data.is_cuda:
+            return data.detach().clone().cpu()
+        elif clone:
+            return data.detach().clone()
+        else:
+            return data
+    elif hasattr(data, "items"):
+        return {k: _dict_to_cpu(v, clone) for k, v in data.items()}
     elif isinstance(data, (list, tuple)):
-        return type(data)(_dict_to_cpu(x) for x in data)
+        return type(data)(_dict_to_cpu(x, clone) for x in data)
     return data
 
 
@@ -50,12 +55,11 @@ def _slice_batch(batch: Dict[str, Any], num_slices: int) -> List[Dict[str, Any]]
 
     for key, value in batch.items():
         if isinstance(value, torch.Tensor):
-            # Slice tensor along batch dimension
             step = value.shape[0] // num_slices
             for i in range(num_slices):
                 slices[i][key] = value[
                     i * step : (i + 1) * step if i < num_slices - 1 else None
-                ]
+                ].clone()
         elif isinstance(value, (list, tuple)):
             # Slice list - divide indices evenly
             step = len(value) // num_slices
@@ -359,7 +363,7 @@ class BaseWorkerGroup(ABC):
         # Broadcast updated parameters from worker 0 to all workers and main process
         for i in range(self.world_size):
             self.cmd_queues[i].put("BROADCAST")
-            self.param_queues[i].put(updated_params_cpu)
+            self.param_queues[i].put(_dict_to_cpu(updated_params_cpu, clone=True))
 
         return sum(losses) / len(losses)
 

@@ -141,12 +141,18 @@ class BaseWorker:
         Args:
             shared_memory: Dictionary to store parameter data
         """
-        shared_memory["eval_agent_group"] = deepcopy(self.eval_agent_group.state_dict())
-        shared_memory["target_agent_group"] = deepcopy(
-            self.target_agent_group.state_dict()
-        )
-        shared_memory["eval_critic"] = self.eval_critic.state_dict()
-        shared_memory["target_critic"] = self.target_critic.state_dict()
+        shared_memory["eval_agent_group"] = {
+            k: v.clone() for k, v in self.eval_agent_group.state_dict().items()
+        }
+        shared_memory["target_agent_group"] = {
+            k: v.clone() for k, v in self.target_agent_group.state_dict().items()
+        }
+        shared_memory["eval_critic"] = {
+            k: v.clone() for k, v in self.eval_critic.state_dict().items()
+        }
+        shared_memory["target_critic"] = {
+            k: v.clone() for k, v in self.target_critic.state_dict().items()
+        }
 
     def reduce_gradients(self):
         """

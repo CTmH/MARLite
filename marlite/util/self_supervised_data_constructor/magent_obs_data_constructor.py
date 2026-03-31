@@ -1,134 +1,55 @@
 import numpy as np
 from typing import Optional, Tuple, List, Type, Any
 from concurrent.futures import ProcessPoolExecutor
+from multiprocessing import shared_memory
+import multiprocessing as mp
+import sys
+import os
 from marlite.util.self_supervised_data_constructor.self_supervised_data_constructor import (
     SelfSupervisedDataConstructor,
 )
-import numba
-from numba import jit
 
 
-@jit(nopython=True, cache=True)
 def remove_duplicates_numba(entities):
     """
-    Numba-accelerated function to remove duplicate rows from a 2D array.
+    Remove duplicate rows from a 2D array.
+    Pure numpy implementation using np.unique for O(n log n) complexity.
     """
     if entities.shape[0] == 0:
         return entities
 
-    # Use a simple approach to find unique rows
-    n_rows = entities.shape[0]
-    n_cols = entities.shape[1]
-
-    # Track which rows are unique
-    is_unique = np.ones(n_rows, dtype=numba.boolean)
-
-    for i in range(n_rows):
-        if is_unique[i]:  # Only check if this row hasn't been marked as duplicate yet
-            for j in range(i + 1, n_rows):
-                if is_unique[j]:
-                    # Only compare with rows that haven't been marked as duplicate
-                    equal = True
-                    for k in range(n_cols):
-                        if entities[i, k] != entities[j, k]:
-                            equal = False
-                            break
-                    if equal:
-                        is_unique[j] = False  # Mark as duplicate
-
-    # Count unique rows
-    unique_count = 0
-    for i in range(n_rows):
-        if is_unique[i]:
-            unique_count += 1
-
-    # Create result array
-    unique_entities = np.empty((unique_count, n_cols), dtype=entities.dtype)
-    out_idx = 0
-    for i in range(n_rows):
-        if is_unique[i]:
-            unique_entities[out_idx, :] = entities[i, :]
-            out_idx += 1
-
-    return unique_entities
+    return np.unique(entities, axis=0)
 
 
-@jit(nopython=True, cache=True)
 def get_alive_neighbors_numba(edge_indices_t, alive_agents, agent_idx):
     """
-    Numba-accelerated function to get neighbors for a specific agent.
+    Get neighbors for a specific agent using vectorized numpy operations.
+    O(m+n) complexity using np.isin for lookup.
     """
     source_agents = edge_indices_t[0]
     target_agents = edge_indices_t[1]
 
-    # Create mask for edges where both source and target are alive
-    alive_source_mask = np.zeros(len(source_agents), dtype=numba.boolean)
-    alive_target_mask = np.zeros(len(target_agents), dtype=numba.boolean)
+    alive_source_mask = np.isin(source_agents, alive_agents)
+    alive_target_mask = np.isin(target_agents, alive_agents)
+    valid_mask = alive_source_mask & alive_target_mask
 
-    for i in range(len(alive_agents)):
-        alive_agent = alive_agents[i]
-        for j in range(len(source_agents)):
-            if source_agents[j] == alive_agent:
-                alive_source_mask[j] = True
-        for j in range(len(target_agents)):
-            if target_agents[j] == alive_agent:
-                alive_target_mask[j] = True
+    filtered_sources = source_agents[valid_mask]
+    filtered_targets = target_agents[valid_mask]
 
-    valid_edge_mask = alive_source_mask & alive_target_mask
+    mask = filtered_targets == agent_idx
+    in_edge_sources = filtered_sources[mask]
 
-    # Count valid edges
-    valid_count = 0
-    for i in range(len(valid_edge_mask)):
-        if valid_edge_mask[i]:
-            valid_count += 1
-
-    # Filter the edge indices to only include valid edges
-    filtered_sources = np.empty(valid_count, dtype=source_agents.dtype)
-    filtered_targets = np.empty(valid_count, dtype=target_agents.dtype)
-
-    idx = 0
-    for i in range(len(valid_edge_mask)):
-        if valid_edge_mask[i]:
-            filtered_sources[idx] = source_agents[i]
-            filtered_targets[idx] = target_agents[i]
-            idx += 1
-
-    # Find all edges where this agent is the TARGET (i.e., j -> agent_idx)
-    in_edge_count = 0
-    for i in range(len(filtered_targets)):
-        if filtered_targets[i] == agent_idx:
-            in_edge_count += 1
-
-    in_edge_sources = np.empty(in_edge_count, dtype=source_agents.dtype)
-
-    idx = 0
-    for i in range(len(filtered_targets)):
-        if filtered_targets[i] == agent_idx:
-            in_edge_sources[idx] = filtered_sources[i]
-            idx += 1
-
-    # Remove duplicates and exclude self
-    if in_edge_count == 0:
+    if len(in_edge_sources) == 0:
         return np.empty(0, dtype=source_agents.dtype)
 
-    # Sort and remove duplicates
-    sorted_sources = np.sort(in_edge_sources)
-    unique_sources = np.empty(len(sorted_sources), dtype=sorted_sources.dtype)
-    unique_count = 0
-    prev_val = -1
-    for val in sorted_sources:
-        if val != prev_val and val != agent_idx:
-            unique_sources[unique_count] = val
-            unique_count += 1
-            prev_val = val
-
-    return unique_sources[:unique_count]
+    unique_sources = np.unique(in_edge_sources)
+    return unique_sources[unique_sources != agent_idx]
 
 
-@jit(nopython=True, cache=True)
 def sort_entities_by_distance_angle_numba(entities):
     """
-    Numba-accelerated function to sort entities by distance first, then by angle.
+    Sort entities by distance first, then by angle.
+    Pure numpy implementation using np.lexsort for O(n log n) complexity.
     Assumes entities have at least 2 features representing relative x, y coordinates.
 
     Args:
@@ -140,181 +61,181 @@ def sort_entities_by_distance_angle_numba(entities):
     if entities.shape[0] <= 1:
         return entities
 
-    n_rows = entities.shape[0]
-    feature_dim = entities.shape[1]
+    distances = np.sqrt(entities[:, 0] ** 2 + entities[:, 1] ** 2)
+    angles = np.arctan2(entities[:, 1], entities[:, 0])
 
-    # Calculate distance and angle for each entity
-    distances = np.empty(n_rows, dtype=np.float64)
-    angles = np.empty(n_rows, dtype=np.float64)
-
-    for i in range(n_rows):
-        rel_x = entities[i, 0]
-        rel_y = entities[i, 1]
-        distances[i] = np.sqrt(rel_x * rel_x + rel_y * rel_y)
-        angles[i] = np.arctan2(rel_y, rel_x)
-
-    # Create indices array and sort by distance first, then angle
-    indices = np.arange(n_rows)
-
-    # Simple bubble sort (numba-compatible)
-    for i in range(n_rows):
-        for j in range(0, n_rows - i - 1):
-            # Compare by distance first
-            if distances[j] > distances[j + 1]:
-                # Swap distances
-                distances[j], distances[j + 1] = distances[j + 1], distances[j]
-                # Swap angles
-                angles[j], angles[j + 1] = angles[j + 1], angles[j]
-                # Swap indices
-                indices[j], indices[j + 1] = indices[j + 1], indices[j]
-            elif distances[j] == distances[j + 1]:
-                # If distances are equal, compare by angle
-                if angles[j] > angles[j + 1]:
-                    angles[j], angles[j + 1] = angles[j + 1], angles[j]
-                    indices[j], indices[j + 1] = indices[j + 1], indices[j]
-
-    # Create sorted result
-    sorted_entities = np.empty_like(entities)
-    for i in range(n_rows):
-        sorted_entities[i, :] = entities[indices[i], :]
-
-    return sorted_entities
+    order = np.lexsort((angles, distances))
+    return entities[order]
 
 
-@jit(nopython=True, cache=True)
 def pad_or_truncate_numba(entities, max_entities_perception):
     """
-    Numba-accelerated function to pad or truncate entities to fixed size.
+    Pad or truncate entities to fixed size.
     """
     num_entities = entities.shape[0]
     feature_dim = entities.shape[1] if entities.ndim > 1 else 0
 
     if num_entities == 0:
         result = np.zeros((max_entities_perception, feature_dim), dtype=entities.dtype)
-        mask = np.zeros(max_entities_perception, dtype=numba.boolean)
+        mask = np.zeros(max_entities_perception, dtype=bool)
         return result, mask
 
     if num_entities > max_entities_perception:
         result = np.empty((max_entities_perception, feature_dim), dtype=entities.dtype)
         result[:max_entities_perception, :] = entities[:max_entities_perception, :]
-        mask = np.ones(max_entities_perception, dtype=numba.boolean)
+        mask = np.ones(max_entities_perception, dtype=bool)
     else:
         result = np.zeros((max_entities_perception, feature_dim), dtype=entities.dtype)
         result[:num_entities, :] = entities[:num_entities, :]
-        mask = np.zeros(max_entities_perception, dtype=numba.boolean)
+        mask = np.zeros(max_entities_perception, dtype=bool)
         mask[:num_entities] = True
 
     return result, mask
 
 
-@jit(nopython=True, cache=True)
 def _process_single_agent_numba(
     observations_np, edge_indices_np, alive_mask_np, agent_idx, max_entities_perception
 ):
     """
-    Numba-accelerated function to process a single agent across all time steps.
-    Updated for new alive_mask dimension: (seq_len, n_agents) and observations dimension: (seq_len, n_agents, max_observed_entities, feature_dim)
+    Process a single agent across all time steps.
     """
-    # Get dimensions from observations_np
     seq_len = observations_np.shape[0]
     max_observed_entities = observations_np.shape[2]
     feature_dim = observations_np.shape[3]
 
-    # Prepare result for this agent
     result = np.zeros(
         (seq_len, max_entities_perception, feature_dim), dtype=observations_np.dtype
     )
-    mask = np.zeros((seq_len, max_entities_perception), dtype=numba.boolean)
+    mask = np.zeros((seq_len, max_entities_perception), dtype=bool)
 
-    # Process each time step
     for t in range(seq_len):
-        # Get alive agents at time t
-        # NEW DIMENSION: alive_mask_np is (seq_len, n_agents), so alive_mask_np[t, :] gives us all agents at time t
-        alive_agents_at_t = np.where(alive_mask_np[t, :])[
-            0
-        ]  # Get all agents alive at time t
+        alive_agents_at_t = np.where(alive_mask_np[t, :])[0]
+        edge_indices_t = edge_indices_np[t]
 
-        # Get the edge indices for this specific time step
-        edge_indices_t = edge_indices_np[t]  # (2, edge_num)
-
-        # Step 1: Get ALL observations from this agent at time t (max_observed_entities entities)
-        # Shape: (max_observed_entities, feature_dim)
         self_obs = np.empty(
             (max_observed_entities, feature_dim), dtype=observations_np.dtype
         )
         self_obs[:, :] = observations_np[t, agent_idx, :, :]
 
-        # Step 2: Get observations from agents that send TO this agent (in-edges only)
         neighbor_agents = get_alive_neighbors_numba(
             edge_indices_t, alive_agents_at_t, agent_idx
         )
 
-        # Calculate total number of entities we'll have
         total_entities = max_observed_entities * (1 + len(neighbor_agents))
 
-        # Collect all entity vectors: self + neighbors' full observations at time t
         all_entities = np.empty(
             (total_entities, feature_dim), dtype=observations_np.dtype
         )
 
-        # Add self's max_observed_entities entities at time t
         entity_idx = 0
         all_entities[entity_idx : entity_idx + max_observed_entities, :] = self_obs[
             :, :
         ]
         entity_idx += max_observed_entities
 
-        # Add each neighbor's max_observed_entities entities at time t
         for neighbor_idx in neighbor_agents:
             all_entities[entity_idx : entity_idx + max_observed_entities, :] = (
                 observations_np[t, neighbor_idx, :, :]
             )
             entity_idx += max_observed_entities
 
-        # Step 3: Remove zero-filled vectors (padding)
         non_zero_mask = np.sum(np.abs(all_entities), axis=1) > 0
-        # non_zero_mask = np.zeros(total_entities, dtype=numba.boolean)
-        # for i in range(total_entities):
-        #    is_nonzero = False
-        #    for f in range(feature_dim):
-        #        if all_entities[i, f] != 0:
-        #            is_nonzero = True
-        #            break
-        #    non_zero_mask[i] = is_nonzero
-
-        # Count non-zero entities
-        nonzero_count = np.sum(non_zero_mask)
-        # nonzero_count = 0
-        # for i in range(len(non_zero_mask)):
-        #    if non_zero_mask[i]:
-        #        nonzero_count += 1
-
-        # Create clean entities array
         clean_entities = all_entities[non_zero_mask]
-        # clean_entities = np.empty((nonzero_count, feature_dim), dtype=observations_np.dtype)
-        # idx = 0
-        # for i in range(len(non_zero_mask)):
-        #    if non_zero_mask[i]:
-        #        clean_entities[idx, :] = all_entities[i, :]
-        #        idx += 1
 
-        # Step 4: Remove duplicates (exact row matches)
         unique_entities = remove_duplicates_numba(clean_entities)
-
-        # Step 5: Sort entities by distance (ascending) first, then by angle (ascending)
-        # This ensures consistent ordering regardless of observation source
         sorted_entities = sort_entities_by_distance_angle_numba(unique_entities)
-
-        # Step 6: Truncate or pad to max_entities_perception
         final_entities, final_mask = pad_or_truncate_numba(
             sorted_entities, max_entities_perception
         )
 
-        # Store results using vectorized assignment
         result[t, :max_entities_perception, :] = final_entities[
             :max_entities_perception, :
         ]
         mask[t, :max_entities_perception] = final_mask[:max_entities_perception]
+
+    return result, mask
+
+
+def _is_linux():
+    return sys.platform.startswith("linux")
+
+
+def _create_shared_memory_arrays(observations, alive_mask):
+    shm_obs = shared_memory.SharedMemory(create=True, size=observations.nbytes)
+    shm_alive = shared_memory.SharedMemory(create=True, size=alive_mask.nbytes)
+
+    obs_arr = np.ndarray(
+        observations.shape, dtype=observations.dtype, buffer=shm_obs.buf
+    )
+    obs_arr[:] = observations[:]
+
+    alive_arr = np.ndarray(
+        alive_mask.shape, dtype=alive_mask.dtype, buffer=shm_alive.buf
+    )
+    alive_arr[:] = alive_mask[:]
+
+    return shm_obs, shm_alive, obs_arr, alive_arr
+
+
+def _cleanup_shared_memory(shm_obs, shm_alive):
+    shm_obs.close()
+    shm_obs.unlink()
+    shm_alive.close()
+    shm_alive.unlink()
+
+
+def _worker_init(
+    shm_obs_name, obs_shape, obs_dtype, shm_alive_name, alive_shape, alive_dtype
+):
+    global _worker_obs_shm, _worker_alive_shm, _worker_obs, _worker_alive
+    _worker_obs_shm = shared_memory.SharedMemory(name=shm_obs_name)
+    _worker_alive_shm = shared_memory.SharedMemory(name=shm_alive_name)
+    _worker_obs = np.ndarray(obs_shape, dtype=obs_dtype, buffer=_worker_obs_shm.buf)
+    _worker_alive = np.ndarray(
+        alive_shape, dtype=alive_dtype, buffer=_worker_alive_shm.buf
+    )
+
+
+def _worker_process_batch(args):
+    batch_indices, edge_indices_list, max_entities_perception = args
+    results = []
+    for idx in batch_indices:
+        obs = _worker_obs[idx]
+        alive = _worker_alive[idx]
+        edges = edge_indices_list[idx]
+        result, mask = _process_single_sample(
+            (obs, edges, alive, max_entities_perception)
+        )
+        results.append((result, mask))
+    return results
+
+
+def _process_single_sample(args):
+    """
+    Process a single sample (batch element) sequentially.
+    """
+    observations_np, edge_indices_np, alive_mask_np, max_entities_perception = args
+
+    seq_len, n_agents, max_observed_entities, feature_dim = observations_np.shape
+
+    result = np.zeros(
+        (seq_len, n_agents, max_entities_perception, feature_dim),
+        dtype=observations_np.dtype,
+    )
+    mask = np.zeros((seq_len, n_agents, max_entities_perception), dtype=bool)
+
+    for t in range(seq_len):
+        for agent_idx in range(n_agents):
+            if alive_mask_np[t, agent_idx]:
+                agent_result, agent_mask = _process_single_agent_numba(
+                    observations_np,
+                    edge_indices_np,
+                    alive_mask_np,
+                    agent_idx,
+                    max_entities_perception,
+                )
+                result[t, agent_idx, :, :] = agent_result[t, :, :]
+                mask[t, agent_idx, :] = agent_mask[t, :]
 
     return result, mask
 
@@ -371,10 +292,8 @@ class MagentObsDataConstructor(SelfSupervisedDataConstructor):
         Returns:
             A tuple containing processed result and mask arrays
         """
-        # Preprocess raw observations into unified format: (B, T, N, L, F)
         processed_observations = self.preprocess_observations(observations)
 
-        # Validate unified format
         if len(processed_observations.shape) != 5:
             raise ValueError(
                 f"Expected preprocessed observations to have 5 dimensions "
@@ -382,22 +301,17 @@ class MagentObsDataConstructor(SelfSupervisedDataConstructor):
                 f"got {len(processed_observations.shape)}"
             )
 
-        # Extract dimensions from preprocessed observations
         batch_size, seq_len, n_agents, max_observed_entities, feature_dim = (
             processed_observations.shape
         )
 
-        # Handle with_time_seq flag: slice to last timestep if needed
         if not self.with_time_seq:
             processed_observations = processed_observations[:, [-1], :, :, :]
-            # For edge_indices, take only the last time step for each batch
             edge_indices = [
                 [batch_edge_indices[-1]] for batch_edge_indices in edge_indices
             ]
-            # Update seq_len after slicing
             seq_len = 1
 
-        # Prepare result and mask arrays
         result = np.zeros(
             (batch_size, seq_len, n_agents, self.max_entities_perception, feature_dim),
             dtype=processed_observations.dtype,
@@ -406,36 +320,47 @@ class MagentObsDataConstructor(SelfSupervisedDataConstructor):
             (batch_size, seq_len, n_agents, self.max_entities_perception), dtype=bool
         )
 
-        # Parallel or sequential processing
         if self.n_workers > 1:
-            # Divide batch among workers
-            base_samples = batch_size // self.n_workers
-            extra_samples = batch_size % self.n_workers
+            shm_obs, shm_alive, _, _ = _create_shared_memory_arrays(
+                processed_observations, alive_mask
+            )
 
-            worker_args = []
-            for worker_id in range(self.n_workers):
-                start_idx = worker_id * base_samples + min(worker_id, extra_samples)
-                end_idx = (
-                    start_idx + base_samples + (1 if worker_id < extra_samples else 0)
-                )
-                if start_idx >= batch_size:
-                    break
+            try:
+                n_workers = min(self.n_workers, batch_size)
+                base_samples = batch_size // n_workers
+                extra_samples = batch_size % n_workers
 
-                worker_batch_args = []
-                for i in range(start_idx, end_idx):
-                    args = (
-                        processed_observations[i],
-                        edge_indices[i],
-                        alive_mask[i],
-                        self.max_entities_perception,
+                worker_args = []
+                for worker_id in range(n_workers):
+                    start_idx = worker_id * base_samples + min(worker_id, extra_samples)
+                    end_idx = (
+                        start_idx
+                        + base_samples
+                        + (1 if worker_id < extra_samples else 0)
                     )
-                    worker_batch_args.append(args)
-                worker_args.append(worker_batch_args)
+                    if start_idx >= batch_size:
+                        break
+                    batch_indices = list(range(start_idx, end_idx))
+                    worker_args.append(
+                        (batch_indices, edge_indices, self.max_entities_perception)
+                    )
 
-            with ProcessPoolExecutor(max_workers=self.n_workers) as executor:
-                results = list(
-                    executor.map(self._process_multiple_samples, worker_args)
-                )
+                mp_ctx = mp.get_context("fork") if _is_linux() else None
+
+                with ProcessPoolExecutor(
+                    max_workers=n_workers,
+                    initializer=_worker_init,
+                    initargs=(
+                        shm_obs.name,
+                        processed_observations.shape,
+                        processed_observations.dtype,
+                        shm_alive.name,
+                        alive_mask.shape,
+                        alive_mask.dtype,
+                    ),
+                    mp_context=mp_ctx,
+                ) as executor:
+                    results = list(executor.map(_worker_process_batch, worker_args))
 
                 batch_idx = 0
                 for worker_result_list in results:
@@ -443,9 +368,11 @@ class MagentObsDataConstructor(SelfSupervisedDataConstructor):
                         result[batch_idx] = processed_sample
                         mask[batch_idx] = mask_batch
                         batch_idx += 1
+            finally:
+                _cleanup_shared_memory(shm_obs, shm_alive)
         else:
             for batch_idx in range(batch_size):
-                processed_sample, mask_batch = self._process_single_sample(
+                processed_sample, mask_batch = _process_single_sample(
                     (
                         processed_observations[batch_idx],
                         edge_indices[batch_idx],
@@ -456,12 +383,10 @@ class MagentObsDataConstructor(SelfSupervisedDataConstructor):
                 result[batch_idx] = processed_sample
                 mask[batch_idx] = mask_batch
 
-        # Remove time dimension if not requested
         if not self.with_time_seq:
             result = result.squeeze(1)
             mask = mask.squeeze(1)
 
-        # Apply feature filtering
         if self.include_features:
             valid_include_features = [
                 f for f in self.include_features if 0 <= f < result.shape[-1]
@@ -482,46 +407,6 @@ class MagentObsDataConstructor(SelfSupervisedDataConstructor):
         """
         raise NotImplementedError("Subclasses must implement preprocess_observations")
 
-    def _process_multiple_samples(self, batch_args_list):
-        """
-        Process multiple samples in parallel (used by ProcessPoolExecutor).
-        """
-        results = []
-        for args in batch_args_list:
-            processed_batch, mask_batch = self._process_single_sample(args)
-            results.append((processed_batch, mask_batch))
-        return results
-
-    def _process_single_sample(self, args):
-        """
-        Process a single sample (batch element) sequentially.
-        """
-        observations_np, edge_indices_np, alive_mask_np, max_entities_perception = args
-
-        seq_len, n_agents, max_observed_entities, feature_dim = observations_np.shape
-
-        result = np.zeros(
-            (seq_len, n_agents, max_entities_perception, feature_dim),
-            dtype=observations_np.dtype,
-        )
-        mask = np.zeros((seq_len, n_agents, max_entities_perception), dtype=bool)
-
-        for t in range(seq_len):
-            for agent_idx in range(n_agents):
-                if alive_mask_np[t, agent_idx]:
-                    # Use the shared numba function from vec obs constructor
-                    agent_result, agent_mask = _process_single_agent_numba(
-                        observations_np,
-                        edge_indices_np,
-                        alive_mask_np,
-                        agent_idx,
-                        max_entities_perception,
-                    )
-                    result[t, agent_idx, :, :] = agent_result[t, :, :]
-                    mask[t, agent_idx, :] = agent_mask[t, :]
-
-        return result, mask
-
 
 class MagentVecObsDataConstructor(MagentObsDataConstructor):
     """
@@ -537,16 +422,6 @@ class MagentVecObsDataConstructor(MagentObsDataConstructor):
         include_features: Optional[List[int]] = None,
         exclude_features: Optional[List[int]] = None,
     ):
-        """
-        Initialize the Magent environment's vector observation data constructor.
-
-        Args:
-            max_entities_perception: Maximum number of entities each agent can perceive
-            with_time_seq: Whether to include time sequence dimension in output
-            n_workers: Number of worker processes for parallel processing
-            include_features: List of feature dimension indices to keep (takes precedence over exclude_features)
-            exclude_features: List of feature dimension indices to filter out
-        """
         super().__init__(
             max_entities_perception,
             with_time_seq,
@@ -556,10 +431,6 @@ class MagentVecObsDataConstructor(MagentObsDataConstructor):
         )
 
     def preprocess_observations(self, observations: np.ndarray) -> np.ndarray:
-        """
-        Vector observations are already in the expected format (B, T, N, L, F).
-        Just validate and return.
-        """
         if len(observations.shape) != 5:
             raise ValueError(
                 f"Expected vector observations to have 5 dimensions "
@@ -585,17 +456,6 @@ class MagentImageObsDataConstructor(MagentObsDataConstructor):
         exclude_features: Optional[List[int]] = None,
         channel_first: bool = False,
     ):
-        """
-        Initialize the Magent environment's image observation data constructor.
-
-        Args:
-            max_entities_perception: Maximum number of entities each agent can perceive
-            with_time_seq: Whether to include time sequence dimension in output
-            n_workers: Number of worker processes for parallel processing
-            include_features: List of feature dimension indices to keep (takes precedence over exclude_features)
-            exclude_features: List of feature dimension indices to filter out
-            channel_first: Whether input observations are in channel-first format (C, H, W) vs channel-last (H, W, C)
-        """
         super().__init__(
             max_entities_perception,
             with_time_seq,
@@ -606,27 +466,15 @@ class MagentImageObsDataConstructor(MagentObsDataConstructor):
         self.channel_first = channel_first
 
     def preprocess_observations(self, observations: np.ndarray) -> np.ndarray:
-        """
-        Preprocess image observations into unified format (B, T, N, L, F):
-        - Handle channel_first conversion
-        - Reshape (H, W, C) to (L, C) where L = H * W
-        """
-        # Validate input format
         if len(observations.shape) != 6:
             raise ValueError(
                 f"Expected image observations to have 6 dimensions "
                 f"(batch_size, seq_len, n_agents, H, W, C) or (batch_size, seq_len, n_agents, C, H, W), got {len(observations.shape)}"
             )
-        # Handle channel_first format by converting to channel_last
         if self.channel_first:
-            # Input shape: (batch_size, seq_len, n_agents, C, H, W)
-            # Convert to: (batch_size, seq_len, n_agents, H, W, C)
             observations = np.transpose(observations, (0, 1, 2, 4, 5, 3))
 
-        # Extract spatial dimensions
         batch_size, seq_len, n_agents, H, W, C = observations.shape
-
-        # Reshape (H, W, C) to (L, C or F) where L = H * W
         L = H * W
         reshaped_observations = observations.reshape(
             batch_size, seq_len, n_agents, L, C

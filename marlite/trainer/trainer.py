@@ -219,10 +219,18 @@ class Trainer:
             return
 
         trainable_params = {
-            "eval_agent_group": deepcopy(self.eval_agent_group.state_dict()),
-            "target_agent_group": deepcopy(self.target_agent_group.state_dict()),
-            "eval_critic": self.eval_critic.state_dict(),
-            "target_critic": self.target_critic.state_dict(),
+            "eval_agent_group": {
+                k: v.clone() for k, v in self.eval_agent_group.state_dict().items()
+            },
+            "target_agent_group": {
+                k: v.clone() for k, v in self.target_agent_group.state_dict().items()
+            },
+            "eval_critic": {
+                k: v.clone() for k, v in self.eval_critic.state_dict().items()
+            },
+            "target_critic": {
+                k: v.clone() for k, v in self.target_critic.state_dict().items()
+            },
         }
         self.worker_group.write_params_to_workers(trainable_params)
 
@@ -315,8 +323,9 @@ class Trainer:
         self.target_agent_group.load_state_dict(
             deepcopy(self.eval_agent_group.state_dict())
         )
-        critic_params = deepcopy(self.eval_critic.state_dict())
-        self.target_critic.load_state_dict(critic_params)
+        self.target_critic.load_state_dict(
+            deepcopy(self.eval_critic.state_dict())
+        )
         return self
 
     def evaluate(self):
