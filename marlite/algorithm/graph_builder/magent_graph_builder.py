@@ -63,7 +63,7 @@ class MAgentGraphBuilder(GraphBuilder):
         map_func = np.vectorize(lambda x: node_mapping.get(x))
 
         if len(coords) > 0:
-            # Use numba-optimized distance calculation for Euclidean distance
+
             distances = cdist(coords, coords, metric=distance_metric)
 
             mask = (distances <= threshold) & (np.triu(np.ones_like(distances, dtype=bool), k=1))

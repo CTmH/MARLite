@@ -124,17 +124,43 @@ class SSLWorker(BaseWorker):
                 dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
                 param.grad.data /= self.world_size
 
-    def write_params_to_shared_memory(self, shared_memory: Dict[str, Any]):
-        """Write current parameters to shared memory including ssl_model."""
-        shared_memory["eval_agent_group"] = deepcopy(self.eval_agent_group.state_dict())
-        shared_memory["ssl_model"] = self.ssl_model.state_dict()
+    def get_params_for_main(self) -> Dict[str, Any]:
+        """Get current parameters to send back to main process including ssl_model."""
+        params = {}
+        if self.eval_agent_group is not None:
+            params["eval_agent_group"] = {
+                k: v.clone().cpu()
+                for k, v in self.eval_agent_group.state_dict().items()
+            }
+        if self.ssl_model is not None:
+            params["ssl_model"] = {
+                k: v.clone().cpu() for k, v in self.ssl_model.state_dict().items()
+            }
+        return params
 
-    def sync_params_from_shared_memory(self, shared_memory: Dict[str, Any]):
-        """Synchronize parameters from shared memory."""
-        if "eval_agent_group" in shared_memory:
-            self.eval_agent_group.load_state_dict(shared_memory["eval_agent_group"])
-        if "ssl_model" in shared_memory:
-            self.ssl_model.load_state_dict(shared_memory["ssl_model"])
+    def sync_params_from_main(self, params):
+        """
+        Synchronize parameters received from main process.
+
+        This method accepts either a dictionary of parameters or serialized bytes.
+        When receiving bytes, it deserializes them and loads into local models.
+
+        Args:
+            params: Dictionary containing parameter data, or serialized bytes
+        """
+        # Handle serialized bytes
+        if isinstance(params, bytes):
+            import io
+
+            buffer = io.BytesIO(params)
+            params = torch.load(buffer, weights_only=True)
+
+        if "eval_agent_group" in params and self.eval_agent_group is not None:
+            local_params = {k: v.clone() for k, v in params["eval_agent_group"].items()}
+            self.eval_agent_group.load_state_dict(local_params)
+        if "ssl_model" in params and self.ssl_model is not None:
+            local_params = {k: v.clone() for k, v in params["ssl_model"].items()}
+            self.ssl_model.load_state_dict(local_params)
 
 
 class VAESSLWorker(SSLWorker):

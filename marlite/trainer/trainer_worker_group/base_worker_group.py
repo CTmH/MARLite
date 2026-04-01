@@ -5,6 +5,7 @@ This module provides the BaseWorkerGroup class that manages multiple worker proc
 for parallel training across multiple GPUs.
 """
 
+import io
 import socket
 import threading
 from abc import ABC, abstractmethod
@@ -22,6 +23,38 @@ def is_port_available(port: int) -> bool:
             return True
     except OSError:
         return False
+
+
+def serialize_params(params: Dict[str, Any]) -> bytes:
+    """
+    Serialize parameters to bytes using torch.save.
+
+    This avoids PyTorch's automatic shared memory mechanism which can cause
+    file descriptor exhaustion when passing large parameter dictionaries.
+
+    Args:
+        params: Dictionary containing parameter data
+
+    Returns:
+        Serialized bytes
+    """
+    buffer = io.BytesIO()
+    torch.save(params, buffer)
+    return buffer.getvalue()
+
+
+def deserialize_params(data: bytes) -> Dict[str, Any]:
+    """
+    Deserialize parameters from bytes using torch.load.
+
+    Args:
+        data: Serialized bytes
+
+    Returns:
+        Dictionary containing parameter data
+    """
+    buffer = io.BytesIO(data)
+    return torch.load(buffer, weights_only=True)
 
 
 def _dict_to_cpu(data: Any, clone: bool = False) -> Any:
@@ -97,7 +130,7 @@ def worker_loop(
     - STOP: Exit the worker loop
     - SYNC_FROM_MAIN: Receive initial parameters from main process
     - BROADCAST: Receive broadcasted parameters from main process
-    - SYNC_TO_MAIN: Write current parameters to shared memory for main process
+    - SYNC_TO_MAIN: Send current parameters back to main process
     - TRAIN_STEP: Execute one training step on received batch data
 
     Args:
@@ -108,7 +141,7 @@ def worker_loop(
         init_method: URL for distributed initialization
         worker_class: Class of the worker to instantiate
         worker_kwargs: Keyword arguments for worker initialization
-        param_queue: Queue for parameter synchronization
+        param_queue: Queue for parameter exchange
         data_queue: Queue for receiving training data
         loss_queue: Queue for sending loss values back to main process
         cmd_queue: Queue for receiving commands
@@ -140,7 +173,7 @@ class BaseWorkerGroup(ABC):
 
     This class handles:
     - Starting and managing worker processes
-    - Parameter synchronization via shared memory
+    - Parameter synchronization via queues (with proper memory isolation)
     - Distributing training batches to workers
     - Collecting loss values from workers
 
@@ -219,8 +252,11 @@ class BaseWorkerGroup(ABC):
         1. Initializes distributed communication
         2. Creates model copies on its assigned GPU
         3. Waits for commands from main process
+
+        Note: Using SimpleQueue to avoid automatic shared memory allocation,
+        which can cause file descriptor exhaustion with large models.
         """
-        self.loss_queue = self.mp_ctx.Queue()
+        self.loss_queue = self.mp_ctx.SimpleQueue()
 
         # Create separate queues for each worker to avoid race conditions
         self.cmd_queues = []
@@ -228,10 +264,10 @@ class BaseWorkerGroup(ABC):
         self.data_queues = []
         self.ack_queues = []
         for _ in range(self.world_size):
-            self.cmd_queues.append(self.mp_ctx.Queue())
-            self.param_queues.append(self.mp_ctx.Queue())
-            self.data_queues.append(self.mp_ctx.Queue())
-            self.ack_queues.append(self.mp_ctx.Queue())
+            self.cmd_queues.append(self.mp_ctx.SimpleQueue())
+            self.param_queues.append(self.mp_ctx.SimpleQueue())
+            self.data_queues.append(self.mp_ctx.SimpleQueue())
+            self.ack_queues.append(self.mp_ctx.SimpleQueue())
 
         worker_class = self._get_worker_class()
 
@@ -279,9 +315,10 @@ class BaseWorkerGroup(ABC):
         self, trainable_params: Dict[str, Any], blocking: bool = True
     ):
         """
-        Write initial parameters to all workers via shared memory.
+        Write initial parameters to all workers.
 
         Called during Trainer initialization to set up workers with initial model parameters.
+        Uses serialization to avoid shared memory issues.
 
         Args:
             trainable_params: Dictionary containing:
@@ -291,10 +328,14 @@ class BaseWorkerGroup(ABC):
                 - target_critic: Target critic state dict
             blocking: Whether to wait for workers to acknowledge
         """
-        trainable_params_cpu = _dict_to_cpu(trainable_params)
+        # Convert to CPU and serialize to bytes
+        trainable_params_cpu = _dict_to_cpu(trainable_params, clone=True)
+        serialized_params = serialize_params(trainable_params_cpu)
+
         for i in range(self.world_size):
             self.cmd_queues[i].put("SYNC_FROM_MAIN")
-            self.param_queues[i].put(trainable_params_cpu)
+            # Send serialized bytes - each worker will deserialize independently
+            self.param_queues[i].put(serialized_params)
 
         if blocking:
             for i in range(self.world_size):
@@ -308,14 +349,19 @@ class BaseWorkerGroup(ABC):
 
         Called before training starts to ensure workers have latest parameters
         (e.g., after loading from checkpoint).
+        Uses serialization to avoid shared memory issues.
         """
         self.cmd_queues[0].put("SYNC_TO_MAIN")
         latest_params = self.param_queues[0].get()
-        latest_params_cpu = _dict_to_cpu(latest_params)
+
+        # Deserialize and convert to CPU
+        latest_params_cpu = _dict_to_cpu(latest_params, clone=True)
+        serialized_params = serialize_params(latest_params_cpu)
 
         for i in range(self.world_size):
             self.cmd_queues[i].put("BROADCAST")
-            self.param_queues[i].put(latest_params_cpu)
+            # Send serialized bytes - each worker will deserialize independently
+            self.param_queues[i].put(serialized_params)
 
     def read_params_from_worker0(self) -> Dict[str, Any]:
         """
@@ -325,12 +371,11 @@ class BaseWorkerGroup(ABC):
         the most up-to-date parameters from workers.
 
         Returns:
-            Dictionary containing latest model parameters
+            Dictionary containing cloned model parameters
         """
         self.cmd_queues[0].put("SYNC_TO_MAIN")
         params = self.param_queues[0].get()
-
-        return params
+        return _dict_to_cpu(params, clone=True)
 
     def train_step(self, batch: Dict[str, Any]) -> float:
         """
@@ -358,12 +403,16 @@ class BaseWorkerGroup(ABC):
         # Get updated parameters from worker 0 (which has the optimized parameters)
         self.cmd_queues[0].put("SYNC_TO_MAIN")
         updated_params = self.param_queues[0].get()
-        updated_params_cpu = _dict_to_cpu(updated_params)
 
-        # Broadcast updated parameters from worker 0 to all workers and main process
+        # Serialize parameters to avoid shared memory issues
+        updated_params_cpu = _dict_to_cpu(updated_params, clone=True)
+        serialized_params = serialize_params(updated_params_cpu)
+
+        # Broadcast updated parameters from worker 0 to all workers
+        # Each worker will deserialize independently
         for i in range(self.world_size):
             self.cmd_queues[i].put("BROADCAST")
-            self.param_queues[i].put(_dict_to_cpu(updated_params_cpu, clone=True))
+            self.param_queues[i].put(serialized_params)
 
         return sum(losses) / len(losses)
 

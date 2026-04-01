@@ -6,6 +6,7 @@ for all worker implementations. Each worker runs in a separate process
 and holds copies of models for parallel training.
 """
 
+import io
 import os
 import torch
 import torch.distributed as dist
@@ -118,40 +119,58 @@ class BaseWorker:
         self.critic_optimizer = critic_optimizer
         self.agent_group_optimizer = agent_group_optimizer
 
-    def sync_params_from_shared_memory(self, shared_memory: Dict[str, Any]):
+    def sync_params_from_main(self, params):
         """
-        Synchronize parameters from shared memory.
+        Synchronize parameters received from main process.
+
+        This method accepts either a dictionary of parameters or serialized bytes.
+        When receiving bytes, it deserializes them and loads into local models.
 
         Args:
-            shared_memory: Dictionary containing parameter data
+            params: Dictionary containing parameter data, or serialized bytes
         """
-        if "eval_agent_group" in shared_memory:
-            self.eval_agent_group.load_state_dict(shared_memory["eval_agent_group"])
-        if "target_agent_group" in shared_memory:
-            self.target_agent_group.load_state_dict(shared_memory["target_agent_group"])
-        if "eval_critic" in shared_memory:
-            self.eval_critic.load_state_dict(shared_memory["eval_critic"])
-        if "target_critic" in shared_memory:
-            self.target_critic.load_state_dict(shared_memory["target_critic"])
+        # Handle serialized bytes
+        if isinstance(params, bytes):
+            buffer = io.BytesIO(params)
+            params = torch.load(buffer, weights_only=True)
 
-    def write_params_to_shared_memory(self, shared_memory: Dict[str, Any]):
-        """
-        Write current parameters to shared memory for main process to read.
+        if "eval_agent_group" in params and self.eval_agent_group is not None:
+            local_params = {k: v.clone() for k, v in params["eval_agent_group"].items()}
+            self.eval_agent_group.load_state_dict(local_params)
+        if "target_agent_group" in params and self.target_agent_group is not None:
+            local_params = {
+                k: v.clone() for k, v in params["target_agent_group"].items()
+            }
+            self.target_agent_group.load_state_dict(local_params)
+        if "eval_critic" in params and self.eval_critic is not None:
+            local_params = {k: v.clone() for k, v in params["eval_critic"].items()}
+            self.eval_critic.load_state_dict(local_params)
+        if "target_critic" in params and self.target_critic is not None:
+            local_params = {k: v.clone() for k, v in params["target_critic"].items()}
+            self.target_critic.load_state_dict(local_params)
 
-        Args:
-            shared_memory: Dictionary to store parameter data
+    def get_params_for_main(self) -> Dict[str, Any]:
         """
-        shared_memory["eval_agent_group"] = {
-            k: v.clone() for k, v in self.eval_agent_group.state_dict().items()
-        }
-        shared_memory["target_agent_group"] = {
-            k: v.clone() for k, v in self.target_agent_group.state_dict().items()
-        }
-        shared_memory["eval_critic"] = {
-            k: v.clone() for k, v in self.eval_critic.state_dict().items()
-        }
-        shared_memory["target_critic"] = {
-            k: v.clone() for k, v in self.target_critic.state_dict().items()
+        Get current parameters to send back to main process.
+
+        Returns:
+            Dictionary containing cloned parameter data
+        """
+        return {
+            "eval_agent_group": {
+                k: v.clone().cpu()
+                for k, v in self.eval_agent_group.state_dict().items()
+            },
+            "target_agent_group": {
+                k: v.clone().cpu()
+                for k, v in self.target_agent_group.state_dict().items()
+            },
+            "eval_critic": {
+                k: v.clone().cpu() for k, v in self.eval_critic.state_dict().items()
+            },
+            "target_critic": {
+                k: v.clone().cpu() for k, v in self.target_critic.state_dict().items()
+            },
         }
 
     def reduce_gradients(self):
@@ -214,22 +233,24 @@ class BaseWorker:
             return False
 
         elif cmd == "SYNC_FROM_MAIN":
-            shared_memory = param_queue.get()
-            self.sync_params_from_shared_memory(shared_memory)
+            params = param_queue.get()
+            self.sync_params_from_main(params)
+            del params  # Release reference to allow garbage collection
             ack_queue.put("ACK")
 
         elif cmd == "BROADCAST":
-            shared_memory = param_queue.get()
-            self.sync_params_from_shared_memory(shared_memory)
+            params = param_queue.get()
+            self.sync_params_from_main(params)
+            del params  # Release reference to allow garbage collection
 
         elif cmd == "SYNC_TO_MAIN":
-            shared_memory = {}
-            self.write_params_to_shared_memory(shared_memory)
-            param_queue.put(shared_memory)
+            params = self.get_params_for_main()
+            param_queue.put(params)
 
         elif cmd == "TRAIN_STEP":
             batch = data_queue.get()
             loss = self.train_step(batch)
+            del batch  # Release reference to allow garbage collection
             loss_queue.put(loss)
 
         else:

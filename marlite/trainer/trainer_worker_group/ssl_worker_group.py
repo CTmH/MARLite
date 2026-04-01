@@ -9,6 +9,7 @@ from marlite.trainer.trainer_worker_group.base_worker_group import (
     BaseWorkerGroup,
     _dict_to_cpu,
     _slice_batch,
+    serialize_params,
 )
 from marlite.trainer.trainer_worker.ssl_worker import SSLWorker
 
@@ -85,6 +86,8 @@ class SSLWorkerGroup(BaseWorkerGroup):
         """
         Write SSL model and agent group parameters to all workers.
 
+        Uses serialization to avoid shared memory issues.
+
         Args:
             ssl_model_params: SSL model state dict
             agent_group_params: Agent group parameters dict
@@ -94,11 +97,13 @@ class SSLWorkerGroup(BaseWorkerGroup):
             "ssl_model": ssl_model_params,
             "eval_agent_group": agent_group_params,
         }
-        trainable_params_cpu = _dict_to_cpu(trainable_params)
+        trainable_params_cpu = _dict_to_cpu(trainable_params, clone=True)
+        serialized_params = serialize_params(trainable_params_cpu)
 
         for i in range(self.world_size):
             self.cmd_queues[i].put("SYNC_FROM_MAIN")
-            self.param_queues[i].put(trainable_params_cpu)
+            # Send serialized bytes - each worker will deserialize independently
+            self.param_queues[i].put(serialized_params)
 
         if blocking:
             for i in range(self.world_size):
@@ -110,11 +115,15 @@ class SSLWorkerGroup(BaseWorkerGroup):
         """Broadcast current SSL and agent group parameters to all workers."""
         self.cmd_queues[0].put("SYNC_TO_MAIN")
         latest_params = self.param_queues[0].get()
-        latest_params_cpu = _dict_to_cpu(latest_params)
+
+        # Serialize to avoid shared memory issues
+        latest_params_cpu = _dict_to_cpu(latest_params, clone=True)
+        serialized_params = serialize_params(latest_params_cpu)
 
         for i in range(self.world_size):
             self.cmd_queues[i].put("BROADCAST")
-            self.param_queues[i].put(latest_params_cpu)
+            # Send serialized bytes - each worker will deserialize independently
+            self.param_queues[i].put(serialized_params)
 
     def read_params_from_worker0(self) -> tuple:
         """
@@ -125,6 +134,7 @@ class SSLWorkerGroup(BaseWorkerGroup):
         """
         self.cmd_queues[0].put("SYNC_TO_MAIN")
         params = self.param_queues[0].get()
+        params = _dict_to_cpu(params, clone=True)
 
         return params.get("ssl_model"), params.get("eval_agent_group")
 
