@@ -182,9 +182,7 @@ class SelfSupervisedQMIXTrainer(Trainer):
         self.target_agent_group.load_state_dict(
             deepcopy(self.eval_agent_group.state_dict())
         )
-        self.target_critic.load_state_dict(
-            deepcopy(self.eval_critic.state_dict())
-        )
+        self.target_critic.load_state_dict(deepcopy(self.eval_critic.state_dict()))
         return self
 
     def train(
@@ -244,8 +242,8 @@ class SelfSupervisedQMIXTrainer(Trainer):
             )
             logging.info(f"Epoch {epoch}: Reinforcement Learning Loss {loss:.4f}")
 
-            # Sync params from workers before evaluation
-            self._sync_params_from_workers()
+            # Sync eval params from workers before evaluation
+            self._sync_eval_params_from_workers()
             self._sync_ssl_params_from_workers()
 
             # Save checkpoint
@@ -329,12 +327,14 @@ class SelfSupervisedQMIXTrainer(Trainer):
                 self.eval_critic.load_state_dict(self._cached_critic_params)
                 self.ssl_model.load_state_dict(self._cached_ssl_model_params)
                 self.update_target_model_params()
+                self._sync_target_params_to_workers()
                 logging.info(
                     f"Epoch {epoch}: Eval model and Target model updated with cached parameters."
                 )
 
             if epoch % update_target_interval == 0:
                 self.update_target_model_params()
+                self._sync_target_params_to_workers()
                 logging.info(
                     f"Epoch {epoch}: Target model updated with eval model parameters."
                 )

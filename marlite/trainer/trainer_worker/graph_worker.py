@@ -55,10 +55,10 @@ class GraphWorker(BaseWorker):
         super().__init__(worker_id, device_id, rank, world_size, init_method)
         self.gamma = gamma
 
-        self.eval_agent_group = agent_group_config.get_agent_group().to(self.device)
-        self.target_agent_group = agent_group_config.get_agent_group().to(self.device)
-        self.eval_critic = critic_config.get_critic().to(self.device)
-        self.target_critic = critic_config.get_critic().to(self.device)
+        self.eval_agent_group = agent_group_config.get_agent_group()
+        self.target_agent_group = agent_group_config.get_agent_group()
+        self.eval_critic = critic_config.get_critic()
+        self.target_critic = critic_config.get_critic()
 
         self.eval_agent_group.train()
         self.target_agent_group.eval()

@@ -52,7 +52,8 @@ class BaseWorker:
         self.world_size = world_size
         self.init_method = init_method
 
-        self.device = f"cuda:{device_id}"
+        self.assigned_device = f"cuda:{device_id}"
+        self.device = "cpu"
         self._setup_distributed()
 
         # Model copies (to be initialized by subclasses via set_models)
@@ -148,6 +149,23 @@ class BaseWorker:
         if "target_critic" in params and self.target_critic is not None:
             local_params = {k: v.clone() for k, v in params["target_critic"].items()}
             self.target_critic.load_state_dict(local_params)
+
+    def move_to_device(self, device: str):
+        """
+        Move all models to the specified device.
+
+        Args:
+            device: Target device string (e.g., 'cuda:0' or 'cpu')
+        """
+        if self.eval_agent_group is not None:
+            self.eval_agent_group.to(device)
+        if self.target_agent_group is not None:
+            self.target_agent_group.to(device)
+        if self.eval_critic is not None:
+            self.eval_critic.to(device)
+        if self.target_critic is not None:
+            self.target_critic.to(device)
+        self.device = device
 
     def get_params_for_main(self) -> Dict[str, Any]:
         """
@@ -252,6 +270,17 @@ class BaseWorker:
             loss = self.train_step(batch)
             del batch  # Release reference to allow garbage collection
             loss_queue.put(loss)
+
+        elif cmd == "MOVE_TO_GPU":
+            self.move_to_device(self.assigned_device)
+            if ack_queue:
+                ack_queue.put("ACK")
+
+        elif cmd == "MOVE_TO_CPU":
+            self.move_to_device("cpu")
+            torch.cuda.empty_cache()
+            if ack_queue:
+                ack_queue.put("ACK")
 
         else:
             print(f"Worker {self.worker_id}: Unknown command: {repr(cmd)}", flush=True)

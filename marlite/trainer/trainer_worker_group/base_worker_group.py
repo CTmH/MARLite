@@ -343,16 +343,24 @@ class BaseWorkerGroup(ABC):
                 if ack != "ACK":
                     raise RuntimeError(f"Worker {i}: Expected ACK, got {ack}")
 
-    def broadcast_params(self):
+    def broadcast_params(self, params: Optional[Dict[str, Any]] = None):
         """
-        Broadcast current Trainer parameters to all workers.
+        Broadcast parameters to all workers.
 
         Called before training starts to ensure workers have latest parameters
         (e.g., after loading from checkpoint).
         Uses serialization to avoid shared memory issues.
+
+        Args:
+            params: Parameters to broadcast. If None, read from worker 0.
         """
-        self.cmd_queues[0].put("SYNC_TO_MAIN")
-        latest_params = self.param_queues[0].get()
+        if params is None:
+            # Read from worker 0 (legacy behavior)
+            self.cmd_queues[0].put("SYNC_TO_MAIN")
+            latest_params = self.param_queues[0].get()
+        else:
+            # Use provided params
+            latest_params = params
 
         # Deserialize and convert to CPU
         latest_params_cpu = _dict_to_cpu(latest_params, clone=True)
@@ -400,21 +408,34 @@ class BaseWorkerGroup(ABC):
             loss = self.loss_queue.get()
             losses.append(loss)
 
-        # Get updated parameters from worker 0 (which has the optimized parameters)
-        self.cmd_queues[0].put("SYNC_TO_MAIN")
-        updated_params = self.param_queues[0].get()
-
-        # Serialize parameters to avoid shared memory issues
-        updated_params_cpu = _dict_to_cpu(updated_params, clone=True)
-        serialized_params = serialize_params(updated_params_cpu)
-
-        # Broadcast updated parameters from worker 0 to all workers
-        # Each worker will deserialize independently
-        for i in range(self.world_size):
-            self.cmd_queues[i].put("BROADCAST")
-            self.param_queues[i].put(serialized_params)
+        # No need to sync parameters after each batch because:
+        # 1. Gradients are already synchronized via all_reduce in reduce_gradients()
+        # 2. All workers use the same optimizer, so parameter updates should be identical
+        # 3. Parameters are synced at the beginning of each epoch via broadcast_params()
 
         return sum(losses) / len(losses)
+
+    def move_models_to_gpu(self):
+        """
+        Move all workers' models to their assigned GPU devices.
+        """
+        for i in range(self.world_size):
+            self.cmd_queues[i].put("MOVE_TO_GPU")
+        for i in range(self.world_size):
+            ack = self.ack_queues[i].get()
+            if ack != "ACK":
+                raise RuntimeError(f"Worker {i}: Expected ACK, got {ack}")
+
+    def move_models_to_cpu(self):
+        """
+        Move all workers' models to CPU and clear GPU cache.
+        """
+        for i in range(self.world_size):
+            self.cmd_queues[i].put("MOVE_TO_CPU")
+        for i in range(self.world_size):
+            ack = self.ack_queues[i].get()
+            if ack != "ACK":
+                raise RuntimeError(f"Worker {i}: Expected ACK, got {ack}")
 
     def shutdown(self):
         """

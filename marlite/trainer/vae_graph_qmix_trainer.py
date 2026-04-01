@@ -196,6 +196,8 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
 
     def _ssl_learn_multi_gpu(self, sample_size, batch_size: int, times: int = 1):
         """Multi-GPU SSL learning via worker processes."""
+        self.ssl_worker_group.move_models_to_gpu()
+
         total_loss = 0.0
         total_batches = 0
 
@@ -258,5 +260,8 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
 
                     bs = obs.shape[0]
                     pbar.update(bs)
+
+        self.ssl_worker_group.move_models_to_cpu()
+        torch.cuda.empty_cache()
 
         return total_loss / total_batches

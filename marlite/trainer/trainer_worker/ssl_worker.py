@@ -56,12 +56,12 @@ class SSLWorker(BaseWorker):
         self.kl_divergence_weight = kl_divergence_weight
 
         if ssl_model_config is not None:
-            self.ssl_model = ssl_model_config.get_model().to(self.device)
+            self.ssl_model = ssl_model_config.get_model()
         else:
             self.ssl_model = None
 
         if agent_group_config is not None:
-            self.eval_agent_group = agent_group_config.get_agent_group().to(self.device)
+            self.eval_agent_group = agent_group_config.get_agent_group()
         else:
             self.eval_agent_group = None
 
@@ -101,12 +101,25 @@ class SSLWorker(BaseWorker):
             ssl_optimizer: Optimizer for ssl_model
             agent_group_optimizer: Optimizer for agent group
         """
-        self.ssl_model = ssl_model.to(self.device)
-        self.eval_agent_group = eval_agent_group.to(self.device)
+        self.ssl_model = ssl_model
+        self.eval_agent_group = eval_agent_group
         self.ssl_optimizer = ssl_optimizer
         self.agent_group_optimizer = agent_group_optimizer
 
         self.eval_agent_group.train()
+
+    def move_to_device(self, device: str):
+        """
+        Move all models to the specified device.
+
+        Args:
+            device: Target device string (e.g., 'cuda:0' or 'cpu')
+        """
+        if self.ssl_model is not None:
+            self.ssl_model.to(device)
+        if self.eval_agent_group is not None:
+            self.eval_agent_group.to(device)
+        self.device = device
 
     def reduce_gradients(self):
         """
@@ -327,7 +340,7 @@ class VAESSLWorker(SSLWorker):
         else:
             return self.reconstruction_loss(pred_set, target_set)
 
-    def handle_command(self, cmd, param_queue, data_queue, loss_queue, ack_queue):
+    def handle_command(self, cmd, param_queue, data_queue, loss_queue, ack_queue=None):
         if cmd == "SSL_TRAIN_STEP":
             batch = data_queue.get()
             loss = self.ssl_train_step(batch)

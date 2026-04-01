@@ -234,21 +234,40 @@ class Trainer:
         }
         self.worker_group.write_params_to_workers(trainable_params)
 
-    def _sync_params_from_workers(self):
+    def _sync_eval_params_from_workers(self):
         """
-        Synchronize model parameters from workers to trainer.
+        Synchronize eval model parameters from workers to trainer.
 
         Called before evaluation or checkpoint saving to get the latest
-        parameters from workers.
+        parameters from workers. Only syncs eval_* models, not target_* models,
+        because target networks are maintained in the Trainer process.
         """
         if self.worker_group is None:
             return
 
         trainable_params = self.worker_group.read_params_from_worker0()
         self.eval_agent_group.load_state_dict(trainable_params["eval_agent_group"])
-        self.target_agent_group.load_state_dict(trainable_params["target_agent_group"])
         self.eval_critic.load_state_dict(trainable_params["eval_critic"])
-        self.target_critic.load_state_dict(trainable_params["target_critic"])
+
+    def _sync_target_params_to_workers(self):
+        """
+        Synchronize target model parameters from trainer to workers.
+
+        Called after update_target_model_params() to ensure workers have
+        the latest target network parameters.
+        """
+        if self.worker_group is None:
+            return
+
+        target_params = {
+            "target_agent_group": {
+                k: v.clone() for k, v in self.target_agent_group.state_dict().items()
+            },
+            "target_critic": {
+                k: v.clone() for k, v in self.target_critic.state_dict().items()
+            },
+        }
+        self.worker_group.write_params_to_workers(target_params)
 
     def _broadcast_params_to_workers(self):
         """
@@ -259,7 +278,23 @@ class Trainer:
         """
         if self.worker_group is None:
             return
-        self.worker_group.broadcast_params()
+
+        # Prepare parameters to broadcast from trainer
+        trainable_params = {
+            "eval_agent_group": {
+                k: v.clone() for k, v in self.eval_agent_group.state_dict().items()
+            },
+            "target_agent_group": {
+                k: v.clone() for k, v in self.target_agent_group.state_dict().items()
+            },
+            "eval_critic": {
+                k: v.clone() for k, v in self.eval_critic.state_dict().items()
+            },
+            "target_critic": {
+                k: v.clone() for k, v in self.target_critic.state_dict().items()
+            },
+        }
+        self.worker_group.broadcast_params(trainable_params)
 
     def learn(self, sample_size, batch_size: int, times: int):
         raise NotImplementedError
@@ -323,9 +358,7 @@ class Trainer:
         self.target_agent_group.load_state_dict(
             deepcopy(self.eval_agent_group.state_dict())
         )
-        self.target_critic.load_state_dict(
-            deepcopy(self.eval_critic.state_dict())
-        )
+        self.target_critic.load_state_dict(deepcopy(self.eval_critic.state_dict()))
         return self
 
     def evaluate(self):
@@ -399,8 +432,8 @@ class Trainer:
             )
             logging.info(f"Epoch {epoch}: Loss {loss:.4f}")
 
-            # Sync params from workers before evaluation
-            self._sync_params_from_workers()
+            # Sync eval params from workers before evaluation
+            self._sync_eval_params_from_workers()
 
             # Save checkpoint
             checkpoint_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -470,12 +503,14 @@ class Trainer:
                 self.eval_agent_group.load_state_dict(self._cached_agent_group_params)
                 self.eval_critic.load_state_dict(self._cached_critic_params)
                 self.update_target_model_params()
+                self._sync_target_params_to_workers()
                 logging.info(
                     f"Epoch {epoch}: Eval model and Target model updated with cached parameters."
                 )
 
             if epoch % update_target_interval == 0:
                 self.update_target_model_params()
+                self._sync_target_params_to_workers()
                 logging.info(
                     f"Epoch {epoch}: Target model updated with eval model parameters."
                 )
