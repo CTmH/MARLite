@@ -57,19 +57,17 @@ def deserialize_params(data: bytes) -> Dict[str, Any]:
     return torch.load(buffer, weights_only=True)
 
 
-def _dict_to_cpu(data: Any, clone: bool = False) -> Any:
+def _dict_to_cpu(data: Any) -> Any:
     """Recursively convert all tensors in a dict/list to CPU."""
     if isinstance(data, (torch.Tensor, torch.nn.Parameter)):
         if data.is_cuda:
-            return data.detach().clone().cpu()
-        elif clone:
-            return data.detach().clone()
+            return data.detach().cpu()
         else:
             return data
     elif hasattr(data, "items"):
-        return {k: _dict_to_cpu(v, clone) for k, v in data.items()}
+        return {k: _dict_to_cpu(v) for k, v in data.items()}
     elif isinstance(data, (list, tuple)):
-        return type(data)(_dict_to_cpu(x, clone) for x in data)
+        return type(data)(_dict_to_cpu(x) for x in data)
     return data
 
 
@@ -329,7 +327,7 @@ class BaseWorkerGroup(ABC):
             blocking: Whether to wait for workers to acknowledge
         """
         # Convert to CPU and serialize to bytes
-        trainable_params_cpu = _dict_to_cpu(trainable_params, clone=True)
+        trainable_params_cpu = _dict_to_cpu(trainable_params)
         serialized_params = serialize_params(trainable_params_cpu)
 
         for i in range(self.world_size):
@@ -343,32 +341,20 @@ class BaseWorkerGroup(ABC):
                 if ack != "ACK":
                     raise RuntimeError(f"Worker {i}: Expected ACK, got {ack}")
 
-    def broadcast_params(self, params: Optional[Dict[str, Any]] = None):
+    def broadcast_params(self, params: Dict[str, Any]):
         """
-        Broadcast parameters to all workers.
+        Broadcast parameters from trainer to all workers.
 
-        Called before training starts to ensure workers have latest parameters
-        (e.g., after loading from checkpoint).
         Uses serialization to avoid shared memory issues.
 
         Args:
-            params: Parameters to broadcast. If None, read from worker 0.
+            params: Parameters to broadcast.
         """
-        if params is None:
-            # Read from worker 0 (legacy behavior)
-            self.cmd_queues[0].put("SYNC_TO_MAIN")
-            latest_params = self.param_queues[0].get()
-        else:
-            # Use provided params
-            latest_params = params
-
-        # Deserialize and convert to CPU
-        latest_params_cpu = _dict_to_cpu(latest_params, clone=True)
-        serialized_params = serialize_params(latest_params_cpu)
+        params_cpu = _dict_to_cpu(params)
+        serialized_params = serialize_params(params_cpu)
 
         for i in range(self.world_size):
             self.cmd_queues[i].put("BROADCAST")
-            # Send serialized bytes - each worker will deserialize independently
             self.param_queues[i].put(serialized_params)
 
     def read_params_from_worker0(self) -> Dict[str, Any]:
@@ -383,7 +369,7 @@ class BaseWorkerGroup(ABC):
         """
         self.cmd_queues[0].put("SYNC_TO_MAIN")
         params = self.param_queues[0].get()
-        return _dict_to_cpu(params, clone=True)
+        return _dict_to_cpu(params)
 
     def train_step(self, batch: Dict[str, Any]) -> float:
         """
@@ -432,6 +418,27 @@ class BaseWorkerGroup(ABC):
         """
         for i in range(self.world_size):
             self.cmd_queues[i].put("MOVE_TO_CPU")
+        for i in range(self.world_size):
+            ack = self.ack_queues[i].get()
+            if ack != "ACK":
+                raise RuntimeError(f"Worker {i}: Expected ACK, got {ack}")
+
+    def sync_lr_to_workers(self, critic_lr: float, agent_lr: float):
+        """
+        Synchronize learning rates to all workers.
+
+        Called within _sync_params_to_workers() to ensure workers use the same
+        learning rates as the trainer.
+
+        Args:
+            critic_lr: Current critic learning rate
+            agent_lr: Current agent group learning rate
+        """
+        lr_data = {"critic_lr": critic_lr, "agent_lr": agent_lr}
+        for i in range(self.world_size):
+            self.cmd_queues[i].put("SYNC_LR")
+            self.param_queues[i].put(lr_data)
+
         for i in range(self.world_size):
             ack = self.ack_queues[i].get()
             if ack != "ACK":

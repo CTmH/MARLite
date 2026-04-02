@@ -97,7 +97,7 @@ class SSLWorkerGroup(BaseWorkerGroup):
             "ssl_model": ssl_model_params,
             "eval_agent_group": agent_group_params,
         }
-        trainable_params_cpu = _dict_to_cpu(trainable_params, clone=True)
+        trainable_params_cpu = _dict_to_cpu(trainable_params)
         serialized_params = serialize_params(trainable_params_cpu)
 
         for i in range(self.world_size):
@@ -111,20 +111,6 @@ class SSLWorkerGroup(BaseWorkerGroup):
                 if ack != "ACK":
                     raise RuntimeError(f"Worker {i}: Expected ACK, got {ack}")
 
-    def broadcast_params(self):
-        """Broadcast current SSL and agent group parameters to all workers."""
-        self.cmd_queues[0].put("SYNC_TO_MAIN")
-        latest_params = self.param_queues[0].get()
-
-        # Serialize to avoid shared memory issues
-        latest_params_cpu = _dict_to_cpu(latest_params, clone=True)
-        serialized_params = serialize_params(latest_params_cpu)
-
-        for i in range(self.world_size):
-            self.cmd_queues[i].put("BROADCAST")
-            # Send serialized bytes - each worker will deserialize independently
-            self.param_queues[i].put(serialized_params)
-
     def read_params_from_worker0(self) -> tuple:
         """
         Read latest SSL model and agent group parameters from Worker 0.
@@ -134,7 +120,7 @@ class SSLWorkerGroup(BaseWorkerGroup):
         """
         self.cmd_queues[0].put("SYNC_TO_MAIN")
         params = self.param_queues[0].get()
-        params = _dict_to_cpu(params, clone=True)
+        params = _dict_to_cpu(params)
 
         return params.get("ssl_model"), params.get("eval_agent_group")
 
@@ -161,8 +147,5 @@ class SSLWorkerGroup(BaseWorkerGroup):
         for _ in range(self.world_size):
             loss = self.loss_queue.get()
             losses.append(loss)
-
-        # Synchronize updated parameters across workers
-        self.broadcast_params()
 
         return sum(losses) / len(losses)

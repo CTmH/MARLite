@@ -164,7 +164,7 @@ class ProbObsGNNCommAgentGroup(ObsGNNCommAgentGroup):
         embedding = self.compute_graph_embeddings(msg, edge_indices)
 
         # Process probabilistic output
-        deterministic = self.deterministic_eval and not self.graph_model.training
+        deterministic = self.deterministic_eval and not self.training
         estimates, log_var, mu, std = process_probabilistic_output(
             embedding, deterministic
         )  # All (B, N, F)
@@ -238,7 +238,7 @@ class ProbSeqGNNCommAgentGroup(SeqGNNCommAgentGroup):
         embedding = self.compute_graph_embeddings(msg, edge_indices)
 
         # Process probabilistic output
-        deterministic = self.deterministic_eval and not self.graph_model.training
+        deterministic = self.deterministic_eval and not self.training
         estimates, log_var, mu, std = process_probabilistic_output(
             embedding, deterministic
         )  # All (B, N, F)
@@ -296,7 +296,7 @@ class DualPathBasedGNNCommAgentGroup(GraphAgentGroup):
         decoder_configs: Dict[str, ModelConfig],
         graph_builder_config: GraphBuilderConfig,
         graph_model_config: ModelConfig,
-        enable_rl_grad_to_msg_aggr: bool = True,
+        enable_rl_grad_to_msg_aggr: bool = False,
     ) -> None:
         super().__init__(
             agent_model_dict=agent_model_dict,
@@ -412,7 +412,7 @@ class DualPathObsGNNCommAgentGroup(DualPathBasedGNNCommAgentGroup):
         decoder_configs: Dict[str, ModelConfig],
         graph_builder_config: GraphBuilderConfig,
         graph_model_config: ModelConfig,
-        enable_rl_grad_to_msg_aggr: bool = True,
+        enable_rl_grad_to_msg_aggr: bool = False,
     ) -> None:
         super().__init__(
             agent_model_dict=agent_model_dict,
@@ -488,7 +488,7 @@ class DualPathProbObsGNNCommAgentGroup(DualPathObsGNNCommAgentGroup):
         decoder_configs: Dict[str, ModelConfig],
         graph_builder_config: GraphBuilderConfig,
         graph_model_config: ModelConfig,
-        enable_rl_grad_to_msg_aggr: bool = True,
+        enable_rl_grad_to_msg_aggr: bool = False,
         deterministic_eval: bool = True,
     ) -> None:
         super().__init__(
@@ -509,12 +509,10 @@ class DualPathProbObsGNNCommAgentGroup(DualPathObsGNNCommAgentGroup):
         embedding = self.compute_graph_embeddings(msg, edge_indices)
 
         # Process probabilistic output
-        deterministic = self.deterministic_eval and not self.graph_model.training
+        deterministic = self.deterministic_eval and not self.training
         estimates, log_var, mu, std = process_probabilistic_output(
             embedding, deterministic
         )  # All (B, N, F)
-        if not self.enable_rl_grad_to_msg_aggr:
-            estimates = estimates.detach()
 
         return estimates, edge_indices, mu, std, log_var
 
@@ -536,9 +534,14 @@ class DualPathProbObsGNNCommAgentGroup(DualPathObsGNNCommAgentGroup):
             msg, edge_indices
         )
 
-        hidden_states = torch.cat(
-            (estimates, local_obs), dim=-1
-        )  # (B, N, Hidden Size + F_local_obs)
+        if self.enable_rl_grad_to_msg_aggr:
+            hidden_states = torch.cat(
+                (estimates, local_obs), dim=-1
+            )  # (B, N, Hidden Size + F_local_obs)
+        else:
+            hidden_states = torch.cat(
+                (estimates.detach(), local_obs), dim=-1
+            )  # (B, N, Hidden Size + F_local_obs)
 
         q_val = self._process_decoders(hidden_states)
 

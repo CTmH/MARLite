@@ -153,13 +153,13 @@ class Trainer:
             self.eval_agent_group.parameters()
         )
 
-        if lr_scheduler_conf:
-            self.lr_scheduler = self.lr_scheduler_conf.get_lr_scheduler(self.optimizer)
+        if isinstance(lr_scheduler_conf, LRSchedulerConfig):
+            self.lr_scheduler = lr_scheduler_conf.get_lr_scheduler(self.optimizer)
         else:
             self.lr_scheduler = None
 
-        if agent_lr_scheduler_conf:
-            self.agent_lr_scheduler = self.agent_lr_scheduler_conf.get_lr_scheduler(
+        if isinstance(agent_lr_scheduler_conf, LRSchedulerConfig):
+            self.agent_lr_scheduler = agent_lr_scheduler_conf.get_lr_scheduler(
                 self.agent_optimizer
             )
         else:
@@ -190,7 +190,7 @@ class Trainer:
             self.worker_group = self._create_worker_group()
             if self.worker_group is not None:
                 self.worker_group.start_workers()
-                self._write_initial_params_to_workers()
+                self._sync_params_to_workers()
             logging.info(
                 f"Using multi-GPU training with {len(self.device_list)} devices: {self.device_list}"
             )
@@ -232,88 +232,30 @@ class Trainer:
         """
         pass
 
-    def _write_initial_params_to_workers(self):
-        """Write initial model parameters to all workers."""
+    def _sync_params_to_workers(self):
+        """Synchronize model parameters and learning rates to all workers."""
         if self.worker_group is None:
             return
 
         trainable_params = {
-            "eval_agent_group": {
-                k: v.clone() for k, v in self.eval_agent_group.state_dict().items()
-            },
-            "target_agent_group": {
-                k: v.clone() for k, v in self.target_agent_group.state_dict().items()
-            },
-            "eval_critic": {
-                k: v.clone() for k, v in self.eval_critic.state_dict().items()
-            },
-            "target_critic": {
-                k: v.clone() for k, v in self.target_critic.state_dict().items()
-            },
-        }
-        self.worker_group.write_params_to_workers(trainable_params)
-
-    def _sync_eval_params_from_workers(self):
-        """
-        Synchronize eval model parameters from workers to trainer.
-
-        Called before evaluation or checkpoint saving to get the latest
-        parameters from workers. Only syncs eval_* models, not target_* models,
-        because target networks are maintained in the Trainer process.
-        """
-        if self.worker_group is None:
-            return
-
-        trainable_params = self.worker_group.read_params_from_worker0()
-        self.eval_agent_group.load_state_dict(trainable_params["eval_agent_group"])
-        self.eval_critic.load_state_dict(trainable_params["eval_critic"])
-
-    def _sync_target_params_to_workers(self):
-        """
-        Synchronize target model parameters from trainer to workers.
-
-        Called after update_target_model_params() to ensure workers have
-        the latest target network parameters.
-        """
-        if self.worker_group is None:
-            return
-
-        target_params = {
-            "target_agent_group": {
-                k: v.clone() for k, v in self.target_agent_group.state_dict().items()
-            },
-            "target_critic": {
-                k: v.clone() for k, v in self.target_critic.state_dict().items()
-            },
-        }
-        self.worker_group.write_params_to_workers(target_params)
-
-    def _broadcast_params_to_workers(self):
-        """
-        Broadcast current trainer parameters to all workers.
-
-        Called before training to sync parameters that may have been
-        updated externally (e.g., after loading checkpoint).
-        """
-        if self.worker_group is None:
-            return
-
-        # Prepare parameters to broadcast from trainer
-        trainable_params = {
-            "eval_agent_group": {
-                k: v.clone() for k, v in self.eval_agent_group.state_dict().items()
-            },
-            "target_agent_group": {
-                k: v.clone() for k, v in self.target_agent_group.state_dict().items()
-            },
-            "eval_critic": {
-                k: v.clone() for k, v in self.eval_critic.state_dict().items()
-            },
-            "target_critic": {
-                k: v.clone() for k, v in self.target_critic.state_dict().items()
-            },
+            "eval_agent_group": self.eval_agent_group.state_dict(),
+            "target_agent_group": self.target_agent_group.state_dict(),
+            "eval_critic": self.eval_critic.state_dict(),
+            "target_critic": self.target_critic.state_dict(),
         }
         self.worker_group.broadcast_params(trainable_params)
+
+        critic_lr = self.optimizer.param_groups[0]["lr"]
+        agent_lr = self.agent_optimizer.param_groups[0]["lr"]
+        self.worker_group.sync_lr_to_workers(critic_lr, agent_lr)
+
+    def _sync_eval_params_from_workers(self):
+        """Sync eval model parameters from workers to trainer before evaluation."""
+        if self.worker_group is None:
+            return
+        eval_params = self.worker_group.read_params_from_worker0()
+        self.eval_agent_group.load_state_dict(eval_params["eval_agent_group"])
+        self.eval_critic.load_state_dict(eval_params["eval_critic"])
 
     def learn(self, sample_size, batch_size: int, times: int):
         raise NotImplementedError
@@ -449,8 +391,8 @@ class Trainer:
                 f"Epoch {epoch}: Learning {learning_times_per_epoch} times per epoch ..."
             )
 
-            # Broadcast params if using multi-GPU (e.g., after checkpoint load)
-            self._broadcast_params_to_workers()
+            # Sync params if using multi-GPU (e.g., after checkpoint load)
+            self._sync_params_to_workers()
 
             loss = self.learn(
                 sample_size=sample_size,
@@ -480,13 +422,15 @@ class Trainer:
                 self.lr_scheduler.step(first_metric)
             elif isinstance(self.lr_scheduler, torch.optim.lr_scheduler.LRScheduler):
                 self.lr_scheduler.step()
-            if self.agent_lr_scheduler:
-                if isinstance(
-                    self.agent_lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau
-                ):
-                    self.agent_lr_scheduler.step(first_metric)
-                else:
-                    self.agent_lr_scheduler.step()
+
+            if isinstance(
+                self.agent_lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau
+            ):
+                self.agent_lr_scheduler.step(first_metric)
+            elif isinstance(
+                self.agent_lr_scheduler, torch.optim.lr_scheduler.LRScheduler
+            ):
+                self.agent_lr_scheduler.step()
 
             cache_params = []
             update_best = []

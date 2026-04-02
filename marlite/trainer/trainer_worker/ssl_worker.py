@@ -9,6 +9,11 @@ import torch
 import torch.distributed as dist
 from copy import deepcopy
 from typing import Any, Dict
+
+from marlite.algorithm.agents import AgentGroupConfig
+from marlite.algorithm.model import ModelConfig
+from marlite.util.optimizer_config import OptimizerConfig
+from marlite.util.loss_func import ReconstructionLoss
 from marlite.trainer.trainer_worker.base_worker import BaseWorker
 
 
@@ -20,6 +25,9 @@ class SSLWorker(BaseWorker):
     The ssl_learn method trains the ssl_model to reconstruct observations.
     """
 
+    ssl_optimizer: torch.optim.Optimizer
+    agent_optimizer: torch.optim.Optimizer
+
     def __init__(
         self,
         worker_id: int,
@@ -27,11 +35,11 @@ class SSLWorker(BaseWorker):
         rank: int,
         world_size: int,
         init_method: str,
-        ssl_model_config=None,
-        agent_group_config=None,
-        ssl_optimizer_config=None,
-        agent_optimizer_config=None,
-        reconstruction_loss=None,
+        ssl_model_config: ModelConfig,
+        agent_group_config: AgentGroupConfig,
+        ssl_optimizer_config: OptimizerConfig,
+        agent_optimizer_config: OptimizerConfig,
+        reconstruction_loss: ReconstructionLoss,
         kl_divergence_weight: float = 1.0,
         **kwargs,
     ):
@@ -55,58 +63,15 @@ class SSLWorker(BaseWorker):
         self.reconstruction_loss = reconstruction_loss
         self.kl_divergence_weight = kl_divergence_weight
 
-        if ssl_model_config is not None:
-            self.ssl_model = ssl_model_config.get_model()
-        else:
-            self.ssl_model = None
+        self.ssl_model = ssl_model_config.get_model()
+        self.eval_agent_group = agent_group_config.get_agent_group()
 
-        if agent_group_config is not None:
-            self.eval_agent_group = agent_group_config.get_agent_group()
-        else:
-            self.eval_agent_group = None
-
-        if ssl_optimizer_config is not None and self.ssl_model is not None:
-            if hasattr(ssl_optimizer_config, "get_optimizer"):
-                self.ssl_optimizer = ssl_optimizer_config.get_optimizer(
-                    self.ssl_model.parameters()
-                )
-            else:
-                self.ssl_optimizer = ssl_optimizer_config
-        else:
-            self.ssl_optimizer = None
-
-        if agent_optimizer_config is not None and self.eval_agent_group is not None:
-            if hasattr(agent_optimizer_config, "get_optimizer"):
-                self.agent_optimizer = agent_optimizer_config.get_optimizer(
-                    self.eval_agent_group.parameters()
-                )
-            else:
-                self.agent_optimizer = agent_optimizer_config
-        else:
-            self.agent_optimizer = None
-
-    def set_ssl_models(
-        self,
-        ssl_model,
-        eval_agent_group,
-        ssl_optimizer,
-        agent_group_optimizer,
-    ):
-        """
-        Set SSL model and agent group for this worker.
-
-        Args:
-            ssl_model: Self-supervised model
-            eval_agent_group: Evaluation agent group
-            ssl_optimizer: Optimizer for ssl_model
-            agent_group_optimizer: Optimizer for agent group
-        """
-        self.ssl_model = ssl_model
-        self.eval_agent_group = eval_agent_group
-        self.ssl_optimizer = ssl_optimizer
-        self.agent_group_optimizer = agent_group_optimizer
-
-        self.eval_agent_group.train()
+        self.ssl_optimizer = ssl_optimizer_config.get_optimizer(
+            self.ssl_model.parameters()
+        )
+        self.agent_optimizer = agent_optimizer_config.get_optimizer(
+            self.eval_agent_group.parameters()
+        )
 
     def move_to_device(self, device: str):
         """
@@ -191,11 +156,11 @@ class VAESSLWorker(SSLWorker):
         rank: int,
         world_size: int,
         init_method: str,
-        ssl_model_config=None,
-        agent_group_config=None,
-        ssl_optimizer_config=None,
-        agent_optimizer_config=None,
-        reconstruction_loss=None,
+        ssl_model_config: ModelConfig,
+        agent_group_config: AgentGroupConfig,
+        ssl_optimizer_config: OptimizerConfig,
+        agent_optimizer_config: OptimizerConfig,
+        reconstruction_loss: ReconstructionLoss,
         kl_divergence_weight: float = 1.0,
         data_constructor=None,
         **kwargs,

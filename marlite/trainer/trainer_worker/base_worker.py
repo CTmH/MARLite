@@ -62,9 +62,10 @@ class BaseWorker:
         self.eval_critic = None
         self.target_critic = None
 
-        # Optimizers (to be initialized by subclasses via set_optimizers)
-        self.critic_optimizer = None
-        self.agent_group_optimizer = None
+        # Optimizers (to be initialized by subclasses)
+        self.critic_optimizer: Optional[torch.optim.Optimizer] = None
+        self.agent_optimizer: Optional[torch.optim.Optimizer] = None
+        self.ssl_optimizer: Optional[torch.optim.Optimizer] = None
 
     def _setup_distributed(self):
         """Initialize distributed communication for this worker."""
@@ -77,48 +78,6 @@ class BaseWorker:
             rank=self.rank,
             world_size=self.world_size,
         )
-
-    def set_models(
-        self,
-        eval_agent_group: Any,
-        target_agent_group: Any,
-        eval_critic: torch.nn.Module,
-        target_critic: torch.nn.Module,
-    ):
-        """
-        Set model instances for this worker.
-
-        Args:
-            eval_agent_group: Evaluation agent group instance
-            target_agent_group: Target agent group instance
-            eval_critic: Evaluation critic module
-            target_critic: Target critic module
-        """
-        self.eval_agent_group = eval_agent_group.to(self.device)
-        self.target_agent_group = target_agent_group.to(self.device)
-        self.eval_critic = eval_critic.to(self.device)
-        self.target_critic = target_critic.to(self.device)
-
-        # Set models to appropriate mode
-        self.eval_agent_group.train()
-        self.target_agent_group.eval()
-        self.eval_critic.train()
-        self.target_critic.eval()
-
-    def set_optimizers(
-        self,
-        critic_optimizer: torch.optim.Optimizer,
-        agent_group_optimizer: torch.optim.Optimizer,
-    ):
-        """
-        Set optimizer instances for this worker.
-
-        Args:
-            critic_optimizer: Optimizer for critic parameters
-            agent_group_optimizer: Optimizer for agent group parameters
-        """
-        self.critic_optimizer = critic_optimizer
-        self.agent_group_optimizer = agent_group_optimizer
 
     def sync_params_from_main(self, params):
         """
@@ -279,6 +238,20 @@ class BaseWorker:
         elif cmd == "MOVE_TO_CPU":
             self.move_to_device("cpu")
             torch.cuda.empty_cache()
+            if ack_queue:
+                ack_queue.put("ACK")
+
+        elif cmd == "SYNC_LR":
+            lr_data = param_queue.get()
+            if "critic_lr" in lr_data:
+                for param_group in self.critic_optimizer.param_groups:
+                    param_group["lr"] = lr_data["critic_lr"]
+            if "agent_lr" in lr_data:
+                for param_group in self.agent_optimizer.param_groups:
+                    param_group["lr"] = lr_data["agent_lr"]
+            if "ssl_lr" in lr_data:
+                for param_group in self.ssl_optimizer.param_groups:
+                    param_group["lr"] = lr_data["ssl_lr"]
             if ack_queue:
                 ack_queue.put("ACK")
 

@@ -8,6 +8,10 @@ for QMIX algorithm in a multi-GPU setting.
 import torch
 import torch.distributed as dist
 from typing import Any, Dict
+
+from marlite.algorithm.agents import AgentGroupConfig
+from marlite.algorithm.critic import CriticConfig
+from marlite.util.optimizer_config import OptimizerConfig
 from marlite.trainer.trainer_worker.base_worker import BaseWorker
 
 
@@ -18,10 +22,11 @@ class QMIXWorker(BaseWorker):
     Implements train_step() method that executes one batch of QMIX training:
     1. Forward pass through eval_agent_group and eval_critic
     2. Compute target Q values using target networks
-    3. Compute TD error loss
-    4. Backward pass with gradient synchronization
-    5. Optimizer step
+    3. Compute loss and update critics and agents
     """
+
+    critic_optimizer: torch.optim.Optimizer
+    agent_optimizer: torch.optim.Optimizer
 
     def __init__(
         self,
@@ -30,10 +35,10 @@ class QMIXWorker(BaseWorker):
         rank: int,
         world_size: int,
         init_method: str,
-        agent_group_config=None,
-        critic_config=None,
-        critic_optimizer_config=None,
-        agent_optimizer_config=None,
+        agent_group_config: AgentGroupConfig,
+        critic_config: CriticConfig,
+        critic_optimizer_config: OptimizerConfig,
+        agent_optimizer_config: OptimizerConfig,
         gamma: float = 0.9,
         **kwargs,
     ):

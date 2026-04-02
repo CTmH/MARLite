@@ -8,6 +8,10 @@ the training logic for message aggregation algorithms in a multi-GPU setting.
 import torch
 import torch.distributed as dist
 from typing import Any, Dict
+
+from marlite.algorithm.agents import AgentGroupConfig
+from marlite.algorithm.critic import CriticConfig
+from marlite.util.optimizer_config import OptimizerConfig
 from marlite.trainer.trainer_worker.base_worker import BaseWorker
 
 
@@ -18,6 +22,9 @@ class MsgAggrWorker(BaseWorker):
     Implements train_step() method with message aggregation loss.
     """
 
+    critic_optimizer: torch.optim.Optimizer
+    agent_optimizer: torch.optim.Optimizer
+
     def __init__(
         self,
         worker_id: int,
@@ -25,10 +32,10 @@ class MsgAggrWorker(BaseWorker):
         rank: int,
         world_size: int,
         init_method: str,
-        agent_group_config=None,
-        critic_config=None,
-        critic_optimizer_config=None,
-        agent_optimizer_config=None,
+        agent_group_config: AgentGroupConfig,
+        critic_config: CriticConfig,
+        critic_optimizer_config: OptimizerConfig,
+        agent_optimizer_config: OptimizerConfig,
         gamma: float = 0.9,
         warmup_epochs: int = 0,
         msg_aggr_weight: float = 1.0,

@@ -53,22 +53,6 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
             data_constructor=self.data_constructor,
         )
 
-    def _create_ssl_worker_group(self):
-        """Create VAESSLWorkerGroup for multi-GPU SSL training."""
-        if not self.use_multi_gpu:
-            return None
-
-        return VAESSLWorkerGroup(
-            device_ids=list(range(len(self.device_list))),
-            ssl_model_config=self.ssl_model_config,
-            agent_group_config=self.agent_group_config,
-            ssl_optimizer_config=self.ssl_optimizer_config,
-            agent_optimizer_config=self.agent_optimizer_config,
-            reconstruction_loss=self.reconstruction_loss,
-            kl_divergence_weight=self.kl_divergence_weight,
-            data_constructor=self.data_constructor,
-        )
-
     def learn(self, sample_size, batch_size: int, times: int = 1):
         """RL learning delegates to GraphQMIXTrainer's implementation."""
         if not self.use_multi_gpu:

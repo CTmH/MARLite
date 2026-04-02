@@ -370,7 +370,7 @@ class DualPathBasedMsgAggrAgentGroup(MsgAggrAgentGroup):
         encoder_configs: Dict[str, ModelConfig],
         decoder_configs: Dict[str, ModelConfig],
         aggr_model_config: ModelConfig,
-        enable_rl_grad_to_msg_aggr: bool = True,
+        enable_rl_grad_to_msg_aggr: bool = False,
     ) -> None:
         super().__init__(
             agent_model_dict=agent_model_dict,
@@ -660,7 +660,7 @@ class DualPathObsMsgAggrAgentGroup(DualPathBasedMsgAggrAgentGroup):
         encoder_configs: Dict[str, ModelConfig],
         decoder_configs: Dict[str, ModelConfig],
         aggr_model_config: ModelConfig,
-        enable_rl_grad_to_msg_aggr: bool = True,
+        enable_rl_grad_to_msg_aggr: bool = False,
     ) -> None:
         super().__init__(
             agent_model_dict=agent_model_dict,
@@ -735,7 +735,7 @@ class DualPathProbObsMsgAggrAgentGroup(DualPathObsMsgAggrAgentGroup):
         encoder_configs: Dict[str, ModelConfig],
         decoder_configs: Dict[str, ModelConfig],
         aggr_model_config: ModelConfig,
-        enable_rl_grad_to_msg_aggr: bool = True,
+        enable_rl_grad_to_msg_aggr: bool = False,
         deterministic_eval: bool = True,
     ) -> None:
         super().__init__(

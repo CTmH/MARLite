@@ -59,7 +59,7 @@ class SelfSupervisedQMIXTrainer(Trainer):
 
         self._init_ssl_optimizer()
 
-        if self.ssl_lr_scheduler_conf:
+        if isinstance(self.ssl_lr_scheduler_conf, LRSchedulerConfig):
             self.ssl_lr_scheduler = self.ssl_lr_scheduler_conf.get_lr_scheduler(
                 self.ssl_optimizer
             )
@@ -72,7 +72,7 @@ class SelfSupervisedQMIXTrainer(Trainer):
             self.ssl_worker_group = self._create_ssl_worker_group()
             if self.ssl_worker_group is not None:
                 self.ssl_worker_group.start_workers()
-                self._write_ssl_params_to_workers()
+                self._sync_ssl_params_to_workers()
 
     def _init_ssl_optimizer(self):
         ssl_params_optim = [
@@ -89,8 +89,8 @@ class SelfSupervisedQMIXTrainer(Trainer):
         """Create SSL worker group. Override in subclass."""
         pass
 
-    def _write_ssl_params_to_workers(self):
-        """Write SSL model and agent group parameters to workers."""
+    def _sync_ssl_params_to_workers(self):
+        """Sync SSL model, agent group parameters and learning rates to workers."""
         if self.ssl_worker_group is None:
             return
 
@@ -102,6 +102,16 @@ class SelfSupervisedQMIXTrainer(Trainer):
             ssl_params["ssl_model"], ssl_params["eval_agent_group"]
         )
 
+        # Sync learning rates to workers
+        ssl_lr = self.ssl_optimizer.param_groups[0]["lr"]
+        agent_lr = self.agent_optimizer.param_groups[0]["lr"]
+        for i in range(self.ssl_worker_group.world_size):
+            self.ssl_worker_group.cmd_queues[i].put("SYNC_LR")
+            self.ssl_worker_group.param_queues[i].put(
+                {"ssl_lr": ssl_lr, "agent_lr": agent_lr}
+            )
+            self.ssl_worker_group.ack_queues[i].get()
+
     def _sync_ssl_params_from_workers(self):
         """Sync SSL parameters from workers to trainer."""
         if self.ssl_worker_group is None:
@@ -110,12 +120,6 @@ class SelfSupervisedQMIXTrainer(Trainer):
         ssl_params, agent_params = self.ssl_worker_group.read_params_from_worker0()
         self.ssl_model.load_state_dict(ssl_params)
         self.eval_agent_group.load_state_dict(agent_params)
-
-    def _broadcast_ssl_params_to_workers(self):
-        """Broadcast current SSL parameters to workers."""
-        if self.ssl_worker_group is None:
-            return
-        self.ssl_worker_group.broadcast_params()
 
     def save_current_model(self, checkpoint: str):
         """Save current model including self_supervised_model parameters"""
@@ -239,8 +243,8 @@ class SelfSupervisedQMIXTrainer(Trainer):
             )
             logging.info(f"Epoch {epoch}: Self-Supervised Learning ...")
 
-            # Write SSL params from trainer to workers before SSL learning
-            self._write_ssl_params_to_workers()
+            # Sync SSL params from trainer to workers before SSL learning
+            self._sync_ssl_params_to_workers()
 
             ssl_loss = self.self_supervised_learn(
                 sample_size=sample_size,
@@ -254,8 +258,8 @@ class SelfSupervisedQMIXTrainer(Trainer):
 
             logging.info(f"Epoch {epoch}: Reinforcement Learning ...")
 
-            # Write RL params from trainer to workers before RL learning
-            self._broadcast_params_to_workers()
+            # Sync RL params from trainer to workers before RL learning
+            self._sync_params_to_workers()
 
             loss = self.learn(
                 sample_size=sample_size,
@@ -295,13 +299,14 @@ class SelfSupervisedQMIXTrainer(Trainer):
             ):
                 self.ssl_lr_scheduler.step()
 
-            if self.agent_lr_scheduler:
-                if isinstance(
-                    self.agent_lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau
-                ):
-                    self.agent_lr_scheduler.step(first_metric)
-                else:
-                    self.agent_lr_scheduler.step()
+            if isinstance(
+                self.agent_lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau
+            ):
+                self.agent_lr_scheduler.step(first_metric)
+            elif isinstance(
+                self.agent_lr_scheduler, torch.optim.lr_scheduler.LRScheduler
+            ):
+                self.agent_lr_scheduler.step()
 
             cache_params = []
             update_best = []
