@@ -8,7 +8,11 @@ from absl import logging
 from torch.nn.modules.loss import _Loss
 
 from marlite.algorithm.model import ModelConfig
-from marlite.trainer.trainer import Trainer
+from marlite.trainer.trainer import (
+    Trainer,
+    _serialize_to_buffer,
+    _deserialize_from_buffer,
+)
 from marlite.util.optimizer_config import OptimizerConfig
 from marlite.util.lr_scheduler_config import LRSchedulerConfig
 from marlite.util.self_supervised_data_constructor.self_supervised_data_constructor_config import (
@@ -45,8 +49,10 @@ class SelfSupervisedQMIXTrainer(Trainer):
         self.data_constructor = self.data_constructor_config.get_data_constructor()
 
         self.ssl_model = ssl_model_config.get_model()
-        self.best_ssl_model_params = deepcopy(self.ssl_model.state_dict())
-        self._cached_ssl_model_params = deepcopy(self.ssl_model.state_dict())
+        self.best_ssl_model_params = _serialize_to_buffer(self.ssl_model.state_dict())
+        self._cached_ssl_model_params = _serialize_to_buffer(
+            self.ssl_model.state_dict()
+        )
 
         self.ssl_optimizer_config = ssl_optimizer_config
         self.ssl_lr_scheduler_conf = ssl_lr_scheduler_conf
@@ -160,20 +166,32 @@ class SelfSupervisedQMIXTrainer(Trainer):
                 torch.load(ssl_model_path, weights_only=True)
             )
 
-        self.best_agent_group_params = deepcopy(self.eval_agent_group.state_dict())
-        self.best_critic_params = deepcopy(self.eval_critic.state_dict())
-        self.best_ssl_model_params = deepcopy(self.ssl_model.state_dict())
-        self._cached_agent_group_params = deepcopy(self.eval_agent_group.state_dict())
-        self._cached_critic_params = deepcopy(self.eval_critic.state_dict())
-        self._cached_ssl_model_params = deepcopy(self.ssl_model.state_dict())
+        self.best_agent_group_params = _serialize_to_buffer(
+            self.eval_agent_group.state_dict()
+        )
+        self.best_critic_params = _serialize_to_buffer(self.eval_critic.state_dict())
+        self.best_ssl_model_params = _serialize_to_buffer(self.ssl_model.state_dict())
+        self._cached_agent_group_params = _serialize_to_buffer(
+            self.eval_agent_group.state_dict()
+        )
+        self._cached_critic_params = _serialize_to_buffer(self.eval_critic.state_dict())
+        self._cached_ssl_model_params = _serialize_to_buffer(
+            self.ssl_model.state_dict()
+        )
         self.update_target_model_params()
         return self
 
     def save_best_model(self):
         """Save best model including self_supervised_model parameters"""
-        self.eval_agent_group.load_state_dict(self.best_agent_group_params)
-        self.eval_critic.load_state_dict(self.best_critic_params)
-        self.ssl_model.load_state_dict(self.best_ssl_model_params)
+        self.eval_agent_group.load_state_dict(
+            _deserialize_from_buffer(self.best_agent_group_params)
+        )
+        self.eval_critic.load_state_dict(
+            _deserialize_from_buffer(self.best_critic_params)
+        )
+        self.ssl_model.load_state_dict(
+            _deserialize_from_buffer(self.best_ssl_model_params)
+        )
         self.save_current_model(checkpoint="best")
         return self
 
@@ -221,8 +239,8 @@ class SelfSupervisedQMIXTrainer(Trainer):
             )
             logging.info(f"Epoch {epoch}: Self-Supervised Learning ...")
 
-            # Broadcast SSL params if using multi-GPU
-            self._broadcast_ssl_params_to_workers()
+            # Write SSL params from trainer to workers before SSL learning
+            self._write_ssl_params_to_workers()
 
             ssl_loss = self.self_supervised_learn(
                 sample_size=sample_size,
@@ -230,9 +248,13 @@ class SelfSupervisedQMIXTrainer(Trainer):
                 times=ssl_learning_times_per_epoch,
             )
             logging.info(f"Epoch {epoch}: Self-Supervised Learning Loss {ssl_loss:.4f}")
+
+            # Sync SSL params from workers to trainer after SSL learning
+            self._sync_ssl_params_from_workers()
+
             logging.info(f"Epoch {epoch}: Reinforcement Learning ...")
 
-            # Broadcast RL params if using multi-GPU
+            # Write RL params from trainer to workers before RL learning
             self._broadcast_params_to_workers()
 
             loss = self.learn(
@@ -244,7 +266,6 @@ class SelfSupervisedQMIXTrainer(Trainer):
 
             # Sync eval params from workers before evaluation
             self._sync_eval_params_from_workers()
-            self._sync_ssl_params_from_workers()
 
             # Save checkpoint
             checkpoint_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -296,22 +317,30 @@ class SelfSupervisedQMIXTrainer(Trainer):
             update_best = np.array(update_best, dtype=np.bool_)
 
             if cache_params.any():
-                self._cached_agent_group_params = deepcopy(
+                self._cached_agent_group_params = _serialize_to_buffer(
                     self.eval_agent_group.state_dict()
                 )
-                self._cached_critic_params = deepcopy(self.eval_critic.state_dict())
-                self._cached_ssl_model_params = deepcopy(self.ssl_model.state_dict())
+                self._cached_critic_params = _serialize_to_buffer(
+                    self.eval_critic.state_dict()
+                )
+                self._cached_ssl_model_params = _serialize_to_buffer(
+                    self.ssl_model.state_dict()
+                )
                 logging.info(
                     f"Epoch {epoch}: Cached parameters updated with current parameters."
                 )
 
             if update_best.any():
                 self.best_metrics = metrics
-                self.best_agent_group_params = deepcopy(
+                self.best_agent_group_params = _serialize_to_buffer(
                     self.eval_agent_group.state_dict()
                 )
-                self.best_critic_params = deepcopy(self.eval_critic.state_dict())
-                self.best_ssl_model_params = deepcopy(self.ssl_model.state_dict())
+                self.best_critic_params = _serialize_to_buffer(
+                    self.eval_critic.state_dict()
+                )
+                self.best_ssl_model_params = _serialize_to_buffer(
+                    self.ssl_model.state_dict()
+                )
                 logging.info(
                     f"Epoch {epoch}: New best {first_metric_name}: {first_metric:.4f}"
                 )
@@ -323,18 +352,22 @@ class SelfSupervisedQMIXTrainer(Trainer):
                 break
 
             if epoch % eval_interval == 0:
-                self.eval_agent_group.load_state_dict(self._cached_agent_group_params)
-                self.eval_critic.load_state_dict(self._cached_critic_params)
-                self.ssl_model.load_state_dict(self._cached_ssl_model_params)
+                self.eval_agent_group.load_state_dict(
+                    _deserialize_from_buffer(self._cached_agent_group_params)
+                )
+                self.eval_critic.load_state_dict(
+                    _deserialize_from_buffer(self._cached_critic_params)
+                )
+                self.ssl_model.load_state_dict(
+                    _deserialize_from_buffer(self._cached_ssl_model_params)
+                )
                 self.update_target_model_params()
-                self._sync_target_params_to_workers()
                 logging.info(
                     f"Epoch {epoch}: Eval model and Target model updated with cached parameters."
                 )
 
             if epoch % update_target_interval == 0:
                 self.update_target_model_params()
-                self._sync_target_params_to_workers()
                 logging.info(
                     f"Epoch {epoch}: Target model updated with eval model parameters."
                 )
