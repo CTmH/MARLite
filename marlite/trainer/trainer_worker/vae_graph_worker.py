@@ -1,30 +1,44 @@
 """
-Graph worker implementation for multi-GPU training.
+VAE Graph worker implementation for joint RL+SSL multi-GPU training.
 
-This module provides the GraphWorker class that implements the training logic
-for GraphQMIX algorithm in a multi-GPU setting.
+This module provides the VAEGraphQMIXWorker class that implements the training logic
+for VAE-based GraphQMIX algorithm in a multi-GPU setting.
+
+Training computes combined_loss = td_error + self_supervised_learning_loss_weight * vae_loss
+in a single forward pass, where vae_loss is computed using local_state_estimates,
+mu, and log_var returned directly from eval_agent_group.forward().
 """
 
 import io
 import torch
 import torch.distributed as dist
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
 from marlite.algorithm.agents import AgentGroupConfig
 from marlite.algorithm.critic import CriticConfig
+from marlite.algorithm.model import ModelConfig
 from marlite.util.optimizer_config import OptimizerConfig
 from marlite.trainer.trainer_worker.base_worker import BaseWorker
 
 
-class GraphWorker(BaseWorker):
+class VAEGraphQMIXWorker(BaseWorker):
     """
-    Worker for GraphQMIX algorithm multi-GPU training.
+    Worker for VAE-based GraphQMIX algorithm multi-GPU training.
 
-    Implements train_step() method that executes one batch of GraphQMIX training.
+    Implements train_step() method that executes one batch of joint RL+SSL training.
+    The eval_agent_group.forward() returns local_state_estimates, mu, log_var which
+    are used for both RL Q-value computation and VAE reconstruction.
+
+    Training flow:
+        combined_loss = critic_loss + weight * vae_loss
+        - Single backward pass
+        - Synchronized gradients for critic, agent, and ssl_model
+        - Separate optimizer steps
     """
 
     critic_optimizer: torch.optim.Optimizer
     agent_optimizer: torch.optim.Optimizer
+    ssl_optimizer: torch.optim.Optimizer
 
     def __init__(
         self,
@@ -38,10 +52,17 @@ class GraphWorker(BaseWorker):
         critic_optimizer_config: OptimizerConfig,
         agent_optimizer_config: OptimizerConfig,
         gamma: float = 0.9,
+        ssl_model_config: ModelConfig = None,
+        ssl_optimizer_config: OptimizerConfig = None,
+        reconstruction_loss=None,
+        kl_divergence_weight: float = 1.0,
+        self_supervised_learning_loss_weight: float = 1.0,
+        data_constructor=None,
+        warmup_epochs: int = 0,
         **kwargs,
     ):
         """
-        Initialize Graph worker.
+        Initialize VAE Graph worker.
 
         Args:
             worker_id: Unique worker identifier
@@ -54,6 +75,15 @@ class GraphWorker(BaseWorker):
             critic_optimizer_config: Configuration for critic optimizer
             agent_optimizer_config: Configuration for agent group optimizer
             gamma: Discount factor
+            ssl_model_config: Configuration for SSL model (VAE decoder)
+            ssl_optimizer_config: Configuration for SSL optimizer
+            reconstruction_loss: Loss function for reconstruction
+            kl_divergence_weight: Weight for KL divergence loss
+            self_supervised_learning_loss_weight: Weight for VAE loss in combined loss
+            data_constructor: Data constructor for SSL preprocessing
+            warmup_epochs: Number of epochs to train with RL only before enabling SSL
+            self_supervised_learning_loss_weight: Weight for VAE loss in combined loss
+            data_constructor: Data constructor for SSL preprocessing
         """
         super().__init__(worker_id, device_id, rank, world_size, init_method)
         self.gamma = gamma
@@ -77,6 +107,23 @@ class GraphWorker(BaseWorker):
             self.eval_agent_group.parameters()
         )
 
+        # Initialize SSL components (optional)
+        self.ssl_model = None
+        self.ssl_optimizer = None
+        self.reconstruction_loss = None
+        self.kl_divergence_weight = kl_divergence_weight
+        self.self_supervised_learning_loss_weight = self_supervised_learning_loss_weight
+        self.data_constructor = data_constructor
+        self.warmup_epochs = warmup_epochs
+
+        if ssl_model_config is not None:
+            self.ssl_model = ssl_model_config.get_model()
+            self.reconstruction_loss = reconstruction_loss
+            self.kl_divergence_weight = kl_divergence_weight
+            self.ssl_optimizer = ssl_optimizer_config.get_optimizer(
+                self.ssl_model.parameters()
+            )
+
     def move_to_device(self, device: str):
         """
         Move all models to the specified device.
@@ -92,11 +139,13 @@ class GraphWorker(BaseWorker):
             self.eval_critic.to(device)
         if self.target_critic is not None:
             self.target_critic.to(device)
+        if self.ssl_model is not None:
+            self.ssl_model.to(device)
         self.device = device
 
     def reduce_gradients(self):
         """
-        Reduce (average) gradients across all workers for critic and agent.
+        Reduce (average) gradients across all workers for critic, agent, and ssl_model.
 
         Implements DDP-style gradient synchronization:
         - All workers compute local gradients
@@ -114,6 +163,13 @@ class GraphWorker(BaseWorker):
             if param.grad is not None:
                 dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
                 param.grad.data /= self.world_size
+
+        # SSL model gradients
+        if self.ssl_model is not None:
+            for param in self.ssl_model.parameters():
+                if param.grad is not None:
+                    dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
+                    param.grad.data /= self.world_size
 
     def get_params_for_main(self) -> Dict[str, Any]:
         """
@@ -138,6 +194,10 @@ class GraphWorker(BaseWorker):
                 k: v.clone().cpu() for k, v in self.target_critic.state_dict().items()
             },
         }
+        if self.ssl_model is not None:
+            params["ssl_model"] = {
+                k: v.clone().cpu() for k, v in self.ssl_model.state_dict().items()
+            }
         return params
 
     def sync_params_from_main(self, params):
@@ -171,10 +231,18 @@ class GraphWorker(BaseWorker):
             self.target_critic.load_state_dict(
                 {k: v.clone() for k, v in params["target_critic"].items()}
             )
+        if "ssl_model" in params and self.ssl_model is not None:
+            self.ssl_model.load_state_dict(
+                {k: v.clone() for k, v in params["ssl_model"].items()}
+            )
 
-    def train_step(self, batch: Dict[str, Any]) -> float:
+    def train_step(self, batch: Dict[str, Any]) -> tuple:
         """
         Execute one training step on the given batch.
+
+        When SSL is enabled, computes combined_loss = critic_loss + weight * vae_loss
+        using local_state_estimates, mu, log_var from forward pass.
+        Returns (combined_loss, critic_loss, vae_loss).
 
         Args:
             batch: Dictionary containing:
@@ -192,10 +260,16 @@ class GraphWorker(BaseWorker):
                 - next_avail_actions: Available actions for next states
                 - next_alive_mask: Alive masks for next states
                 - terminations: Termination flags
+                - formatted_obs: Processed observations for SSL (B, T, N, E)
+                - construct_padding_mask: Padding mask for SSL (B, T, N)
 
         Returns:
-            Critic loss (TD error)
+            Tuple of (combined_loss, critic_loss, vae_loss) or single critic_loss if SSL disabled
         """
+        # Get current epoch from batch to determine warmup status
+        current_epoch = batch.get("epoch", 0)
+        is_warmup = current_epoch < self.warmup_epochs
+
         # Extract batch data
         alive_mask = batch["alive_mask"].to(dtype=torch.bool)
         observations = batch["observations"].to(dtype=torch.float32)  # (B, T, N, O)
@@ -213,6 +287,8 @@ class GraphWorker(BaseWorker):
         next_avail_actions = batch["next_avail_actions"]
         next_alive_mask = batch["next_alive_mask"].to(dtype=torch.bool)
         terminations = batch["terminations"].to(dtype=torch.bool)
+        formatted = batch["formatted_obs"].to(dtype=torch.float32)  # (B, T, N, E)
+        construct_mask = batch["construct_padding_mask"].to(dtype=torch.bool)
 
         bs = states.shape[0]  # Batch size
         n_agents = rewards.shape[2]  # Number of agents
@@ -249,12 +325,13 @@ class GraphWorker(BaseWorker):
         last_edge_indices = [edge_indices[i][-1] for i in range(bs)]
         last_next_edge_indices = [next_edge_indices[i][-1] for i in range(bs)]
 
-        # === RL Forward Pass ===
+        # === RL Forward Pass (also gets SSL data from same forward) ===
         self.eval_agent_group.reset().train()
         # Transpose: (B, T, N, O) -> (B, N, T, O)
         observations_transposed = torch.transpose(observations, 1, 2).to(self.device)
         states = states.to(self.device)
 
+        # Forward returns: q_val, edge_indices, local_state_estimates, mu, std, log_var
         ret = self.eval_agent_group.forward(
             observations_transposed,
             states,
@@ -263,6 +340,11 @@ class GraphWorker(BaseWorker):
             last_edge_indices,
         )
         q_val = ret["q_val"]
+        # Get SSL data from forward return (for VAE reconstruction)
+        estimates = ret["local_state_estimates"]  # (B, N, T, E)
+        mu = ret["mu"]
+        log_var = ret["log_var"]
+
         # Get actions at last timestep: (B, T, N, A) -> (B, N, A)
         actions_last = actions[:, -1].to(device=self.device, dtype=torch.int64)
         q_val = torch.gather(q_val, dim=-1, index=actions_last.unsqueeze(-1)).squeeze(
@@ -315,11 +397,44 @@ class GraphWorker(BaseWorker):
         # Compute critic loss (TD error)
         critic_loss = torch.nn.functional.mse_loss(q_tot, y_tot.detach())
 
+        # === Compute VAE Loss (if SSL enabled and not in warmup) ===
+        if self.ssl_model is not None and not is_warmup:
+            # VAE decoder forward pass
+            # estimates: (B, N, T, E), formatted: (B, T, N, E)
+            formatted_device = formatted.to(self.device)
+            construct_mask_device = construct_mask.to(self.device)
+            reconstructed_obs = self.ssl_model(estimates)
+            reconstructed_obs = torch.reshape(reconstructed_obs, formatted_device.shape)
+
+            # Compute reconstruction loss
+            reconstruction_loss = self._compute_ssl_loss(
+                reconstructed_obs.view(-1, *reconstructed_obs.shape[2:]),
+                formatted_device.view(-1, *formatted_device.shape[2:]),
+                construct_mask_device.view(-1, *construct_mask_device.shape[2:]),
+            )
+
+            # Compute KL divergence loss
+            # KL(q(z|x) || p(z)) = -0.5 * sum(1 + log_var - mu^2 - exp(log_var))
+            kl_divergence = -0.5 * torch.sum(
+                1 + log_var - mu.pow(2) - torch.exp(log_var), dim=-1
+            )
+            kl_divergence = torch.mean(kl_divergence)
+
+            vae_loss = reconstruction_loss + self.kl_divergence_weight * kl_divergence
+            combined_loss = (
+                critic_loss + self.self_supervised_learning_loss_weight * vae_loss
+            )
+        else:
+            vae_loss = 0.0
+            combined_loss = critic_loss
+
         # === Backward Pass ===
         self.critic_optimizer.zero_grad()
         self.agent_optimizer.zero_grad()
+        if self.ssl_optimizer is not None:
+            self.ssl_optimizer.zero_grad()
 
-        critic_loss.backward()
+        combined_loss.backward()
 
         # Synchronize gradients across all workers
         self.reduce_gradients()
@@ -327,12 +442,50 @@ class GraphWorker(BaseWorker):
         # Clip gradients
         torch.nn.utils.clip_grad_norm_(self.eval_critic.parameters(), max_norm=5.0)
         torch.nn.utils.clip_grad_norm_(self.eval_agent_group.parameters(), max_norm=5.0)
+        if self.ssl_model is not None and not is_warmup:
+            torch.nn.utils.clip_grad_norm_(self.ssl_model.parameters(), max_norm=5.0)
 
         # Optimizer steps
         self.critic_optimizer.step()
         self.agent_optimizer.step()
+        if self.ssl_optimizer is not None and not is_warmup:
+            self.ssl_optimizer.step()
 
-        return critic_loss.detach().cpu().item()
+        # Return losses
+        # When SSL is enabled, return tuple (combined_loss, critic_loss, vae_loss)
+        # When SSL is disabled, return single critic_loss for backward compatibility
+        if self.ssl_model is not None:
+            vae_loss_value = (
+                vae_loss.detach().cpu().item()
+                if isinstance(vae_loss, torch.Tensor)
+                else vae_loss
+            )
+            return (
+                combined_loss.detach().cpu().item(),
+                critic_loss.detach().cpu().item(),
+                vae_loss_value,
+            )
+        else:
+            return critic_loss.detach().cpu().item()
+
+    def _compute_ssl_loss(self, pred_set, target_set, mask=None):
+        """
+        Compute SSL reconstruction loss.
+
+        Args:
+            pred_set: Predicted values
+            target_set: Target values
+            mask: Optional mask for valid elements
+
+        Returns:
+            loss: Computed loss value
+        """
+        if hasattr(self.reconstruction_loss, "reconstruction_loss"):
+            return self.reconstruction_loss.reconstruction_loss(
+                pred_set, target_set, mask
+            )
+        else:
+            return self.reconstruction_loss(pred_set, target_set)
 
     def handle_command(
         self,
@@ -376,9 +529,13 @@ class GraphWorker(BaseWorker):
 
         elif cmd == "TRAIN_STEP":
             batch = data_queue.get()
-            loss = self.train_step(batch)
+            result = self.train_step(batch)
             del batch
-            loss_queue.put(loss)
+            if self.ssl_model is not None:
+                combined, critic, vae = result
+                loss_queue.put((combined, critic, vae))
+            else:
+                loss_queue.put(result)
 
         elif cmd == "MOVE_TO_GPU":
             self.move_to_device(self.assigned_device)
@@ -399,6 +556,9 @@ class GraphWorker(BaseWorker):
             if "agent_lr" in lr_data:
                 for param_group in self.agent_optimizer.param_groups:
                     param_group["lr"] = lr_data["agent_lr"]
+            if "ssl_lr" in lr_data and self.ssl_optimizer is not None:
+                for param_group in self.ssl_optimizer.param_groups:
+                    param_group["lr"] = lr_data["ssl_lr"]
             if ack_queue:
                 ack_queue.put("ACK")
 

@@ -39,14 +39,19 @@ class SelfSupervisedQMIXTrainer(Trainer):
         self_supervised_learning_loss_weight=1.0,
         **kwargs,
     ):
+        # Set SSL-related attributes before calling super().__init__
+        # because _create_worker_group() is called during Trainer.__init__
         self.ssl_model_config = ssl_model_config
+        self.ssl_optimizer_config = ssl_optimizer_config
+        self.ssl_lr_scheduler_conf = ssl_lr_scheduler_conf
         self.data_constructor_config = data_constructor_config
         self.reconstruction_loss = reconstruction_loss
         self.self_supervised_learning_loss_weight = self_supervised_learning_loss_weight
 
-        super().__init__(**kwargs)
-
+        # Create data_constructor before super().__init__ because _create_worker_group needs it
         self.data_constructor = self.data_constructor_config.get_data_constructor()
+
+        super().__init__(**kwargs)
 
         self.ssl_model = ssl_model_config.get_model()
         self.best_ssl_model_params = _serialize_to_buffer(self.ssl_model.state_dict())
@@ -54,10 +59,10 @@ class SelfSupervisedQMIXTrainer(Trainer):
             self.ssl_model.state_dict()
         )
 
-        self.ssl_optimizer_config = ssl_optimizer_config
-        self.ssl_lr_scheduler_conf = ssl_lr_scheduler_conf
-
-        self._init_ssl_optimizer()
+        # ssl_optimizer only optimizes ssl_model, not eval_agent_group
+        self.ssl_optimizer = self.ssl_optimizer_config.get_optimizer(
+            self.ssl_model.parameters()
+        )
 
         if isinstance(self.ssl_lr_scheduler_conf, LRSchedulerConfig):
             self.ssl_lr_scheduler = self.ssl_lr_scheduler_conf.get_lr_scheduler(
@@ -66,60 +71,12 @@ class SelfSupervisedQMIXTrainer(Trainer):
         else:
             self.ssl_lr_scheduler = None
 
-        # SSL worker group for multi-GPU training
-        self.ssl_worker_group = None
-        if self.use_multi_gpu:
-            self.ssl_worker_group = self._create_ssl_worker_group()
-            if self.ssl_worker_group is not None:
-                self.ssl_worker_group.start_workers()
-                self._sync_ssl_params_to_workers()
-
-    def _init_ssl_optimizer(self):
-        ssl_params_optim = [
-            {"params": self.ssl_model.parameters()},
-        ]
-        self.ssl_optimizer = self.ssl_optimizer_config.get_optimizer(ssl_params_optim)
-        return self
+        # Note: ssl_worker_group is removed. Multi-GPU SSL training is now handled
+        # by VAEGraphWorkerGroup which combines RL and SSL in a single train_step.
 
     def _create_worker_group(self):
-        """Create worker group for RL training. Override in subclass."""
+        """Create worker group for RL+SSL joint training. Override in subclass."""
         pass
-
-    def _create_ssl_worker_group(self):
-        """Create SSL worker group. Override in subclass."""
-        pass
-
-    def _sync_ssl_params_to_workers(self):
-        """Sync SSL model, agent group parameters and learning rates to workers."""
-        if self.ssl_worker_group is None:
-            return
-
-        ssl_params = {
-            "ssl_model": self.ssl_model.state_dict(),
-            "eval_agent_group": deepcopy(self.eval_agent_group.state_dict()),
-        }
-        self.ssl_worker_group.write_params_to_workers(
-            ssl_params["ssl_model"], ssl_params["eval_agent_group"]
-        )
-
-        # Sync learning rates to workers
-        ssl_lr = self.ssl_optimizer.param_groups[0]["lr"]
-        agent_lr = self.agent_optimizer.param_groups[0]["lr"]
-        for i in range(self.ssl_worker_group.world_size):
-            self.ssl_worker_group.cmd_queues[i].put("SYNC_LR")
-            self.ssl_worker_group.param_queues[i].put(
-                {"ssl_lr": ssl_lr, "agent_lr": agent_lr}
-            )
-            self.ssl_worker_group.ack_queues[i].get()
-
-    def _sync_ssl_params_from_workers(self):
-        """Sync SSL parameters from workers to trainer."""
-        if self.ssl_worker_group is None:
-            return
-
-        ssl_params, agent_params = self.ssl_worker_group.read_params_from_worker0()
-        self.ssl_model.load_state_dict(ssl_params)
-        self.eval_agent_group.load_state_dict(agent_params)
 
     def save_current_model(self, checkpoint: str):
         """Save current model including self_supervised_model parameters"""
@@ -215,8 +172,6 @@ class SelfSupervisedQMIXTrainer(Trainer):
         update_target_interval=1,
         batch_size=64,
         learning_times_per_epoch=1,
-        ssl_batch_size=64,
-        ssl_learning_times_per_epoch=1,
     ):
         for epoch in range(epochs):
             self.current_epoch = epoch
@@ -241,22 +196,6 @@ class SelfSupervisedQMIXTrainer(Trainer):
             logging.info(
                 f"Epoch {epoch}: Learning {learning_times_per_epoch} times per epoch ..."
             )
-            logging.info(f"Epoch {epoch}: Self-Supervised Learning ...")
-
-            # Sync SSL params from trainer to workers before SSL learning
-            self._sync_ssl_params_to_workers()
-
-            ssl_loss = self.self_supervised_learn(
-                sample_size=sample_size,
-                batch_size=ssl_batch_size,
-                times=ssl_learning_times_per_epoch,
-            )
-            logging.info(f"Epoch {epoch}: Self-Supervised Learning Loss {ssl_loss:.4f}")
-
-            # Sync SSL params from workers to trainer after SSL learning
-            self._sync_ssl_params_from_workers()
-
-            logging.info(f"Epoch {epoch}: Reinforcement Learning ...")
 
             # Sync RL params from trainer to workers before RL learning
             self._sync_params_to_workers()
@@ -266,7 +205,7 @@ class SelfSupervisedQMIXTrainer(Trainer):
                 batch_size=batch_size,
                 times=learning_times_per_epoch,
             )
-            logging.info(f"Epoch {epoch}: Reinforcement Learning Loss {loss:.4f}")
+            logging.info(f"Epoch {epoch}: Combined Loss {loss:.4f}")
 
             # Sync eval params from workers before evaluation
             self._sync_eval_params_from_workers()
@@ -383,17 +322,9 @@ class SelfSupervisedQMIXTrainer(Trainer):
         self.save_best_model()
         return self.best_metrics
 
-    def self_supervised_learn(self, sample_size: float, batch_size: int, times: int):
-        raise NotImplementedError
-
     def _compute_ssl_loss(self, pred_set, target_set, mask=None):
         if isinstance(self.reconstruction_loss, ReconstructionLoss):
             reconstruction_loss = self.reconstruction_loss(pred_set, target_set, mask)
         else:
             reconstruction_loss = self.reconstruction_loss(pred_set, target_set)
         return reconstruction_loss
-
-    def __del__(self):
-        super().__del__()
-        if hasattr(self, "ssl_worker_group") and self.ssl_worker_group is not None:
-            self.ssl_worker_group.shutdown()

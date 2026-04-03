@@ -11,14 +11,14 @@ from marlite.trainer.trainer_worker_group.graph_worker_group import GraphWorkerG
 from marlite.trainer.trainer_worker_group.msg_aggr_worker_group import (
     MsgAggrWorkerGroup,
 )
-from marlite.trainer.trainer_worker_group.ssl_worker_group import SSLWorkerGroup
-from marlite.trainer.trainer_worker_group.vae_ssl_worker_group import VAESSLWorkerGroup
+from marlite.trainer.trainer_worker_group.vae_ssl_worker_group import (
+    VAEGraphWorkerGroup,
+)
 
 __all__ = [
     "BaseWorkerGroup",
     "QMIXWorkerGroup",
     "GraphWorkerGroup",
     "MsgAggrWorkerGroup",
-    "SSLWorkerGroup",
-    "VAESSLWorkerGroup",
+    "VAEGraphWorkerGroup",
 ]

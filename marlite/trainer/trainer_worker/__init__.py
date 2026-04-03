@@ -9,18 +9,17 @@ implements training logic specific to its algorithm.
 from marlite.trainer.trainer_worker.base_worker import BaseWorker
 from marlite.trainer.trainer_worker.qmix_worker import QMIXWorker
 from marlite.trainer.trainer_worker.graph_worker import GraphWorker
+from marlite.trainer.trainer_worker.vae_graph_worker import VAEGraphQMIXWorker
 from marlite.trainer.trainer_worker.msg_aggr_worker import (
     MsgAggrWorker,
     ProbMsgAggrWorker,
 )
-from marlite.trainer.trainer_worker.ssl_worker import SSLWorker, VAESSLWorker
 
 __all__ = [
     "BaseWorker",
     "QMIXWorker",
     "GraphWorker",
+    "VAEGraphQMIXWorker",
     "MsgAggrWorker",
     "ProbMsgAggrWorker",
-    "SSLWorker",
-    "VAESSLWorker",
 ]
