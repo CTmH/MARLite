@@ -7,7 +7,7 @@ from tqdm import tqdm
 from marlite.trainer.self_supervised_qmix_trainer import SelfSupervisedQMIXTrainer
 from marlite.trainer.trainer_worker_group import VAEGraphWorkerGroup
 from marlite.util.trajectory_dataset import (
-    JointTrajectoryDataLoader,
+    SSLEnrichedTrajectoryDataset,
     TrajectoryDataLoader,
 )
 
@@ -24,21 +24,43 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
 
     Joint RL+SSL Training:
     - During warmup_epochs: only RL loss is used
-    - After warmup: combined_loss = critic_loss + self_supervised_learning_loss_weight * vae_loss
+    - After warmup: combined loss is computed using the specified combination method
+        - "weighted_sum": combined_loss = critic_loss + weight * vae_loss
+        - "pit_loss": PITLoss-based combination
+
+    SSL and RL loss combination is controlled by:
+        - loss_combination_method: "weighted_sum" or "pit_loss"
+        - self_supervised_learning_loss_weight: weight for VAE loss (used in weighted_sum mode)
+        - pit_loss_alpha: alpha for PITLoss (used in pit_loss mode)
     """
 
-    def __init__(self, kl_divergence_weight=1.0, warmup_epochs=0, **kwargs):
+    def __init__(
+        self,
+        kl_divergence_weight=1.0,
+        warmup_epochs=0,
+        loss_combination_method="weighted_sum",
+        pit_loss_alpha=0.9,
+        **kwargs,
+    ):
         """
         Initialize VAEGraphQMIXTrainer.
 
         Args:
             kl_divergence_weight: Weight for KL divergence in VAE loss
             warmup_epochs: Number of epochs to train with RL only before enabling SSL
+            loss_combination_method: Method to combine RL and SSL losses
+                - "weighted_sum": combined_loss = critic_loss + weight * vae_loss
+                - "pit_loss": use PITLoss to combine critic_loss and vae_loss
+            pit_loss_alpha: Alpha parameter for PITLoss (exponential decay rate)
             **kwargs: Additional arguments passed to parent class
         """
         self.kl_divergence_weight = kl_divergence_weight
         self.warmup_epochs = warmup_epochs
-        super().__init__(**kwargs)
+        super().__init__(
+            loss_combination_method=loss_combination_method,
+            pit_loss_alpha=pit_loss_alpha,
+            **kwargs,
+        )
 
     def _create_worker_group(self):
         """Create VAEGraphWorkerGroup for multi-GPU joint RL+SSL training."""
@@ -57,6 +79,8 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
             reconstruction_loss=self.reconstruction_loss,
             kl_divergence_weight=self.kl_divergence_weight,
             self_supervised_learning_loss_weight=self.self_supervised_learning_loss_weight,
+            loss_combination_method=self.loss_combination_method,
+            pit_loss_alpha=self.pit_loss_alpha,
             data_constructor=self.data_constructor,
             warmup_epochs=self.warmup_epochs,
         )
@@ -112,17 +136,22 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
         is_warmup = self.current_epoch < self.warmup_epochs
 
         for t in range(times):
+            dataset = self.replaybuffer.sample(sample_size)
+            ssl_start = time.time()
+            ssl_dataset = SSLEnrichedTrajectoryDataset(dataset, self.data_constructor)
+            dataloader = TrajectoryDataLoader(
+                ssl_dataset,
+                batch_size=batch_size,
+                shuffle=True,
+                num_workers=self.n_workers,
+            )
+            ssl_time = time.time() - ssl_start
+            logging.info(
+                f"  Self-supervised learning data construction: {ssl_time:.4f}s"
+            )
             with tqdm(
                 total=sample_size, desc=f"Times {t + 1}/{times}", unit="batch"
             ) as pbar:
-                dataset = self.replaybuffer.sample(sample_size)
-                dataloader = JointTrajectoryDataLoader(
-                    dataset,
-                    self.data_constructor,
-                    batch_size=batch_size,
-                    shuffle=True,
-                    num_workers=self.n_workers,
-                )
                 for batch in dataloader:
                     # Compute combined RL+SSL loss in single forward pass
                     combined_loss, critic_loss, vae_loss = self._compute_loss(
@@ -175,7 +204,7 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
         avg_critic = total_critic / total_batches
         avg_vae = total_vae / total_batches
         logging.info(
-            f"  Combined Loss: {avg_combined:.4f}, Critic Loss: {avg_critic:.4f}, VAE Loss: {avg_vae:.4f}"
+            f"  Combined Loss: {avg_combined:.4f}, RL Loss: {avg_critic:.4f}, VAE Loss: {avg_vae:.4f}"
         )
 
         return avg_combined
@@ -205,17 +234,22 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
         total_batches = 0
 
         for t in range(times):
+            dataset = self.replaybuffer.sample(sample_size)
+            ssl_start = time.time()
+            ssl_dataset = SSLEnrichedTrajectoryDataset(dataset, self.data_constructor)
+            dataloader = TrajectoryDataLoader(
+                ssl_dataset,
+                batch_size=batch_size,
+                shuffle=True,
+                num_workers=self.n_workers,
+            )
+            ssl_time = time.time() - ssl_start
+            logging.info(
+                f"  Self-supervised learning data construction: {ssl_time:.4f}s"
+            )
             with tqdm(
                 total=sample_size, desc=f"Times {t + 1}/{times}", unit="batch"
             ) as pbar:
-                dataset = self.replaybuffer.sample(sample_size)
-                dataloader = JointTrajectoryDataLoader(
-                    dataset,
-                    self.data_constructor,
-                    batch_size=batch_size,
-                    shuffle=True,
-                    num_workers=self.n_workers,
-                )
                 for batch in dataloader:
                     batch["epoch"] = self.current_epoch
                     combined, critic, vae = self.worker_group.train_step(batch)
@@ -410,9 +444,10 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
 
             vae_loss = reconstruction_loss + self.kl_divergence_weight * kl_divergence
 
-        # Combined loss
-        combined_loss = (
-            critic_loss + self.self_supervised_learning_loss_weight * vae_loss
-        )
+        # Combined loss using the specified combination method
+        if is_warmup:
+            combined_loss = critic_loss
+        else:
+            combined_loss = self._combine_rl_ssl_loss(critic_loss, vae_loss)
 
         return combined_loss, critic_loss, vae_loss

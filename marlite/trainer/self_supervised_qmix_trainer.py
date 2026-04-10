@@ -18,7 +18,7 @@ from marlite.util.lr_scheduler_config import LRSchedulerConfig
 from marlite.util.self_supervised_data_constructor.self_supervised_data_constructor_config import (
     SelfSupervisedDataConstructorConfig,
 )
-from marlite.util.loss_func import ReconstructionLoss
+from marlite.util.loss_func import ReconstructionLoss, PITLoss
 
 
 class SelfSupervisedQMIXTrainer(Trainer):
@@ -27,6 +27,10 @@ class SelfSupervisedQMIXTrainer(Trainer):
 
     This trainer supports both reinforcement learning (via learn()) and
     self-supervised learning (via ssl_learn()).
+
+    The SSL loss can be combined with RL loss using two methods:
+    1. Weighted sum: combined_loss = critic_loss + weight * vae_loss
+    2. PITLoss: combines RL and SSL losses via Probability Integral Transformation
     """
 
     def __init__(
@@ -37,16 +41,33 @@ class SelfSupervisedQMIXTrainer(Trainer):
         data_constructor_config: SelfSupervisedDataConstructorConfig,
         reconstruction_loss: _Loss,
         self_supervised_learning_loss_weight=1.0,
+        loss_combination_method="weighted_sum",
+        pit_loss_alpha=0.9,
         **kwargs,
     ):
-        # Set SSL-related attributes before calling super().__init__
-        # because _create_worker_group() is called during Trainer.__init__
+        """
+        Initialize SelfSupervisedQMIXTrainer.
+
+        Args:
+            ssl_model_config: Configuration for SSL model (VAE decoder)
+            ssl_optimizer_config: Configuration for SSL optimizer
+            ssl_lr_scheduler_conf: Configuration for SSL learning rate scheduler
+            data_constructor_config: Configuration for SSL data constructor
+            reconstruction_loss: Loss function for reconstruction
+            self_supervised_learning_loss_weight: Weight for VAE loss in combined loss
+            loss_combination_method: Method to combine RL and SSL losses
+                - "weighted_sum": combined_loss = critic_loss + weight * vae_loss
+                - "pit_loss": use PITLoss to combine critic_loss and vae_loss
+            pit_loss_alpha: Alpha parameter for PITLoss (exponential decay rate)
+        """
         self.ssl_model_config = ssl_model_config
         self.ssl_optimizer_config = ssl_optimizer_config
         self.ssl_lr_scheduler_conf = ssl_lr_scheduler_conf
         self.data_constructor_config = data_constructor_config
         self.reconstruction_loss = reconstruction_loss
         self.self_supervised_learning_loss_weight = self_supervised_learning_loss_weight
+        self.loss_combination_method = loss_combination_method
+        self.pit_loss_alpha = pit_loss_alpha
 
         # Create data_constructor before super().__init__ because _create_worker_group needs it
         self.data_constructor = self.data_constructor_config.get_data_constructor()
@@ -70,6 +91,14 @@ class SelfSupervisedQMIXTrainer(Trainer):
             )
         else:
             self.ssl_lr_scheduler = None
+
+        # Initialize PITLoss for combining RL and SSL losses
+        # PITLoss expects losses for all tasks, so we have 2 tasks: critic_loss and vae_loss
+        self.pit_loss = PITLoss(
+            num_tasks=2,
+            alpha=self.pit_loss_alpha,
+            reduction="mean",
+        )
 
         # Note: ssl_worker_group is removed. Multi-GPU SSL training is now handled
         # by VAEGraphWorkerGroup which combines RL and SSL in a single train_step.
@@ -188,10 +217,10 @@ class SelfSupervisedQMIXTrainer(Trainer):
             sample_size = min(sample_size, len(self.replaybuffer.buffer))
 
             agent_group_lr = self.agent_optimizer.param_groups[0]["lr"]
-            critic_lr = self.optimizer.param_groups[0]["lr"]
+            critic_lr = self.critic_optimizer.param_groups[0]["lr"]
             ssl_lr = self.ssl_optimizer.param_groups[0]["lr"]
             logging.info(
-                f"Epoch {epoch}: Batch size: {batch_size}, Critic learning rate: {critic_lr:.8f}, Self-supervised learning rate: {ssl_lr:.8f}, Agent learning rate: {agent_group_lr:.8f}"
+                f"Epoch {epoch}: Batch size: {batch_size}, Critic learning rate: {critic_lr:.8f}, Agent learning rate: {agent_group_lr:.8f}, Self-supervised learning rate: {ssl_lr:.8f}"
             )
             logging.info(
                 f"Epoch {epoch}: Learning {learning_times_per_epoch} times per epoch ..."
@@ -328,3 +357,26 @@ class SelfSupervisedQMIXTrainer(Trainer):
         else:
             reconstruction_loss = self.reconstruction_loss(pred_set, target_set)
         return reconstruction_loss
+
+    def _combine_rl_ssl_loss(self, critic_loss, vae_loss):
+        """
+        Combine RL (critic) loss and SSL (VAE) loss using the specified method.
+
+        Args:
+            critic_loss: RL critic loss tensor (scalar)
+            vae_loss: SSL VAE loss tensor (scalar)
+
+        Returns:
+            combined_loss: Combined loss tensor (scalar)
+        """
+        if self.loss_combination_method == "pit_loss":
+            # PITLoss combines multiple tasks by transforming losses to standard normal
+            # and applying CDF-based transformation
+            losses = torch.stack([critic_loss, vae_loss])  # (2,)
+            combined_loss = self.pit_loss(losses)
+        else:
+            # Default: weighted sum
+            combined_loss = (
+                critic_loss + self.self_supervised_learning_loss_weight * vae_loss
+            )
+        return combined_loss

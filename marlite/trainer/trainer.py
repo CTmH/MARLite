@@ -145,7 +145,7 @@ class Trainer:
         self.lr_scheduler_conf = lr_scheduler_conf
         self.agent_lr_scheduler_conf = agent_lr_scheduler_conf
 
-        self.optimizer = self.critic_optimizer_config.get_optimizer(
+        self.critic_optimizer = self.critic_optimizer_config.get_optimizer(
             self.eval_critic.parameters()
         )
 
@@ -154,7 +154,9 @@ class Trainer:
         )
 
         if isinstance(lr_scheduler_conf, LRSchedulerConfig):
-            self.lr_scheduler = lr_scheduler_conf.get_lr_scheduler(self.optimizer)
+            self.lr_scheduler = lr_scheduler_conf.get_lr_scheduler(
+                self.critic_optimizer
+            )
         else:
             self.lr_scheduler = None
 
@@ -245,7 +247,7 @@ class Trainer:
         }
         self.worker_group.broadcast_params(trainable_params)
 
-        critic_lr = self.optimizer.param_groups[0]["lr"]
+        critic_lr = self.critic_optimizer.param_groups[0]["lr"]
         agent_lr = self.agent_optimizer.param_groups[0]["lr"]
         self.worker_group.sync_lr_to_workers(critic_lr, agent_lr)
 
@@ -342,7 +344,7 @@ class Trainer:
         result = self.analyzer(episodes)
 
         logging.info(f"Evaluation results:")
-        for key in self.eval_metric_list:
+        for key in result.keys():
             logging.info(
                 f"{key}: Mean:{result[key]['mean']:.4f} Std:{result[key].get('std', 0):.4f}"
             )
@@ -383,7 +385,7 @@ class Trainer:
 
             # Learn and update eval model
             agent_group_lr = self.agent_optimizer.param_groups[0]["lr"]
-            critic_lr = self.optimizer.param_groups[0]["lr"]
+            critic_lr = self.critic_optimizer.param_groups[0]["lr"]
             logging.info(
                 f"Epoch {epoch}: Batch size: {batch_size}, Critic learning rate: {critic_lr:.8f}, Agent learning rate: {agent_group_lr:.8f}"
             )

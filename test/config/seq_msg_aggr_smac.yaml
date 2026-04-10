@@ -73,7 +73,7 @@ agent_group_config:
     weight_decay: 0.00005
   lr_scheduler:
     type: "ReduceLROnPlateau"
-    mode: 'max'
+    mode: "max"
     patience: 3
 
 env_config:
@@ -114,7 +114,7 @@ critic_config:
     weight_decay: 0.00005
   lr_scheduler:
     type: "ReduceLROnPlateau"
-    mode: 'max'
+    mode: "max"
     patience: 3
 
 rollout_config:

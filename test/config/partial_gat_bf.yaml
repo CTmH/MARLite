@@ -105,7 +105,7 @@ agent_group_config:
     weight_decay: 0.00001
   lr_scheduler:
     type: "ReduceLROnPlateau"
-    mode: 'max'
+    mode: "max"
     factor: 0.5
     patience: 4
     min_lr: 0.00001
@@ -204,7 +204,7 @@ critic_config:
     weight_decay: 0.00001
   lr_scheduler:
     type: "ReduceLROnPlateau"
-    mode: 'max'
+    mode: "max"
     factor: 0.5
     patience: 4
     min_lr: 0.00001

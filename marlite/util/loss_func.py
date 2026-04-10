@@ -31,15 +31,12 @@ class PITLoss(_Loss):
         self.reduction = reduction
 
         # Initialize buffers for moving averages
-        # Mean is initialized to 0, variance to 0 (not 1 as in original)
+        # Mean is initialized to 0, variance to small positive value (prevents division by zero)
         self.register_buffer("moving_mean", torch.zeros(num_tasks))
         self.register_buffer(
-            "moving_var", torch.zeros(num_tasks)
-        )  # Fixed: was torch.ones()
+            "moving_var", torch.ones(num_tasks) * 0.1
+        )  # Small positive value for numerical stability
         self.register_buffer("step", torch.zeros(1, dtype=torch.long))
-        self.register_buffer(
-            "total_var", torch.zeros(num_tasks)
-        )  # For unbiased variance estimation
 
     def forward(self, losses: torch.Tensor) -> torch.Tensor:
         """
@@ -50,50 +47,54 @@ class PITLoss(_Loss):
 
         Returns:
             torch.Tensor: PIT loss value
+
+        Device management:
+            - EMA state (moving_mean, moving_var) persists across calls
+            - On first call, buffers are moved to the device of input losses
+            - Subsequent calls expect losses on the same device
+            - step counter stays on CPU as a scalar (used only for unbiased variance formula)
         """
+        target_device = losses.device
+
         with torch.no_grad():
             if self.training:
                 self.step += 1
                 current_losses = losses.detach()
 
-                # Initialize on first step
-                if self.step == 1:
+                # Ensure EMA buffers are on the correct device for in-place updates
+                # This is critical: if buffers were on a different device (e.g., CPU
+                # from initialization), moving them here ensures subsequent operations work
+                self.moving_mean = self.moving_mean.to(target_device)
+                self.moving_var = self.moving_var.to(target_device)
+
+                if self.step.item() == 1:
                     self.moving_mean.copy_(current_losses)
                 else:
-                    # Update exponential moving average for mean
                     self.moving_mean.mul_(self.alpha).add_(
                         current_losses, alpha=1 - self.alpha
                     )
-
-                    # Calculate difference from current mean
                     diff = current_losses - self.moving_mean
-
-                    # Update exponential moving average for variance (unbiased estimate)
                     self.moving_var.mul_(self.alpha).add_(
                         diff.pow(2), alpha=(1 - self.alpha)
                     )
 
-        # Calculate unbiased variance estimate
-        # This compensates for bias in initial estimates
-        unbiased_var = self.moving_var / (1 - self.alpha**self.step)
+        # Compute forward pass (can be on different device than EMA state)
+        unbiased_var = self.moving_var / (1 - self.alpha ** self.step.item())
         std = torch.sqrt(unbiased_var + self.eps)
 
-        # Correct normalization: (x - μ) / σ
-        normalized_losses = (losses - self.moving_mean) / std
+        # Move mean to target device for computation
+        moving_mean = self.moving_mean.to(target_device)
+        normalized_losses = (losses - moving_mean) / std
 
-        # Calculate standard normal CDF values
-        sqrt2 = torch.sqrt(torch.tensor(2.0, device=losses.device))
+        sqrt2 = torch.tensor(2.0, device=target_device).sqrt()
         cdf_values = 0.5 * (1 + torch.erf(normalized_losses / sqrt2))
-
-        # PIT loss: (CDF - 0.5)^2
         pit_loss = (cdf_values - 0.5).pow(2)
 
-        # Apply reduction
         if self.reduction == "mean":
             return pit_loss.mean()
         elif self.reduction == "sum":
             return pit_loss.sum()
-        else:  # 'none'
+        else:
             return pit_loss
 
 

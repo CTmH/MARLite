@@ -155,7 +155,7 @@ class QMIXTrainer(Trainer):
                     torch.nn.utils.clip_grad_norm_(
                         self.eval_agent_group.parameters(), max_norm=5.0
                     )
-                    self.optimizer.step()
+                    self.critic_optimizer.step()
                     self.agent_optimizer.step()
 
                     total_loss += critic_loss.detach().cpu().item()

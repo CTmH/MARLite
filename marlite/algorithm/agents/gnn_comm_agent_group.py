@@ -490,6 +490,7 @@ class DualPathProbObsGNNCommAgentGroup(DualPathObsGNNCommAgentGroup):
         graph_model_config: ModelConfig,
         enable_rl_grad_to_msg_aggr: bool = False,
         deterministic_eval: bool = True,
+        use_mu_for_decision: bool = False,
     ) -> None:
         super().__init__(
             agent_model_dict=agent_model_dict,
@@ -502,6 +503,7 @@ class DualPathProbObsGNNCommAgentGroup(DualPathObsGNNCommAgentGroup):
             enable_rl_grad_to_msg_aggr=enable_rl_grad_to_msg_aggr,
         )
         self.deterministic_eval = deterministic_eval
+        self.use_mu_for_decision = use_mu_for_decision
 
     def _compute_local_state_estimates(self, msg, edge_indices):
         """Compute local state estimates from messages and local observations with probabilistic output."""
@@ -535,13 +537,23 @@ class DualPathProbObsGNNCommAgentGroup(DualPathObsGNNCommAgentGroup):
         )
 
         if self.enable_rl_grad_to_msg_aggr:
-            hidden_states = torch.cat(
-                (estimates, local_obs), dim=-1
-            )  # (B, N, Hidden Size + F_local_obs)
+            if self.use_mu_for_decision:
+                hidden_states = torch.cat(
+                    (mu, local_obs), dim=-1
+                )  # (B, N, Hidden Size + F_local_obs)
+            else:
+                hidden_states = torch.cat(
+                    (estimates, local_obs), dim=-1
+                )  # (B, N, Hidden Size + F_local_obs)
         else:
-            hidden_states = torch.cat(
-                (estimates.detach(), local_obs), dim=-1
-            )  # (B, N, Hidden Size + F_local_obs)
+            if self.use_mu_for_decision:
+                hidden_states = torch.cat(
+                    (mu.detach(), local_obs), dim=-1
+                )  # (B, N, Hidden Size + F_local_obs), gradient truncated before mu
+            else:
+                hidden_states = torch.cat(
+                    (estimates.detach(), local_obs), dim=-1
+                )  # (B, N, Hidden Size + F_local_obs)
 
         q_val = self._process_decoders(hidden_states)
 

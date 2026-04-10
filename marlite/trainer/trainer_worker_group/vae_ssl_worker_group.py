@@ -40,6 +40,8 @@ class VAEGraphWorkerGroup(BaseWorkerGroup):
         reconstruction_loss=None,
         kl_divergence_weight: float = 1.0,
         self_supervised_learning_loss_weight: float = 1.0,
+        loss_combination_method: str = "weighted_sum",
+        pit_loss_alpha: float = 0.9,
         data_constructor=None,
         warmup_epochs: int = 0,
         init_method: str = None,
@@ -59,6 +61,10 @@ class VAEGraphWorkerGroup(BaseWorkerGroup):
             reconstruction_loss: Loss function for reconstruction
             kl_divergence_weight: Weight for KL divergence loss
             self_supervised_learning_loss_weight: Weight for VAE loss in combined loss
+            loss_combination_method: Method to combine RL and SSL losses
+                - "weighted_sum": combined_loss = critic_loss + weight * vae_loss
+                - "pit_loss": use PITLoss to combine critic_loss and vae_loss
+            pit_loss_alpha: Alpha parameter for PITLoss (exponential decay rate)
             data_constructor: Data constructor for SSL preprocessing
             warmup_epochs: Number of epochs to train with RL only before enabling SSL
             init_method: URL for distributed initialization
@@ -73,6 +79,8 @@ class VAEGraphWorkerGroup(BaseWorkerGroup):
         self.reconstruction_loss = reconstruction_loss
         self.kl_divergence_weight = kl_divergence_weight
         self.self_supervised_learning_loss_weight = self_supervised_learning_loss_weight
+        self.loss_combination_method = loss_combination_method
+        self.pit_loss_alpha = pit_loss_alpha
         self.data_constructor = data_constructor
         self.warmup_epochs = warmup_epochs
 
@@ -103,6 +111,8 @@ class VAEGraphWorkerGroup(BaseWorkerGroup):
         kwargs["self_supervised_learning_loss_weight"] = (
             self.self_supervised_learning_loss_weight
         )
+        kwargs["loss_combination_method"] = self.loss_combination_method
+        kwargs["pit_loss_alpha"] = self.pit_loss_alpha
         kwargs["data_constructor"] = self.data_constructor
         kwargs["warmup_epochs"] = self.warmup_epochs
         return kwargs

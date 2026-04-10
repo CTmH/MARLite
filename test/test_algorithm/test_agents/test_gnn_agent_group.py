@@ -199,7 +199,7 @@ agent_group_config:
     weight_decay: 0.00005
   lr_scheduler:
     type: "ReduceLROnPlateau"
-    mode: 'max'
+    mode: "max"
     patience: 3
         """
         config = yaml.safe_load(config)
@@ -396,7 +396,7 @@ agent_group_config:
     weight_decay: 0.00005
   lr_scheduler:
     type: "ReduceLROnPlateau"
-    mode: 'max'
+    mode: "max"
     patience: 3
         """
         config = yaml.safe_load(config)
@@ -593,7 +593,7 @@ agent_group_config:
     weight_decay: 0.00005
   lr_scheduler:
     type: "ReduceLROnPlateau"
-    mode: 'max'
+    mode: "max"
     patience: 3
         """
         config = yaml.safe_load(config)

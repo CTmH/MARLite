@@ -29,7 +29,7 @@ class Analyzer:
             'mean': float(np.mean(data)),
             'std': float(np.std(data)),
             'min': float(np.min(data)),
-            'max': float(np.max(data)),
+            "max": float(np.max(data)),
             'median': float(np.median(data)),
         }
 

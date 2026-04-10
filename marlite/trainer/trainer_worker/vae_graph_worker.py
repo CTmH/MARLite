@@ -18,6 +18,7 @@ from marlite.algorithm.agents import AgentGroupConfig
 from marlite.algorithm.critic import CriticConfig
 from marlite.algorithm.model import ModelConfig
 from marlite.util.optimizer_config import OptimizerConfig
+from marlite.util.loss_func import PITLoss
 from marlite.trainer.trainer_worker.base_worker import BaseWorker
 
 
@@ -57,6 +58,8 @@ class VAEGraphQMIXWorker(BaseWorker):
         reconstruction_loss=None,
         kl_divergence_weight: float = 1.0,
         self_supervised_learning_loss_weight: float = 1.0,
+        loss_combination_method: str = "weighted_sum",
+        pit_loss_alpha: float = 0.9,
         data_constructor=None,
         warmup_epochs: int = 0,
         **kwargs,
@@ -80,13 +83,17 @@ class VAEGraphQMIXWorker(BaseWorker):
             reconstruction_loss: Loss function for reconstruction
             kl_divergence_weight: Weight for KL divergence loss
             self_supervised_learning_loss_weight: Weight for VAE loss in combined loss
+            loss_combination_method: Method to combine RL and SSL losses
+                - "weighted_sum": combined_loss = critic_loss + weight * vae_loss
+                - "pit_loss": use PITLoss to combine critic_loss and vae_loss
+            pit_loss_alpha: Alpha parameter for PITLoss (exponential decay rate)
             data_constructor: Data constructor for SSL preprocessing
             warmup_epochs: Number of epochs to train with RL only before enabling SSL
-            self_supervised_learning_loss_weight: Weight for VAE loss in combined loss
-            data_constructor: Data constructor for SSL preprocessing
         """
         super().__init__(worker_id, device_id, rank, world_size, init_method)
         self.gamma = gamma
+        self.loss_combination_method = loss_combination_method
+        self.pit_loss_alpha = pit_loss_alpha
 
         # Initialize RL models
         self.eval_agent_group = agent_group_config.get_agent_group()
@@ -122,6 +129,12 @@ class VAEGraphQMIXWorker(BaseWorker):
             self.kl_divergence_weight = kl_divergence_weight
             self.ssl_optimizer = ssl_optimizer_config.get_optimizer(
                 self.ssl_model.parameters()
+            )
+            # Initialize PITLoss for combining RL and SSL losses
+            self.pit_loss = PITLoss(
+                num_tasks=2,
+                alpha=self.pit_loss_alpha,
+                reduction="mean",
             )
 
     def move_to_device(self, device: str):
@@ -421,9 +434,7 @@ class VAEGraphQMIXWorker(BaseWorker):
             kl_divergence = torch.mean(kl_divergence)
 
             vae_loss = reconstruction_loss + self.kl_divergence_weight * kl_divergence
-            combined_loss = (
-                critic_loss + self.self_supervised_learning_loss_weight * vae_loss
-            )
+            combined_loss = self._combine_rl_ssl_loss(critic_loss, vae_loss)
         else:
             vae_loss = 0.0
             combined_loss = critic_loss
@@ -486,6 +497,26 @@ class VAEGraphQMIXWorker(BaseWorker):
             )
         else:
             return self.reconstruction_loss(pred_set, target_set)
+
+    def _combine_rl_ssl_loss(self, critic_loss, vae_loss):
+        """
+        Combine RL (critic) loss and SSL (VAE) loss using the specified method.
+
+        Args:
+            critic_loss: RL critic loss tensor (scalar)
+            vae_loss: SSL VAE loss tensor (scalar)
+
+        Returns:
+            combined_loss: Combined loss tensor (scalar)
+        """
+        if self.loss_combination_method == "pit_loss":
+            losses = torch.stack([critic_loss, vae_loss])  # (2,)
+            combined_loss = self.pit_loss(losses)
+        else:
+            combined_loss = (
+                critic_loss + self.self_supervised_learning_loss_weight * vae_loss
+            )
+        return combined_loss
 
     def handle_command(
         self,

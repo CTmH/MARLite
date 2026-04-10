@@ -2,6 +2,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader
 
+# Used by TrajectoryDataset.__getitem__ to build sample dict keys
 FLOAT_ATTR = [
     "states",
     "next_states",
@@ -9,12 +10,15 @@ FLOAT_ATTR = [
     "next_observations",
 ]
 
+# Used by TrajectoryDataset.__getitem__ for array-type episode buffer fields
 ARRAY_ATTR = [
     "states",
     "edge_indices",
     "next_states",
     "next_edge_indices",
 ]
+
+# Used by TrajectoryDataset.__getitem__ for dict-type episode buffer fields
 DICT_ATTR = [
     "alive_mask",
     "observations",
@@ -26,11 +30,14 @@ DICT_ATTR = [
     "terminations",
     "truncations",
 ]
+
+# Used by TrajectoryDataset.__getitem__ for padding mask fields
 PADDING_ATTR = [
     "timestep_padding_mask",
     "next_timestep_padding_mask",
 ]
 
+# Used by trajectory_collate_fn to stack samples into tensors
 NUMERIC_ATTR = [
     "states",
     "next_states",
@@ -44,15 +51,19 @@ NUMERIC_ATTR = [
     "next_alive_mask",
     "next_observations",
     "next_timestep_padding_mask",
+    "formatted_obs",
+    "construct_padding_mask",
 ]
 
+# Used by trajectory_collate_fn for variable-length fields (kept as list)
 DYNAMIC_LEN_ATTR = [
     "edge_indices",
     "next_edge_indices",
 ]
 
+# Used by trajectory_collate_fn to preserve gym.Space objects
 OBJ_ATTR = [
-    "next_avail_actions",  # gym.spaces.Space if use_action_mask = False
+    "next_avail_actions",
 ]
 
 
@@ -176,80 +187,61 @@ def trajectory_collate_fn(batch):
     return collated
 
 
-class JointTrajectoryDataLoader(DataLoader):
+class SSLEnrichedTrajectoryDataset(Dataset):
     """
-    DataLoader that combines RL trajectory data with SSL preprocessed data.
+    A TrajectoryDataset wrapper that precomputes and enriches samples with SSL data.
 
-    Takes a TrajectoryDataset and a data_constructor. On each iteration,
-    returns batches containing both RL data and SSL data (formatted_obs, construct_padding_mask).
+    Instead of computing SSL data per-batch in collate_fn (which is slow),
+    this dataset:
+    1. Materializes all samples via list(trajectory_dataset)
+    2. Extracts SSL-relevant fields (observations, states, edge_indices, alive_mask)
+    3. Processes all SSL data in a single call to data_constructor.process()
+    4. Enriches each sample dict with formatted_obs and construct_padding_mask
+    5. Returns enriched samples that work with standard TrajectoryDataLoader
 
-    The SSL preprocessing is done per-batch in the collate_fn for simplicity and correctness.
+    This approach is faster because:
+    - SSL data construction happens once, not per-batch
+    - data_constructor.process() can process all samples together (batch processing)
+    - Collate_fn just converts to tensors without complex processing
     """
 
-    def __init__(
-        self, dataset, data_constructor, batch_size=32, shuffle=True, num_workers=0
-    ):
+    def __init__(self, trajectory_dataset, data_constructor):
         """
-        Initialize JointTrajectoryDataLoader.
+        Initialize SSLEnrichedTrajectoryDataset.
 
         Args:
-            dataset: TrajectoryDataset instance
+            trajectory_dataset: TrajectoryDataset instance to wrap
             data_constructor: SelfSupervisedDataConstructor instance for SSL preprocessing
-            batch_size: Batch size for DataLoader
-            shuffle: Whether to shuffle the data
-            num_workers: Number of worker processes for data loading
         """
+        self.base_dataset = trajectory_dataset
         self.data_constructor = data_constructor
+        self.traj_len = trajectory_dataset.traj_len
 
-        super().__init__(
-            dataset,
-            batch_size=batch_size,
-            shuffle=shuffle,
-            num_workers=num_workers,
-            collate_fn=self._joint_collate_fn,
-        )
+        self._enrich_all_samples()
 
-    def _joint_collate_fn(self, batch):
+    def _enrich_all_samples(self):
         """
-        Collate function that includes both RL and SSL data.
-
-        Processes SSL data per-batch using full sequences:
-        - observations: (B, T, N, O) - full sequence
-        - states: (B, T, S) - full sequence
-        - edge_indices: list of lists of (2, E) arrays for each timestep
-        - alive_mask: (B, T, N) - full sequence
-
-        Args:
-            batch: List of samples from TrajectoryDataset
-
-        Returns:
-            Dictionary containing both RL data and SSL data (formatted_obs, construct_padding_mask)
+        Materialize all samples and compute SSL data for all at once.
         """
-        # Get RL data using standard trajectory collate
-        rl_batch = trajectory_collate_fn(batch)
+        all_samples = list(self.base_dataset)
 
-        # Get full sequences for SSL preprocessing
-        # observations: (B, T, N, O)
-        # states: (B, T, S)
-        # edge_indices: list of list of (2, E) arrays (one per timestep per sample)
-        # alive_mask: (B, T, N)
-        observations = rl_batch["observations"].numpy()
-        states = rl_batch["states"].numpy()
-        edge_indices = rl_batch["edge_indices"]
-        alive_masks = rl_batch["alive_mask"].numpy()
+        observations = np.array([s["observations"] for s in all_samples])
+        states = np.array([s["states"] for s in all_samples])
+        alive_masks = np.array([s["alive_mask"] for s in all_samples])
+        edge_indices = [s["edge_indices"] for s in all_samples]
 
-        # Process SSL data using full sequences
-        # data_constructor.process expects:
-        # - observations: (B, T, N, O)
-        # - states: (B, T, S)
-        # - edge_indices: list of (2, E) arrays (one per sample, using last timestep)
-        # - alive_mask: (B, T, N)
         formatted_obs, construct_padding_mask = self.data_constructor.process(
             observations, states, edge_indices, alive_masks
         )
 
-        # Add SSL data to batch
-        rl_batch["formatted_obs"] = torch.tensor(formatted_obs)
-        rl_batch["construct_padding_mask"] = torch.tensor(construct_padding_mask)
+        for i, sample in enumerate(all_samples):
+            sample["formatted_obs"] = formatted_obs[i]
+            sample["construct_padding_mask"] = construct_padding_mask[i]
 
-        return rl_batch
+        self._enriched_samples = all_samples
+
+    def __len__(self):
+        return len(self._enriched_samples)
+
+    def __getitem__(self, idx):
+        return self._enriched_samples[idx]
