@@ -322,7 +322,7 @@ class Trainer:
         return self
 
     def evaluate(self):
-        self.eval_agent_group.eval()
+        self.eval_agent_group.eval().to("cpu")
         serialized_params = serialize_to_buffer(self.eval_agent_group.state_dict())
         manager = self.rolloutmanager_config.create_eval_manager(
             self.agent_group_config,

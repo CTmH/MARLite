@@ -2,8 +2,11 @@ import torch.nn.functional as F
 from torch import nn, zeros, Tensor
 from torch_geometric.nn import GCNConv, GATConv
 
+
 class GCNModel(nn.Module):
-    def __init__(self, input_dim, hidden_dim, output_dim, add_self_loops=True, activation='ELU'):
+    def __init__(
+        self, input_dim, hidden_dim, output_dim, add_self_loops=True, activation="ELU"
+    ):
         super(GCNModel, self).__init__()
         self.conv1 = GCNConv(input_dim, hidden_dim, add_self_loops=add_self_loops)
         self.conv2 = GCNConv(hidden_dim, output_dim, add_self_loops=add_self_loops)
@@ -20,8 +23,19 @@ class GCNModel(nn.Module):
         x = self.activation(x)
         return x
 
+
 class GATModel(nn.Module):
-    def __init__(self, input_dim, hidden_dim, output_dim, head_conv1=8, head_conv2=1, dropout=0.75, add_self_loops=True, activation='ELU'):
+    def __init__(
+        self,
+        input_dim,
+        hidden_dim,
+        output_dim,
+        head_conv1=8,
+        head_conv2=1,
+        dropout=0.75,
+        add_self_loops=True,
+        activation="ELU",
+    ):
         super(GATModel, self).__init__()
         self.conv1 = GATConv(
             in_channels=input_dim,
@@ -49,5 +63,52 @@ class GATModel(nn.Module):
         x = self.conv1(inputs, edge_index)
         x = self.activation(x)
         x = self.conv2(x, edge_index)
+        x = self.activation(x)
+        return x
+
+
+class SingleLayerGCNModel(nn.Module):
+    def __init__(self, input_dim, output_dim, add_self_loops=True, activation="ELU"):
+        super(SingleLayerGCNModel, self).__init__()
+        self.conv = GCNConv(input_dim, output_dim, add_self_loops=add_self_loops)
+
+        activation_nn_module = getattr(nn, activation, None)
+        if activation_nn_module is None:
+            raise ValueError(f"Invalid activation function: {activation}")
+        self.activation = activation_nn_module()
+
+    def forward(self, inputs: Tensor, edge_index):
+        x = self.conv(inputs, edge_index)
+        x = self.activation(x)
+        return x
+
+
+class SingleLayerGATModel(nn.Module):
+    def __init__(
+        self,
+        input_dim,
+        output_dim,
+        heads=8,
+        dropout=0.75,
+        add_self_loops=True,
+        activation="ELU",
+    ):
+        super(SingleLayerGATModel, self).__init__()
+        self.conv = GATConv(
+            in_channels=input_dim,
+            out_channels=output_dim,
+            heads=heads,
+            concat=False,
+            dropout=dropout,
+            add_self_loops=add_self_loops,
+        )
+
+        activation_nn_module = getattr(nn, activation, None)
+        if activation_nn_module is None:
+            raise ValueError(f"Invalid activation function: {activation}")
+        self.activation = activation_nn_module()
+
+    def forward(self, inputs: Tensor, edge_index):
+        x = self.conv(inputs, edge_index)
         x = self.activation(x)
         return x

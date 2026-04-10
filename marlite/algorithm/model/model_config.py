@@ -1,28 +1,44 @@
 import torch
 import torch.nn as nn
 from absl import logging
-from marlite.algorithm.model.gnn import GCNModel, GATModel
+from marlite.algorithm.model.gnn import (
+    GCNModel,
+    GATModel,
+    SingleLayerGCNModel,
+    SingleLayerGATModel,
+)
 from marlite.algorithm.model.matrix_gnn import MatrixGCNModel
 from marlite.algorithm.model.custom_model import CustomModel
 from marlite.algorithm.model.rnn import GRUModel
 from marlite.algorithm.model.conv1d_model import CustomConv1DModel
-from marlite.algorithm.model.resnet import ResAttMaskedProbEnc, ResAttMaskedStateEnc, ResAttStateEnc, ResAttSeqEnc
-from marlite.algorithm.model.resnet import SimpleResAttMaskedStateEnc, SimpleResAttStateEnc, SimpleResAttSeqEnc
+from marlite.algorithm.model.resnet import (
+    ResAttMaskedProbEnc,
+    ResAttMaskedStateEnc,
+    ResAttStateEnc,
+    ResAttSeqEnc,
+)
+from marlite.algorithm.model.resnet import (
+    SimpleResAttMaskedStateEnc,
+    SimpleResAttStateEnc,
+    SimpleResAttSeqEnc,
+)
 from marlite.algorithm.model.resnet import ResAttObsEnc, SimpleResAttObsEnc
 from marlite.algorithm.model.qmix_critic_model import QMixModel
 from marlite.algorithm.model.graphmix_critic_model import GraphMixModel
 
 
 registered_models = {
-    "RNN": GRUModel, # For compatibility
+    "RNN": GRUModel,  # For compatibility
     "GRU": GRUModel,
     "GCN": GCNModel,
     "GAT": GATModel,
+    "SingleLayerGCN": SingleLayerGCNModel,
+    "SingleLayerGAT": SingleLayerGATModel,
     "MatrixGCN": MatrixGCNModel,
     "Identity": nn.Identity,
     "Flatten": nn.Flatten,
     "Custom": CustomModel,
-    "CustomTimeSeq": CustomConv1DModel, # For compatibility
+    "CustomTimeSeq": CustomConv1DModel,  # For compatibility
     "CustomConv1D": CustomConv1DModel,
     "ResAttObsEnc": ResAttObsEnc,
     "ResAttStateEnc": ResAttStateEnc,
@@ -36,6 +52,7 @@ registered_models = {
     "QMixModel": QMixModel,
     "GraphMixModel": GraphMixModel,
 }
+
 
 class ModelConfig:
     def __init__(self, **kwargs):
@@ -57,9 +74,13 @@ class ModelConfig:
             model = model_class(**self.model_config)
             if self.pretrained_params_path is not None:
                 try:
-                    model.load_state_dict(torch.load(self.pretrained_params_path, weights_only=True))
+                    model.load_state_dict(
+                        torch.load(self.pretrained_params_path, weights_only=True)
+                    )
                 except FileNotFoundError as e:
-                    logging.error(f"Pretrained model path {self.pretrained_params_path} not found.")
+                    logging.error(
+                        f"Pretrained model path {self.pretrained_params_path} not found."
+                    )
                     raise e
         else:
             raise ValueError(f"Model type {self.model_type} not registered.")
