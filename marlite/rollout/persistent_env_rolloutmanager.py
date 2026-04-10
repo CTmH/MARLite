@@ -1,8 +1,7 @@
-import torch
-import torch.multiprocessing as mp
-from typing import List, Any, Callable
+import multiprocessing as mp
+from typing import List, Any, Callable, Union
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from marlite.algorithm.agents import AgentGroup
+from marlite.algorithm.agents import AgentGroupConfig
 from marlite.environment import EnvConfig
 from marlite.rollout.rolloutmanager import RolloutManager
 from tqdm import tqdm
@@ -13,19 +12,21 @@ class PersistentEnvRolloutManager(RolloutManager):
         self,
         worker_func: Callable,
         env_config: EnvConfig,
-        agent_group: AgentGroup,
+        agent_group_config: AgentGroupConfig,
+        serialized_agent_group_params: bytes,
         n_workers: int,
         n_episodes: int,
         traj_len: int,
         episode_limit: int,
         epsilon: float,
-        device: str,
+        device: Union[str, List[str]],
         check_victory: Callable,
     ):
 
         self.worker_func = worker_func
         self.env_config = env_config
-        self.agent_group = agent_group
+        self.agent_group_config = agent_group_config
+        self.serialized_agent_group_params = serialized_agent_group_params
         self.n_workers = n_workers
         self.n_episodes = n_episodes
         self.traj_len = traj_len
@@ -37,14 +38,21 @@ class PersistentEnvRolloutManager(RolloutManager):
     def generate_episodes(self) -> List[Any]:
         mp.set_start_method("spawn", force=True)
 
-        # Calculate episodes per worker
+        shm = mp.shared_memory.SharedMemory(
+            create=True, size=len(self.serialized_agent_group_params)
+        )
+        shm.buf[: len(self.serialized_agent_group_params)] = (
+            self.serialized_agent_group_params
+        )
+        shm_name = shm.name
+        shm_size = len(self.serialized_agent_group_params)
+
         episodes_per_worker = [
             self.n_episodes // self.n_workers
             + (1 if i < self.n_episodes % self.n_workers else 0)
             for i in range(self.n_workers)
         ]
 
-        # Filter out workers that would get 0 episodes
         workers_with_episodes = [
             (i, n_episodes)
             for i, n_episodes in enumerate(episodes_per_worker)
@@ -52,64 +60,51 @@ class PersistentEnvRolloutManager(RolloutManager):
         ]
         n_active_workers = len(workers_with_episodes)
 
-        # Only use as many workers as needed
         n_workers = min(self.n_workers, n_active_workers)
 
-        # Handle CUDA device allocation when device is just "cuda" without device number
-        if self.device == "cuda":
-            if torch.cuda.is_available():
-                num_cuda_devices = torch.cuda.device_count()
-                # Distribute workers evenly across available CUDA devices
-                devices = [f"cuda:{i % num_cuda_devices}" for i in range(n_workers)]
-            else:
-                raise RuntimeError("CUDA is not available on this system")
+        if isinstance(self.device, list):
+            devices = [self.device[i % len(self.device)] for i in range(n_workers)]
         else:
-            # Use the specified device for all workers
-            devices = [self.device for _ in range(n_workers)]
+            devices = [self.device] * n_workers
 
-        # Move agent_group to CPU before sharing memory and pickling for multiprocessing
-        # share_memory() reduces memory copy overhead when passing model to child processes
-        self.agent_group.to("cpu").share_memory()
+        shm_info = (shm_name, shm_size)
 
         episodes = []
-        with ProcessPoolExecutor(max_workers=n_workers) as executor:
-            # Prepare arguments for each worker
-            futures = [
-                executor.submit(
-                    self.worker_func,
-                    self.env_config,
-                    self.agent_group,
-                    n_episodes,
-                    self.traj_len,
-                    self.episode_limit,
-                    self.epsilon,
-                    devices[i],  # Use the assigned device for this worker
-                    self.check_victory,
-                )
-                for i, (worker_idx, n_episodes) in enumerate(
-                    workers_with_episodes[:n_workers]
-                )
-            ]
+        try:
+            with ProcessPoolExecutor(max_workers=n_workers) as executor:
+                futures = [
+                    executor.submit(
+                        self.worker_func,
+                        self.env_config,
+                        self.agent_group_config,
+                        shm_info,
+                        n_episodes,
+                        self.traj_len,
+                        self.episode_limit,
+                        self.epsilon,
+                        devices[i],
+                        self.check_victory,
+                    )
+                    for i, (worker_idx, n_episodes) in enumerate(
+                        workers_with_episodes[:n_workers]
+                    )
+                ]
 
-            # Collect results with progress bar
-            completed_count = 0
-            pbar = tqdm(total=n_workers, desc="Generating Episodes")
-            for future in as_completed(futures):
-                try:
-                    worker_episodes = future.result()
-                    episodes.extend(worker_episodes)
-                    completed_count += 1
-                except Exception as e:
-                    # Log the error but continue with other workers
-                    print(f"Worker failed with error: {e}")
-                    # Continue with remaining futures
-                    completed_count += 1
-                    continue
-                # Update progress bar
-                pbar.update(completed_count)
-            pbar.close()
+                completed_count = 0
+                pbar = tqdm(total=n_workers, desc="Generating Episodes")
+                for future in as_completed(futures):
+                    try:
+                        worker_episodes = future.result()
+                        episodes.extend(worker_episodes)
+                        completed_count += 1
+                    except Exception as e:
+                        print(f"Worker failed with error: {e}")
+                        completed_count += 1
+                        continue
+                    pbar.update(completed_count)
+                pbar.close()
+        finally:
+            shm.close()
+            shm.unlink()
 
         return episodes
-
-    def cleanup(self):  # For compatibility
-        return self

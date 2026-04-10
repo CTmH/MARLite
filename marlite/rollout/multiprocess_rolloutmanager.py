@@ -1,8 +1,7 @@
-import torch.multiprocessing as mp
-import torch
-from typing import List, Any, Callable
+import multiprocessing as mp
+from typing import List, Any, Callable, Union
 from concurrent.futures import ProcessPoolExecutor
-from marlite.algorithm.agents.agent_group import AgentGroup
+from marlite.algorithm.agents import AgentGroupConfig
 from marlite.environment.env_config import EnvConfig
 from marlite.rollout.rolloutmanager import RolloutManager
 from tqdm import tqdm
@@ -13,19 +12,21 @@ class MultiProcessRolloutManager(RolloutManager):
         self,
         worker_func: Callable,
         env_config: EnvConfig,
-        agent_group: AgentGroup,
+        agent_group_config: AgentGroupConfig,
+        serialized_agent_group_params: bytes,
         n_workers: int,
         n_episodes: int,
         traj_len: int,
         episode_limit: int,
         epsilon: float,
-        device: str,
+        device: Union[str, List[str]],
         check_victory: Callable,
     ):
 
         self.worker_func = worker_func
         self.env_config = env_config
-        self.agent_group = agent_group
+        self.agent_group_config = agent_group_config
+        self.serialized_agent_group_params = serialized_agent_group_params
         self.n_workers = n_workers
         self.n_episodes = n_episodes
         self.traj_len = traj_len
@@ -36,45 +37,49 @@ class MultiProcessRolloutManager(RolloutManager):
 
     def generate_episodes(self) -> List[Any]:
         mp.set_start_method("spawn", force=True)
+
+        shm = mp.shared_memory.SharedMemory(
+            create=True, size=len(self.serialized_agent_group_params)
+        )
+        shm.buf[: len(self.serialized_agent_group_params)] = (
+            self.serialized_agent_group_params
+        )
+        shm_name = shm.name
+        shm_size = len(self.serialized_agent_group_params)
+
         n_workers = min(self.n_workers, self.n_episodes)
 
-        # Handle CUDA device allocation when device is just "cuda" without device number
-        if self.device == "cuda":
-            if torch.cuda.is_available():
-                num_cuda_devices = torch.cuda.device_count()
-                # Distribute workers evenly across available CUDA devices
-                devices = [
-                    f"cuda:{i % num_cuda_devices}" for i in range(self.n_episodes)
-                ]
-            else:
-                raise RuntimeError("CUDA is not available on this system")
+        if isinstance(self.device, list):
+            devices = [
+                self.device[i % len(self.device)] for i in range(self.n_episodes)
+            ]
         else:
-            # Use the specified device for all workers
-            devices = [self.device for _ in range(self.n_episodes)]
+            devices = [self.device] * self.n_episodes
 
-        # Move agent_group to CPU before sharing memory and pickling for multiprocessing
-        # share_memory() reduces memory copy overhead when passing model to child processes
-        self.agent_group.to("cpu").share_memory()
+        shm_info = (shm_name, shm_size)
 
-        with ProcessPoolExecutor(max_workers=n_workers) as executor:
-            episodes = list(
-                tqdm(
-                    executor.map(
-                        self.worker_func,
-                        [self.env_config] * self.n_episodes,
-                        [self.agent_group] * self.n_episodes,
-                        [self.traj_len] * self.n_episodes,
-                        [self.episode_limit] * self.n_episodes,
-                        [self.epsilon] * self.n_episodes,
-                        devices,
-                        [self.check_victory] * self.n_episodes,
-                    ),
-                    total=self.n_episodes,
-                    desc="Generating Episodes",
+        try:
+            with ProcessPoolExecutor(max_workers=n_workers) as executor:
+                episodes = list(
+                    tqdm(
+                        executor.map(
+                            self.worker_func,
+                            [self.env_config] * self.n_episodes,
+                            [self.agent_group_config] * self.n_episodes,
+                            [shm_info] * self.n_episodes,
+                            [self.traj_len] * self.n_episodes,
+                            [self.episode_limit] * self.n_episodes,
+                            [self.epsilon] * self.n_episodes,
+                            devices,
+                            [self.check_victory] * self.n_episodes,
+                        ),
+                        total=self.n_episodes,
+                        desc="Generating Episodes",
+                    )
                 )
-            )
+        finally:
+            shm.close()
+            shm.unlink()
+
         episodes = [e for e in episodes if e]
         return episodes
-
-    def cleanup(self):  # For compatibility
-        return self

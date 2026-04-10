@@ -1,4 +1,3 @@
-import io
 import os
 import sys
 import yaml
@@ -21,18 +20,7 @@ from marlite.util.optimizer_config import OptimizerConfig
 from marlite.util.lr_scheduler_config import LRSchedulerConfig
 from marlite.util.scheduler import Scheduler
 from marlite.analyzer import AnalyzerConfig
-
-
-def _serialize_to_buffer(state_dict):
-    buffer = io.BytesIO()
-    torch.save(state_dict, buffer)
-    buffer.seek(0)
-    return buffer
-
-
-def _deserialize_from_buffer(buffer):
-    buffer.seek(0)
-    return torch.load(buffer, weights_only=True)
+from marlite.util.serialization import serialize_to_buffer, deserialize_from_buffer
 
 
 def get_device_list(train_device: Union[str, List[str]]) -> tuple:
@@ -125,13 +113,13 @@ class Trainer:
         self.agent_group_config = agent_group_config
         self.eval_agent_group = agent_group_config.get_agent_group()
         self.target_agent_group = agent_group_config.get_agent_group()
-        self.best_agent_group_params = _serialize_to_buffer(
+        self.best_agent_group_params = serialize_to_buffer(
             self.eval_agent_group.state_dict()
         )
         self.target_agent_group.load_state_dict(
-            _deserialize_from_buffer(self.best_agent_group_params)
+            deserialize_from_buffer(self.best_agent_group_params)
         )
-        self._cached_agent_group_params = _serialize_to_buffer(
+        self._cached_agent_group_params = serialize_to_buffer(
             self.eval_agent_group.state_dict()
         )
 
@@ -139,8 +127,8 @@ class Trainer:
         self.eval_critic = critic_config.get_critic()
         self.target_critic = critic_config.get_critic()
         self.target_critic.load_state_dict(self.eval_critic.state_dict())
-        self.best_critic_params = _serialize_to_buffer(self.eval_critic.state_dict())
-        self._cached_critic_params = _serialize_to_buffer(self.eval_critic.state_dict())
+        self.best_critic_params = serialize_to_buffer(self.eval_critic.state_dict())
+        self._cached_critic_params = serialize_to_buffer(self.eval_critic.state_dict())
         self.critic_optimizer_config = critic_optimizer_config
         self.lr_scheduler_conf = lr_scheduler_conf
         self.agent_lr_scheduler_conf = agent_lr_scheduler_conf
@@ -286,23 +274,23 @@ class Trainer:
             self.checkpointdir, checkpoint, "critic", "critic.pth"
         )
         self.eval_critic.load_state_dict(torch.load(critic_path, weights_only=True))
-        self.best_agent_group_params = _serialize_to_buffer(
+        self.best_agent_group_params = serialize_to_buffer(
             self.eval_agent_group.state_dict()
         )
-        self.best_critic_params = _serialize_to_buffer(self.eval_critic.state_dict())
-        self._cached_agent_group_params = _serialize_to_buffer(
+        self.best_critic_params = serialize_to_buffer(self.eval_critic.state_dict())
+        self._cached_agent_group_params = serialize_to_buffer(
             self.eval_agent_group.state_dict()
         )
-        self._cached_critic_params = _serialize_to_buffer(self.eval_critic.state_dict())
+        self._cached_critic_params = serialize_to_buffer(self.eval_critic.state_dict())
         self.update_target_model_params()
         return self
 
     def save_best_model(self):
         self.eval_agent_group.load_state_dict(
-            _deserialize_from_buffer(self.best_agent_group_params)
+            deserialize_from_buffer(self.best_agent_group_params)
         )
         self.eval_critic.load_state_dict(
-            _deserialize_from_buffer(self.best_critic_params)
+            deserialize_from_buffer(self.best_critic_params)
         )
         self.save_current_model(checkpoint="best")
         return self
@@ -312,8 +300,9 @@ class Trainer:
         Collect experiences using multiple rollout workers.
         """
         self.eval_agent_group.eval().to("cpu")
+        serialized_params = serialize_to_buffer(self.eval_agent_group.state_dict())
         manager = self.rolloutmanager_config.create_manager(
-            self.eval_agent_group, self.env_config, epsilon
+            self.agent_group_config, serialized_params, self.env_config, epsilon
         )
         episodes = manager.generate_episodes()
 
@@ -334,12 +323,15 @@ class Trainer:
 
     def evaluate(self):
         self.eval_agent_group.eval()
+        serialized_params = serialize_to_buffer(self.eval_agent_group.state_dict())
         manager = self.rolloutmanager_config.create_eval_manager(
-            self.eval_agent_group, self.env_config, self.eval_epsilon
+            self.agent_group_config,
+            serialized_params,
+            self.env_config,
+            self.eval_epsilon,
         )
 
         episodes = manager.generate_episodes()
-        manager.cleanup()
 
         result = self.analyzer(episodes)
 
@@ -448,10 +440,10 @@ class Trainer:
             update_best = np.array(update_best, dtype=np.bool_)
 
             if cache_params.any():
-                self._cached_agent_group_params = _serialize_to_buffer(
+                self._cached_agent_group_params = serialize_to_buffer(
                     self.eval_agent_group.state_dict()
                 )
-                self._cached_critic_params = _serialize_to_buffer(
+                self._cached_critic_params = serialize_to_buffer(
                     self.eval_critic.state_dict()
                 )
                 logging.info(
@@ -460,10 +452,10 @@ class Trainer:
 
             if update_best.any():
                 self.best_metrics = metrics
-                self.best_agent_group_params = _serialize_to_buffer(
+                self.best_agent_group_params = serialize_to_buffer(
                     self.eval_agent_group.state_dict()
                 )
-                self.best_critic_params = _serialize_to_buffer(
+                self.best_critic_params = serialize_to_buffer(
                     self.eval_critic.state_dict()
                 )
                 logging.info(
@@ -478,10 +470,10 @@ class Trainer:
 
             if epoch % eval_interval == 0:
                 self.eval_agent_group.load_state_dict(
-                    _deserialize_from_buffer(self._cached_agent_group_params)
+                    deserialize_from_buffer(self._cached_agent_group_params)
                 )
                 self.eval_critic.load_state_dict(
-                    _deserialize_from_buffer(self._cached_critic_params)
+                    deserialize_from_buffer(self._cached_critic_params)
                 )
                 self.update_target_model_params()
                 logging.info(

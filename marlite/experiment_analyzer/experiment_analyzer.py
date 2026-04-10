@@ -74,7 +74,6 @@ class ExperimentAnalyzer:
             f"Generating {manager.n_episodes} episodes using the best model..."
         )
         episodes = manager.generate_episodes()
-        manager.cleanup()
 
         return episodes
 
