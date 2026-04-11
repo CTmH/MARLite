@@ -165,23 +165,26 @@ def trajectory_collate_fn(batch):
                   and Space objects are kept as-is (one per batch, assumed identical).
     """
     collated = {}
-    for k in NUMERIC_ATTR:
+    first_sample_keys = set(batch[0].keys())
+
+    numeric_keys = [k for k in NUMERIC_ATTR if k in first_sample_keys]
+    obj_keys = [k for k in OBJ_ATTR if k in first_sample_keys]
+    dynamic_keys = [k for k in DYNAMIC_LEN_ATTR if k in first_sample_keys]
+
+    for k in numeric_keys:
         batch_values = [sample[k] for sample in batch]
         collated[k] = torch.tensor(np.array(batch_values))
 
-    # Preserve space objects — assume they're identical across batch
-    for k in OBJ_ATTR:
+    for k in obj_keys:
         first_elem = batch[0][k][0]
         if np.issubdtype(first_elem.dtype, np.object_):
-            collated[k] = np.stack(
-                [sample[k] for sample in batch]
-            )  # Keep original object (not collated)
+            collated[k] = np.stack([sample[k] for sample in batch])
         elif np.issubdtype(first_elem.dtype, np.number):
             collated[k] = torch.tensor([sample[k] for sample in batch])
         else:
-            raise ValueError(f"Unexpected data type for {k}: {batch[0][k][0].dtype}")
+            raise ValueError(f"Unexpected data type for {k}: {first_elem.dtype}")
 
-    for k in DYNAMIC_LEN_ATTR:
+    for k in dynamic_keys:
         collated[k] = [sample[k] for sample in batch]
 
     return collated
