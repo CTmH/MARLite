@@ -37,7 +37,7 @@ class ObsGNNCommAgentGroup(GraphAgentGroup):
             embedding  # For non-probabilistic case, embedding is the estimate
         )
 
-        return local_state_estimates, edge_indices
+        return local_state_estimates
 
     def forward(
         self,
@@ -53,9 +53,7 @@ class ObsGNNCommAgentGroup(GraphAgentGroup):
         if edge_indices is None:  # If edge_indices are not provided
             adj_matrix, edge_indices = self.graph_builder(states)
 
-        local_state_estimates, edge_indices = self._compute_local_state_estimates(
-            msg, edge_indices
-        )
+        local_state_estimates = self._compute_local_state_estimates(msg, edge_indices)
 
         hidden_states = torch.cat(
             (local_state_estimates, local_obs), dim=-1
@@ -98,7 +96,7 @@ class SeqGNNCommAgentGroup(GraphAgentGroup):
             embedding  # For non-probabilistic case, embedding is the estimate
         )
 
-        return local_state_estimates, edge_indices
+        return local_state_estimates
 
     def forward(
         self,
@@ -114,9 +112,7 @@ class SeqGNNCommAgentGroup(GraphAgentGroup):
         if edge_indices is None:  # If edge_indices are not provided
             adj_matrix, edge_indices = self.graph_builder(states)
 
-        local_state_estimates, edge_indices = self._compute_local_state_estimates(
-            msg, edge_indices
-        )
+        local_state_estimates = self._compute_local_state_estimates(msg, edge_indices)
 
         hidden_states = torch.cat(
             (local_state_estimates, local_obs), dim=-1
@@ -169,7 +165,7 @@ class ProbObsGNNCommAgentGroup(ObsGNNCommAgentGroup):
             embedding, deterministic
         )  # All (B, N, F)
 
-        return estimates, edge_indices, mu, std, log_var
+        return estimates, mu, std, log_var
 
     def forward(
         self,
@@ -185,7 +181,7 @@ class ProbObsGNNCommAgentGroup(ObsGNNCommAgentGroup):
         if edge_indices is None:  # If edge_indices are not provided
             adj_matrix, edge_indices = self.graph_builder(states)
 
-        estimates, edge_indices, mu, std, log_var = self._compute_local_state_estimates(
+        estimates, mu, std, log_var = self._compute_local_state_estimates(
             msg, edge_indices
         )
 
@@ -243,7 +239,7 @@ class ProbSeqGNNCommAgentGroup(SeqGNNCommAgentGroup):
             embedding, deterministic
         )  # All (B, N, F)
 
-        return estimates, edge_indices, mu, std, log_var
+        return estimates, mu, std, log_var
 
     def forward(
         self,
@@ -253,13 +249,13 @@ class ProbSeqGNNCommAgentGroup(SeqGNNCommAgentGroup):
         alive_mask: torch.Tensor,
         edge_indices: List[np.ndarray] | None = None,
     ) -> Dict[str, Any]:
-        msg, local_obs = self._process_sequences(observations, traj_padding_mask)
+        msg, local_obs = self._process_observations(observations, traj_padding_mask)
 
         # Build Graph
         if edge_indices is None:  # If edge_indices are not provided
             adj_matrix, edge_indices = self.graph_builder(states)
 
-        estimates, edge_indices, mu, std, log_var = self._compute_local_state_estimates(
+        estimates, mu, std, log_var = self._compute_local_state_estimates(
             msg, edge_indices
         )
 
@@ -440,7 +436,7 @@ class DualPathObsGNNCommAgentGroup(DualPathBasedGNNCommAgentGroup):
             embedding  # For non-probabilistic case, embedding is the estimate
         )
 
-        return local_state_estimates, edge_indices
+        return local_state_estimates
 
     def forward(
         self,
@@ -456,9 +452,7 @@ class DualPathObsGNNCommAgentGroup(DualPathBasedGNNCommAgentGroup):
         if edge_indices is None:  # If edge_indices are not provided
             adj_matrix, edge_indices = self.graph_builder(states)
 
-        local_state_estimates, edge_indices = self._compute_local_state_estimates(
-            msg, edge_indices
-        )
+        local_state_estimates = self._compute_local_state_estimates(msg, edge_indices)
 
         hidden_states = torch.cat(
             (local_state_estimates, local_obs), dim=-1
@@ -516,7 +510,7 @@ class DualPathProbObsGNNCommAgentGroup(DualPathObsGNNCommAgentGroup):
             embedding, deterministic
         )  # All (B, N, F)
 
-        return estimates, edge_indices, mu, std, log_var
+        return estimates, mu, std, log_var
 
     def forward(
         self,
@@ -532,7 +526,7 @@ class DualPathProbObsGNNCommAgentGroup(DualPathObsGNNCommAgentGroup):
         if edge_indices is None:  # If edge_indices are not provided
             adj_matrix, edge_indices = self.graph_builder(states)
 
-        estimates, edge_indices, mu, std, log_var = self._compute_local_state_estimates(
+        estimates, mu, std, log_var = self._compute_local_state_estimates(
             msg, edge_indices
         )
 

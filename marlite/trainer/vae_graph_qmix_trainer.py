@@ -36,7 +36,7 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
 
     def __init__(
         self,
-        kl_divergence_weight=1.0,
+        kl_divergence_weight=0.005,
         warmup_epochs=0,
         loss_combination_method="weighted_sum",
         pit_loss_alpha=0.9,
