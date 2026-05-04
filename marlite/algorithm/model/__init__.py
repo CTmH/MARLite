@@ -3,6 +3,7 @@ from marlite.algorithm.model.attention_model import AttentionModel
 from marlite.algorithm.model.rnn import RNNModel
 from marlite.algorithm.model.conv1d_model import Conv1DModel
 from marlite.algorithm.model.masked_model import MaskedModel
+from marlite.algorithm.model.hypernet import HyperNetwork
 from marlite.algorithm.model.model_config import ModelConfig
 
-__all__ = ["ModelConfig", "TimeSeqModel", "RNNModel", "Conv1DModel", "AttentionModel", "MaskedModel"]
+__all__ = ["ModelConfig", "TimeSeqModel", "RNNModel", "Conv1DModel", "AttentionModel", "MaskedModel", "HyperNetwork"]

@@ -6,6 +6,8 @@ from marlite.trainer.graph_qmix_trainer import GraphQMIXTrainer
 from marlite.trainer.msg_aggr_qmix_trainer import MsgAggrQMIXTrainer, ProbMsgAggrQMIXTrainer
 from marlite.trainer.self_supervised_qmix_trainer import SelfSupervisedQMIXTrainer
 from marlite.trainer.vae_graph_qmix_trainer import VAEGraphQMIXTrainer
+from marlite.trainer.group_consensus_trainer import GroupConsensusTrainer
+from marlite.trainer.vae_group_consensus_trainer import VAEGroupConsensusQMIXTrainer
 from marlite.config_processor import REGISTERED_PROCESSORS
 
 REGISTERED_TRAINERS: Dict[str, Type[Trainer]] = {
@@ -14,6 +16,8 @@ REGISTERED_TRAINERS: Dict[str, Type[Trainer]] = {
     'MsgAggr': MsgAggrQMIXTrainer,
     'ProbMsgAggr': ProbMsgAggrQMIXTrainer,
     'VAEGraphQMIX': VAEGraphQMIXTrainer,
+    'GroupConsensus': GroupConsensusTrainer,
+    'VAEGroupConsensus': VAEGroupConsensusQMIXTrainer,
 }
 
 class TrainerConfig:

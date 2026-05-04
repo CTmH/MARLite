@@ -277,7 +277,7 @@ class MsgAggrAgentGroup(AgentGroup):
 
         # Get Q-values
         with torch.no_grad():
-            ret = self.forward(obs, padding_mask, alive_mask)
+            ret = self(obs, padding_mask, alive_mask)
             q_values = ret["q_val"]
             q_values = q_values.detach().cpu().numpy().squeeze()
 

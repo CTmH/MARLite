@@ -1,0 +1,30 @@
+from copy import deepcopy
+import numpy as np
+from marlite.algorithm.group_builder.group_builder import GroupBuilder
+from marlite.algorithm.group_builder.label_propagation_group_builder import (
+    MAgentLabelPropagationGroupBuilder,
+)
+from marlite.algorithm.group_builder.fixed_group_builder import FixedGroupBuilder
+
+registered_group_builders = {
+    "MAgentLabelPropagation": MAgentLabelPropagationGroupBuilder,
+    "Fixed": FixedGroupBuilder,
+}
+
+
+class GroupBuilderConfig:
+    def __init__(self, **kwargs) -> None:
+        self.conf = deepcopy(kwargs)
+        self.builder_type = self.conf.pop("type")
+        dtype = self.conf.get("dtype")
+        if isinstance(dtype, str):
+            self.conf["dtype"] = np.dtype(dtype)
+        if self.builder_type not in registered_group_builders:
+            raise ValueError(
+                f"Group Builder type {self.builder_type} not registered."
+            )
+        self.group_builder_class = registered_group_builders[self.builder_type]
+
+    def get_group_builder(self) -> GroupBuilder:
+        group_builder = self.group_builder_class(**self.conf)
+        return group_builder

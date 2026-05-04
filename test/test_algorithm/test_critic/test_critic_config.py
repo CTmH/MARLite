@@ -2,6 +2,7 @@ import unittest
 import yaml
 from marlite.algorithm.critic import CriticConfig
 from marlite.algorithm.critic.mixer import QMixer, SeqQMixer
+from marlite.algorithm.critic.group_consensus_mixer import GroupConsensusMixer
 
 class TestCriticConfig(unittest.TestCase):
 
@@ -28,6 +29,18 @@ class TestCriticConfig(unittest.TestCase):
         self.critic_config = CriticConfig(**critic_config_dict)
         self.critic = self.critic_config.get_critic()
         self.assertIsInstance(self.critic, SeqQMixer)
+
+    def test_get_group_consensus_mixer(self):
+        config_path = 'test/config/group_consensus_default.yaml'
+        with open(config_path, 'r') as file:
+            config = yaml.safe_load(file)
+        critic_config_dict = config['critic_config']
+        critic_config_dict.pop('optimizer')
+        if 'lr_scheduler' in critic_config_dict:
+            critic_config_dict.pop('lr_scheduler')
+        self.critic_config = CriticConfig(**critic_config_dict)
+        self.critic = self.critic_config.get_critic()
+        self.assertIsInstance(self.critic, GroupConsensusMixer)
 
 
 if __name__ == '__main__':

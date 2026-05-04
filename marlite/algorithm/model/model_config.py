@@ -25,6 +25,7 @@ from marlite.algorithm.model.resnet import (
 from marlite.algorithm.model.resnet import ResAttObsEnc, SimpleResAttObsEnc
 from marlite.algorithm.model.qmix_critic_model import QMixModel
 from marlite.algorithm.model.graphmix_critic_model import GraphMixModel
+from marlite.algorithm.model.hypernet import HyperNetwork
 
 
 registered_models = {
@@ -51,6 +52,7 @@ registered_models = {
     "SimpleResAttSeqEnc": SimpleResAttSeqEnc,
     "QMixModel": QMixModel,
     "GraphMixModel": GraphMixModel,
+    "HyperNetwork": HyperNetwork,
 }
 
 

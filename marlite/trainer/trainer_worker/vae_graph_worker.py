@@ -345,7 +345,7 @@ class VAEGraphQMIXWorker(BaseWorker):
         states = states.to(self.device)
 
         # Forward returns: q_val, edge_indices, local_state_estimates, mu, std, log_var
-        ret = self.eval_agent_group.forward(
+        ret = self.eval_agent_group(
             observations_transposed,
             states,
             timestep_padding_mask,
@@ -379,7 +379,7 @@ class VAEGraphQMIXWorker(BaseWorker):
                 self.device
             )
             next_states = next_states.to(self.device)
-            ret_next = self.target_agent_group.forward(
+            ret_next = self.target_agent_group(
                 next_observations_transposed,
                 next_states,
                 next_timestep_padding_mask,

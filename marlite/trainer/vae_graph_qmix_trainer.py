@@ -352,7 +352,7 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
         states = states.to(self.train_device)
 
         # Forward returns: q_val, edge_indices, local_state_estimates, mu, std, log_var
-        ret = self.eval_agent_group.forward(
+        ret = self.eval_agent_group(
             observations_transposed,
             states,
             timestep_padding_mask,
@@ -386,7 +386,7 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
                 self.train_device
             )
             next_states = next_states.to(self.train_device)
-            ret_next = self.target_agent_group.forward(
+            ret_next = self.target_agent_group(
                 next_observations_transposed,
                 next_states,
                 next_timestep_padding_mask,

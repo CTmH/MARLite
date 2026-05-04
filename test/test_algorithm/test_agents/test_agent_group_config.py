@@ -3,6 +3,7 @@ import yaml
 from mpe2 import simple_spread_v3
 
 from marlite.algorithm.agents import AgentGroupConfig, AgentGroup
+from marlite.algorithm.agents.group_consensus_agent_group import GroupConsensusAgentGroup
 
 class TestAgentGroupConfig(unittest.TestCase):
 
@@ -27,6 +28,16 @@ class TestAgentGroupConfig(unittest.TestCase):
         self.agent_group_config = AgentGroupConfig(**config['agent_group_config'])
         self.agent_group = self.agent_group_config.get_agent_group()
         self.assertIsInstance(self.agent_group, AgentGroup)
+
+    def test_get_group_consensus_agent_group(self):
+        # GroupConsensus agent group configuration
+        config_path = 'test/config/group_consensus_default.yaml'
+
+        with open(config_path) as f:
+            conf = yaml.safe_load(f)
+        self.agent_group_config = AgentGroupConfig(**conf['agent_group_config'])
+        self.agent_group = self.agent_group_config.get_agent_group()
+        self.assertIsInstance(self.agent_group, GroupConsensusAgentGroup)
 
 
 if __name__ == '__main__':

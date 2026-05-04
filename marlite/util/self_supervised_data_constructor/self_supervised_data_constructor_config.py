@@ -2,11 +2,15 @@ from copy import deepcopy
 from marlite.util.self_supervised_data_constructor.self_supervised_data_constructor import SelfSupervisedDataConstructor
 from marlite.util.self_supervised_data_constructor.magent_obs_data_constructor import MagentVecObsDataConstructor, MagentImageObsDataConstructor
 from marlite.util.self_supervised_data_constructor.sumo_obs_data_constructor import SumoObsDataConstructor
+from marlite.util.self_supervised_data_constructor.magent_group_window_constructor import MagentGroupWindowConstructor
+from marlite.util.self_supervised_data_constructor.magent_group_features_constructor import MagentGroupFeaturesConstructor
 
 registered_self_supervised_data_constructor_models = {
     "MagentVecObs": MagentVecObsDataConstructor,
     "MagentImageObs": MagentImageObsDataConstructor,
     "SUMO": SumoObsDataConstructor,
+    "MagentGroupWindow": MagentGroupWindowConstructor,
+    "MagentGroupFeatures": MagentGroupFeaturesConstructor,
 }
 
 class SelfSupervisedDataConstructorConfig:

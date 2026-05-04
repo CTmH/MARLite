@@ -68,6 +68,7 @@ def persistent_env_rollout(
             "observations": [],
             "states": [],
             "edge_indices": [],
+            "zone_indices": [],
             "actions": [],
             "rewards": [],
             "avail_actions": [],
@@ -75,6 +76,7 @@ def persistent_env_rollout(
             "terminations": [],
             "next_alive_mask": [],
             "next_edge_indices": [],
+            "next_zone_indices": [],
             "next_states": [],
             "next_observations": [],
             "next_avail_actions": [],
@@ -143,6 +145,7 @@ def persistent_env_rollout(
                 episode["observations"].append(observations)
                 episode["states"].append(env.state())
                 episode["edge_indices"].append(edge_indices)
+                episode["zone_indices"].append(zone_indices)
                 episode["actions"].append(all_actions)
                 episode["avail_actions"].append(avail_actions)
                 episode["infos"].append(infos)
@@ -192,6 +195,7 @@ def persistent_env_rollout(
                     episode["next_avail_actions"].append(default_avail_actions)
                     episode["next_alive_mask"].append(default_alive_mask)
                     episode["next_edge_indices"].append(edge_indices)
+                    episode["next_zone_indices"].append(zone_indices)
                     break
                 episode["next_states"].append(env.state())
 
@@ -230,11 +234,13 @@ def persistent_env_rollout(
             )
             actions, all_actions = ret["actions"], ret["all_actions"]
             edge_indices = ret.get("edge_indices", np.zeros((2, 0)))
+            zone_indices = ret.get("zone_indices", np.zeros(len(env.possible_agents), dtype=np.int8))
 
             if i > 0:
                 episode["next_alive_mask"].append(alive_mask)
                 episode["next_avail_actions"].append(avail_actions)
                 episode["next_edge_indices"].append(edge_indices)
+                episode["next_zone_indices"].append(zone_indices)
 
         episode["win_tag"] = win_tag
         episode["episode_length"] = len(episode["observations"])

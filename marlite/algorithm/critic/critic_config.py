@@ -4,6 +4,7 @@ from typing import Dict, Any, Callable
 from torch.nn import Module
 
 from marlite.algorithm.critic.mixer import QMixer, SeqQMixer, ProbQMixer, ProbSeqQMixer
+from marlite.algorithm.critic.group_consensus_mixer import GroupConsensusMixer
 from marlite.algorithm.model import ModelConfig
 
 
@@ -44,12 +45,25 @@ def create_prob_seq_qmixer(critic_config: Dict[str, Any]) -> SeqQMixer:
 
     return ProbSeqQMixer(model_config, fe_config, seq_model_config, **critic_config)
 
+
+def create_group_consensus_mixer(critic_config: Dict[str, Any]) -> GroupConsensusMixer:
+    """Create a GroupConsensusMixer critic instance from config."""
+
+    return GroupConsensusMixer(
+        feature_extractor_config=fe_config,
+        consensus_processor_config=consensus_processor_config,
+        model_config=model_config,
+        **critic_config,
+    )
+
+
 # Registry mapping critic type names to creator functions
 registered_critic_creators: Dict[str, Callable[[Dict[str, Any]], Module]] = {
     "QMixer": create_qmixer,
     "SeqQMixer": create_seq_qmixer,
     "ProbQMixer": create_prob_qmixer,
     "ProbSeqQMixer": create_prob_seq_qmixer,
+    "GroupConsensusMixer": create_group_consensus_mixer,
 }
 
 

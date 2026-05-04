@@ -330,7 +330,7 @@ class GraphAgentGroup(AgentGroup):
         alive_mask = alive_mask.unsqueeze(0).to(self.device)
 
         with torch.no_grad():
-            ret = self.forward(
+            ret = self(
                 obs, np.expand_dims(state, axis=0), padding_mask, alive_mask
             )
             q_values = ret["q_val"]  # (1, num_agents, num_actions)

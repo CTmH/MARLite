@@ -16,6 +16,8 @@ ARRAY_ATTR = [
     "edge_indices",
     "next_states",
     "next_edge_indices",
+    "zone_indices",
+    "next_zone_indices",
 ]
 
 # Used by TrajectoryDataset.__getitem__ for dict-type episode buffer fields
@@ -59,6 +61,8 @@ NUMERIC_ATTR = [
 DYNAMIC_LEN_ATTR = [
     "edge_indices",
     "next_edge_indices",
+    "zone_indices",
+    "next_zone_indices",
 ]
 
 # Used by trajectory_collate_fn to preserve gym.Space objects

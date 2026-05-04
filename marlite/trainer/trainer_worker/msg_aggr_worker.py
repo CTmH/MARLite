@@ -146,7 +146,7 @@ class MsgAggrWorker(BaseWorker):
         # Compute Q-tot for current state
         self.eval_agent_group.train()
         observations = torch.transpose(observations, 1, 2).to(self.device)
-        ret = self.eval_agent_group.forward(
+        ret = self.eval_agent_group(
             observations, timestep_padding_mask, alive_mask[:, -1, :]
         )
         q_val = ret["q_val"]
@@ -173,7 +173,7 @@ class MsgAggrWorker(BaseWorker):
         with torch.no_grad():
             self.target_agent_group.eval()
             next_observations = torch.transpose(next_observations, 1, 2).to(self.device)
-            ret_next = self.target_agent_group.forward(
+            ret_next = self.target_agent_group(
                 next_observations,
                 next_timestep_padding_mask,
                 next_alive_mask[:, -1, :],
@@ -348,7 +348,7 @@ class ProbMsgAggrWorker(MsgAggrWorker):
         # Compute Q-tot for current state
         self.eval_agent_group.train()
         observations = torch.transpose(observations, 1, 2).to(self.device)
-        ret = self.eval_agent_group.forward(
+        ret = self.eval_agent_group(
             observations, timestep_padding_mask, alive_mask[:, -1, :]
         )
         q_val = ret["q_val"]
@@ -377,7 +377,7 @@ class ProbMsgAggrWorker(MsgAggrWorker):
         with torch.no_grad():
             self.target_agent_group.eval()
             next_observations = torch.transpose(next_observations, 1, 2).to(self.device)
-            ret_next = self.target_agent_group.forward(
+            ret_next = self.target_agent_group(
                 next_observations,
                 next_timestep_padding_mask,
                 next_alive_mask[:, -1, :],
