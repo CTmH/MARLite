@@ -1,7 +1,7 @@
 import numpy as np
 from typing import Callable, Tuple
 import time
-import multiprocessing as mp
+from multiprocessing.shared_memory import SharedMemory
 from marlite.environment.env_config import EnvConfig
 from marlite.algorithm.agents import AgentGroup, AgentGroupConfig
 from marlite.util.env_util import obs_preprocess, ensure_all_agents_present
@@ -34,7 +34,7 @@ def multiprocess_rollout(
         Episode data dictionary
     """
     shm_name, shm_size = shm_info
-    shm = mp.shared_memory.SharedMemory(name=shm_name)
+    shm = SharedMemory(name=shm_name)
     serialized_bytes = bytes(shm.buf[:shm_size])
     shm.close()
 

@@ -3,13 +3,17 @@ import torch
 import datetime
 import yaml
 import numpy as np
-from copy import deepcopy
 from absl import logging
 from torch.nn.modules.loss import _Loss
 
 from marlite.algorithm.model import ModelConfig
 from marlite.trainer.trainer import Trainer
-from marlite.util.serialization import serialize_to_buffer, deserialize_from_buffer
+from marlite.util.serialization import (
+    serialize_to_buffer,
+    deserialize_from_buffer,
+    get_state_dict,
+    load_state_dict_into,
+)
 from marlite.util.optimizer_config import OptimizerConfig
 from marlite.util.lr_scheduler_config import LRSchedulerConfig
 from marlite.util.self_supervised_data_constructor.self_supervised_data_constructor_config import (
@@ -80,6 +84,10 @@ class SelfSupervisedQMIXTrainer(Trainer):
             self.ssl_model.parameters()
         )
 
+        # Optionally compile ssl_model (only on single-GPU)
+        if self.compile_models:
+            self.ssl_model = torch.compile(self.ssl_model.to(self.train_device)).to("cpu")
+
         if isinstance(self.ssl_lr_scheduler_conf, LRSchedulerConfig):
             self.ssl_lr_scheduler = self.ssl_lr_scheduler_conf.get_lr_scheduler(
                 self.ssl_optimizer
@@ -107,13 +115,13 @@ class SelfSupervisedQMIXTrainer(Trainer):
         agent_path = os.path.join(self.checkpointdir, checkpoint, "agent")
         os.makedirs(agent_path, exist_ok=True)
         self.eval_agent_group.to("cpu")
-        agent_params = self.eval_agent_group.state_dict()
+        agent_params = get_state_dict(self.eval_agent_group)
         torch.save(agent_params, os.path.join(agent_path, "agent.pth"))
 
         critic_path = os.path.join(self.checkpointdir, checkpoint, "critic")
         os.makedirs(critic_path, exist_ok=True)
         self.eval_critic.to("cpu")
-        critic_params = self.eval_critic.state_dict()
+        critic_params = get_state_dict(self.eval_critic)
         torch.save(critic_params, os.path.join(critic_path, "critic.pth"))
 
         ssl_model_path = os.path.join(
@@ -121,7 +129,7 @@ class SelfSupervisedQMIXTrainer(Trainer):
         )
         os.makedirs(ssl_model_path, exist_ok=True)
         self.ssl_model.to("cpu")
-        ssl_model_params = self.ssl_model.state_dict()
+        ssl_model_params = get_state_dict(self.ssl_model)
         torch.save(
             ssl_model_params, os.path.join(ssl_model_path, "self_supervised_model.pth")
         )
@@ -134,11 +142,15 @@ class SelfSupervisedQMIXTrainer(Trainer):
         self.eval_agent_group.to("cpu")
         self.eval_critic.to("cpu")
         self.ssl_model.to("cpu")
-        self.eval_agent_group.load_state_dict(torch.load(agent_path, weights_only=True))
+        load_state_dict_into(
+            self.eval_agent_group, torch.load(agent_path, weights_only=True)
+        )
         critic_path = os.path.join(
             self.checkpointdir, checkpoint, "critic", "critic.pth"
         )
-        self.eval_critic.load_state_dict(torch.load(critic_path, weights_only=True))
+        load_state_dict_into(
+            self.eval_critic, torch.load(critic_path, weights_only=True)
+        )
 
         ssl_model_path = os.path.join(
             self.checkpointdir,
@@ -147,43 +159,58 @@ class SelfSupervisedQMIXTrainer(Trainer):
             "self_supervised_model.pth",
         )
         if os.path.exists(ssl_model_path):
-            self.ssl_model.load_state_dict(
-                torch.load(ssl_model_path, weights_only=True)
+            load_state_dict_into(
+                self.ssl_model, torch.load(ssl_model_path, weights_only=True)
             )
 
         self.best_agent_group_params = serialize_to_buffer(
-            self.eval_agent_group.state_dict()
+            get_state_dict(self.eval_agent_group)
         )
-        self.best_critic_params = serialize_to_buffer(self.eval_critic.state_dict())
-        self.best_ssl_model_params = serialize_to_buffer(self.ssl_model.state_dict())
+        self.best_critic_params = serialize_to_buffer(
+            get_state_dict(self.eval_critic)
+        )
+        self.best_ssl_model_params = serialize_to_buffer(
+            get_state_dict(self.ssl_model)
+        )
         self._cached_agent_group_params = serialize_to_buffer(
-            self.eval_agent_group.state_dict()
+            get_state_dict(self.eval_agent_group)
         )
-        self._cached_critic_params = serialize_to_buffer(self.eval_critic.state_dict())
-        self._cached_ssl_model_params = serialize_to_buffer(self.ssl_model.state_dict())
+        self._cached_critic_params = serialize_to_buffer(
+            get_state_dict(self.eval_critic)
+        )
+        self._cached_ssl_model_params = serialize_to_buffer(
+            get_state_dict(self.ssl_model)
+        )
         self.update_target_model_params()
         return self
 
     def save_best_model(self):
         """Save best model including self_supervised_model parameters"""
-        self.eval_agent_group.load_state_dict(
-            deserialize_from_buffer(self.best_agent_group_params)
+        load_state_dict_into(
+            self.eval_agent_group,
+            deserialize_from_buffer(self.best_agent_group_params),
         )
-        self.eval_critic.load_state_dict(
-            deserialize_from_buffer(self.best_critic_params)
+        load_state_dict_into(
+            self.eval_critic,
+            deserialize_from_buffer(self.best_critic_params),
         )
-        self.ssl_model.load_state_dict(
-            deserialize_from_buffer(self.best_ssl_model_params)
+        load_state_dict_into(
+            self.ssl_model,
+            deserialize_from_buffer(self.best_ssl_model_params),
         )
         self.save_current_model(checkpoint="best")
         return self
 
     def update_target_model_params(self):
         """Update target model parameters including self_supervised_model"""
-        self.target_agent_group.load_state_dict(
-            deepcopy(self.eval_agent_group.state_dict())
+        load_state_dict_into(
+            self.target_agent_group,
+            get_state_dict(self.eval_agent_group),
         )
-        self.target_critic.load_state_dict(deepcopy(self.eval_critic.state_dict()))
+        load_state_dict_into(
+            self.target_critic,
+            get_state_dict(self.eval_critic),
+        )
         return self
 
     def train(
@@ -284,13 +311,13 @@ class SelfSupervisedQMIXTrainer(Trainer):
 
             if cache_params.any():
                 self._cached_agent_group_params = serialize_to_buffer(
-                    self.eval_agent_group.state_dict()
+                    get_state_dict(self.eval_agent_group)
                 )
                 self._cached_critic_params = serialize_to_buffer(
-                    self.eval_critic.state_dict()
+                    get_state_dict(self.eval_critic)
                 )
                 self._cached_ssl_model_params = serialize_to_buffer(
-                    self.ssl_model.state_dict()
+                    get_state_dict(self.ssl_model)
                 )
                 logging.info(
                     f"Epoch {epoch}: Cached parameters updated with current parameters."
@@ -299,13 +326,13 @@ class SelfSupervisedQMIXTrainer(Trainer):
             if update_best.any():
                 self.best_metrics = metrics
                 self.best_agent_group_params = serialize_to_buffer(
-                    self.eval_agent_group.state_dict()
+                    get_state_dict(self.eval_agent_group)
                 )
                 self.best_critic_params = serialize_to_buffer(
-                    self.eval_critic.state_dict()
+                    get_state_dict(self.eval_critic)
                 )
                 self.best_ssl_model_params = serialize_to_buffer(
-                    self.ssl_model.state_dict()
+                    get_state_dict(self.ssl_model)
                 )
                 logging.info(
                     f"Epoch {epoch}: New best {first_metric_name}: {first_metric:.4f}"
@@ -318,14 +345,17 @@ class SelfSupervisedQMIXTrainer(Trainer):
                 break
 
             if epoch % eval_interval == 0:
-                self.eval_agent_group.load_state_dict(
-                    deserialize_from_buffer(self._cached_agent_group_params)
+                load_state_dict_into(
+                    self.eval_agent_group,
+                    deserialize_from_buffer(self._cached_agent_group_params),
                 )
-                self.eval_critic.load_state_dict(
-                    deserialize_from_buffer(self._cached_critic_params)
+                load_state_dict_into(
+                    self.eval_critic,
+                    deserialize_from_buffer(self._cached_critic_params),
                 )
-                self.ssl_model.load_state_dict(
-                    deserialize_from_buffer(self._cached_ssl_model_params)
+                load_state_dict_into(
+                    self.ssl_model,
+                    deserialize_from_buffer(self._cached_ssl_model_params),
                 )
                 self.update_target_model_params()
                 logging.info(

@@ -8,11 +8,14 @@ from marlite.algorithm.critic.group_consensus_mixer import GroupConsensusMixer
 class TestGroupConsensusMixer(unittest.TestCase):
     def setUp(self):
         config_path = os.path.join(
-            os.path.dirname(__file__), "..", "..", "..", "config", "group_consensus_default.yaml"
+            "test", "config", "group_consensus_default.yaml"
         )
         with open(config_path, "r") as f:
             config = yaml.safe_load(f)
-        self.critic_config = CriticConfig(**config["critic_config"])
+        critic_conf = config["critic_config"].copy()
+        critic_conf.pop("optimizer", None)
+        critic_conf.pop("lr_scheduler", None)
+        self.critic_config = CriticConfig(**critic_conf)
         self.critic = self.critic_config.get_critic()
 
     def test_critic_type(self):

@@ -5,6 +5,7 @@ import torch.nn.init as init
 from marlite.rollout.persistent_env_rolloutmanager import PersistentEnvRolloutManager
 from marlite.rollout.persistent_env_rollout import persistent_env_rollout
 from marlite.util.victory_checker import always_lose
+from marlite.util.serialization import serialize_to_buffer
 from marlite.environment import EnvConfig
 from marlite.algorithm.agents import AgentGroupConfig
 
@@ -61,11 +62,13 @@ class TestPersistentEnvRolloutManager(unittest.TestCase):
         self.n_episodes = 2
         self.episode_limit = 7
         self.n_workers = 2
-        self.agent_group = self.agent_group_config.get_agent_group()
+        agent_group = self.agent_group_config.get_agent_group()
+        serialized_agent_group_params = serialize_to_buffer(agent_group.state_dict())
         self.manager = PersistentEnvRolloutManager(
             worker_func=persistent_env_rollout,
             env_config=self.env_config,
-            agent_group=self.agent_group,
+            agent_group_config=self.agent_group_config,
+            serialized_agent_group_params=serialized_agent_group_params,
             n_workers=self.n_workers,
             n_episodes=self.n_episodes,
             traj_len=self.traj_len,

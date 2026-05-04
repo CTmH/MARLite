@@ -1,4 +1,5 @@
 import multiprocessing as mp
+from multiprocessing.shared_memory import SharedMemory
 from typing import List, Any, Callable, Union
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from marlite.algorithm.agents import AgentGroupConfig
@@ -38,7 +39,7 @@ class PersistentEnvRolloutManager(RolloutManager):
     def generate_episodes(self) -> List[Any]:
         mp.set_start_method("spawn", force=True)
 
-        shm = mp.shared_memory.SharedMemory(
+        shm = SharedMemory(
             create=True, size=len(self.serialized_agent_group_params)
         )
         shm.buf[: len(self.serialized_agent_group_params)] = (

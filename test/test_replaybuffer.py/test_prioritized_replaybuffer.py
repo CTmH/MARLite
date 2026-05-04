@@ -1,13 +1,15 @@
 import unittest
 import numpy as np
+from multiprocessing.shared_memory import SharedMemory
 
 from marlite.replaybuffer.prioritized_replaybuffer import PrioritizedReplayBuffer
 from marlite.util.trajectory_dataset import TrajectoryDataset
-from marlite.algorithm.agents.qmix_agent_group import QMIXAgentGroup
+from marlite.algorithm.agents import AgentGroupConfig
 from marlite.rollout.multiprocess_rollout import multiprocess_rollout
 from marlite.algorithm.model import ModelConfig
 from marlite.environment import EnvConfig
 from marlite.util.optimizer_config import OptimizerConfig
+from marlite.util.serialization import serialize_to_buffer
 
 
 class TestPrioritizedReplayBuffer(unittest.TestCase):
@@ -70,17 +72,35 @@ class TestPrioritizedReplayBuffer(unittest.TestCase):
 
         self.optimizer_config = OptimizerConfig(type="Adam", lr=0.001)
 
-        # Initialize QMIXAgents
-        self.agent_group = QMIXAgentGroup(
-            agent_model_dict=self.agents,
-            model_configs=self.model_configs,
-            feature_extractors_configs=self.feature_extractor_configs,
-            device="cpu",
+        # Initialize AgentGroupConfig and shared memory
+        agent_group_cfg = {
+            "type": "QMIX",
+            "agent_list": self.agents,
+            "model_configs": {
+                name: {
+                    "model": self.model_layers.copy(),
+                    "feature_extractor": {"model_type": "Identity"},
+                }
+                for name in ("RNN0", "RNN1")
+            },
+            "optimizer": {"type": "Adam", "lr": 0.001},
+        }
+        self.agent_group_config = AgentGroupConfig(**agent_group_cfg)
+        agent_group = self.agent_group_config.get_agent_group()
+        serialized_params = serialize_to_buffer(agent_group.state_dict())
+        self.shm = SharedMemory(
+            create=True, size=len(serialized_params)
         )
+        self.shm.buf[: len(serialized_params)] = serialized_params
+        self.shm_info = (self.shm.name, len(serialized_params))
 
         self.traj_len = 5
         self.n_episodes = 2
         self.episode_limit = 10
+
+    def tearDown(self):
+        self.shm.close()
+        self.shm.unlink()
 
     def test_add_episode_too_short(self):
         self.buffer = PrioritizedReplayBuffer(
@@ -90,8 +110,9 @@ class TestPrioritizedReplayBuffer(unittest.TestCase):
             alpha=1,
         )
         episode = multiprocess_rollout(
-            env_config=self.env_config,
-            agent_group=self.agent_group,
+            self.env_config,
+            self.agent_group_config,
+            self.shm_info,
             rnn_traj_len=self.traj_len,
             episode_limit=1,
             epsilon=0.9,
@@ -109,8 +130,9 @@ class TestPrioritizedReplayBuffer(unittest.TestCase):
             alpha=1,
         )
         episode = multiprocess_rollout(
-            env_config=self.env_config,
-            agent_group=self.agent_group,
+            self.env_config,
+            self.agent_group_config,
+            self.shm_info,
             rnn_traj_len=self.traj_len,
             episode_limit=self.episode_limit,
             epsilon=0.9,
@@ -129,8 +151,9 @@ class TestPrioritizedReplayBuffer(unittest.TestCase):
             alpha=1,
         )
         episode = multiprocess_rollout(
-            env_config=self.env_config,
-            agent_group=self.agent_group,
+            self.env_config,
+            self.agent_group_config,
+            self.shm_info,
             rnn_traj_len=self.traj_len,
             episode_limit=self.episode_limit,
             epsilon=0.9,
@@ -151,8 +174,9 @@ class TestPrioritizedReplayBuffer(unittest.TestCase):
         )
         for i in range(capacity + 1):
             episode = multiprocess_rollout(
-                env_config=self.env_config,
-                agent_group=self.agent_group,
+                self.env_config,
+                self.agent_group_config,
+                self.shm_info,
                 rnn_traj_len=self.traj_len,
                 episode_limit=self.episode_limit,
                 epsilon=0.9,
@@ -173,8 +197,9 @@ class TestPrioritizedReplayBuffer(unittest.TestCase):
             alpha=1,
         )
         episode = multiprocess_rollout(
-            env_config=self.env_config,
-            agent_group=self.agent_group,
+            self.env_config,
+            self.agent_group_config,
+            self.shm_info,
             rnn_traj_len=self.traj_len,
             episode_limit=self.episode_limit,
             epsilon=0.9,
@@ -193,8 +218,9 @@ class TestPrioritizedReplayBuffer(unittest.TestCase):
             alpha=1,
         )
         episode = multiprocess_rollout(
-            env_config=self.env_config,
-            agent_group=self.agent_group,
+            self.env_config,
+            self.agent_group_config,
+            self.shm_info,
             rnn_traj_len=self.traj_len,
             episode_limit=self.episode_limit,
             epsilon=0.9,

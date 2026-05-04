@@ -5,7 +5,6 @@ import torch
 import random
 import datetime
 import numpy as np
-from copy import deepcopy
 from absl import logging
 from typing import List, Union, Optional
 from abc import abstractmethod
@@ -20,7 +19,12 @@ from marlite.util.optimizer_config import OptimizerConfig
 from marlite.util.lr_scheduler_config import LRSchedulerConfig
 from marlite.util.scheduler import Scheduler
 from marlite.analyzer import AnalyzerConfig
-from marlite.util.serialization import serialize_to_buffer, deserialize_from_buffer
+from marlite.util.serialization import (
+    serialize_to_buffer,
+    deserialize_from_buffer,
+    get_state_dict,
+    load_state_dict_into,
+)
 
 
 def get_device_list(train_device: Union[str, List[str]]) -> tuple:
@@ -114,21 +118,26 @@ class Trainer:
         self.eval_agent_group = agent_group_config.get_agent_group()
         self.target_agent_group = agent_group_config.get_agent_group()
         self.best_agent_group_params = serialize_to_buffer(
-            self.eval_agent_group.state_dict()
+            get_state_dict(self.eval_agent_group)
         )
-        self.target_agent_group.load_state_dict(
-            deserialize_from_buffer(self.best_agent_group_params)
+        load_state_dict_into(
+            self.target_agent_group,
+            deserialize_from_buffer(self.best_agent_group_params),
         )
         self._cached_agent_group_params = serialize_to_buffer(
-            self.eval_agent_group.state_dict()
+            get_state_dict(self.eval_agent_group)
         )
 
         # Critic
         self.eval_critic = critic_config.get_critic()
         self.target_critic = critic_config.get_critic()
-        self.target_critic.load_state_dict(self.eval_critic.state_dict())
-        self.best_critic_params = serialize_to_buffer(self.eval_critic.state_dict())
-        self._cached_critic_params = serialize_to_buffer(self.eval_critic.state_dict())
+        load_state_dict_into(self.target_critic, get_state_dict(self.eval_critic))
+        self.best_critic_params = serialize_to_buffer(
+            get_state_dict(self.eval_critic)
+        )
+        self._cached_critic_params = serialize_to_buffer(
+            get_state_dict(self.eval_critic)
+        )
         self.critic_optimizer_config = critic_optimizer_config
         self.lr_scheduler_conf = lr_scheduler_conf
         self.agent_lr_scheduler_conf = agent_lr_scheduler_conf
@@ -188,22 +197,28 @@ class Trainer:
             self.train_device = self.device_list[0]
             logging.info(f"Using single device: {self.train_device}")
 
-        # torch.compile
+        # torch.compile (single-GPU only — multi-GPU uses worker processes)
         self.compile_models = compile_models
         if self.compile_models:
-            logging.info(f"Compiling models...")
-            self.eval_agent_group = torch.compile(
-                self.eval_agent_group.to(self.train_device)
-            ).to("cpu")
-            self.target_agent_group = torch.compile(
-                self.target_agent_group.to(self.train_device)
-            ).to("cpu")
-            self.eval_critic = torch.compile(self.eval_critic.to(self.train_device)).to(
-                "cpu"
-            )
-            self.target_critic = torch.compile(
-                self.target_critic.to(self.train_device)
-            ).to("cpu")
+            if self.use_multi_gpu:
+                logging.warning(
+                    "Model compilation is not supported in multi-GPU mode. Skipping."
+                )
+                self.compile_models = False
+            else:
+                logging.info("Compiling models...")
+                self.eval_agent_group = torch.compile(
+                    self.eval_agent_group.to(self.train_device)
+                ).to("cpu")
+                self.target_agent_group = torch.compile(
+                    self.target_agent_group.to(self.train_device)
+                ).to("cpu")
+                self.eval_critic = torch.compile(
+                    self.eval_critic.to(self.train_device)
+                ).to("cpu")
+                self.target_critic = torch.compile(
+                    self.target_critic.to(self.train_device)
+                ).to("cpu")
 
         # Metrics
         self.best_metrics = {key: -np.inf for key in self.eval_metric_list}
@@ -228,10 +243,10 @@ class Trainer:
             return
 
         trainable_params = {
-            "eval_agent_group": self.eval_agent_group.state_dict(),
-            "target_agent_group": self.target_agent_group.state_dict(),
-            "eval_critic": self.eval_critic.state_dict(),
-            "target_critic": self.target_critic.state_dict(),
+            "eval_agent_group": get_state_dict(self.eval_agent_group),
+            "target_agent_group": get_state_dict(self.target_agent_group),
+            "eval_critic": get_state_dict(self.eval_critic),
+            "target_critic": get_state_dict(self.target_critic),
         }
         self.worker_group.broadcast_params(trainable_params)
 
@@ -244,8 +259,10 @@ class Trainer:
         if self.worker_group is None:
             return
         eval_params = self.worker_group.read_params_from_worker0()
-        self.eval_agent_group.load_state_dict(eval_params["eval_agent_group"])
-        self.eval_critic.load_state_dict(eval_params["eval_critic"])
+        load_state_dict_into(
+            self.eval_agent_group, eval_params["eval_agent_group"]
+        )
+        load_state_dict_into(self.eval_critic, eval_params["eval_critic"])
 
     def learn(self, sample_size, batch_size: int, times: int):
         raise NotImplementedError
@@ -254,13 +271,13 @@ class Trainer:
         agent_path = os.path.join(self.checkpointdir, checkpoint, "agent")
         os.makedirs(agent_path, exist_ok=True)
         self.eval_agent_group.to("cpu")
-        agent_params = self.eval_agent_group.state_dict()
+        agent_params = get_state_dict(self.eval_agent_group)
         torch.save(agent_params, os.path.join(agent_path, "agent.pth"))
 
         critic_path = os.path.join(self.checkpointdir, checkpoint, "critic")
         os.makedirs(critic_path, exist_ok=True)
         self.eval_critic.to("cpu")
-        critic_params = self.eval_critic.state_dict()
+        critic_params = get_state_dict(self.eval_critic)
         torch.save(critic_params, os.path.join(critic_path, "critic.pth"))
         return self
 
@@ -269,28 +286,38 @@ class Trainer:
         agent_path = os.path.join(self.checkpointdir, checkpoint, "agent", "agent.pth")
         self.eval_agent_group.to("cpu")
         self.eval_critic.to("cpu")
-        self.eval_agent_group.load_state_dict(torch.load(agent_path, weights_only=True))
+        load_state_dict_into(
+            self.eval_agent_group, torch.load(agent_path, weights_only=True)
+        )
         critic_path = os.path.join(
             self.checkpointdir, checkpoint, "critic", "critic.pth"
         )
-        self.eval_critic.load_state_dict(torch.load(critic_path, weights_only=True))
+        load_state_dict_into(
+            self.eval_critic, torch.load(critic_path, weights_only=True)
+        )
         self.best_agent_group_params = serialize_to_buffer(
-            self.eval_agent_group.state_dict()
+            get_state_dict(self.eval_agent_group)
         )
-        self.best_critic_params = serialize_to_buffer(self.eval_critic.state_dict())
+        self.best_critic_params = serialize_to_buffer(
+            get_state_dict(self.eval_critic)
+        )
         self._cached_agent_group_params = serialize_to_buffer(
-            self.eval_agent_group.state_dict()
+            get_state_dict(self.eval_agent_group)
         )
-        self._cached_critic_params = serialize_to_buffer(self.eval_critic.state_dict())
+        self._cached_critic_params = serialize_to_buffer(
+            get_state_dict(self.eval_critic)
+        )
         self.update_target_model_params()
         return self
 
     def save_best_model(self):
-        self.eval_agent_group.load_state_dict(
-            deserialize_from_buffer(self.best_agent_group_params)
+        load_state_dict_into(
+            self.eval_agent_group,
+            deserialize_from_buffer(self.best_agent_group_params),
         )
-        self.eval_critic.load_state_dict(
-            deserialize_from_buffer(self.best_critic_params)
+        load_state_dict_into(
+            self.eval_critic,
+            deserialize_from_buffer(self.best_critic_params),
         )
         self.save_current_model(checkpoint="best")
         return self
@@ -300,7 +327,9 @@ class Trainer:
         Collect experiences using multiple rollout workers.
         """
         self.eval_agent_group.eval().to("cpu")
-        serialized_params = serialize_to_buffer(self.eval_agent_group.state_dict())
+        serialized_params = serialize_to_buffer(
+            get_state_dict(self.eval_agent_group)
+        )
         manager = self.rolloutmanager_config.create_manager(
             self.agent_group_config, serialized_params, self.env_config, epsilon
         )
@@ -315,15 +344,21 @@ class Trainer:
         return self
 
     def update_target_model_params(self):
-        self.target_agent_group.load_state_dict(
-            deepcopy(self.eval_agent_group.state_dict())
+        load_state_dict_into(
+            self.target_agent_group,
+            get_state_dict(self.eval_agent_group),
         )
-        self.target_critic.load_state_dict(deepcopy(self.eval_critic.state_dict()))
+        load_state_dict_into(
+            self.target_critic,
+            get_state_dict(self.eval_critic),
+        )
         return self
 
     def evaluate(self):
         self.eval_agent_group.eval().to("cpu")
-        serialized_params = serialize_to_buffer(self.eval_agent_group.state_dict())
+        serialized_params = serialize_to_buffer(
+            get_state_dict(self.eval_agent_group)
+        )
         manager = self.rolloutmanager_config.create_eval_manager(
             self.agent_group_config,
             serialized_params,
@@ -441,10 +476,10 @@ class Trainer:
 
             if cache_params.any():
                 self._cached_agent_group_params = serialize_to_buffer(
-                    self.eval_agent_group.state_dict()
+                    get_state_dict(self.eval_agent_group)
                 )
                 self._cached_critic_params = serialize_to_buffer(
-                    self.eval_critic.state_dict()
+                    get_state_dict(self.eval_critic)
                 )
                 logging.info(
                     f"Epoch {epoch}: Cached parameters updated with current parameters."
@@ -453,10 +488,10 @@ class Trainer:
             if update_best.any():
                 self.best_metrics = metrics
                 self.best_agent_group_params = serialize_to_buffer(
-                    self.eval_agent_group.state_dict()
+                    get_state_dict(self.eval_agent_group)
                 )
                 self.best_critic_params = serialize_to_buffer(
-                    self.eval_critic.state_dict()
+                    get_state_dict(self.eval_critic)
                 )
                 logging.info(
                     f"Epoch {epoch}: New best {first_metric_name}: {first_metric:.4f}"
@@ -469,11 +504,13 @@ class Trainer:
                 break
 
             if epoch % eval_interval == 0:
-                self.eval_agent_group.load_state_dict(
-                    deserialize_from_buffer(self._cached_agent_group_params)
+                load_state_dict_into(
+                    self.eval_agent_group,
+                    deserialize_from_buffer(self._cached_agent_group_params),
                 )
-                self.eval_critic.load_state_dict(
-                    deserialize_from_buffer(self._cached_critic_params)
+                load_state_dict_into(
+                    self.eval_critic,
+                    deserialize_from_buffer(self._cached_critic_params),
                 )
                 self.update_target_model_params()
                 logging.info(

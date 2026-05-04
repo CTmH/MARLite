@@ -10,7 +10,7 @@ from marlite.algorithm.agents.group_consensus_agent_group import GroupConsensusA
 class TestGroupConsensusAgentGroup(unittest.TestCase):
     def setUp(self):
         config_path = os.path.join(
-            os.path.dirname(__file__), "..", "..", "..", "config", "group_consensus_default.yaml"
+            os.path.dirname(__file__), "..", "..", "config", "group_consensus_default.yaml"
         )
         with open(config_path, "r") as f:
             config = yaml.safe_load(f)

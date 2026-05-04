@@ -1,77 +1,73 @@
 import unittest
 import numpy as np
+from multiprocessing.shared_memory import SharedMemory
 
 from marlite.replaybuffer.normal_replaybuffer import NormalReplayBuffer
-from marlite.util.trajectory_dataset import TrajectoryDataLoader, NUMERIC_ATTR, OBJ_ATTR
-from marlite.algorithm.agents.qmix_agent_group import QMIXAgentGroup
-from marlite.algorithm.model import ModelConfig
+from marlite.util.trajectory_dataset import TrajectoryDataLoader, NUMERIC_ATTR, DYNAMIC_LEN_ATTR, OBJ_ATTR
+from marlite.algorithm.agents import AgentGroupConfig
 from marlite.rollout.multiprocess_rollout import multiprocess_rollout
 from marlite.environment import EnvConfig
-from marlite.util.optimizer_config import OptimizerConfig
+from marlite.util.serialization import serialize_to_buffer
+
+
+def _create_agent_group_config(env):
+    env.reset()
+    agents = {env.agents[i]: ["RNN0", "RNN0", "RNN1"][i] for i in range(len(env.agents))}
+    obs_shape = env.observation_space(env.agents[0]).shape[0]
+    action_shape = env.action_space(env.agents[0]).n
+    model_layers = {
+        "model_type": "RNN",
+        "input_shape": obs_shape,
+        "rnn_hidden_dim": 128,
+        "output_shape": action_shape,
+    }
+    agent_group_cfg = {
+        "type": "QMIX",
+        "agent_list": agents,
+        "model_configs": {
+            name: {
+                "model": model_layers,
+                "feature_extractor": {"model_type": "Identity"},
+            }
+            for name in ("RNN0", "RNN1")
+        },
+    }
+    agent_group_config = AgentGroupConfig(**agent_group_cfg)
+    agent_group = agent_group_config.get_agent_group()
+    serialized_params = serialize_to_buffer(agent_group.state_dict())
+    shm = SharedMemory(create=True, size=len(serialized_params))
+    shm.buf[: len(serialized_params)] = serialized_params
+    shm_info = (shm.name, len(serialized_params))
+    return agent_group_config, shm, shm_info
+
+
+def _setup_env():
+    env_config = EnvConfig(**{"module_name": "mpe2", "env_name": "simple_spread_v3"})
+    env = env_config.create_env()
+    return env_config, env
+
 
 class TestTrajectoryDataset(unittest.TestCase):
 
     def setUp(self):
-        self.capacity = 10
         self.traj_len = 5
-        self.buffer = NormalReplayBuffer(capacity=self.capacity, traj_len=self.traj_len)
-
-        # Environment setup and model configuration
-        self.env_config = {"module_name": "mpe2", "env_name": "simple_spread_v3"}
-        self.env_config = EnvConfig(**self.env_config)
-        self.env = self.env_config.create_env()
-        obs, _ = self.env.reset()
-        key = self.env.agents[0]
-        self.obs_shape = self.env.observation_space(key).shape
-        self.obs_shape = self.obs_shape[0]
-        self.action_space_shape = self.env.action_space(key).n
-        self.model_names = ["RNN0", "RNN0", "RNN1"]
-        self.agents = {self.env.agents[i]: self.model_names[i] for i in range(len(self.env.agents))}
-        observations = {agent: [] for agent in self.env.agents}
-        seq_length = 5
-        for i in range(seq_length):
-            actions = {agent: self.env.action_space(agent).sample() for agent in self.env.agents}
-            obs, rewards, terminations, truncations, infos = self.env.step(actions)
-            for agent in self.env.agents:
-                observations[agent].append(obs[agent])
-        self.observations = {key: np.array(value) for key, value in observations.items()}
-
-        self.avail_actions = self.env.action_space
-        self.env.close()
-
-        # Model configuration
-        self.model_layers = {
-            "model_type": "RNN",
-            "input_shape": self.obs_shape,
-            "rnn_hidden_dim": 128,
-            "output_shape": self.action_space_shape
-        }
-
-        self.model_configs = {
-            "RNN0": ModelConfig(**self.model_layers),
-            "RNN1": ModelConfig(**self.model_layers)
-        }
-        self.feature_extractor_configs = {
-            "RNN0": ModelConfig(model_type="Identity"),
-            "RNN1": ModelConfig(model_type="Identity"),
-        }
-
-        # Initialize QMIXAgents
-        self.agent_group = QMIXAgentGroup(agent_model_dict=self.agents,
-                                          model_configs=self.model_configs,
-                                          feature_extractors_configs=self.feature_extractor_configs)
-        self.episode_limit=10
-        self.epsilon=0.5
+        self.episode_limit = 10
         self.n_episodes = 5
-        self.buffer = NormalReplayBuffer(capacity=self.capacity, traj_len=self.traj_len)
-        episode = episode = multiprocess_rollout(env_config=self.env_config,
-                                    agent_group=self.agent_group,
-                                    rnn_traj_len=self.traj_len,
-                                    episode_limit=self.episode_limit,
-                                    epsilon=0.9,
-                                    device='cpu')
+        self.env_config, self.env = _setup_env()
+        self.agent_group_config, self.shm, self.shm_info = _create_agent_group_config(self.env)
+        self.env.close()
+        self.buffer = NormalReplayBuffer(capacity=10, traj_len=self.traj_len)
+        episode = multiprocess_rollout(
+            self.env_config, self.agent_group_config, self.shm_info,
+            rnn_traj_len=self.traj_len, episode_limit=self.episode_limit,
+            epsilon=0.9, device="cpu",
+        )
         self.buffer.add_episode(episode)
         self.dataset = self.buffer.sample(10)
+
+    def tearDown(self):
+        self.shm.close()
+        self.shm.unlink()
 
     def test_getitem_normal_case(self):
         for sample in self.dataset:
@@ -85,77 +81,35 @@ class TestTrajectoryDataset(unittest.TestCase):
             self.assertTrue(isinstance(sample['rewards'][0], np.ndarray))
             self.assertTrue(isinstance(sample['states'][0], np.ndarray))
 
+
 class TestTrajectoryDataloader(unittest.TestCase):
 
     def setUp(self):
-        self.capacity = 10
         self.traj_len = 5
-        self.buffer = NormalReplayBuffer(capacity=self.capacity, traj_len=self.traj_len)
-
-        # Environment setup and model configuration
-        self.env_config = {"module_name": "mpe2", "env_name": "simple_spread_v3"}
-        self.env_config = EnvConfig(**self.env_config)
-        self.env = self.env_config.create_env()
-        obs, _ = self.env.reset()
-        key = self.env.agents[0]
-        self.obs_shape = self.env.observation_space(key).shape
-        self.obs_shape = self.obs_shape[0]
-        self.action_space_shape = self.env.action_space(key).n
-        self.model_names = ["RNN0", "RNN0", "RNN1"]
-        self.agents = {self.env.agents[i]: self.model_names[i] for i in range(len(self.env.agents))}
-        observations = {agent: [] for agent in self.env.agents}
-        seq_length = 5
-        for i in range(seq_length):
-            actions = {agent: self.env.action_space(agent).sample() for agent in self.env.agents}
-            obs, rewards, terminations, truncations, infos = self.env.step(actions)
-            for agent in self.env.agents:
-                observations[agent].append(obs[agent])
-        self.observations = {key: np.array(value) for key, value in observations.items()}
-
-        self.avail_actions = self.env.action_space
-        self.env.close()
-
-        # Model configuration
-        self.model_layers = {
-            "model_type": "RNN",
-            "input_shape": self.obs_shape,
-            "rnn_hidden_dim": 128,
-            "output_shape": self.action_space_shape
-        }
-
-        self.model_configs = {
-            "RNN0": ModelConfig(**self.model_layers),
-            "RNN1": ModelConfig(**self.model_layers)
-        }
-        self.feature_extractor_configs = {
-            "RNN0": ModelConfig(model_type="Identity"),
-            "RNN1": ModelConfig(model_type="Identity"),
-        }
-
-        # Initialize QMIXAgents
-        self.agent_group = QMIXAgentGroup(agent_model_dict=self.agents,
-                                          model_configs=self.model_configs,
-                                          feature_extractors_configs=self.feature_extractor_configs)
-
-        self.episode_limit=10
-        self.epsilon=0.5
+        self.episode_limit = 10
         self.n_episodes = 5
-        self.buffer = NormalReplayBuffer(capacity=self.capacity, traj_len=self.traj_len)
-        episode = episode = multiprocess_rollout(env_config=self.env_config,
-                                    agent_group=self.agent_group,
-                                    rnn_traj_len=self.traj_len,
-                                    episode_limit=self.episode_limit,
-                                    epsilon=0.9,
-                                    device='cpu')
+        self.env_config, self.env = _setup_env()
+        self.agent_group_config, self.shm, self.shm_info = _create_agent_group_config(self.env)
+        self.env.close()
+        self.buffer = NormalReplayBuffer(capacity=10, traj_len=self.traj_len)
+        episode = multiprocess_rollout(
+            self.env_config, self.agent_group_config, self.shm_info,
+            rnn_traj_len=self.traj_len, episode_limit=self.episode_limit,
+            epsilon=0.9, device="cpu",
+        )
         self.buffer.add_episode(episode)
         self.dataset = self.buffer.sample(10)
         self.dataloader = TrajectoryDataLoader(dataset=self.dataset, batch_size=3, shuffle=True)
 
+    def tearDown(self):
+        self.shm.close()
+        self.shm.unlink()
+
     def test_get_batch(self):
-        all_attr = NUMERIC_ATTR + OBJ_ATTR
         for batch in self.dataloader:
-            for key1, key2 in zip(batch.keys(), NUMERIC_ATTR):
-                self.assertEqual(key1, key2)
+            for key in batch.keys():
+                self.assertIn(key, NUMERIC_ATTR + DYNAMIC_LEN_ATTR + OBJ_ATTR)
+
 
 if __name__ == '__main__':
     unittest.main()

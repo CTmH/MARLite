@@ -48,6 +48,9 @@ def create_prob_seq_qmixer(critic_config: Dict[str, Any]) -> SeqQMixer:
 
 def create_group_consensus_mixer(critic_config: Dict[str, Any]) -> GroupConsensusMixer:
     """Create a GroupConsensusMixer critic instance from config."""
+    fe_config = ModelConfig(**critic_config.pop("feature_extractor"))
+    consensus_processor_config = ModelConfig(**critic_config.pop("consensus_processor"))
+    model_config = ModelConfig(**critic_config.pop("model"))
 
     return GroupConsensusMixer(
         feature_extractor_config=fe_config,

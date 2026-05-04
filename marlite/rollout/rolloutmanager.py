@@ -1,7 +1,7 @@
 from typing import List, Any, Callable, Union
+from multiprocessing.shared_memory import SharedMemory
 from marlite.environment import EnvConfig
 from marlite.algorithm.agents import AgentGroupConfig
-import multiprocessing as mp
 from tqdm import tqdm
 
 
@@ -29,7 +29,7 @@ class RolloutManager:
         self.device = device
 
     def generate_episodes(self) -> List[Any]:
-        shm = mp.shared_memory.SharedMemory(
+        shm = SharedMemory(
             create=True, size=len(self.serialized_agent_group_params)
         )
         shm.buf[: len(self.serialized_agent_group_params)] = (
