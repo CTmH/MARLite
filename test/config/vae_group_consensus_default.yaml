@@ -1,0 +1,326 @@
+agent_group_config:
+  type: "GroupConsensus"
+  deterministic_eval: true
+  enable_rl_grad_to_group_estimate: false
+  agent_list:
+    red_0: model_0
+    red_1: model_0
+    red_2: model_0
+    red_3: model_0
+    red_4: model_0
+    red_5: model_0
+    red_6: model_0
+    red_7: model_0
+    red_8: model_0
+    red_9: model_0
+    red_10: model_0
+    red_11: model_0
+    red_12: model_0
+    red_13: model_0
+    red_14: model_0
+    red_15: model_0
+    red_16: model_0
+    red_17: model_0
+    red_18: model_0
+    red_19: model_0
+    red_20: model_0
+    red_21: model_0
+    red_22: model_0
+    red_23: model_0
+    red_24: model_0
+    red_25: model_0
+    red_26: model_0
+    red_27: model_0
+    red_28: model_0
+    red_29: model_0
+    red_30: model_0
+    red_31: model_0
+    red_32: model_0
+    red_33: model_0
+    red_34: model_0
+    red_35: model_0
+  model_configs:
+    model_0:
+      group_estimate_feature_extractor:
+        model_type: "Custom"
+        layers:
+        - type: ChannelSelector
+          num_channels: [0, 1, 2, 4, 5, 39, 40]
+          dim: -3
+        - type: Conv2d
+          in_channels: 7
+          out_channels: 4
+          kernel_size: 1
+          stride: 1
+          padding: 0
+        - type: BatchNorm2d
+          num_features: 4
+        - type: GELU
+        - type: Flatten
+        - type: Linear
+          in_features: 676
+          out_features: 256
+        - type: LayerNorm
+          normalized_shape: 256
+        - type: GELU
+        - type: Linear
+          in_features: 256
+          out_features: 128
+      feature_extractor:
+        model_type: "Custom"
+        layers:
+        - type: Conv2d
+          in_channels: 41
+          out_channels: 16
+          kernel_size: 1
+          stride: 1
+          padding: 0
+        - type: BatchNorm2d
+          num_features: 16
+        - type: GELU
+        - type: Conv2d
+          in_channels: 16
+          out_channels: 8
+          kernel_size: 1
+          stride: 1
+          padding: 0
+        - type: BatchNorm2d
+          num_features: 8
+        - type: GELU
+        - type: Flatten
+        - type: Linear
+          in_features: 1352
+          out_features: 256
+        - type: LayerNorm
+          normalized_shape: 256
+        - type: GELU
+        - type: Linear
+          in_features: 256
+          out_features: 64
+      encoder:
+        model_type: "SimpleResAttSeqEnc"
+        input_dim: 64
+        embed_dim: 128
+        output_dim: 64
+        num_heads: 4
+        max_seq_len: 8
+        dropout: 0.0
+      decoder:
+        model_type: "Custom"
+        layers:
+        - type: LayerNorm
+          normalized_shape: 128
+        - type: GELU
+        - type: Linear
+          in_features: 128
+          out_features: 21
+  group_builder_config:
+    type: "MAgentVecLP"
+    n_groups: 6
+    coord_dims: [3, 4]
+    hp_dim: 0
+    team_dim: 1
+    comm_distance: 0.126
+    selected_teams: [0]
+    distance_metric: "cityblock"
+    n_workers: 0
+    update_interval: 10
+  optimizer:
+    type: "Adam"
+    lr: 0.001
+    weight_decay: 0.000001
+  lr_scheduler:
+    type: "ReduceLROnPlateau"
+    mode: "max"
+    factor: 0.5
+    patience: 8
+    min_lr: 0.000001
+
+env_config:
+  module_name: "magent2.environments"
+  env_name: "battle_v4"
+  env_config:
+    map_size: 32
+    step_reward: -0.0001
+    dead_penalty: -1.0
+    attack_penalty: -0.001
+    attack_opponent_reward: 0.8
+    extra_features: true
+    minimap_mode: true
+  wrapper_config:
+    type: battle
+    opp_obs_queue_len: 1
+    channel_first: true
+    vector_state: true
+    vector_observation: false
+    opponent_agent_group_config:
+      type: "MAgentBattle"
+      strategy: "advanced"
+      agent_list:
+        blue_0: policy
+        blue_1: policy
+        blue_2: policy
+        blue_3: policy
+        blue_4: policy
+        blue_5: policy
+        blue_6: policy
+        blue_7: policy
+        blue_8: policy
+        blue_9: policy
+        blue_10: policy
+        blue_11: policy
+        blue_12: policy
+        blue_13: policy
+        blue_14: policy
+        blue_15: policy
+        blue_16: policy
+        blue_17: policy
+        blue_18: policy
+        blue_19: policy
+        blue_20: policy
+        blue_21: policy
+        blue_22: policy
+        blue_23: policy
+        blue_24: policy
+        blue_25: policy
+        blue_26: policy
+        blue_27: policy
+        blue_28: policy
+        blue_29: policy
+        blue_30: policy
+        blue_31: policy
+        blue_32: policy
+        blue_33: policy
+        blue_34: policy
+        blue_35: policy
+
+critic_config:
+  type: "SeqQMixer"
+  model:
+    model_type: QMixModel
+    state_shape: 256
+    input_dim: 36
+    qmix_hidden_dim: 128
+    hypernet_layers: 2
+    hyper_hidden_dim: 256
+  feature_extractor:
+    model_type: "SimpleResAttStateEnc"
+    input_dim: 62
+    embed_dim: 256
+    num_heads: 8
+    max_seq_len: 72
+    dropout: 0.0
+  seq_model:
+    model_type: "SimpleResAttSeqEnc"
+    input_dim: 256
+    embed_dim: 256
+    output_dim: 256
+    num_heads: 4
+    max_seq_len: 8
+    dropout: 0.0
+  optimizer:
+    type: "Adam"
+    lr: 0.001
+    weight_decay: 0.000001
+  lr_scheduler:
+    type: "ReduceLROnPlateau"
+    mode: "max"
+    factor: 0.5
+    patience: 8
+    min_lr: 0.000001
+
+self_supervised_learning_config:
+  model:
+    model_type: "Custom"
+    layers:
+    - type: ResidualMLP
+      input_dim: 64
+      hidden_dim: 256
+    - type: LayerNorm
+      normalized_shape: 64
+    - type: GELU
+    - type: Dropout
+      p: 0.25
+    - type: Linear
+      in_features: 64
+      out_features: 17
+  optimizer:
+    type: "Adam"
+    lr: 0.001
+    weight_decay: 0.000001
+  lr_scheduler:
+    type: "ReduceLROnPlateau"
+    mode: "max"
+    factor: 0.5
+    patience: 8
+    min_lr: 0.000001
+  data_constructor_config:
+    type: "MagentVecStateGroupFeatures"
+    observation_range: 0.40625
+    n_groups: 6
+    coord_dims: [3, 4]
+    hp_dim: 0
+    team_dim: 1
+    my_team: 0
+    enemy_team: 1
+    action_dim: 21
+    n_offsets: 12
+    n_workers: 0
+  reconstruction_loss_config:
+    type: "PointSetMSE"
+
+rollout_config:
+  manager_type: "persistent-env"
+  worker_type: "persistent-env"
+  n_workers: 8
+  n_episodes: 8
+  n_eval_episodes: 32
+  traj_len: 8
+  episode_limit: 200
+  victory_checker: "battle_wrapper"
+  device: ["cuda:0", "cuda:1"]
+
+replaybuffer_config:
+  type: "Prioritized"
+  capacity: 600
+  traj_len: 8
+  priority_attr: all_agents_sum_rewards
+  alpha: 0.45
+
+analyzer_config:
+  type: "default"
+
+trainer_config:
+  type: "VAEGraphQMIX"
+  gamma: 0.95
+  eval_epsilon: 0.001
+  eval_threshold: 0.01
+  eval_episodes_to_replay_ratio: 0.125
+  workdir: "./test/results/bf_vae_group/"
+  train_device: "cuda:0"
+  compile_models: false
+  sample_mode: "direct"
+  n_workers: 0
+  kl_divergence_weight: 0.005
+  loss_combination_method: "pit_loss"
+  warmup_epochs: 4
+
+  epsilon_scheduler:
+    type: "linear"
+    start_value: 1.0
+    end_value: 0.05
+    decay_steps: 200
+
+  sample_ratio_scheduler:
+    type: "linear"
+    start_value: 16384
+    end_value: 16384
+    decay_steps: 100
+
+  train_args:
+    epochs: 200
+    target_first_metric: 10000000
+    eval_interval: 4
+    update_target_interval: 1
+    batch_size: 256
+    learning_times_per_epoch: 1

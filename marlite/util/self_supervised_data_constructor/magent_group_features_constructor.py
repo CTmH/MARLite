@@ -97,6 +97,7 @@ class MagentGroupFeaturesConstructor:
         K_sq = K * K
 
         result = np.zeros((batch_size, self.n_groups, self.N_FEATURES), dtype=np.float16)
+        padding_mask = np.zeros((batch_size, self.n_groups), dtype=bool)
 
         for b in range(batch_size):
             st = state_last[b]
@@ -147,8 +148,9 @@ class MagentGroupFeaturesConstructor:
                     window, ys, xs, cy, cx, H_map, W_map, K, self.channel_first
                 )
                 result[b, gid] = features
+                padding_mask[b, gid] = True
 
-        return result
+        return result, padding_mask
 
     def _crop_window(self, st, y_start, x_start, y_end, x_end, H, W, channel_first):
         """Crop a K×K window from state with zero-padding for out-of-bounds."""

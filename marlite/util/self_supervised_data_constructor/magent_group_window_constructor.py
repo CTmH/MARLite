@@ -76,6 +76,7 @@ class MagentGroupWindowConstructor:
         else:
             out_shape = (batch_size, self.n_groups, K, K, len(self.selected_channels))
         result = np.zeros(out_shape, dtype=np.float16)
+        padding_mask = np.zeros((batch_size, self.n_groups), dtype=bool)
 
         for b in range(batch_size):
             st = state_last[b]
@@ -170,11 +171,12 @@ class MagentGroupWindowConstructor:
                         crop = final_crop
 
                 result[b, gid] = crop
+                padding_mask[b, gid] = True
                 processed.add(gid)
 
             # Unoccupied group slots remain zero-padded (already zeros)
 
-        return result
+        return result, padding_mask
 
     def _extract_positions(self, state_single: np.ndarray) -> dict:
         """Extract agent positions from a single state grid.

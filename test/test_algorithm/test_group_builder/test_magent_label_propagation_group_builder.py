@@ -2,6 +2,7 @@ import unittest
 import numpy as np
 from marlite.algorithm.group_builder.label_propagation_group_builder import (
     MAgentLabelPropagationGroupBuilder,
+    MAgentVecLPGroupBuilder,
 )
 
 
@@ -240,6 +241,191 @@ class TestMergeExcessGroupsStatic(unittest.TestCase):
         )
         # After merging to 2, labels should be 0 and 1
         self.assertEqual(set(merged), {0, 1})
+
+
+class TestMAgentVecLPGroupBuilder(unittest.TestCase):
+    """Tests for MAgentVecLPGroupBuilder using (N, F) vector states."""
+
+    N_AGENTS = 8
+    F_DIM = 20
+    COORD_DIMS = (3, 4)
+    HP_DIM = 0
+    TEAM_DIM = 1
+
+    def _build_state(self, agents, selected_teams=None):
+        """Build a (N, F) vector state.
+
+        Args:
+            agents: List of (agent_idx, team, y, x) tuples. Only listed agents have hp=1.
+            selected_teams: Pass-through (unused here, kept for API consistency).
+        Returns:
+            ndarray shape (N_AGENTS, F_DIM).
+        """
+        state = np.zeros((self.N_AGENTS, self.F_DIM), dtype=np.float32)
+        state[:, self.TEAM_DIM] = 1
+        for agent_idx, team, y, x in agents:
+            state[agent_idx, self.HP_DIM] = 1
+            state[agent_idx, self.TEAM_DIM] = team
+            state[agent_idx, self.COORD_DIMS[0]] = y
+            state[agent_idx, self.COORD_DIMS[1]] = x
+        return state
+
+    def _make_builder(self, comm_distance=5, n_groups=None, selected_teams=None):
+        return MAgentVecLPGroupBuilder(
+            coord_dims=self.COORD_DIMS,
+            hp_dim=self.HP_DIM,
+            team_dim=self.TEAM_DIM,
+            selected_teams=selected_teams or [1],
+            comm_distance=comm_distance,
+            distance_metric="euclidean",
+            n_groups=n_groups,
+        )
+
+    # ── Basic group formation ────────────────────────────────────────────
+
+    def test_all_agents_close_single_group(self):
+        state = self._build_state([(0, 1, 5, 5), (1, 1, 6, 6), (2, 1, 4, 7)])
+        builder = self._make_builder(comm_distance=5)
+        result = builder(np.expand_dims(state, 0))
+        self.assertEqual(result[0, 0], result[0, 1])
+        self.assertEqual(result[0, 0], result[0, 2])
+
+    def test_agents_separated_two_groups(self):
+        state = self._build_state(
+            [(0, 1, 2, 2), (1, 1, 3, 3), (2, 1, 15, 15), (3, 1, 16, 16)]
+        )
+        builder = self._make_builder(comm_distance=3)
+        result = builder(np.expand_dims(state, 0))
+        self.assertEqual(result[0, 0], result[0, 1])
+        self.assertEqual(result[0, 2], result[0, 3])
+        self.assertNotEqual(result[0, 0], result[0, 2])
+
+    # ── Dead agent handling ──────────────────────────────────────────────
+
+    def test_dead_agent_gets_minus_one(self):
+        state = self._build_state([(0, 1, 3, 3), (1, 1, 4, 4), (3, 1, 10, 10)])
+        builder = self._make_builder(comm_distance=5)
+        result = builder(np.expand_dims(state, 0))
+        self.assertEqual(result[0, 2], -1)
+        self.assertGreaterEqual(result[0, 0], 0)
+        self.assertGreaterEqual(result[0, 1], 0)
+        self.assertGreaterEqual(result[0, 3], 0)
+
+    def test_all_dead_all_minus_one(self):
+        state = np.zeros((self.N_AGENTS, self.F_DIM), dtype=np.float32)
+        state[:, self.TEAM_DIM] = 1
+        builder = self._make_builder()
+        result = builder(np.expand_dims(state, 0))
+        self.assertEqual(result.shape[1], self.N_AGENTS)
+        np.testing.assert_array_equal(result[0], np.full(self.N_AGENTS, -1, dtype=np.int8))
+
+    def test_single_survivor(self):
+        state = self._build_state([(0, 1, 5, 5)])
+        builder = self._make_builder(comm_distance=5)
+        result = builder(np.expand_dims(state, 0))
+        self.assertEqual(result[0, 0], 0)
+        for i in range(1, self.N_AGENTS):
+            self.assertEqual(result[0, i], -1)
+
+    # ── Team filtering ───────────────────────────────────────────────────
+
+    def test_only_selected_team_gets_groups(self):
+        state = self._build_state(
+            [(0, 1, 2, 2), (1, 1, 3, 3), (2, 2, 5, 5), (3, 2, 6, 6)]
+        )
+        builder = self._make_builder(comm_distance=5, selected_teams=[1])
+        result = builder(np.expand_dims(state, 0))
+        self.assertEqual(result[0, 0], result[0, 1])  # team 1 agents grouped
+        self.assertEqual(result[0, 2], -1)  # team 2 excluded
+        self.assertEqual(result[0, 3], -1)
+
+    def test_team_and_hp_filter_independent(self):
+        state = self._build_state(
+            [(0, 1, 2, 2), (1, 2, 3, 3), (2, 1, 5, 5)]
+        )
+        state[2, self.HP_DIM] = 0  # agent 2 dead, hp=0
+        builder = self._make_builder(comm_distance=5, selected_teams=[1])
+        result = builder(np.expand_dims(state, 0))
+        self.assertGreaterEqual(result[0, 0], 0)
+        self.assertEqual(result[0, 1], -1)  # wrong team
+        self.assertEqual(result[0, 2], -1)  # dead
+
+    # ── Group merging (n_groups constraint) ──────────────────────────────
+
+    def test_no_merge_when_under_limit(self):
+        state = self._build_state(
+            [(0, 1, 2, 2), (1, 1, 3, 3), (2, 1, 15, 15), (3, 1, 16, 16)]
+        )
+        builder = self._make_builder(comm_distance=3, n_groups=3)
+        result = builder(np.expand_dims(state, 0))
+        self.assertIn(result[0, 0], [0, 1])
+        self.assertIn(result[0, 2], [0, 1])
+        self.assertNotEqual(result[0, 0], result[0, 2])
+
+    def test_merge_when_over_limit(self):
+        state = self._build_state(
+            [(0, 1, 1, 1), (1, 1, 3, 1), (2, 1, 1, 3), (3, 1, 3, 3)]
+        )
+        builder = self._make_builder(comm_distance=1, n_groups=2)
+        result = builder(np.expand_dims(state, 0))
+        unique_groups = set(r for r in result[0] if r >= 0)
+        self.assertLessEqual(len(unique_groups), 2)
+
+    def test_merge_to_single_group(self):
+        state = self._build_state(
+            [(0, 1, 2, 2), (1, 1, 6, 2), (2, 1, 10, 2), (3, 1, 14, 2)]
+        )
+        builder = self._make_builder(comm_distance=1, n_groups=1)
+        result = builder(np.expand_dims(state, 0))
+        alive = result[0] >= 0
+        np.testing.assert_array_equal(
+            result[0][alive], np.zeros(alive.sum(), dtype=result.dtype)
+        )
+
+    def test_merge_with_dead_agents(self):
+        state = self._build_state(
+            [(0, 1, 2, 2), (1, 1, 6, 2), (3, 1, 14, 2)]
+        )
+        builder = self._make_builder(comm_distance=1, n_groups=1)
+        result = builder(np.expand_dims(state, 0))
+        self.assertEqual(result[0, 2], -1)
+        self.assertEqual(result[0, 0], 0)
+        self.assertEqual(result[0, 1], 0)
+        self.assertEqual(result[0, 3], 0)
+
+    # ── Batch processing ─────────────────────────────────────────────────
+
+    def test_batch_independence(self):
+        state_a = self._build_state([(0, 1, 2, 2), (1, 1, 3, 3)])
+        state_b = self._build_state([(0, 1, 2, 2), (1, 1, 15, 15)])
+        states = np.stack([state_a, state_b], axis=0)
+        builder = self._make_builder(comm_distance=3)
+        result = builder(states)
+        self.assertEqual(result.shape, (2, self.N_AGENTS))
+        self.assertEqual(result[0, 0], result[0, 1])
+        self.assertNotEqual(result[1, 0], result[1, 1])
+
+    # ── Caching ──────────────────────────────────────────────────────────
+
+    def test_caching_in_eval_mode(self):
+        state = self._build_state([(0, 1, 5, 5), (1, 1, 6, 6)])
+        builder = self._make_builder(comm_distance=5, n_groups=None)
+        builder.training = False
+        result1 = builder(np.expand_dims(state, 0))
+        result2 = builder(np.expand_dims(state, 0))
+        np.testing.assert_array_equal(result1, result2)
+
+    def test_no_cache_in_training(self):
+        state = self._build_state([(0, 1, 5, 5), (1, 1, 6, 6)])
+        builder = self._make_builder(comm_distance=5, n_groups=None)
+        builder.training = True
+        result1 = builder(np.expand_dims(state, 0))
+        result2 = builder(np.expand_dims(state, 0))
+        np.testing.assert_array_equal(result1, result2)
+
+    def test_reset_method(self):
+        builder = self._make_builder()
+        self.assertIs(builder.reset(), builder)
 
 
 if __name__ == "__main__":

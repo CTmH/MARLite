@@ -1,7 +1,9 @@
 import numpy as np
-from typing import Union, List, Optional
+from typing import Union, List, Optional, Tuple
+from concurrent.futures import ProcessPoolExecutor
 from scipy.sparse.csgraph import connected_components
 from scipy.spatial.distance import cdist
+from copy import deepcopy
 from numpy import ndarray
 from marlite.algorithm.group_builder.group_builder import GroupBuilder
 from marlite.algorithm.graph_builder.graph_util import binary_to_decimal
@@ -10,12 +12,12 @@ from marlite.algorithm.graph_builder.graph_util import binary_to_decimal
 class MAgentLabelPropagationGroupBuilder(GroupBuilder):
     def __init__(
         self,
-        binary_agent_id_dim: list,
-        agent_presence_dim: list,
+        binary_agent_id_dim: List[int],
+        agent_presence_dim: List[int],
         comm_distance: float,
         distance_metric: str = "cityblock",
         n_workers: int = 0,
-        valid_node_list: Union[list, None] = None,
+        valid_node_list: Union[List[int], None] = None,
         n_groups: Optional[int] = None,
         channel_first: bool = False,
         dtype=np.int16,
@@ -165,4 +167,131 @@ class MAgentLabelPropagationGroupBuilder(GroupBuilder):
         return zone_indices.astype(self.dtype)
 
     def reset(self):
+        return self
+
+
+class MAgentVecLPGroupBuilder(GroupBuilder):
+    def __init__(
+        self,
+        coord_dims: Tuple[int, int],
+        hp_dim: int,
+        team_dim: int,
+        selected_teams: List[int],
+        comm_distance: float,
+        distance_metric: str = "euclidean",
+        n_groups: Optional[int] = None,
+        update_interval: int = 1,
+        n_workers: int = 0,
+    ):
+        super().__init__()
+        self.coord_dims = coord_dims
+        self.hp_dim = hp_dim
+        self.team_dim = team_dim
+        self.selected_teams = selected_teams
+        self.comm_distance = comm_distance
+        self.distance_metric = distance_metric
+        self.n_groups = n_groups
+        self.update_interval = update_interval
+        self.n_workers = n_workers
+        self.step_counter = 0
+        self.cached_labels = None
+
+    @staticmethod
+    def _process_sample(
+        sample_state: ndarray,
+        coord_dims: Tuple[int, int],
+        hp_dim: int,
+        team_dim: int,
+        selected_teams: List[int],
+        comm_distance: float,
+        distance_metric: str,
+        n_groups: Optional[int] = None,
+    ) -> ndarray:
+        coords = sample_state[:, coord_dims]
+        hps = sample_state[:, hp_dim]
+        teams = sample_state[:, team_dim]
+
+        candidate_mask = np.isin(teams, selected_teams)
+        n_candidates = candidate_mask.sum()
+
+        candidate_coords = coords[candidate_mask]
+        candidate_hps = hps[candidate_mask]
+
+        valid_mask = candidate_hps > 0
+        valid_local_ids = np.where(valid_mask)[0]
+
+        if len(valid_local_ids) == 0:
+            return np.full(n_candidates, -1, dtype=np.int8)
+
+        valid_coords = candidate_coords[valid_mask]
+        distances = cdist(valid_coords, valid_coords, metric=distance_metric)
+        adj_matrix = (distances <= comm_distance).astype(np.int64)
+        np.fill_diagonal(adj_matrix, 0)
+
+        n_components, comp_labels = connected_components(
+            adj_matrix, directed=False, return_labels=True
+        )
+
+        if n_groups is not None and n_components > n_groups:
+            comp_labels = MAgentLabelPropagationGroupBuilder._merge_excess_groups(
+                valid_coords, comp_labels, n_groups
+            )
+
+        full_labels = np.full(n_candidates, -1, dtype=np.int8)
+        full_labels[valid_local_ids] = comp_labels
+        return full_labels
+
+    def forward(self, states: ndarray) -> ndarray:
+        bs = states.shape[0]
+
+        if not self.training:
+            self.step_counter += 1
+            if (
+                self.step_counter % self.update_interval != 0
+                and self.cached_labels is not None
+            ):
+                return deepcopy(self.cached_labels)
+
+        n_workers = min(bs, self.n_workers)
+
+        if n_workers > 1:
+            with ProcessPoolExecutor(max_workers=n_workers) as executor:
+                results = list(
+                    executor.map(
+                        self._process_sample,
+                        [states[b] for b in range(bs)],
+                        [self.coord_dims] * bs,
+                        [self.hp_dim] * bs,
+                        [self.team_dim] * bs,
+                        [self.selected_teams] * bs,
+                        [self.comm_distance] * bs,
+                        [self.distance_metric] * bs,
+                        [self.n_groups] * bs,
+                    )
+                )
+        else:
+            results = [
+                self._process_sample(
+                    states[b],
+                    self.coord_dims,
+                    self.hp_dim,
+                    self.team_dim,
+                    self.selected_teams,
+                    self.comm_distance,
+                    self.distance_metric,
+                    self.n_groups,
+                )
+                for b in range(bs)
+            ]
+
+        labels = np.stack(results, axis=0)
+
+        if not self.training:
+            self.cached_labels = labels
+
+        return labels.astype(self.dtype)
+
+    def reset(self):
+        self.step_counter = 0
+        self.cached_labels = None
         return self

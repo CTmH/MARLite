@@ -87,7 +87,7 @@ class TestMagentGroupFeaturesConstructor(unittest.TestCase):
             obstacle_dim=0,
             channel_first=False,
         )
-        result = constructor.process(obs, states, grouping, alive_mask)
+        result, _ = constructor.process(obs, states, grouping, alive_mask)
         self.assertEqual(result.shape, (2, 3, 18))
         self.assertEqual(result.dtype, np.float16)
 
@@ -106,7 +106,7 @@ class TestMagentGroupFeaturesConstructor(unittest.TestCase):
             obstacle_dim=0,
             channel_first=False,
         )
-        result = constructor.process(obs, states, grouping, alive_mask)
+        result, _ = constructor.process(obs, states, grouping, alive_mask)
 
         f = result[0, 0]
         # Our density: 2 agents / 49 cells (only TEAM_0 agents in window)
@@ -131,7 +131,7 @@ class TestMagentGroupFeaturesConstructor(unittest.TestCase):
             obstacle_dim=0,
             channel_first=True,
         )
-        result = constructor.process(obs, states, grouping, alive_mask)
+        result, _ = constructor.process(obs, states, grouping, alive_mask)
 
         f = result[0, 0]
         self.assertAlmostEqual(float(f[0]), 2.0 / 49.0, places=2)
@@ -152,7 +152,7 @@ class TestMagentGroupFeaturesConstructor(unittest.TestCase):
             obstacle_dim=0,
             channel_first=False,
         )
-        result = constructor.process(obs, states, grouping, alive_mask)
+        result, _ = constructor.process(obs, states, grouping, alive_mask)
 
         f = result[0, 1]
         # Enemy density: 2 enemies / 49 cells
@@ -180,7 +180,7 @@ class TestMagentGroupFeaturesConstructor(unittest.TestCase):
             obstacle_dim=0,
             channel_first=False,
         )
-        result = constructor.process(obs, states, grouping, alive_mask)
+        result, _ = constructor.process(obs, states, grouping, alive_mask)
 
         f = result[0, 0]
         self.assertGreater(float(f[10]), 0.0, "Obstacle density should be > 0")
@@ -202,7 +202,7 @@ class TestMagentGroupFeaturesConstructor(unittest.TestCase):
             obstacle_dim=0,
             channel_first=False,
         )
-        result = constructor.process(obs, states, grouping, alive_mask)
+        result, _ = constructor.process(obs, states, grouping, alive_mask)
         self.assertTrue(np.all(result == 0), "All dead agents → all zeros")
 
     def test_grouping_all_minus_one_zero_output(self):
@@ -222,7 +222,7 @@ class TestMagentGroupFeaturesConstructor(unittest.TestCase):
             obstacle_dim=0,
             channel_first=False,
         )
-        result = constructor.process(obs, states, grouping, alive_mask)
+        result, _ = constructor.process(obs, states, grouping, alive_mask)
         self.assertTrue(np.all(result == 0), "All -1 grouping → all zeros")
 
     def test_fewer_groups_than_n_groups(self):
@@ -243,7 +243,7 @@ class TestMagentGroupFeaturesConstructor(unittest.TestCase):
             obstacle_dim=0,
             channel_first=False,
         )
-        result = constructor.process(obs, states, grouping, alive_mask)
+        result, _ = constructor.process(obs, states, grouping, alive_mask)
 
         self.assertFalse(np.all(result[0, 0] == 0), "Group 0 should have content")
         self.assertTrue(np.all(result[0, 1] == 0), "Group 1 should be zeros")
@@ -274,7 +274,7 @@ class TestMagentGroupFeaturesConstructor(unittest.TestCase):
             obstacle_dim=0,
             channel_first=False,
         )
-        result = constructor.process(obs, states, grouping, alive_mask)
+        result, _ = constructor.process(obs, states, grouping, alive_mask)
 
         f_g0 = result[0, 0]
         f_g1 = result[0, 1]
@@ -302,7 +302,7 @@ class TestMagentGroupFeaturesConstructor(unittest.TestCase):
             obstacle_dim=0,
             channel_first=False,
         )
-        result = constructor.process(obs, states, grouping, alive_mask)
+        result, _ = constructor.process(obs, states, grouping, alive_mask)
 
         for g in range(2):
             f = result[0, g]
@@ -337,7 +337,7 @@ class TestMagentGroupFeaturesConstructor(unittest.TestCase):
         # All 4 agents in group 0 (2 ours + 2 enemies)
         grouping[:, :] = 0
 
-        result = constructor.process(obs, states, grouping, alive_mask)
+        result, _ = constructor.process(obs, states, grouping, alive_mask)
         f = result[0, 0]
         # Group size = all alive agents = 4 / 49
         self.assertAlmostEqual(float(f[11]), 4.0 / 49.0, places=2)
@@ -359,7 +359,7 @@ class TestMagentGroupFeaturesConstructor(unittest.TestCase):
             obstacle_dim=0,
             channel_first=False,
         )
-        result = constructor.process(obs, states, grouping, alive_mask)
+        result, _ = constructor.process(obs, states, grouping, alive_mask)
         f = result[0, 0]
         # Centroid is ~(8, 8) on a 20x20 map → border distance = 8
         # Normalized: 8/20 = 0.4

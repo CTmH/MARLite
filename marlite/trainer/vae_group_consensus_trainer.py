@@ -63,6 +63,7 @@ class VAEGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
         warmup_epochs: int = 0,
         loss_combination_method: str = "weighted_sum",
         pit_loss_alpha: float = 0.9,
+        kl_on_group: bool = False,
         **kwargs,
     ):
         if recon_mode not in ("per_agent", "per_group"):
@@ -70,6 +71,7 @@ class VAEGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
         self.recon_mode = recon_mode
         self.kl_divergence_weight = kl_divergence_weight
         self.warmup_epochs = warmup_epochs
+        self.kl_on_group = kl_on_group
         super().__init__(
             loss_combination_method=loss_combination_method,
             pit_loss_alpha=pit_loss_alpha,
@@ -418,10 +420,15 @@ class VAEGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
                 )
             #   scalar
 
-            # ── 3d. KL divergence: KL(N(μ_i, σ²_i) || N(0, 1)) ──────────
-            # Sum over latent dim, mean over (batch, agent).
+            # ── 3d. KL divergence: KL(N(μ, σ²) || N(0, 1)) ──────────
+            if self.kl_on_group:
+                kl_mu = group_mu
+                kl_log_var = group_log_var
+            else:
+                kl_mu = agent_mu
+                kl_log_var = agent_log_var
             kl_divergence = -0.5 * torch.sum(
-                1 + agent_log_var - agent_mu.pow(2) - torch.exp(agent_log_var),
+                1 + kl_log_var - kl_mu.pow(2) - torch.exp(kl_log_var),
                 dim=-1,
             )
             #   (B, N, L) → sum over L → (B, N)

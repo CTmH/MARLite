@@ -34,6 +34,7 @@ agent_group_config:
     type: "Fixed"
     group_ids: [0, 0, 1]
   deterministic_eval: true
+  enable_rl_grad_to_group_estimate: false
   optimizer:
     type: "Adam"
     lr: 0.0005

@@ -3,11 +3,13 @@ import numpy as np
 from marlite.algorithm.group_builder.group_builder import GroupBuilder
 from marlite.algorithm.group_builder.label_propagation_group_builder import (
     MAgentLabelPropagationGroupBuilder,
+    MAgentVecLPGroupBuilder,
 )
 from marlite.algorithm.group_builder.fixed_group_builder import FixedGroupBuilder
 
 registered_group_builders = {
     "MAgentLabelPropagation": MAgentLabelPropagationGroupBuilder,
+    "MAgentVecLP": MAgentVecLPGroupBuilder,
     "Fixed": FixedGroupBuilder,
 }
 

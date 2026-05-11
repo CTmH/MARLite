@@ -7,10 +7,10 @@ import torch
 
 from marlite.trainer import TrainerConfig, REGISTERED_TRAINERS
 
-'''
+
 class TestGroupConsensusTrainer(unittest.TestCase):
     def setUp(self):
-        self.config_path = "test/config/group_consensus_default.yaml"
+        self.config_path = "test/config/vae_group_consensus_default.yaml"
         with open(self.config_path, "r") as file:
             self.config = yaml.safe_load(file)
         self.config["trainer_config"]["train_args"]["epochs"] = 2
@@ -91,7 +91,7 @@ class TestGroupConsensusTrainer(unittest.TestCase):
             best_metrics = self.trainer.train(epochs=2, target_first_metric=5)
 
     def test_torch_compile(self):
-        self.config_path = "test/config/group_consensus_default.yaml"
+        self.config_path = "test/config/vae_group_consensus_default.yaml"
         with open(self.config_path, "r") as file:
             self.config = yaml.safe_load(file)
         self.config["trainer_config"]["train_args"]["epochs"] = 2
@@ -117,7 +117,7 @@ class TestGroupConsensusTrainer(unittest.TestCase):
             for w1, w2 in zip(critic_params.values(), origin_critic_params.values()):
                 if w1.requires_grad:
                     self.assertFalse(torch.equal(w1, w2))
-'''
+
 
 if __name__ == "__main__":
     unittest.main()

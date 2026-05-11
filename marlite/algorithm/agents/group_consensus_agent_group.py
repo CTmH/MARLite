@@ -6,6 +6,7 @@ from marlite.algorithm.model.model_config import ModelConfig
 from marlite.algorithm.model import RNNModel, Conv1DModel, AttentionModel
 from marlite.algorithm.agents.agent_group import AgentGroup
 from marlite.algorithm.group_builder import GroupBuilderConfig
+from marlite.util.prob_util import process_probabilistic_output
 
 
 class GroupConsensusAgentGroup(AgentGroup):
@@ -18,10 +19,12 @@ class GroupConsensusAgentGroup(AgentGroup):
         decoder_configs: Dict[str, ModelConfig],
         group_builder_config: GroupBuilderConfig,
         deterministic_eval: bool = True,
+        enable_rl_grad_to_group_estimate: bool = False,
     ) -> None:
         super().__init__()
         self.agent_model_dict = agent_model_dict
         self.deterministic_eval = deterministic_eval
+        self.enable_rl_grad_to_group_estimate = enable_rl_grad_to_group_estimate
 
         self.feature_extractors = nn.ModuleDict()
         for model_name, config in feature_extractor_configs.items():
@@ -181,7 +184,6 @@ class GroupConsensusAgentGroup(AgentGroup):
         bs, n_agents, f_z = agent_mu.shape
 
         group_indices = torch.tensor(group_indices, dtype=torch.int32, device=self.device)
-        agent_var = torch.exp(agent_log_var)
 
         group_mu = agent_mu.clone()
         group_log_var = agent_log_var.clone()
@@ -197,8 +199,13 @@ class GroupConsensusAgentGroup(AgentGroup):
                     continue
 
                 merged_mu = agent_mu[b, mask].mean(dim=0)
-                merged_var = agent_var[b, mask].sum(dim=0) / (n_z * n_z)
-                merged_log_var = torch.log(merged_var + 1e-8)
+
+                log_var_masked = agent_log_var[b, mask]
+                max_lv = torch.max(log_var_masked, dim=0).values
+                log_sum_exp = max_lv + torch.log(
+                    torch.sum(torch.exp(log_var_masked - max_lv), dim=0) + 1e-8
+                )
+                merged_log_var = log_sum_exp - 2 * torch.log(n_z)
 
                 group_mu[b, mask] = merged_mu
                 group_log_var[b, mask] = merged_log_var
@@ -267,24 +274,23 @@ class GroupConsensusAgentGroup(AgentGroup):
             agent_mu, agent_log_var, group_indices
         )
 
-        group_std = torch.exp(0.5 * group_log_var)
         deterministic = self.deterministic_eval and not self.training
-        if deterministic:
-            group_consensus = group_mu
-        else:
-            eps = torch.randn_like(group_std)
-            group_consensus = group_mu + eps * group_std
+        group_consensus, group_log_var, group_mu, _ = process_probabilistic_output(
+            torch.cat([group_mu, group_log_var], dim=-1), deterministic
+        )
 
-        combined_features = torch.cat((local_obs, group_consensus), dim=-1)
+        consensus_for_rl = group_consensus
+        if not self.enable_rl_grad_to_group_estimate:
+            consensus_for_rl = consensus_for_rl.detach()
+        combined_features = torch.cat((local_obs, consensus_for_rl), dim=-1)
 
-        hidden_states = self._process_encoders(combined_features)
-
-        q_val = self._process_decoders(hidden_states)
+        q_val = self._process_decoders(combined_features)
 
         return {
             "q_val": q_val,
             "group_mu": group_mu,
             "group_log_var": group_log_var,
+            "group_consensus": group_consensus,
             "agent_mu": agent_mu,
             "agent_log_var": agent_log_var,
             "group_indices": group_indices,

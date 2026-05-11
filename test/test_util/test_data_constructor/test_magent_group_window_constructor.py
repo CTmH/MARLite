@@ -73,7 +73,7 @@ class TestMagentGroupWindowConstructor(unittest.TestCase):
             agent_presence_dim=[1, 3],
             channel_first=False,
         )
-        result = constructor.process(obs, states, grouping, alive_mask)
+        result, _ = constructor.process(obs, states, grouping, alive_mask)
         self.assertEqual(result.shape, (2, 3, 7, 7, 5))
         self.assertEqual(result.dtype, np.float16)
 
@@ -88,7 +88,7 @@ class TestMagentGroupWindowConstructor(unittest.TestCase):
             agent_presence_dim=[1, 3],
             channel_first=True,
         )
-        result = constructor.process(obs, states, grouping, alive_mask)
+        result, _ = constructor.process(obs, states, grouping, alive_mask)
         self.assertEqual(result.shape, (2, 3, 5, 7, 7))
         self.assertEqual(result.dtype, np.float16)
 
@@ -103,7 +103,7 @@ class TestMagentGroupWindowConstructor(unittest.TestCase):
             agent_presence_dim=[1, 3],
             channel_first=False,
         )
-        result = constructor.process(obs, states, grouping, alive_mask)
+        result, _ = constructor.process(obs, states, grouping, alive_mask)
 
         # Group 0 (agents at 5,5 and 6,6) should have content in presence channel
         self.assertTrue(np.any(result[0, 0] != 0), "Group 0 should have non-zero content")
@@ -123,7 +123,7 @@ class TestMagentGroupWindowConstructor(unittest.TestCase):
             agent_presence_dim=[1, 3],
             channel_first=True,
         )
-        result = constructor.process(obs, states, grouping, alive_mask)
+        result, _ = constructor.process(obs, states, grouping, alive_mask)
 
         self.assertTrue(np.any(result[0, 0] != 0), "Group 0 should have non-zero content")
         self.assertTrue(np.any(result[0, 1] != 0), "Group 1 should have non-zero content")
@@ -140,7 +140,7 @@ class TestMagentGroupWindowConstructor(unittest.TestCase):
             agent_presence_dim=[1, 3],
             channel_first=False,
         )
-        result = constructor.process(obs, states, grouping, alive_mask)
+        result, _ = constructor.process(obs, states, grouping, alive_mask)
 
         # Group 0 centroid is (5.5, 5.5), window is 7×7 centered there
         # Agent 0 at (5,5), relative to window center: window coords ~(3,3)
@@ -167,7 +167,7 @@ class TestMagentGroupWindowConstructor(unittest.TestCase):
             agent_presence_dim=[1, 3],
             channel_first=False,
         )
-        result = constructor.process(obs, states, grouping, alive_mask)
+        result, _ = constructor.process(obs, states, grouping, alive_mask)
         self.assertTrue(np.all(result == 0), "All dead agents should yield all zeros")
 
     def test_grouping_all_minus_one_zero_output(self):
@@ -183,7 +183,7 @@ class TestMagentGroupWindowConstructor(unittest.TestCase):
             agent_presence_dim=[1, 3],
             channel_first=False,
         )
-        result = constructor.process(obs, states, grouping, alive_mask)
+        result, _ = constructor.process(obs, states, grouping, alive_mask)
         self.assertTrue(np.all(result == 0), "All -1 grouping should yield all zeros")
 
     def test_fewer_groups_than_n_groups(self):
@@ -200,7 +200,7 @@ class TestMagentGroupWindowConstructor(unittest.TestCase):
             agent_presence_dim=[1, 3],
             channel_first=False,
         )
-        result = constructor.process(obs, states, grouping, alive_mask)
+        result, _ = constructor.process(obs, states, grouping, alive_mask)
 
         self.assertTrue(np.any(result[0, 0] != 0), "Group 0 should have content")
         self.assertTrue(np.any(result[0, 1] != 0), "Group 1 should have content")
@@ -224,7 +224,7 @@ class TestMagentGroupWindowConstructor(unittest.TestCase):
             agent_presence_dim=[1, 3],
             channel_first=False,
         )
-        result = constructor.process(obs, states, grouping, alive_mask)
+        result, _ = constructor.process(obs, states, grouping, alive_mask)
 
         # Group 0 centroid should now be at (5,5) (only agent 0 alive)
         # Group 1 centroid should now be at (15,15) (only agent 2 alive)
@@ -243,7 +243,7 @@ class TestMagentGroupWindowConstructor(unittest.TestCase):
             agent_presence_dim=[1, 3],
             channel_first=False,
         )
-        result = constructor.process(obs, states, grouping, alive_mask)
+        result, _ = constructor.process(obs, states, grouping, alive_mask)
         # Last dim should be 2 (selected_channels count)
         self.assertEqual(result.shape, (2, 1, 7, 7, 2))
 
@@ -262,7 +262,7 @@ class TestMagentGroupWindowConstructor(unittest.TestCase):
             agent_presence_dim=[1, 3],
             channel_first=False,
         )
-        result = constructor.process(obs, states, grouping, alive_mask)
+        result, _ = constructor.process(obs, states, grouping, alive_mask)
         # Shape should be correct despite OOB
         self.assertEqual(result.shape, (2, 1, 15, 15, 5))
         # Should have some non-zero content (agent pixels) and some zero (OOB padding)
