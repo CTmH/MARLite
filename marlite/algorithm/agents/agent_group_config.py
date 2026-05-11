@@ -346,7 +346,7 @@ registered_agent_groups = {
     "Random": create_random_agent_group,
     "MAgentPrey": create_magent_prey_agent_group,
     "MAgentBattle": create_magent_battle_agent_group,
-    "GroupConsensus": create_group_consensus_agent_group,
+    "GroupConsensusQMIX": create_group_consensus_agent_group,
 }
 
 

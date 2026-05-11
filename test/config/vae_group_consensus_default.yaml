@@ -1,5 +1,5 @@
 agent_group_config:
-  type: "GroupConsensus"
+  type: "GroupConsensusQMIX"
   deterministic_eval: true
   enable_rl_grad_to_group_estimate: false
   agent_list:
@@ -291,7 +291,7 @@ analyzer_config:
   type: "default"
 
 trainer_config:
-  type: "VAEGroupConsensus"
+  type: "VAEGroupConsensusQMIX"
   gamma: 0.95
   eval_epsilon: 0.001
   eval_threshold: 0.01

@@ -24,7 +24,7 @@ class TestGroupConsensusAgentGroup(unittest.TestCase):
 class TestGroupConsensusAgentGroupConfig(unittest.TestCase):
     def test_group_consensus_registration(self):
         from marlite.algorithm.agents.agent_group_config import registered_agent_groups
-        self.assertIn("GroupConsensus", registered_agent_groups)
+        self.assertIn("GroupConsensusQMIX", registered_agent_groups)
 
 
 if __name__ == "__main__":

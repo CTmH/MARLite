@@ -16,8 +16,8 @@ REGISTERED_TRAINERS: Dict[str, Type[Trainer]] = {
     'MsgAggr': MsgAggrQMIXTrainer,
     'ProbMsgAggr': ProbMsgAggrQMIXTrainer,
     'VAEGraphQMIX': VAEGraphQMIXTrainer,
-    'GroupConsensus': GroupConsensusTrainer,
-    'VAEGroupConsensus': VAEGroupConsensusQMIXTrainer,
+    'GroupConsensusQMIX': GroupConsensusTrainer,
+    'VAEGroupConsensusQMIX': VAEGroupConsensusQMIXTrainer,
 }
 
 class TrainerConfig:

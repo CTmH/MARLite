@@ -1,5 +1,5 @@
 agent_group_config:
-  type: "GroupConsensus"
+  type: "GroupConsensusQMIX"
   agent_list:
     agent_0: model1
     agent_1: model1
@@ -89,7 +89,7 @@ analyzer_config:
   type: "default"
 
 trainer_config:
-  type: "GroupConsensus"
+  type: "GroupConsensusQMIX"
   gamma: 0.95
   eval_epsilon: 0.01
   workdir: "./test/results/group_consensus_default"
