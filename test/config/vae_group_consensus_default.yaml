@@ -291,7 +291,7 @@ analyzer_config:
   type: "default"
 
 trainer_config:
-  type: "VAEGraphQMIX"
+  type: "VAEGroupConsensus"
   gamma: 0.95
   eval_epsilon: 0.001
   eval_threshold: 0.01

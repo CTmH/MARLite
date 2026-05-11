@@ -40,7 +40,6 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
         warmup_epochs=0,
         loss_combination_method="weighted_sum",
         pit_loss_alpha=0.9,
-        kl_on_group=False,
         **kwargs,
     ):
         """
@@ -50,13 +49,13 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
             kl_divergence_weight: Weight for KL divergence in VAE loss
             warmup_epochs: Number of epochs to train with RL only before enabling SSL
             loss_combination_method: Method to combine RL and SSL losses
-            pit_loss_alpha: Alpha parameter for PITLoss
-            kl_on_group: If True, KL divergence targets group_mu/group_log_var;
-                if False (default), targets agent_mu/agent_log_var.
+                - "weighted_sum": combined_loss = critic_loss + weight * vae_loss
+                - "pit_loss": use PITLoss to combine critic_loss and vae_loss
+            pit_loss_alpha: Alpha parameter for PITLoss (exponential decay rate)
+            **kwargs: Additional arguments passed to parent class
         """
         self.kl_divergence_weight = kl_divergence_weight
         self.warmup_epochs = warmup_epochs
-        self.kl_on_group = kl_on_group
         super().__init__(
             loss_combination_method=loss_combination_method,
             pit_loss_alpha=pit_loss_alpha,
@@ -361,13 +360,10 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
             last_edge_indices,
         )
         q_val = ret["q_val"]
-        estimates = ret["group_consensus"]
-        if self.kl_on_group:
-            mu = ret["group_mu"]
-            log_var = ret["group_log_var"]
-        else:
-            mu = ret["agent_mu"]
-            log_var = ret["agent_log_var"]
+        # Get SSL data from forward return (for VAE reconstruction)
+        estimates = ret["local_state_estimates"]  # (B, N, T, E)
+        mu = ret["mu"]
+        log_var = ret["log_var"]
 
         # Get actions at last timestep: (B, T, N, A) -> (B, N, A)
         actions_last = actions[:, -1].to(device=self.train_device, dtype=torch.int64)
