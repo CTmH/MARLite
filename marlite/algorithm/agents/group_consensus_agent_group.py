@@ -182,54 +182,44 @@ class GroupConsensusAgentGroup(AgentGroup):
 
     def _merge_group_distributions(self, agent_mu, agent_log_var, group_indices):
         bs, n_agents, f_z = agent_mu.shape
+        G = int(group_indices.max()) + 1
 
-        group_indices = torch.tensor(group_indices, dtype=torch.int32, device=self.device)
+        gids = torch.as_tensor(group_indices, dtype=torch.long, device=self.device)
 
-        group_mu = agent_mu.clone()
-        group_log_var = agent_log_var.clone()
+        group_mu = agent_mu.new_zeros(bs, G, f_z)
+        group_log_var = agent_log_var.new_zeros(bs, G, f_z)
 
         for b in range(bs):
-            unique_groups = torch.unique(group_indices[b])
-            unique_groups = unique_groups[unique_groups >= 0]
-
-            for z in unique_groups:
-                mask = (group_indices[b] == z)
-                n_z = mask.sum().float()
-                if n_z <= 1:
+            for g in range(G):
+                mask = gids[b] == g
+                if not mask.any():
                     continue
+                n_z = mask.sum().float()
 
-                merged_mu = agent_mu[b, mask].mean(dim=0)
+                group_mu[b, g] = agent_mu[b, mask].mean(dim=0)
 
                 log_var_masked = agent_log_var[b, mask]
                 max_lv = torch.max(log_var_masked, dim=0).values
                 log_sum_exp = max_lv + torch.log(
                     torch.sum(torch.exp(log_var_masked - max_lv), dim=0) + 1e-8
                 )
-                merged_log_var = log_sum_exp - 2 * torch.log(n_z)
-
-                group_mu[b, mask] = merged_mu
-                group_log_var[b, mask] = merged_log_var
+                group_log_var[b, g] = log_sum_exp - 2 * torch.log(n_z)
 
         return group_mu, group_log_var
 
-    def _process_encoders(self, combined_features):
-        hidden_states = [None for _ in range(len(self.agent_model_dict))]
-        for model_name, enc in self.encoders.items():
-            idx = self.model_to_agent_indices[model_name]
-            h = combined_features[:, idx]
-            bs = h.shape[0]
-            n_agents = len(idx)
-            hidden_size = h.shape[-1]
-            h = h.reshape(bs * n_agents, hidden_size)
-            hidden_selected = enc(h)
-            hidden_selected = hidden_selected.reshape(bs, n_agents, -1)
-
-            for j, agent_idx in enumerate(idx):
-                hidden_states[agent_idx] = hidden_selected[:, j, :]
-
-        hidden_states = torch.stack(hidden_states, dim=1).to(self.device)
-
-        return hidden_states
+    @staticmethod
+    def _scatter(g_t, group_indices):
+        bs, G = g_t.shape[:2]
+        n_agents = group_indices.shape[1]
+        out = g_t.new_zeros(bs, n_agents, *g_t.shape[2:])
+        for b in range(bs):
+            gids = torch.as_tensor(group_indices[b], dtype=torch.long, device=g_t.device)
+            valid = gids >= 0
+            for g in range(G):
+                m = valid & (gids == g)
+                if m.any():
+                    out[b, m] = g_t[b, g]
+        return out
 
     def _process_decoders(self, hidden_states):
         q_val = [None for _ in range(len(self.agent_model_dict))]
@@ -279,7 +269,9 @@ class GroupConsensusAgentGroup(AgentGroup):
             torch.cat([group_mu, group_log_var], dim=-1), deterministic
         )
 
-        consensus_for_rl = group_consensus
+        # Scatter group-level (B,G,L) → per-agent (B,N,L) for RL path
+        consensus_per_agent = self._scatter(group_consensus, group_indices)
+        consensus_for_rl = consensus_per_agent
         if not self.enable_rl_grad_to_group_estimate:
             consensus_for_rl = consensus_for_rl.detach()
         combined_features = torch.cat((local_obs, consensus_for_rl), dim=-1)

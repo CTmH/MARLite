@@ -7,7 +7,7 @@ from marlite.algorithm.group_builder.group_builder import GroupBuilder
 class FixedGroupBuilder(GroupBuilder):
     def __init__(self, group_ids: List[int], dtype=np.int16):
         super().__init__(dtype=dtype)
-        self.group_ids = np.array(group_ids, dtype=np.int64)
+        self.group_ids = np.array(group_ids, dtype=dtype)
 
     def forward(self, states: ndarray) -> ndarray:
         bs = states.shape[0]

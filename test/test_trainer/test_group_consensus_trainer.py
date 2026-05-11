@@ -7,7 +7,7 @@ import torch
 
 from marlite.trainer import TrainerConfig, REGISTERED_TRAINERS
 
-'''
+
 class TestGroupConsensusTrainer(unittest.TestCase):
     def setUp(self):
         self.config_path = "test/config/group_consensus_default.yaml"
@@ -117,7 +117,6 @@ class TestGroupConsensusTrainer(unittest.TestCase):
             for w1, w2 in zip(critic_params.values(), origin_critic_params.values()):
                 if w1.requires_grad:
                     self.assertFalse(torch.equal(w1, w2))
-'''
 
 if __name__ == "__main__":
     unittest.main()

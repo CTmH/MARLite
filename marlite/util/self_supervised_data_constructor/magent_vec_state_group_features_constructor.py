@@ -113,9 +113,10 @@ class MagentVecStateGroupFeaturesConstructor:
             )
             padding_mask = np.ones((batch_size, self.n_groups), dtype=bool)
             for chunk, chunk_result in zip(chunks, chunk_results):
-                for b, (r, m) in zip(chunk, chunk_result):
-                    result[b] = r
-                    padding_mask[b] = m
+                chunk_arr, chunk_mask = chunk_result
+                for i, b in enumerate(chunk):
+                    result[b] = chunk_arr[i]
+                    padding_mask[b] = chunk_mask[i]
             return result, padding_mask
         finally:
             shm.close()
@@ -311,7 +312,7 @@ def _process_chunk_worker(args):
             (len(chunk_ids), constructor.n_groups, constructor.N_FEATURES),
             dtype=np.float16,
         )
-        padding_mask = np.ones((len(chunk_ids), constructor.n_groups), dtype=bool)
+        padding_mask = np.zeros((len(chunk_ids), constructor.n_groups), dtype=bool)
         for i, b in enumerate(chunk_ids):
             r, m = constructor._process_single(state_last[b], grouping[b])
             result[i] = r

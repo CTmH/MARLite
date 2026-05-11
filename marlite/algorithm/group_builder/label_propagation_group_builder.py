@@ -81,7 +81,7 @@ class MAgentLabelPropagationGroupBuilder(GroupBuilder):
         # Re-label to consecutive IDs starting from 0
         unique = sorted(np.unique(current_labels))
         remap = {old: new for new, old in enumerate(unique)}
-        remapped = np.array([remap[l] for l in current_labels], dtype=np.int8)
+        remapped = np.array([remap[l] for l in current_labels], dtype=np.int64)
 
         return remapped
 
@@ -135,13 +135,13 @@ class MAgentLabelPropagationGroupBuilder(GroupBuilder):
                     coords, labels, n_groups
                 )
 
-            full_labels = np.full(n, -1, dtype=np.int8)
+            full_labels = np.full(n, -1, dtype=np.int64)
             for i, node_id in enumerate(sorted_ids):
                 if node_id in valid_node_list:
                     mapped_idx = valid_node_list.index(node_id)
                     full_labels[mapped_idx] = labels[i]
         else:
-            full_labels = np.full(n, -1, dtype=np.int8)
+            full_labels = np.full(n, -1, dtype=np.int64)
 
         return full_labels
 
@@ -221,7 +221,7 @@ class MAgentVecLPGroupBuilder(GroupBuilder):
         valid_local_ids = np.where(valid_mask)[0]
 
         if len(valid_local_ids) == 0:
-            return np.full(n_candidates, -1, dtype=np.int8)
+            return np.full(n_candidates, -1, dtype=np.int64)
 
         valid_coords = candidate_coords[valid_mask]
         distances = cdist(valid_coords, valid_coords, metric=distance_metric)
@@ -237,7 +237,7 @@ class MAgentVecLPGroupBuilder(GroupBuilder):
                 valid_coords, comp_labels, n_groups
             )
 
-        full_labels = np.full(n_candidates, -1, dtype=np.int8)
+        full_labels = np.full(n_candidates, -1, dtype=np.int64)
         full_labels[valid_local_ids] = comp_labels
         return full_labels
 

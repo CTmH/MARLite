@@ -303,7 +303,7 @@ trainer_config:
   n_workers: 0
   kl_divergence_weight: 0.005
   loss_combination_method: "pit_loss"
-  warmup_epochs: 4
+  warmup_epochs: 0
 
   epsilon_scheduler:
     type: "linear"
