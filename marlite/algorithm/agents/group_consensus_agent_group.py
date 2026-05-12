@@ -318,7 +318,7 @@ class GroupConsensusAgentGroup(AgentGroup):
             )
             q_values = ret["q_val"]
             q_values = q_values.detach().cpu().numpy().squeeze()
-            group_indices = ret["group_indices"].squeeze(0)
+            group_indices_arr = ret["group_indices"].squeeze(0)
 
         if isinstance(next(iter(avail_actions.values())), np.ndarray):
             action_masks = np.array(
@@ -353,10 +353,17 @@ class GroupConsensusAgentGroup(AgentGroup):
         }
         actual_actions = {agent: all_actions[agent] for agent in alive_agents}
 
+        all_group_indices = {
+            agent: int(gid)
+            for agent, gid in zip(self.agent_model_dict.keys(), group_indices_arr)
+        }
+        actual_group_indices = {agent: all_group_indices[agent] for agent in alive_agents}
+
         return {
             "actions": actual_actions,
             "all_actions": all_actions,
-            "group_indices": group_indices,
+            "group_indices": actual_group_indices,
+            "all_group_indices": all_group_indices,
         }
 
     def reset(self) -> "GroupConsensusAgentGroup":

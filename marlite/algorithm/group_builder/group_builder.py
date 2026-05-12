@@ -16,7 +16,7 @@ class GroupBuilder(nn.Module):
             states: numpy array of shape (batch_size, ...) representing environment states
 
         Returns:
-            zone_indices: numpy array of shape (batch_size, n_agents) with dtype
+            group_indices: numpy array of shape (batch_size, n_agents) with dtype
                           determined by self.dtype (default int16),
                           each element is the zone/group ID for that agent
         """

@@ -1,8 +1,10 @@
 import unittest
 import numpy as np
-from marlite.algorithm.group_builder.label_propagation_group_builder import (
+from marlite.algorithm.group_builder.magent_group_builder import (
     MAgentLabelPropagationGroupBuilder,
     MAgentVecLPGroupBuilder,
+    MagentKMeansGroupBuilder,
+    MagentVecKMeansGroupBuilder,
 )
 
 
@@ -418,6 +420,256 @@ class TestMAgentVecLPGroupBuilder(unittest.TestCase):
     def test_no_cache_in_training(self):
         state = self._build_state([(0, 1, 5, 5), (1, 1, 6, 6)])
         builder = self._make_builder(comm_distance=5, n_groups=None)
+        builder.training = True
+        result1 = builder(np.expand_dims(state, 0))
+        result2 = builder(np.expand_dims(state, 0))
+        np.testing.assert_array_equal(result1, result2)
+
+    def test_reset_method(self):
+        builder = self._make_builder()
+        self.assertIs(builder.reset(), builder)
+
+
+class TestMagentKMeansGroupBuilder(unittest.TestCase):
+    BINARY_DIM = [5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+    PRESENCE_DIM = [1, 3]
+
+    def _build_state(self, agents, H=20, W=20, C=37):
+        state = np.zeros((H, W, C), dtype=np.float16)
+        for y, x, agent_id in agents:
+            state[y, x, 1] = 1
+            bits = [(agent_id >> i) & 1 for i in range(len(self.BINARY_DIM))]
+            for i, bit in enumerate(bits):
+                if bit:
+                    state[y, x, self.BINARY_DIM[i]] = 1
+        return state
+
+    def _make_builder(self, n_agents=4, n_groups=4, min_group_size=1):
+        return MagentKMeansGroupBuilder(
+            binary_agent_id_dim=self.BINARY_DIM,
+            agent_presence_dim=self.PRESENCE_DIM,
+            n_groups=n_groups,
+            min_group_size=min_group_size,
+            valid_node_list=list(range(n_agents)),
+        )
+
+    def test_all_agents_close_single_group(self):
+        state = self._build_state([(5, 5, 0), (6, 6, 1), (4, 7, 2), (7, 4, 3)])
+        builder = self._make_builder()
+        result = builder(np.expand_dims(state, 0))
+        self.assertEqual(result.shape, (1, 4))
+        self.assertTrue(np.all(result[0] >= 0))
+
+    def test_agents_far_apart_multiple_groups(self):
+        state = self._build_state([(2, 2, 0), (3, 3, 1), (15, 15, 2), (16, 16, 3)])
+        builder = self._make_builder(n_groups=4, min_group_size=1)
+        result = builder(np.expand_dims(state, 0))
+        alive = result[0] >= 0
+        unique = set(result[0][alive])
+        self.assertGreater(len(unique), 1)
+
+    def test_dead_agent_gets_minus_one(self):
+        state = self._build_state([(3, 3, 0), (4, 4, 1), (10, 10, 3)])
+        builder = self._make_builder(n_agents=4)
+        result = builder(np.expand_dims(state, 0))
+        self.assertEqual(result[0, 2], -1)
+        self.assertGreaterEqual(result[0, 0], 0)
+        self.assertGreaterEqual(result[0, 1], 0)
+        self.assertGreaterEqual(result[0, 3], 0)
+
+    def test_all_dead_all_minus_one(self):
+        state = self._build_state([])
+        builder = self._make_builder(n_agents=4)
+        result = builder(np.expand_dims(state, 0))
+        np.testing.assert_array_equal(result[0], [-1, -1, -1, -1])
+
+    def test_single_survivor_single_group(self):
+        state = self._build_state([(5, 5, 0)])
+        builder = self._make_builder(n_agents=4)
+        result = builder(np.expand_dims(state, 0))
+        self.assertEqual(result[0, 0], 0)
+        self.assertEqual(result[0, 1], -1)
+        self.assertEqual(result[0, 2], -1)
+        self.assertEqual(result[0, 3], -1)
+
+    def test_min_group_size_reduces_clusters(self):
+        state = self._build_state([(2, 2, 0), (3, 3, 1), (15, 15, 2), (16, 16, 3)])
+        builder = self._make_builder(n_groups=4, min_group_size=3)
+        result = builder(np.expand_dims(state, 0))
+        alive = result[0] >= 0
+        unique = set(result[0][alive])
+        self.assertLessEqual(len(unique), 1)
+
+    def test_min_group_size_six_agents(self):
+        state = self._build_state([
+            (1, 1, 0), (1, 5, 1), (1, 9, 2),
+            (9, 1, 3), (9, 5, 4), (9, 9, 5),
+        ])
+        builder = self._make_builder(n_agents=6, n_groups=4, min_group_size=2)
+        result = builder(np.expand_dims(state, 0))
+        alive = result[0] >= 0
+        unique = set(result[0][alive])
+        self.assertLessEqual(len(unique), 3)
+
+    def test_group_labels_are_consecutive(self):
+        state = self._build_state([
+            (2, 2, 0), (3, 3, 1), (10, 10, 2), (11, 11, 3), (14, 14, 4)
+        ])
+        builder = self._make_builder(n_agents=5, n_groups=3, min_group_size=1)
+        result = builder(np.expand_dims(state, 0))
+        alive = result[0] >= 0
+        unique = sorted(set(result[0][alive]))
+        self.assertEqual(unique, list(range(len(unique))))
+
+    def test_no_alive_agents(self):
+        state = self._build_state([])
+        builder = self._make_builder(n_agents=4)
+        result = builder(np.expand_dims(state, 0))
+        self.assertTrue(np.all(result[0] == -1))
+
+    def test_batch_independence(self):
+        state_a = self._build_state([(2, 2, 0), (3, 3, 1)])
+        state_b = self._build_state([(2, 2, 0), (15, 15, 1)])
+        states = np.stack([state_a, state_b], axis=0)
+        builder = self._make_builder(n_agents=2, n_groups=2, min_group_size=1)
+        result = builder(states)
+        self.assertEqual(result.shape, (2, 2))
+
+    def test_reset_method(self):
+        builder = self._make_builder()
+        self.assertIs(builder.reset(), builder)
+
+
+class TestMagentVecKMeansGroupBuilder(unittest.TestCase):
+    N_AGENTS = 8
+    F_DIM = 20
+    COORD_DIMS = (3, 4)
+    HP_DIM = 0
+    TEAM_DIM = 1
+
+    def _build_state(self, agents, selected_teams=None):
+        state = np.zeros((self.N_AGENTS, self.F_DIM), dtype=np.float32)
+        state[:, self.TEAM_DIM] = 1
+        for agent_idx, team, y, x in agents:
+            state[agent_idx, self.HP_DIM] = 1
+            state[agent_idx, self.TEAM_DIM] = team
+            state[agent_idx, self.COORD_DIMS[0]] = y
+            state[agent_idx, self.COORD_DIMS[1]] = x
+        return state
+
+    def _make_builder(self, n_groups=4, min_group_size=1, selected_teams=None):
+        return MagentVecKMeansGroupBuilder(
+            coord_dims=self.COORD_DIMS,
+            hp_dim=self.HP_DIM,
+            team_dim=self.TEAM_DIM,
+            selected_teams=selected_teams or [1],
+            n_groups=n_groups,
+            min_group_size=min_group_size,
+        )
+
+    def test_all_agents_close_single_group(self):
+        state = self._build_state([(0, 1, 5, 5), (1, 1, 6, 6), (2, 1, 4, 7)])
+        builder = self._make_builder()
+        result = builder(np.expand_dims(state, 0))
+        self.assertTrue(result[0, 0] >= 0)
+        self.assertTrue(result[0, 1] >= 0)
+        self.assertTrue(result[0, 2] >= 0)
+
+    def test_agents_far_apart_multiple_groups(self):
+        state = self._build_state([
+            (0, 1, 2, 2), (1, 1, 3, 3), (2, 1, 15, 15), (3, 1, 16, 16)
+        ])
+        builder = self._make_builder(n_groups=4, min_group_size=1)
+        result = builder(np.expand_dims(state, 0))
+        alive = result[0] >= 0
+        unique = set(result[0][alive])
+        self.assertGreater(len(unique), 1)
+
+    def test_dead_agent_gets_minus_one(self):
+        state = self._build_state([(0, 1, 3, 3), (1, 1, 4, 4), (3, 1, 10, 10)])
+        builder = self._make_builder()
+        result = builder(np.expand_dims(state, 0))
+        self.assertEqual(result[0, 2], -1)
+        self.assertGreaterEqual(result[0, 0], 0)
+        self.assertGreaterEqual(result[0, 1], 0)
+        self.assertGreaterEqual(result[0, 3], 0)
+
+    def test_all_dead_all_minus_one(self):
+        state = np.zeros((self.N_AGENTS, self.F_DIM), dtype=np.float32)
+        state[:, self.TEAM_DIM] = 1
+        builder = self._make_builder()
+        result = builder(np.expand_dims(state, 0))
+        self.assertEqual(result.shape[1], self.N_AGENTS)
+        np.testing.assert_array_equal(result[0], np.full(self.N_AGENTS, -1, dtype=np.int8))
+
+    def test_single_survivor_single_group(self):
+        state = self._build_state([(0, 1, 5, 5)])
+        builder = self._make_builder()
+        result = builder(np.expand_dims(state, 0))
+        self.assertEqual(result[0, 0], 0)
+        for i in range(1, self.N_AGENTS):
+            self.assertEqual(result[0, i], -1)
+
+    def test_min_group_size_reduces_clusters(self):
+        state = self._build_state([
+            (0, 1, 2, 2), (1, 1, 3, 3), (2, 1, 15, 15), (3, 1, 16, 16)
+        ])
+        builder = self._make_builder(n_groups=4, min_group_size=3)
+        result = builder(np.expand_dims(state, 0))
+        alive = result[0] >= 0
+        unique = set(result[0][alive])
+        self.assertLessEqual(len(unique), 1)
+
+    def test_only_selected_team_gets_groups(self):
+        state = self._build_state([
+            (0, 1, 2, 2), (1, 1, 3, 3), (2, 2, 5, 5), (3, 2, 6, 6)
+        ])
+        builder = self._make_builder(n_groups=4, selected_teams=[1])
+        result = builder(np.expand_dims(state, 0))
+        self.assertGreaterEqual(result[0, 0], 0)
+        self.assertGreaterEqual(result[0, 1], 0)
+        self.assertEqual(result[0, 2], -1)
+        self.assertEqual(result[0, 3], -1)
+
+    def test_team_and_hp_filter(self):
+        state = self._build_state([(0, 1, 2, 2), (1, 2, 3, 3), (2, 1, 5, 5)])
+        state[2, self.HP_DIM] = 0
+        builder = self._make_builder(selected_teams=[1])
+        result = builder(np.expand_dims(state, 0))
+        self.assertGreaterEqual(result[0, 0], 0)
+        self.assertEqual(result[0, 1], -1)
+        self.assertEqual(result[0, 2], -1)
+
+    def test_group_labels_are_consecutive(self):
+        state = self._build_state([
+            (0, 1, 2, 2), (1, 1, 3, 3), (2, 1, 10, 10),
+            (3, 1, 11, 11), (4, 1, 14, 14)
+        ])
+        builder = self._make_builder(n_groups=3, min_group_size=1)
+        result = builder(np.expand_dims(state, 0))
+        alive = result[0] >= 0
+        unique = sorted(set(result[0][alive]))
+        self.assertEqual(unique, list(range(len(unique))))
+
+    def test_batch_independence(self):
+        state_a = self._build_state([(0, 1, 2, 2), (1, 1, 3, 3)])
+        state_b = self._build_state([(0, 1, 2, 2), (1, 1, 15, 15)])
+        states = np.stack([state_a, state_b], axis=0)
+        builder = self._make_builder(n_groups=2)
+        result = builder(states)
+        self.assertEqual(result.shape, (2, self.N_AGENTS))
+
+    def test_caching_in_eval_mode(self):
+        state = self._build_state([(0, 1, 5, 5), (1, 1, 6, 6)])
+        builder = self._make_builder()
+        builder.training = False
+        result1 = builder(np.expand_dims(state, 0))
+        result2 = builder(np.expand_dims(state, 0))
+        np.testing.assert_array_equal(result1, result2)
+
+    def test_no_cache_in_training(self):
+        state = self._build_state([(0, 1, 5, 5), (1, 1, 6, 6)])
+        builder = self._make_builder()
         builder.training = True
         result1 = builder(np.expand_dims(state, 0))
         result2 = builder(np.expand_dims(state, 0))

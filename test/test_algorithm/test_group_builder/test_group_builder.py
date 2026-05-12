@@ -18,14 +18,14 @@ class TestFixedGroupBuilder(unittest.TestCase):
 
         bs = 5
         states = np.random.randn(bs, 10, 10, 5)
-        zone_indices = builder(states)
+        group_indices = builder(states)
 
-        self.assertEqual(zone_indices.shape, (bs, len(self.group_ids)))
-        self.assertEqual(zone_indices.dtype, np.int16)
+        self.assertEqual(group_indices.shape, (bs, len(self.group_ids)))
+        self.assertEqual(group_indices.dtype, np.int16)
 
         for b in range(bs):
             np.testing.assert_array_equal(
-                zone_indices[b], np.array(self.group_ids, dtype=np.int16)
+                group_indices[b], np.array(self.group_ids, dtype=np.int16)
             )
 
     def test_reset(self):
@@ -33,8 +33,8 @@ class TestFixedGroupBuilder(unittest.TestCase):
         builder = builder_config.get_group_builder()
         builder.reset()
         states = np.random.randn(2, 10, 10, 5)
-        zone_indices = builder(states)
-        self.assertEqual(zone_indices.shape, (2, len(self.group_ids)))
+        group_indices = builder(states)
+        self.assertEqual(group_indices.shape, (2, len(self.group_ids)))
 
 
 class TestGroupBuilderConfig(unittest.TestCase):

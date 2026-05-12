@@ -1,3 +1,4 @@
+from absl import logging
 from typing import Dict, Any, Tuple, List
 import numpy as np
 from collections import deque
@@ -90,6 +91,16 @@ class MAgentWrapper(BaseParallelWrapper):
 
         self._n_env_possible_agents = len(self.env.possible_agents)
         self.manhattan_offsets = precompute_manhattan_offsets(2)
+
+        # env.possible_agents = [team0_0..team0_N, team1_0..team1_M]
+        # Find where team 1 begins (row offset for vectorized state).
+        team0_prefix = self.env.possible_agents[0].rsplit('_', 1)[0]
+        for i, name in enumerate(self.env.possible_agents):
+            if name.rsplit('_', 1)[0] != team0_prefix:
+                self._start_team1 = i
+                break
+        else:
+            self._start_team1 = self._n_env_possible_agents
 
         self.opponent_avail_actions = {}
         self.default_opponent_obs = {}
@@ -312,9 +323,21 @@ class MAgentWrapper(BaseParallelWrapper):
         # Create feature matrix
         feature_matrix = np.zeros((self._n_env_possible_agents, feature_dim), dtype=np.float16)
 
+        # Set default team value for every row so that dead-agent slots
+        # inherit the correct team rather than 0.  team-0 rows are always
+        # team 0, team-1 rows are always team 1, regardless of alive state.
+        feature_matrix[: self._start_team1, 1] = 0
+        feature_matrix[self._start_team1 :, 1] = 1
+
         map_size = state.shape[:2]
-        # Fill feature matrix
         for agent_id, team, (y, x) in zip(agent_ids, agent_team, agent_positions):
+            if agent_id >= self._n_env_possible_agents:
+                logging.warning(
+                    "Vectorize state: agent_id %d out of bounds (max %d). "
+                    "Skipping agent at (y=%d, x=%d) team=%d.",
+                    agent_id, self._n_env_possible_agents, y, x, team,
+                )
+                continue
 
             # HP (1 feature)
             if state[y, x, self.TEAM_0_PRESENCE_CHANNEL] > 0:

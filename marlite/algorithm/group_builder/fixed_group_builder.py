@@ -11,8 +11,8 @@ class FixedGroupBuilder(GroupBuilder):
 
     def forward(self, states: ndarray) -> ndarray:
         bs = states.shape[0]
-        zone_indices = np.tile(self.group_ids[np.newaxis, :], (bs, 1))
-        return zone_indices.astype(self.dtype)
+        group_indices = np.tile(self.group_ids[np.newaxis, :], (bs, 1))
+        return group_indices.astype(self.dtype)
 
     def reset(self):
         return self

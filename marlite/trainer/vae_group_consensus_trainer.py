@@ -273,13 +273,14 @@ class VAEGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
         ).to(self.train_device)
         #   (B, T) → (B, N, T)
 
-        # ── Pre-compute group_indices from state ─────────────────────────
-        # Avoids recomputation inside agent.forward().
-        # GroupBuilder takes grid state (B, H, W, C) or (B, C, H, W).
+        # ── Extract state for agent forward ─────────────────────────────────
         states_last_np = states[:, -1].detach().cpu().numpy()
-        #   (B, T, H,W,C) → (B, H,W,C)  numpy  [or (B, C,H,W)]
-        group_indices = self.eval_agent_group.group_builder(states_last_np)
-        #   (B, N)  numpy, group ID per agent, -1 = dead
+        #   (B, T, H,W,C) → (B, H,W,C)  numpy
+
+        # ── Pre-compute group_indices from batch ───────────────────────────
+        # Stored during rollout, avoids recomputation via group_builder.
+        group_indices = batch["group_indices"][:, -1, :].numpy()
+        #   (B, T, N) → (B, N)  numpy, group ID per agent, -1 = dead
 
         # ═══════════════════════════════════════════════════════════════════
         #  PART 1 : RL Forward Pass  (Agent + standard QMixer)
@@ -343,10 +344,8 @@ class VAEGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
             next_states_last_np = next_states[:, -1].detach().cpu().numpy()
             #   (B, T, H,W,C) → (B, H,W,C) numpy
 
-            next_group_indices = self.target_agent_group.group_builder(
-                next_states_last_np
-            )
-            #   (B, N) numpy
+            next_group_indices = batch["next_group_indices"][:, -1, :].numpy()
+            #   (B, T, N) → (B, N)  numpy
 
             ret_next = self.target_agent_group(
                 next_observations_t,                 # (B, N, T, obs_dim)

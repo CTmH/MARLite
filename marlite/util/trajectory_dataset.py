@@ -13,11 +13,9 @@ FLOAT_ATTR = [
 # Used by TrajectoryDataset.__getitem__ for array-type episode buffer fields
 ARRAY_ATTR = [
     "states",
-    "edge_indices",
     "next_states",
+    "edge_indices",
     "next_edge_indices",
-    "zone_indices",
-    "next_zone_indices",
 ]
 
 # Used by TrajectoryDataset.__getitem__ for dict-type episode buffer fields
@@ -31,6 +29,8 @@ DICT_ATTR = [
     "rewards",
     "terminations",
     "truncations",
+    "group_indices",
+    "next_group_indices",
 ]
 
 # Used by TrajectoryDataset.__getitem__ for padding mask fields
@@ -53,6 +53,8 @@ NUMERIC_ATTR = [
     "next_alive_mask",
     "next_observations",
     "next_timestep_padding_mask",
+    "group_indices",
+    "next_group_indices",
     "formatted_obs",
     "construct_padding_mask",
 ]
@@ -61,8 +63,6 @@ NUMERIC_ATTR = [
 DYNAMIC_LEN_ATTR = [
     "edge_indices",
     "next_edge_indices",
-    "zone_indices",
-    "next_zone_indices",
 ]
 
 # Used by trajectory_collate_fn to preserve gym.Space objects

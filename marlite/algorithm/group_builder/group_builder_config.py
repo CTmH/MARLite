@@ -1,15 +1,19 @@
 from copy import deepcopy
 import numpy as np
 from marlite.algorithm.group_builder.group_builder import GroupBuilder
-from marlite.algorithm.group_builder.label_propagation_group_builder import (
+from marlite.algorithm.group_builder.magent_group_builder import (
     MAgentLabelPropagationGroupBuilder,
     MAgentVecLPGroupBuilder,
+    MagentKMeansGroupBuilder,
+    MagentVecKMeansGroupBuilder,
 )
 from marlite.algorithm.group_builder.fixed_group_builder import FixedGroupBuilder
 
 registered_group_builders = {
     "MAgentLabelPropagation": MAgentLabelPropagationGroupBuilder,
     "MAgentVecLP": MAgentVecLPGroupBuilder,
+    "MagentKMeans": MagentKMeansGroupBuilder,
+    "MagentVecKMeans": MagentVecKMeansGroupBuilder,
     "Fixed": FixedGroupBuilder,
 }
 
