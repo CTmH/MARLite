@@ -272,13 +272,18 @@ def create_random_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
 
 def create_magent_prey_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
     agents = agent_group_config["agent_list"]
-    return MAgentPreyAgentGroup(agents)
+    strategy = agent_group_config.get("strategy", "greedy")
+    temperature = agent_group_config.get("temperature", 1.0)
+    top_k = agent_group_config.get("top_k", 5)
+    return MAgentPreyAgentGroup(agents, strategy, temperature, top_k)
 
 
 def create_magent_battle_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
     agents = agent_group_config["agent_list"]
     strategy = agent_group_config.get("strategy", "advanced")
-    return MAgentBattleAgentGroup(agents, strategy)
+    temperature = agent_group_config.get("temperature", 1.0)
+    top_k = agent_group_config.get("top_k", 8)
+    return MAgentBattleAgentGroup(agents, strategy, temperature, top_k)
 
 
 def create_group_consensus_agent_group(

@@ -15,6 +15,7 @@ from marlite.trainer.trainer_worker.msg_aggr_worker import (
     ProbMsgAggrWorker,
 )
 from marlite.trainer.trainer_worker.group_consensus_worker import GroupConsensusWorker
+from marlite.trainer.trainer_worker.vae_group_consensus_worker import VAEGroupConsensusWorker
 
 __all__ = [
     "BaseWorker",
@@ -24,4 +25,5 @@ __all__ = [
     "MsgAggrWorker",
     "ProbMsgAggrWorker",
     "GroupConsensusWorker",
+    "VAEGroupConsensusWorker",
 ]

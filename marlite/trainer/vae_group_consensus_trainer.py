@@ -4,9 +4,13 @@ import absl.logging as logging
 from tqdm import tqdm
 
 from marlite.trainer.self_supervised_qmix_trainer import SelfSupervisedQMIXTrainer
+from marlite.trainer.trainer_worker_group.vae_group_consensus_worker_group import (
+    VAEGroupConsensusWorkerGroup,
+)
 from marlite.util.trajectory_dataset import (
     TrajectoryDataLoader,
 )
+from marlite.util.serialization import get_state_dict, load_state_dict_into
 
 # ────────────────────────────────────────────────────────────────────────
 # Dimension reference
@@ -78,12 +82,67 @@ class VAEGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
             **kwargs,
         )
 
-    # ── Training loop (single-GPU only) ──────────────────────────────────
+    # ── Multi-GPU support ───────────────────────────────────────────────
+
+    def _create_worker_group(self):
+        if not self.use_multi_gpu:
+            return None
+
+        return VAEGroupConsensusWorkerGroup(
+            device_ids=list(range(len(self.device_list))),
+            agent_group_config=self.agent_group_config,
+            critic_config=self.critic_config,
+            critic_optimizer_config=self.critic_optimizer_config,
+            agent_optimizer_config=self.agent_optimizer_config,
+            gamma=self.gamma,
+            ssl_model_config=self.ssl_model_config,
+            ssl_optimizer_config=self.ssl_optimizer_config,
+            reconstruction_loss=self.reconstruction_loss,
+            data_constructor=self.data_constructor,
+            kl_divergence_weight=self.kl_divergence_weight,
+            self_supervised_learning_loss_weight=self.self_supervised_learning_loss_weight,
+            loss_combination_method=self.loss_combination_method,
+            pit_loss_alpha=self.pit_loss_alpha,
+            warmup_epochs=self.warmup_epochs,
+            recon_mode=self.recon_mode,
+            kl_on_group=self.kl_on_group,
+        )
+
+    def _sync_params_to_workers(self):
+        if self.worker_group is None:
+            return
+
+        trainable_params = {
+            "eval_agent_group": get_state_dict(self.eval_agent_group),
+            "target_agent_group": get_state_dict(self.target_agent_group),
+            "eval_critic": get_state_dict(self.eval_critic),
+            "target_critic": get_state_dict(self.target_critic),
+        }
+        if hasattr(self, "ssl_model") and self.ssl_model is not None:
+            trainable_params["ssl_model"] = get_state_dict(self.ssl_model)
+        self.worker_group.broadcast_params(trainable_params)
+
+        critic_lr = self.critic_optimizer.param_groups[0]["lr"]
+        agent_lr = self.agent_optimizer.param_groups[0]["lr"]
+        self.worker_group.sync_lr_to_workers(critic_lr, agent_lr)
+
+    def _sync_eval_params_from_workers(self):
+        if self.worker_group is None:
+            return
+        eval_params = self.worker_group.read_params_from_worker0()
+        load_state_dict_into(
+            self.eval_agent_group, eval_params["eval_agent_group"]
+        )
+        load_state_dict_into(self.eval_critic, eval_params["eval_critic"])
+        if "ssl_model" in eval_params and hasattr(self, "ssl_model"):
+            load_state_dict_into(self.ssl_model, eval_params["ssl_model"])
+
+    # ── Training loop ────────────────────────────────────────────────────
 
     def learn(self, sample_size, batch_size: int, times: int = 1):
         if not self.use_multi_gpu:
             return self._joint_learn_single_gpu(sample_size, batch_size, times)
-        return self._joint_learn_single_gpu(sample_size, batch_size, times)
+        return self._joint_learn_multi_gpu(sample_size, batch_size, times)
 
     def _joint_learn_single_gpu(self, sample_size, batch_size: int, times: int = 1):
         total_combined = 0.0
@@ -149,6 +208,49 @@ class VAEGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
         self.target_agent_group.to("cpu")
         self.target_critic.to("cpu")
         self.ssl_model.to("cpu")
+        torch.cuda.empty_cache()
+
+        avg_combined = total_combined / total_batches
+        avg_critic = total_critic / total_batches
+        avg_vae = total_vae / total_batches
+        logging.info(
+            f"  Combined Loss: {avg_combined:.4f}, RL Loss: {avg_critic:.4f}, VAE Loss: {avg_vae:.4f}"
+        )
+
+        return avg_combined
+
+    def _joint_learn_multi_gpu(self, sample_size, batch_size: int, times: int = 1):
+        self.worker_group.move_models_to_gpu()
+
+        total_combined = 0.0
+        total_critic = 0.0
+        total_vae = 0.0
+        total_batches = 0
+
+        for t in range(times):
+            dataset = self.replaybuffer.sample(sample_size)
+            dataloader = TrajectoryDataLoader(
+                dataset,
+                batch_size=batch_size,
+                shuffle=True,
+                num_workers=self.n_workers,
+            )
+            with tqdm(
+                total=sample_size, desc=f"Times {t + 1}/{times}", unit="batch"
+            ) as pbar:
+                for batch in dataloader:
+                    batch["epoch"] = self.current_epoch
+                    combined, critic, vae = self.worker_group.train_step(batch)
+
+                    total_combined += combined
+                    total_critic += critic
+                    total_vae += vae
+                    total_batches += 1
+
+                    bs = batch["states"].shape[0]
+                    pbar.update(bs)
+
+        self.worker_group.move_models_to_cpu()
         torch.cuda.empty_cache()
 
         avg_combined = total_combined / total_batches

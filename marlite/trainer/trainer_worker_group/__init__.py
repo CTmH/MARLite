@@ -17,6 +17,9 @@ from marlite.trainer.trainer_worker_group.vae_ssl_worker_group import (
 from marlite.trainer.trainer_worker_group.group_consensus_worker_group import (
     GroupConsensusWorkerGroup,
 )
+from marlite.trainer.trainer_worker_group.vae_group_consensus_worker_group import (
+    VAEGroupConsensusWorkerGroup,
+)
 
 __all__ = [
     "BaseWorkerGroup",
@@ -25,4 +28,5 @@ __all__ = [
     "MsgAggrWorkerGroup",
     "VAEGraphWorkerGroup",
     "GroupConsensusWorkerGroup",
+    "VAEGroupConsensusWorkerGroup",
 ]

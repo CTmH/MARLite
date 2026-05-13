@@ -4,11 +4,106 @@ from marlite.algorithm.agents.agent_group import AgentGroup
 
 class MAgentPreyAgentGroup(AgentGroup):
     '''
-    agents: Dict[(agent_name(str), model_name(str))]
-    model_configs: Dict[model_name(str), ModelConfig]
+    Agent group for prey agents in adversarial pursuit environment.
+    Supports greedy (deterministic) and probability-based strategies.
+
+    Args:
+        agents: Dict mapping agent names to model names.
+        strategy: Action selection strategy ("greedy" or "probability").
+        temperature: Softmax temperature for probability strategy.
+            Lower values make the distribution peakier (more greedy).
+            Higher values make it more uniform (more exploratory).
+        top_k: Number of top-scoring actions to consider in probability strategy.
     '''
-    def __init__(self, agents: Dict[str, str]) -> None:
-       self.agents = list(agents.keys())
+    def __init__(
+            self,
+            agents: Dict[str, str],
+            strategy: str = "greedy",
+            temperature: float = 1.0,
+            top_k: int = 5
+        ) -> None:
+        self.agents = list(agents.keys())
+        self.strategy = strategy
+        self.temperature = temperature
+        self.top_k = top_k
+
+    def _compute_action_values(
+            self,
+            observations: Dict[str, np.ndarray]
+        ) -> np.ndarray:
+        """
+        Compute action values for all 9 grid positions (8 directions + center).
+        Each position is scored by its total Manhattan distance from obstacles
+        and enemy agents. Higher values indicate safer positions.
+
+        Args:
+            observations: Dictionary mapping agent IDs to observation tensors
+                of shape (T, H, W, C).
+
+        Returns:
+            ndarray of shape (num_agents, 9) with distance sums for each action.
+        """
+        obstacle_and_other_team_presence = {key: value[-1,:,:,0] + value[-1,:,:,3] for key, value in observations.items()}
+        o_tensor = np.stack(list(obstacle_and_other_team_presence.values()))
+        batch_size, n, m = o_tensor.shape
+        cx = n // 2
+        cy = m // 2
+
+        offsets = np.array([(-1,-1), (-1,0), (-1,1),
+                        (0,-1),  (0,0),  (0,1),
+                        (1,-1),  (1,0),  (1,1)])
+
+        points = [np.argwhere(o > 0) for o in o_tensor]
+
+        grid_coords = offsets + (cx, cy)
+        dist_sums = np.zeros((batch_size, 9))
+
+        for i in range(batch_size):
+            if len(points[i]) > 0:
+                diff = np.abs(grid_coords[:, None] - points[i][None])
+                dist_sums[i] = np.sum(np.sum(diff, axis=-1), axis=-1)
+
+        return dist_sums
+
+    def probability_strategy(
+            self,
+            observations: Dict[str, np.ndarray],
+            alive_agents: List[str]
+        ) -> Dict[str, int]:
+        """
+        Probability-based action selection using softmax over top-K actions.
+        Computes action values via _compute_action_values, selects the
+        top-K scoring actions, applies softmax with temperature scaling,
+        and samples from the resulting distribution.
+
+        Args:
+            observations: Dictionary mapping agent IDs to observation tensors.
+            alive_agents: List of agent IDs that are currently alive.
+
+        Returns:
+            tuple: (actual_actions dict for alive agents, all_actions dict).
+        """
+        action_values = self._compute_action_values(observations)
+
+        all_actions = {}
+        for i, agent in enumerate(observations.keys()):
+            values = action_values[i]
+
+            # Select top-K actions by score
+            sorted_indices = np.argsort(-values)
+            top_k = min(self.top_k, len(sorted_indices))
+            active_indices = sorted_indices[:top_k]
+            active_values = values[active_indices]
+
+            # Softmax with temperature
+            probs = np.exp((active_values - np.max(active_values)) / self.temperature)
+            probs = probs / np.sum(probs)
+
+            chosen_idx = np.random.choice(active_indices, p=probs)
+            all_actions[agent] = int(chosen_idx)
+
+        actual_actions = {agent: all_actions[agent] for agent in alive_agents}
+        return actual_actions, all_actions
 
     def act(
             self,
@@ -44,38 +139,16 @@ class MAgentPreyAgentGroup(AgentGroup):
                 - 'actions': Dictionary mapping only alive agents to their selected actions
                 - 'all_actions': Dictionary mapping all agents to their selected actions (including dead ones)
         """
-        obstacle_and_other_team_presence = {key: value[-1,:,:,0] + value[-1,:,:,3] for key, value in observations.items()} # value: (T*obs_len*obs_len*F)
+        if self.strategy == "probability":
+            actual_actions, all_actions = self.probability_strategy(observations, alive_agents)
+            return {'actions': actual_actions, 'all_actions': all_actions}
 
-        # (num_agents, n, n)
-        o_tensor = np.stack(list(obstacle_and_other_team_presence.values()))
-        batch_size, n, m = o_tensor.shape
-        # Centre Coord
-        cx = n // 2
-        cy = m // 2
+        # Default greedy strategy: select the action with maximum distance from threats
+        action_values = self._compute_action_values(observations)
+        max_indices = np.argmax(action_values, axis=1)
 
-        offsets = np.array([(-1,-1), (-1,0), (-1,1),
-                        (0,-1),  (0,0),  (0,1),
-                        (1,-1),  (1,0),  (1,1)])
-
-        # Get all agent coordinates (batch_size, m, 2)
-        points = [np.argwhere(o > 0) for o in o_tensor]
-
-        # Vectorized calculation of Manhattan distance sum
-        grid_coords = offsets + (cx, cy)
-        dist_sums = np.zeros((batch_size, 9))
-
-        for i in range(batch_size):
-            if len(points[i]) > 0:
-                diff = np.abs(grid_coords[:, None] - points[i][None]) # grid_coords shape changes to (9, 1, 2), points shape changes to (1, N, 2)
-                # Calculate the distance from each grid point to all targets
-                dist_sums[i] = np.sum(np.sum(diff, axis=-1), axis=-1)
-
-        # Find the index of the position with the maximum distance sum
-        max_indices = np.argmax(dist_sums, axis=1)
-
-        # Construct action dictionary
         all_actions = {agent: max_indices[i]
-                for i, agent in enumerate(obstacle_and_other_team_presence.keys())}
+                for i, agent in enumerate(observations.keys())}
 
         actual_actions = {agent: all_actions[agent] for agent in alive_agents}
 
@@ -87,10 +160,31 @@ class MAgentBattleAgentGroup(AgentGroup):
     Agent group for the battle environment that handles enemy agent actions.
     Implements attack_8 (8 directions) and move_12 (12 positions within Manhattan distance 3)
     with obstacle avoidance.
+
+    Supports three strategies:
+        - "basic": Attack when possible, otherwise move toward enemies.
+        - "advanced": Tactical decision making with HP management,
+          coordinated attacks, and strategic positioning.
+        - "probability": Probability-based sampling using the advanced
+          strategy's scoring logic with softmax over top-K actions.
+
+    Args:
+        agents: Dict mapping agent names to model names.
+        strategy: Action selection strategy ("basic", "advanced", or "probability").
+        temperature: Softmax temperature for probability strategy.
+        top_k: Number of top-scoring actions to consider in probability strategy.
     '''
-    def __init__(self, agents: Dict[str, str], strategy: str = "advanced") -> None:
+    def __init__(
+            self,
+            agents: Dict[str, str],
+            strategy: str = "advanced",
+            temperature: float = 1.0,
+            top_k: int = 8
+        ) -> None:
         self.agents = list(agents.keys())
-        self.strategy = strategy  # "basic" or "advanced"
+        self.strategy = strategy
+        self.temperature = temperature
+        self.top_k = top_k
 
         # Initialize constant class attributes
         self.do_nothing_action = 0
@@ -121,6 +215,8 @@ class MAgentBattleAgentGroup(AgentGroup):
         # Validate move offsets count
         if len(self.move_offsets) != 13:
             raise ValueError(f"Expected 13 move offsets, got {len(self.move_offsets)}")
+
+        self._total_actions = 21
 
     def basic_strategy(
             self,
@@ -373,6 +469,142 @@ class MAgentBattleAgentGroup(AgentGroup):
 
         return all_actions
 
+    def probability_strategy(
+            self,
+            observations: Dict[str, np.ndarray],
+            alive_agents: List[str]
+        ) -> Dict[str, int]:
+        """
+        Probability-based strategy: Computes action values for all 21 actions
+        using the advanced strategy's scoring logic (without phase gating),
+        then samples from a softmax distribution over the top-K feasible actions.
+
+        Unlike the deterministic advanced strategy which uses conditional
+        phase gating (retreat when low HP, attack when advantage, etc.),
+        this strategy evaluates all actions simultaneously and samples
+        proportionally to their scores, providing smoother exploration.
+
+        Args:
+            observations (dict): Dictionary mapping agent IDs to observation arrays.
+            alive_agents (list): List of agent IDs that are currently alive.
+
+        Returns:
+            tuple: (actual_actions dict, all_actions dict).
+        """
+        # Extract observation channels: obstacle, team presence, and HP
+        obstacle_map = {key: value[-1, :, :, 0] for key, value in observations.items()}
+        my_team_presence = {key: value[-1, :, :, 1] for key, value in observations.items()}
+        my_team_hp = {key: value[-1, :, :, 2] for key, value in observations.items()}
+        other_team_presence = {key: value[-1, :, :, 3] for key, value in observations.items()}
+        other_team_hp = {key: value[-1, :, :, 4] for key, value in observations.items()}
+
+        # Combine obstacle and enemy presence for pathfinding
+        combined_map = {key: obs + other for key, (obs, other) in
+                       zip(obstacle_map.keys(), zip(obstacle_map.values(), other_team_presence.values()))}
+        o_tensor = np.stack(list(combined_map.values()))
+        batch_size, n, m = o_tensor.shape
+
+        cx = n // 2
+        cy = m // 2
+
+        all_actions = {}
+
+        for i, agent in enumerate(observations.keys()):
+            local_grid = o_tensor[i]
+            agent_pos = np.array([cx, cy])
+
+            current_hp = my_team_hp[agent][cx, cy]
+
+            enemy_positions = np.argwhere(other_team_presence[agent] > 0)
+            ally_positions = np.argwhere(my_team_presence[agent] > 0)
+            ally_positions = ally_positions[~np.all(ally_positions == agent_pos, axis=1)]
+
+            # Initialize all 21 actions with -inf (infeasible by default)
+            action_values = np.full(self._total_actions, -np.inf)
+
+            # Score attack actions (indices 13-20): value based on enemy HP and ally support
+            for j, offset in enumerate(self.attack_offsets):
+                attack_pos = agent_pos + offset
+                action_idx = self.attack_start_idx + j
+
+                if (0 <= attack_pos[0] < n and 0 <= attack_pos[1] < m):
+                    enemy_at_pos = np.any(np.all(enemy_positions == attack_pos, axis=1))
+                    if enemy_at_pos:
+                        enemy_hp = other_team_hp[agent][attack_pos[0], attack_pos[1]]
+                        attack_value = 10 - enemy_hp
+
+                        ally_support = 0
+                        for ally_pos in ally_positions:
+                            dist = abs(attack_pos[0] - ally_pos[0]) + abs(attack_pos[1] - ally_pos[1])
+                            if dist <= 2:
+                                ally_support += 1
+                        attack_value += ally_support * 2
+
+                        action_values[action_idx] = attack_value
+
+            # Score move actions (indices 1-12): combine retreat safety and offensive positioning
+            for j, offset in enumerate(self.move_offsets):
+                move_pos = agent_pos + offset
+                action_idx = self.move_start_idx + j
+
+                if (0 <= move_pos[0] < n and 0 <= move_pos[1] < m and
+                    local_grid[move_pos[0], move_pos[1]] == 0):
+
+                    # Retreat component: maximize distance from enemies, stay near allies
+                    safety_score = 0
+                    for enemy_pos in enemy_positions:
+                        dist = abs(move_pos[0] - enemy_pos[0]) + abs(move_pos[1] - enemy_pos[1])
+                        safety_score += dist
+
+                    ally_proximity = 0
+                    for ally_pos in ally_positions:
+                        dist = abs(move_pos[0] - ally_pos[0]) + abs(move_pos[1] - ally_pos[1])
+                        if dist <= 2:
+                            ally_proximity += 1 / (dist + 1)
+
+                    retreat_value = safety_score + ally_proximity * 5
+
+                    # Position component: stay at optimal attack range, near allies, control center
+                    position_value = 0
+                    for enemy_pos in enemy_positions:
+                        dist = abs(move_pos[0] - enemy_pos[0]) + abs(move_pos[1] - enemy_pos[1])
+                        if 2 <= dist <= 4:
+                            position_value += 3
+                        elif dist < 2:
+                            position_value -= 2
+
+                    for ally_pos in ally_positions:
+                        dist = abs(move_pos[0] - ally_pos[0]) + abs(move_pos[1] - ally_pos[1])
+                        if dist <= 2:
+                            position_value += 2
+
+                    center_dist = abs(move_pos[0] - cx) + abs(move_pos[1] - cy)
+                    position_value += (n - center_dist) * 0.5
+
+                    action_values[action_idx] = max(retreat_value, position_value)
+
+            # Do nothing (action 0): baseline value for fallback
+            action_values[self.do_nothing_action] = 0.0
+
+            # Select top-K feasible actions and apply softmax with temperature
+            feasible_mask = np.isfinite(action_values)
+            feasible_indices = np.where(feasible_mask)[0]
+            feasible_values = action_values[feasible_indices]
+
+            sorted_order = np.argsort(-feasible_values)
+            top_k = min(self.top_k, len(feasible_indices))
+            top_indices = feasible_indices[sorted_order[:top_k]]
+            top_values = action_values[top_indices]
+
+            exp_values = np.exp((top_values - np.max(top_values)) / self.temperature)
+            probs = exp_values / np.sum(exp_values)
+
+            chosen_action = int(np.random.choice(top_indices, p=probs))
+            all_actions[agent] = chosen_action
+
+        actual_actions = {agent: all_actions[agent] for agent in alive_agents}
+        return actual_actions, all_actions
+
     def act(
             self,
             observations: Dict[str, np.ndarray],
@@ -399,11 +631,18 @@ class MAgentBattleAgentGroup(AgentGroup):
                 - 'actions': Dictionary mapping only alive agents to their selected actions
                 - 'all_actions': Dictionary mapping all agents to their selected actions
         """
-        # Choose strategy based on strategy_type
-        if self.strategy == "advanced":
+        # Choose strategy based on strategy_type:
+        #   "probability" - softmax sampling over top-K scored actions (based on advanced scoring)
+        #   "advanced"    - tactical decision tree with HP management and coordinated attacks
+        #   "basic"       - simple attack-if-possible, move-toward-enemies heuristic
+        if self.strategy == "probability":
+            actual_actions, all_actions = self.probability_strategy(observations, alive_agents)
+        elif self.strategy == "advanced":
             all_actions = self.advanced_strategy(observations, alive_agents)
+            actual_actions = {agent: all_actions[agent] for agent in alive_agents}
         else:
             all_actions = self.basic_strategy(observations, alive_agents)
+            actual_actions = {agent: all_actions[agent] for agent in alive_agents}
 
         # Apply exploration with epsilon-greedy
         if epsilon > 0:
@@ -418,7 +657,6 @@ class MAgentBattleAgentGroup(AgentGroup):
                         # Fallback to random action from all possible actions
                         all_actions[agent] = np.random.randint(0, 21)  # 21 total actions
 
-        # Return actions only for alive agents
         actual_actions = {agent: all_actions[agent] for agent in alive_agents}
 
         return {'actions': actual_actions, 'all_actions': all_actions}
