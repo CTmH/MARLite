@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+import torch.nn.functional as F
 import torch.nn as nn
 from typing import Dict, Any, List, Optional
 from marlite.algorithm.model.model_config import ModelConfig
@@ -20,11 +21,17 @@ class GroupConsensusAgentGroup(AgentGroup):
         group_builder_config: GroupBuilderConfig,
         deterministic_eval: bool = True,
         enable_rl_grad_to_group_estimate: bool = False,
+        merge_mode: str = "bayesian",
     ) -> None:
         super().__init__()
         self.agent_model_dict = agent_model_dict
         self.deterministic_eval = deterministic_eval
         self.enable_rl_grad_to_group_estimate = enable_rl_grad_to_group_estimate
+        if merge_mode not in ("sample_mean", "bayesian"):
+            raise ValueError(
+                f"merge_mode must be 'sample_mean' or 'bayesian', got '{merge_mode}'"
+            )
+        self.merge_mode = merge_mode
 
         self.feature_extractors = nn.ModuleDict()
         for model_name, config in feature_extractor_configs.items():
@@ -181,29 +188,84 @@ class GroupConsensusAgentGroup(AgentGroup):
         return agent_latent, local_obs
 
     def _merge_group_distributions(self, agent_mu, agent_log_var, group_indices):
+        if self.merge_mode == "sample_mean":
+            return GroupConsensusAgentGroup._merge_sample_mean(
+                self, agent_mu, agent_log_var, group_indices
+            )
+        return GroupConsensusAgentGroup._merge_bayesian(
+            self, agent_mu, agent_log_var, group_indices
+        )
+
+    def _merge_sample_mean(self, agent_mu, agent_log_var, group_indices):
         bs, n_agents, f_z = agent_mu.shape
         G = int(group_indices.max()) + 1
 
         gids = torch.as_tensor(group_indices, dtype=torch.long, device=self.device)
+        dead = gids < 0
+        gids_safe = gids.clamp(min=0)
 
-        group_mu = agent_mu.new_zeros(bs, G, f_z)
-        group_log_var = agent_log_var.new_zeros(bs, G, f_z)
+        mask = F.one_hot(gids_safe, num_classes=G).float()
+        mask[dead] = 0.0
 
-        for b in range(bs):
-            for g in range(G):
-                mask = gids[b] == g
-                if not mask.any():
-                    continue
-                n_z = mask.sum().float()
+        count = mask.sum(dim=1)
+        count_safe = count.clamp(min=1)
 
-                group_mu[b, g] = agent_mu[b, mask].mean(dim=0)
+        group_mu = torch.bmm(mask.transpose(1, 2), agent_mu) / count_safe.unsqueeze(-1)
 
-                log_var_masked = agent_log_var[b, mask]
-                max_lv = torch.max(log_var_masked, dim=0).values
-                log_sum_exp = max_lv + torch.log(
-                    torch.sum(torch.exp(log_var_masked - max_lv), dim=0) + 1e-8
-                )
-                group_log_var[b, g] = log_sum_exp - 2 * torch.log(n_z)
+        neg_inf = torch.tensor(float('-inf'), dtype=agent_log_var.dtype, device=self.device)
+        agent_lv_exp = agent_log_var.unsqueeze(2)
+        mask_z = mask.unsqueeze(-1)
+
+        max_lv, _ = torch.where(mask_z.bool(), agent_lv_exp, neg_inf).max(dim=1)
+        count_mask = (count > 0).unsqueeze(-1)
+        max_lv = torch.where(count_mask, max_lv, torch.zeros_like(max_lv))
+
+        log_var_diff = agent_lv_exp - max_lv.unsqueeze(1)
+        sum_exp = (torch.exp(log_var_diff) * mask_z).sum(dim=1)
+        log_sum_exp = max_lv + torch.log(sum_exp + 1e-8)
+        group_log_var = log_sum_exp - 2 * torch.log(count_safe.unsqueeze(-1))
+        group_log_var = group_log_var * count_mask
+        group_mu = group_mu * count_mask
+
+        return group_mu, group_log_var
+
+    def _merge_bayesian(self, agent_mu, agent_log_var, group_indices):
+        bs, n_agents, f_z = agent_mu.shape
+        G = int(group_indices.max()) + 1
+
+        gids = torch.as_tensor(group_indices, dtype=torch.long, device=self.device)
+        dead = gids < 0
+        gids_safe = gids.clamp(min=0)
+
+        mask = F.one_hot(gids_safe, num_classes=G).float()
+        mask[dead] = 0.0
+
+        count = mask.sum(dim=1)
+        count_mask = (count > 0).unsqueeze(-1)
+
+        neg_log_var = -agent_log_var
+        neg_inf = torch.tensor(float('-inf'), dtype=agent_log_var.dtype, device=self.device)
+        agent_nlv_exp = neg_log_var.unsqueeze(2)
+        agent_mu_exp = agent_mu.unsqueeze(2)
+        mask_z = mask.unsqueeze(-1)
+
+        max_nlv, _ = torch.where(mask_z.bool(), agent_nlv_exp, neg_inf).max(dim=1)
+        max_nlv = torch.where(count_mask, max_nlv, torch.zeros_like(max_nlv))
+
+        nlv_diff = agent_nlv_exp - max_nlv.unsqueeze(1)
+        precision = torch.exp(nlv_diff) * mask_z
+
+        sum_precision = precision.sum(dim=1)
+
+        weighted_mu = agent_mu_exp * precision
+        sum_weighted_mu = weighted_mu.sum(dim=1)
+        group_mu = sum_weighted_mu / sum_precision.clamp(min=1e-8)
+
+        log_sum_precision = max_nlv + torch.log(sum_precision + 1e-8)
+        group_log_var = -log_sum_precision
+
+        group_mu = group_mu * count_mask.float()
+        group_log_var = group_log_var * count_mask.float()
 
         return group_mu, group_log_var
 
@@ -211,14 +273,18 @@ class GroupConsensusAgentGroup(AgentGroup):
     def _scatter(g_t, group_indices):
         bs, G = g_t.shape[:2]
         n_agents = group_indices.shape[1]
-        out = g_t.new_zeros(bs, n_agents, *g_t.shape[2:])
-        for b in range(bs):
-            gids = torch.as_tensor(group_indices[b], dtype=torch.long, device=g_t.device)
-            valid = gids >= 0
-            for g in range(G):
-                m = valid & (gids == g)
-                if m.any():
-                    out[b, m] = g_t[b, g]
+        extra_dims = g_t.shape[2:]
+        device = g_t.device
+
+        gids = torch.as_tensor(group_indices, dtype=torch.long, device=device)
+        dead = gids < 0
+        mask = F.one_hot(gids.clamp(min=0), num_classes=G).float()
+        mask[dead] = 0.0
+
+        g_t_flat = g_t.reshape(bs, G, -1)
+        out_flat = torch.bmm(mask, g_t_flat)
+        out = out_flat.reshape(bs, n_agents, *extra_dims)
+
         return out
 
     def _process_decoders(self, hidden_states):

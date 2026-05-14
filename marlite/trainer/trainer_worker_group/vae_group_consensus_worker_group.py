@@ -25,6 +25,7 @@ class VAEGroupConsensusWorkerGroup(BaseWorkerGroup):
         warmup_epochs: int = 0,
         recon_mode: str = "per_agent",
         kl_on_group: bool = False,
+        kl_on_consensus: bool = True,
         init_method: str = None,
     ):
         self.gamma = gamma
@@ -43,6 +44,7 @@ class VAEGroupConsensusWorkerGroup(BaseWorkerGroup):
         self.warmup_epochs = warmup_epochs
         self.recon_mode = recon_mode
         self.kl_on_group = kl_on_group
+        self.kl_on_consensus = kl_on_consensus
 
         super().__init__(
             device_ids=device_ids,
@@ -77,6 +79,7 @@ class VAEGroupConsensusWorkerGroup(BaseWorkerGroup):
         kwargs["warmup_epochs"] = self.warmup_epochs
         kwargs["recon_mode"] = self.recon_mode
         kwargs["kl_on_group"] = self.kl_on_group
+        kwargs["kl_on_consensus"] = self.kl_on_consensus
         return kwargs
 
     def train_step(self, batch: Dict[str, Any]) -> tuple:

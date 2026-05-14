@@ -1,5 +1,6 @@
 import io
 import torch
+import torch.nn.functional as F
 import torch.distributed as dist
 from typing import Any, Dict
 
@@ -39,6 +40,7 @@ class VAEGroupConsensusWorker(BaseWorker):
         warmup_epochs: int = 0,
         recon_mode: str = "per_agent",
         kl_on_group: bool = False,
+        kl_on_consensus: bool = True,
         **kwargs,
     ):
         super().__init__(worker_id, device_id, rank, world_size, init_method)
@@ -49,6 +51,7 @@ class VAEGroupConsensusWorker(BaseWorker):
         self.pit_loss_alpha = pit_loss_alpha
         self.recon_mode = recon_mode
         self.kl_on_group = kl_on_group
+        self.kl_on_consensus = kl_on_consensus
 
         self.eval_agent_group = agent_group_config.get_agent_group()
         self.target_agent_group = agent_group_config.get_agent_group()
@@ -299,16 +302,23 @@ class VAEGroupConsensusWorker(BaseWorker):
                     construct_mask, alive_mask
                 )
 
+            kl_divergence = 0.0
+            if self.kl_on_consensus:
+                kl_mu = agent_mu
+                kl_log_var = agent_log_var
+                mask = alive_mask[:, -1, :].unsqueeze(-1).expand_as(agent_mu)
+                kl_per_dim = 1 + kl_log_var - kl_mu.pow(2) - torch.exp(kl_log_var)
+                kl_divergence = kl_divergence + -0.5 * (
+                    kl_per_dim * mask
+                ).sum() / mask.sum().clamp(min=1)
             if self.kl_on_group:
                 kl_mu = group_mu
                 kl_log_var = group_log_var
                 mask = construct_mask.unsqueeze(-1).expand_as(group_mu)
-            else:
-                kl_mu = agent_mu
-                kl_log_var = agent_log_var
-                mask = alive_mask[:, -1, :].unsqueeze(-1).expand_as(agent_mu)
-            kl_per_dim = 1 + kl_log_var - kl_mu.pow(2) - torch.exp(kl_log_var)
-            kl_divergence = -0.5 * (kl_per_dim * mask).sum() / mask.sum().clamp(min=1)
+                kl_per_dim = 1 + kl_log_var - kl_mu.pow(2) - torch.exp(kl_log_var)
+                kl_divergence = kl_divergence + -0.5 * (
+                    kl_per_dim * mask
+                ).sum() / mask.sum().clamp(min=1)
 
             vae_loss = reconstruction_loss + self.kl_divergence_weight * kl_divergence
 
@@ -376,16 +386,16 @@ class VAEGroupConsensusWorker(BaseWorker):
         pred_flat = self.ssl_model(consensus.reshape(bs * G, L))
         pred_g = pred_flat.reshape(bs, G, *target_flat_dim)
 
-        pred_agent = torch.zeros(bs, n_agents, *target_flat_dim, device=device)
-        target_agent = torch.zeros(bs, n_agents, *target_flat_dim, device=device)
-        for b in range(bs):
-            gids = torch.as_tensor(group_indices[b], device=device)
-            for g in range(G):
-                if construct_mask[b, g]:
-                    m = gids == g
-                    if m.any():
-                        pred_agent[b, m] = pred_g[b, g]
-                        target_agent[b, m] = targets[b, g]
+        gids = torch.as_tensor(group_indices, device=device)
+        dead = gids < 0
+        mask = F.one_hot(gids.clamp(min=0), num_classes=G).float()
+        mask[dead] = 0.0
+        mask = mask * construct_mask.unsqueeze(1).float()
+
+        flat_pred = pred_g.reshape(bs, G, -1)
+        flat_target = targets.reshape(bs, G, -1)
+        pred_agent = torch.bmm(mask, flat_pred).reshape(bs, n_agents, *target_flat_dim)
+        target_agent = torch.bmm(mask, flat_target).reshape(bs, n_agents, *target_flat_dim)
 
         agent_alive = alive_mask[:, -1, :]
         return self._compute_ssl_loss(pred_agent, target_agent, agent_alive)

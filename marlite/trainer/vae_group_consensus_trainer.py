@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 import numpy as np
 import absl.logging as logging
 from tqdm import tqdm
@@ -68,6 +69,7 @@ class VAEGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
         loss_combination_method: str = "weighted_sum",
         pit_loss_alpha: float = 0.9,
         kl_on_group: bool = False,
+        kl_on_consensus: bool = True,
         **kwargs,
     ):
         if recon_mode not in ("per_agent", "per_group"):
@@ -76,6 +78,7 @@ class VAEGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
         self.kl_divergence_weight = kl_divergence_weight
         self.warmup_epochs = warmup_epochs
         self.kl_on_group = kl_on_group
+        self.kl_on_consensus = kl_on_consensus
         super().__init__(
             loss_combination_method=loss_combination_method,
             pit_loss_alpha=pit_loss_alpha,
@@ -106,6 +109,7 @@ class VAEGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
             warmup_epochs=self.warmup_epochs,
             recon_mode=self.recon_mode,
             kl_on_group=self.kl_on_group,
+            kl_on_consensus=self.kl_on_consensus,
         )
 
     def _sync_params_to_workers(self):
@@ -524,16 +528,23 @@ class VAEGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
             #   scalar
 
             # ── 3d. KL divergence: KL(N(μ, σ²) || N(0, 1)) ──────────
-            if self.kl_on_group:
-                kl_mu = group_mu                     # (B, G, L)
-                kl_log_var = group_log_var            # (B, G, L)
-                mask = construct_mask.unsqueeze(-1).expand_as(group_mu)
-            else:
-                kl_mu = agent_mu                     # (B, N, L)
-                kl_log_var = agent_log_var            # (B, N, L)
+            kl_divergence = 0.0
+            if self.kl_on_consensus:
+                kl_mu = agent_mu
+                kl_log_var = agent_log_var
                 mask = alive_mask[:, -1, :].unsqueeze(-1).expand_as(agent_mu)
-            kl_per_dim = 1 + kl_log_var - kl_mu.pow(2) - torch.exp(kl_log_var)
-            kl_divergence = -0.5 * (kl_per_dim * mask).sum() / mask.sum().clamp(min=1)
+                kl_per_dim = 1 + kl_log_var - kl_mu.pow(2) - torch.exp(kl_log_var)
+                kl_divergence = kl_divergence + -0.5 * (
+                    kl_per_dim * mask
+                ).sum() / mask.sum().clamp(min=1)
+            if self.kl_on_group:
+                kl_mu = group_mu
+                kl_log_var = group_log_var
+                mask = construct_mask.unsqueeze(-1).expand_as(group_mu)
+                kl_per_dim = 1 + kl_log_var - kl_mu.pow(2) - torch.exp(kl_log_var)
+                kl_divergence = kl_divergence + -0.5 * (
+                    kl_per_dim * mask
+                ).sum() / mask.sum().clamp(min=1)
 
             vae_loss = reconstruction_loss + self.kl_divergence_weight * kl_divergence
             #   scalar
@@ -590,37 +601,26 @@ class VAEGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
     # ── Reconstruction loss: per-agent mode ──────────────────────────────
 
     def _recon_loss_per_agent(self, consensus, group_indices, targets, construct_mask, alive_mask):
-        """Reconstruction loss with agent-count weighting via alive_mask.
-
-        Args:
-            consensus:      (B, G, L)  already deduplicated group consensus
-            group_indices:  (B, N)     numpy group IDs, -1=dead
-            targets:        (B, G, …)  reconstruction target
-            construct_mask: (B, G)     torch bool — True if group has data
-            alive_mask:     (B, T, N)  torch bool
-        """
         bs, G, L = consensus.shape
         n_agents = group_indices.shape[1]
         device = consensus.device
         target_flat_dim = targets.shape[2:]
 
-        # ssl_model on group level: (B*G, L) → (B*G, D)
         pred_flat = self.ssl_model(consensus.reshape(bs * G, L))
         pred_g = pred_flat.reshape(bs, G, *target_flat_dim)
 
-        # Expand to agent level: (B, G, *) → (B, N, *)
-        pred_agent = torch.zeros(bs, n_agents, *target_flat_dim, device=device)
-        target_agent = torch.zeros(bs, n_agents, *target_flat_dim, device=device)
-        for b in range(bs):
-            gids = torch.as_tensor(group_indices[b], device=device)
-            for g in range(G):
-                if construct_mask[b, g]:
-                    m = gids == g
-                    if m.any():
-                        pred_agent[b, m] = pred_g[b, g]
-                        target_agent[b, m] = targets[b, g]
+        gids = torch.as_tensor(group_indices, device=device)
+        dead = gids < 0
+        mask = F.one_hot(gids.clamp(min=0), num_classes=G).float()
+        mask[dead] = 0.0
+        mask = mask * construct_mask.unsqueeze(1).float()
 
-        agent_alive = alive_mask[:, -1, :]  # (B, N)
+        flat_pred = pred_g.reshape(bs, G, -1)
+        flat_target = targets.reshape(bs, G, -1)
+        pred_agent = torch.bmm(mask, flat_pred).reshape(bs, n_agents, *target_flat_dim)
+        target_agent = torch.bmm(mask, flat_target).reshape(bs, n_agents, *target_flat_dim)
+
+        agent_alive = alive_mask[:, -1, :]
         return self._compute_ssl_loss(pred_agent, target_agent, agent_alive)
 
     # ── Reconstruction loss: per-group mode ──────────────────────────────
