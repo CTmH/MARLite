@@ -1,15 +1,51 @@
+"""MAPPO Trainer — Multi-Agent PPO with on-policy training loop.
+
+Implements the MAPPO algorithm (Yu et al., 2021) for discrete action spaces.
+Uses Generalized Advantage Estimation (GAE) with a centralized value critic
+and per-agent stochastic policies (categorical distributions).  Supports both
+single-GPU and multi-GPU training via replicated workers.
+"""
+
 import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.distributions import Categorical
 from absl import logging
-from typing import Union
 
 from marlite.trainer.onpolicy_trainer import OnPolicyTrainer
+from marlite.trainer.trainer_worker_group.mappo_worker_group import MAPPOWorkerGroup
 from marlite.util.trajectory_dataset import TrajectoryDataLoader
 
 
 class MAPPOTrainer(OnPolicyTrainer):
+    """MAPPO (Multi-Agent Proximal Policy Optimization) trainer.
+
+    On-policy actor-critic algorithm with:
+    - Centralized critic V(s) estimating the value of the global state.
+    - Per-agent stochastic policy pi(a|o) modelled as a categorical distribution.
+    - GAE for computing advantage estimates over trajectory segments.
+    - PPO clipped surrogate objective for stable policy updates.
+
+    Supports single-GPU (main process) and multi-GPU (worker processes) modes.
+    In on-policy mode, the replay buffer is cleared after each iteration and
+    refilled by ``evaluate()`` calls, so each batch of data is used exactly once.
+
+    Parameters
+    ----------
+    clip_epsilon : float
+        PPO clip range for the importance sampling ratio.
+    gae_lambda : float
+        GAE lambda parameter controlling bias-variance tradeoff.
+    entropy_coef : float
+        Coefficient for the entropy bonus (encourages exploration).
+    vf_coef : float
+        Coefficient for the value function loss in the combined loss.
+    max_grad_norm : float
+        Maximum gradient norm for clipping.
+    **kwargs :
+        Forwarded to ``OnPolicyTrainer.__init__``.
+    """
+
     def __init__(
         self,
         clip_epsilon: float = 0.2,
@@ -19,22 +55,68 @@ class MAPPOTrainer(OnPolicyTrainer):
         max_grad_norm: float = 5.0,
         **kwargs,
     ):
-        super().__init__(**kwargs)
+        # Must be set before super().__init__() because _create_worker_group()
+        # is called during _setup_multi_gpu() in OnPolicyTrainer.__init__().
         self.clip_epsilon = clip_epsilon
         self.gae_lambda = gae_lambda
         self.entropy_coef = entropy_coef
         self.vf_coef = vf_coef
         self.max_grad_norm = max_grad_norm
+        super().__init__(**kwargs)
+
+    # ------------------------------------------------------------------
+    # Multi-GPU worker group factory
+    # ------------------------------------------------------------------
 
     def _create_worker_group(self):
-        return None
+        """Create a MAPPOWorkerGroup for multi-GPU training.
+
+        Returns ``None`` when ``use_multi_gpu`` is ``False`` (single-GPU mode).
+        """
+        if not self.use_multi_gpu:
+            return None
+
+        return MAPPOWorkerGroup(
+            device_ids=list(range(len(self.device_list))),
+            agent_group_config=self.agent_group_config,
+            critic_config=self.critic_config,
+            critic_optimizer_config=self.critic_optimizer_config,
+            agent_optimizer_config=self.agent_optimizer_config,
+            gamma=self.gamma,
+            clip_epsilon=self.clip_epsilon,
+            gae_lambda=self.gae_lambda,
+            entropy_coef=self.entropy_coef,
+            vf_coef=self.vf_coef,
+            max_grad_norm=self.max_grad_norm,
+        )
+
+    # ------------------------------------------------------------------
+    # PPO learning (single- and multi-GPU)
+    # ------------------------------------------------------------------
 
     def learn(self, sample_size, batch_size: int, ppo_epochs: int = 4):
+        """Run PPO updates on data sampled from the replay buffer.
+
+        Parameters
+        ----------
+        sample_size : int
+            Number of transitions to sample from the replay buffer.
+        batch_size : int
+            Mini-batch size for gradient computation.
+        ppo_epochs : int
+            Number of PPO epochs per learning call.
+
+        Returns
+        -------
+        float
+            Combined loss (actor + vf_coef * critic) averaged over batches.
+        """
         if not self.use_multi_gpu:
             return self._learn_single_gpu(sample_size, batch_size, ppo_epochs)
         return self._learn_multi_gpu(sample_size, batch_size, ppo_epochs)
 
     def _learn_single_gpu(self, sample_size, batch_size: int, ppo_epochs: int = 4):
+        """Single-GPU PPO learning loop."""
         total_actor_loss = 0.0
         total_critic_loss = 0.0
         total_batches = 0
@@ -87,21 +169,23 @@ class MAPPOTrainer(OnPolicyTrainer):
                     [timestep_padding_mask] * n_agents, dim=1
                 ).to(device)
 
+                # ---- Critic forward: V(s) for all timesteps ----
                 self.eval_critic.train()
                 ret_critic = self.eval_critic(
                     states_dev, alive_mask, timestep_padding_mask
                 )
-                v_all = ret_critic["v"].squeeze(-1)
+                v_all = ret_critic["v"].squeeze(-1)  # (B, T)
 
+                # ---- Bootstrap value from next state ----
                 with torch.no_grad():
-                    next_states_dev = next_states.to(device)
                     ret_critic_next = self.eval_critic(
                         next_states_dev[:, -1:, ...],
                         next_alive_mask[:, -1:, :],
                         next_timestep_padding_mask[:, -1:],
                     )
-                    v_next_bootstrap = ret_critic_next["v"].squeeze(-1)[:, 0]
+                    v_next_bootstrap = ret_critic_next["v"].squeeze(-1)[:, 0]  # (B,)
 
+                # ---- GAE advantage computation ----
                 timestep_valid = (~timestep_padding_mask).to(
                     dtype=torch.float32, device=device
                 )
@@ -125,6 +209,7 @@ class MAPPOTrainer(OnPolicyTrainer):
                     advantages[:, t] = gae
                 returns = advantages + v_all
 
+                # Normalize advantages over valid timesteps
                 valid_count = timestep_valid.sum()
                 if valid_count > 0:
                     adv_mean = (advantages * timestep_valid).sum() / valid_count
@@ -133,6 +218,7 @@ class MAPPOTrainer(OnPolicyTrainer):
                     ).sum() / valid_count
                     advantages = (advantages - adv_mean) / (adv_var.sqrt() + 1e-8)
 
+                # ---- Actor forward: action logits for last timestep ----
                 observations_transposed = torch.transpose(observations, 1, 2).to(
                     device
                 )
@@ -142,11 +228,12 @@ class MAPPOTrainer(OnPolicyTrainer):
                     timestep_padding_mask_expanded,
                     alive_mask[:, -1, :],
                 )
-                action_logits = ret_agent["action_logits"]
+                action_logits = ret_agent["action_logits"]  # (B, N, action_dim)
 
                 actions_last = actions[:, -1].to(dtype=torch.int64, device=device)
                 log_probs_old = all_log_probs[:, -1, :].to(device)
 
+                # ---- PPO actor loss ----
                 dist = Categorical(logits=action_logits)
                 new_log_probs = dist.log_prob(actions_last)
                 entropy = dist.entropy()
@@ -175,17 +262,20 @@ class MAPPOTrainer(OnPolicyTrainer):
                 )
                 actor_loss = actor_loss + self.entropy_coef * entropy_loss
 
+                # ---- Critic value loss ----
                 critic_loss_mse = F.mse_loss(v_all, returns, reduction="none")
                 critic_loss = (critic_loss_mse * timestep_valid).sum() / max(
                     valid_count, torch.tensor(1.0, device=device)
                 )
 
+                # ---- Backward pass: actor ----
                 self.agent_optimizer.zero_grad()
                 actor_loss.backward(retain_graph=True)
                 torch.nn.utils.clip_grad_norm_(
                     self.eval_agent_group.parameters(), max_norm=self.max_grad_norm
                 )
 
+                # ---- Backward pass: critic ----
                 self.critic_optimizer.zero_grad()
                 critic_loss.backward()
                 torch.nn.utils.clip_grad_norm_(
@@ -208,7 +298,38 @@ class MAPPOTrainer(OnPolicyTrainer):
         return avg_actor + avg_critic * self.vf_coef
 
     def _learn_multi_gpu(self, sample_size, batch_size: int, ppo_epochs: int = 4):
-        raise NotImplementedError("Multi-GPU not implemented for MAPPO")
+        """Multi-GPU PPO learning via worker processes.
+
+        Each worker holds a full copy of the eval models and optimizers.
+        Batches are sliced across workers, gradients are synchronized via
+        all_reduce, and average loss is collected from all workers.
+        """
+        self.worker_group.move_models_to_gpu()
+
+        total_combined = 0.0
+        total_batches = 0
+
+        for epoch in range(ppo_epochs):
+            dataset = self.replaybuffer.sample(sample_size)
+            dataloader = TrajectoryDataLoader(
+                dataset,
+                batch_size=batch_size,
+                shuffle=True,
+                num_workers=self.n_workers,
+            )
+            for batch in dataloader:
+                loss = self.worker_group.train_step(batch)
+                total_combined += loss
+                total_batches += 1
+
+        self.worker_group.move_models_to_cpu()
+        torch.cuda.empty_cache()
+
+        return total_combined / max(total_batches, 1)
+
+    # ------------------------------------------------------------------
+    # On-policy training loop
+    # ------------------------------------------------------------------
 
     def train(
         self,
@@ -217,8 +338,37 @@ class MAPPOTrainer(OnPolicyTrainer):
         batch_size=64,
         ppo_epochs=4,
     ):
+        """Run the on-policy MAPPO training loop.
+
+        The loop follows this on-policy pattern::
+
+            1. Initial ``evaluate()`` fills the replay buffer with episodes.
+            2. For each iteration:
+               a. ``learn()`` performs PPO updates on the current buffer.
+               b. The buffer is cleared (on-policy: each batch is used once).
+               c. ``evaluate()`` generates fresh episodes with the updated
+                  policy and adds them to the buffer for the next iteration.
+               d. LR schedulers are stepped; best model is tracked.
+
+        Parameters
+        ----------
+        iterations : int
+            Number of training iterations.
+        target_first_metric : float
+            Target value for the first eval metric (early stopping threshold).
+        batch_size : int
+            Mini-batch size for PPO updates.
+        ppo_epochs : int
+            Number of PPO epochs per iteration.
+
+        Returns
+        -------
+        dict
+            Best metrics achieved during training.
+        """
         self.eval_episodes_to_replay_ratio = 1.0
 
+        # Initial data collection
         self.evaluate()
 
         for iteration in range(iterations):
@@ -232,15 +382,19 @@ class MAPPOTrainer(OnPolicyTrainer):
                     f"Iteration {iteration}: Batch size: {batch_size}, "
                     f"Critic lr: {critic_lr:.8f}, Agent lr: {agent_group_lr:.8f}"
                 )
+                self._sync_params_to_workers()
                 loss = self.learn(
                     sample_size=sample_size,
                     batch_size=batch_size,
                     ppo_epochs=ppo_epochs,
                 )
+                self._sync_eval_params_from_workers()
                 logging.info(f"Iteration {iteration}: Loss {loss:.4f}")
 
+            # Clear buffer (on-policy: discard old data)
             self.replaybuffer = self.replaybuffer_config.create_replaybuffer()
 
+            # Collect fresh episodes with updated policy
             result = self.evaluate()
             metrics = {key: result[key]["mean"] for key in self.eval_metric_list}
             first_metric = next(iter(metrics.values()))

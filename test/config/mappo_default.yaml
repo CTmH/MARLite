@@ -1,0 +1,95 @@
+agent_group_config:
+  type: "MAPPO"
+  agent_list:
+    agent_0: model1
+    agent_1: model1
+    agent_2: model1
+  model_configs:
+    model1:
+      feature_extractor:
+        model_type: "Identity"
+      model:
+        model_type: "RNN"
+        input_shape: 18
+        rnn_hidden_dim: 128
+        rnn_layers: 1
+        output_shape: 5
+  optimizer:
+    type: "Adam"
+    lr: 0.0005
+    weight_decay: 0.0001
+
+env_config:
+  module_name: "mpe2"
+  env_name: "simple_spread_v3"
+
+critic_config:
+  type: "MAPPOCritic"
+  model:
+    model_type: "Custom"
+    layers:
+      - type: "Linear"
+        in_features: 54
+        out_features: 128
+      - type: "ReLU"
+      - type: "Linear"
+        in_features: 128
+        out_features: 128
+      - type: "ReLU"
+      - type: "Linear"
+        in_features: 128
+        out_features: 1
+  feature_extractor:
+    model_type: "Identity"
+  optimizer:
+    type: "Adam"
+    lr: 0.0005
+    weight_decay: 0.0001
+
+rollout_config:
+  manager_type: "multi-process"
+  worker_type: "multi-process"
+  n_workers: 8
+  n_episodes: 1000
+  n_eval_episodes: 100
+  traj_len: 7
+  episode_limit: 500
+  device: "cpu"
+
+replaybuffer_config:
+  type: "Normal"
+  capacity: 50000
+  traj_len: 7
+
+analyzer_config:
+  type: "default"
+
+trainer_config:
+  type: "MAPPO"
+  gamma: 0.99
+  eval_epsilon: 0.05
+  workdir: "./test/results/mappo_default"
+  train_device: "cpu"
+  clip_epsilon: 0.2
+  gae_lambda: 0.95
+  entropy_coef: 0.01
+  vf_coef: 0.5
+  max_grad_norm: 5.0
+
+  epsilon_scheduler:
+    type: "logarithmic"
+    start_value: 1.0
+    end_value: 0.05
+    decay_steps: 100
+
+  sample_ratio_scheduler:
+    type: "linear"
+    start_value: 1.0
+    end_value: 0.3
+    decay_steps: 100
+
+  train_args:
+    iterations: 100
+    target_first_metric: -9999
+    batch_size: 128
+    ppo_epochs: 4

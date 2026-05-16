@@ -20,6 +20,9 @@ from marlite.trainer.trainer_worker_group.group_consensus_worker_group import (
 from marlite.trainer.trainer_worker_group.vae_group_consensus_worker_group import (
     VAEGroupConsensusWorkerGroup,
 )
+from marlite.trainer.trainer_worker_group.mappo_worker_group import (
+    MAPPOWorkerGroup,
+)
 
 __all__ = [
     "BaseWorkerGroup",
@@ -29,4 +32,5 @@ __all__ = [
     "VAEGraphWorkerGroup",
     "GroupConsensusWorkerGroup",
     "VAEGroupConsensusWorkerGroup",
+    "MAPPOWorkerGroup",
 ]
