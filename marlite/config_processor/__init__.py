@@ -1,7 +1,8 @@
 from typing import Dict, Type
 from marlite.config_processor.config_processor import ConfigProcessor
 from marlite.config_processor.qmix_config_processor import QMIXConfigProcessor, SemiSupervisedQMIXConfigProcessor
-# Register processors for each trainer type
+from marlite.config_processor.mappo_config_processor import MAPPOConfigProcessor, SemiSupervisedMAPPOConfigProcessor
+
 REGISTERED_PROCESSORS: Dict[str, Type[ConfigProcessor]] = {
     'QMIX': QMIXConfigProcessor,
     'GraphQMIX': QMIXConfigProcessor,
@@ -10,7 +11,8 @@ REGISTERED_PROCESSORS: Dict[str, Type[ConfigProcessor]] = {
     'VAEGraphQMIX': SemiSupervisedQMIXConfigProcessor,
     'GroupConsensusQMIX': QMIXConfigProcessor,
     'VAEGroupConsensusQMIX': SemiSupervisedQMIXConfigProcessor,
-    'MAPPO': QMIXConfigProcessor,
+    'MAPPO': MAPPOConfigProcessor,
+    'VAEGroupConsensusMAPPO': SemiSupervisedMAPPOConfigProcessor,
 }
 
 __all__ = ['ConfigProcessor', 'REGISTERED_PROCESSORS']

@@ -48,7 +48,6 @@ class Trainer:
         env_config: EnvConfig,
         agent_group_config: AgentGroupConfig,
         critic_config: CriticConfig,
-        epsilon_scheduler: Scheduler,
         sample_ratio_scheduler: Scheduler,
         critic_optimizer_config: OptimizerConfig,
         agent_optimizer_config: OptimizerConfig,
@@ -59,7 +58,6 @@ class Trainer:
         analyzer_config: AnalyzerConfig,
         eval_metric_list: List[str] = ["reward"],
         gamma: float = 0.9,
-        eval_epsilon: float = 0.01,
         eval_threshold: float = 0.03,
         eval_episodes_to_replay_ratio: float = 0.25,
         workdir: str = "",
@@ -67,19 +65,19 @@ class Trainer:
         n_workers: int = 1,
         compile_models: bool = False,
         sample_mode: str = "ratio",
+        max_grad_norm: float = 5.0,
     ):
         self.env_config = env_config
         self.critic_config = critic_config
         self.agent_optimizer_config = agent_optimizer_config
         self.sample_ratio = sample_ratio_scheduler
-        self.epsilon = epsilon_scheduler
-        self.eval_epsilon = eval_epsilon
         self.eval_threshold = eval_threshold
         self.eval_episodes_to_replay_ratio = eval_episodes_to_replay_ratio
         self.gamma = gamma
         self.n_workers = n_workers
         self.eval_metric_list = eval_metric_list
         self.sample_mode = sample_mode
+        self.max_grad_norm = max_grad_norm
 
         if self.sample_mode not in ["ratio", "direct"]:
             raise ValueError(
@@ -253,7 +251,7 @@ class Trainer:
         torch.cuda.empty_cache()
         return self
 
-    def evaluate(self):
+    def evaluate(self, eval_epsilon: float = 1.0):
         self.eval_agent_group.eval().to("cpu")
         serialized_params = serialize_to_buffer(
             get_state_dict(self.eval_agent_group)
@@ -262,7 +260,7 @@ class Trainer:
             self.agent_group_config,
             serialized_params,
             self.env_config,
-            self.eval_epsilon,
+            eval_epsilon,
         )
 
         episodes = manager.generate_episodes()

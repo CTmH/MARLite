@@ -3,9 +3,13 @@ from copy import deepcopy
 from typing import Dict, Any, Callable
 from torch.nn import Module
 
-from marlite.algorithm.critic.mixer import QMixer, SeqQMixer, ProbQMixer, ProbSeqQMixer
+from marlite.algorithm.critic.qmix_mixer import QMixer
+from marlite.algorithm.critic.seq_qmix_mixer import SeqQMixer
+from marlite.algorithm.critic.prob_qmix_mixer import ProbQMixer
+from marlite.algorithm.critic.prob_seq_qmix_mixer import ProbSeqQMixer
 from marlite.algorithm.critic.group_consensus_mixer import GroupConsensusMixer
 from marlite.algorithm.critic.mappo_critic import MAPPOCritic
+from marlite.algorithm.critic.seq_mappo_critic import SeqMAPPOCritic
 from marlite.algorithm.model import ModelConfig
 
 
@@ -69,6 +73,15 @@ def create_mappo_critic(critic_config: Dict[str, Any]) -> MAPPOCritic:
     return MAPPOCritic(model_config, fe_config)
 
 
+def create_seq_mappo_critic(critic_config: Dict[str, Any]) -> SeqMAPPOCritic:
+    """Create a SeqMAPPOCritic value network from config."""
+    model_config = ModelConfig(**critic_config["model"])
+    fe_config_dict = critic_config.get("feature_extractor", {"model_type": "Identity"})
+    fe_config = ModelConfig(**fe_config_dict)
+    seq_model_config = ModelConfig(**critic_config["seq_model"])
+    return SeqMAPPOCritic(model_config, fe_config, seq_model_config)
+
+
 # Registry mapping critic type names to creator functions
 registered_critic_creators: Dict[str, Callable[[Dict[str, Any]], Module]] = {
     "QMixer": create_qmixer,
@@ -77,6 +90,7 @@ registered_critic_creators: Dict[str, Callable[[Dict[str, Any]], Module]] = {
     "ProbSeqQMixer": create_prob_seq_qmixer,
     "GroupConsensusMixer": create_group_consensus_mixer,
     "MAPPOCritic": create_mappo_critic,
+    "SeqMAPPOCritic": create_seq_mappo_critic,
 }
 
 

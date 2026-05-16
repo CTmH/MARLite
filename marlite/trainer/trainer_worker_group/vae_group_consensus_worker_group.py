@@ -14,6 +14,7 @@ class VAEGroupConsensusWorkerGroup(BaseWorkerGroup):
         critic_optimizer_config,
         agent_optimizer_config,
         gamma: float = 0.9,
+        max_grad_norm: float = 5.0,
         ssl_model_config=None,
         ssl_optimizer_config=None,
         reconstruction_loss=None,
@@ -29,6 +30,7 @@ class VAEGroupConsensusWorkerGroup(BaseWorkerGroup):
         init_method: str = None,
     ):
         self.gamma = gamma
+        self.max_grad_norm = max_grad_norm
         self.agent_group_config = agent_group_config
         self.critic_config = critic_config
         self.critic_optimizer_config = critic_optimizer_config
@@ -66,6 +68,7 @@ class VAEGroupConsensusWorkerGroup(BaseWorkerGroup):
         kwargs["critic_optimizer_config"] = self.critic_optimizer_config
         kwargs["agent_optimizer_config"] = self.agent_optimizer_config
         kwargs["gamma"] = self.gamma
+        kwargs["max_grad_norm"] = self.max_grad_norm
         kwargs["ssl_model_config"] = self.ssl_model_config
         kwargs["ssl_optimizer_config"] = self.ssl_optimizer_config
         kwargs["reconstruction_loss"] = self.reconstruction_loss

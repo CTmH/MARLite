@@ -23,6 +23,7 @@ class QMIXTrainer(OffPolicyTrainer):
             critic_optimizer_config=self.critic_optimizer_config,
             agent_optimizer_config=self.agent_optimizer_config,
             gamma=self.gamma,
+            max_grad_norm=self.max_grad_norm,
         )
 
     def learn(self, sample_size, batch_size: int, times: int = 1):
@@ -150,10 +151,10 @@ class QMIXTrainer(OffPolicyTrainer):
                     self.eval_critic.zero_grad()
                     critic_loss.backward()
                     torch.nn.utils.clip_grad_norm_(
-                        self.eval_critic.parameters(), max_norm=5.0
+                        self.eval_critic.parameters(), max_norm=self.max_grad_norm
                     )
                     torch.nn.utils.clip_grad_norm_(
-                        self.eval_agent_group.parameters(), max_norm=5.0
+                        self.eval_agent_group.parameters(), max_norm=self.max_grad_norm
                     )
                     self.critic_optimizer.step()
                     self.agent_optimizer.step()

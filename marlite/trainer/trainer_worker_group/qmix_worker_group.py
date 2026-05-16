@@ -28,6 +28,7 @@ class QMIXWorkerGroup(BaseWorkerGroup):
         critic_optimizer_config,
         agent_optimizer_config,
         gamma: float = 0.9,
+        max_grad_norm: float = 5.0,
         init_method: str = None,
     ):
         """
@@ -47,6 +48,7 @@ class QMIXWorkerGroup(BaseWorkerGroup):
         self.critic_optimizer_config = critic_optimizer_config
         self.agent_optimizer_config = agent_optimizer_config
         self.gamma = gamma
+        self.max_grad_norm = max_grad_norm
 
         super().__init__(
             device_ids=device_ids,
@@ -62,6 +64,7 @@ class QMIXWorkerGroup(BaseWorkerGroup):
         """Create kwargs for QMIXWorker initialization."""
         kwargs = super()._create_worker_kwargs()
         kwargs["gamma"] = self.gamma
+        kwargs["max_grad_norm"] = self.max_grad_norm
         kwargs["agent_group_config"] = self.agent_group_config
         kwargs["critic_config"] = self.critic_config
         kwargs["critic_optimizer_config"] = self.critic_optimizer_config

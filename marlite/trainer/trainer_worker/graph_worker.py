@@ -38,6 +38,7 @@ class GraphWorker(BaseWorker):
         critic_optimizer_config: OptimizerConfig,
         agent_optimizer_config: OptimizerConfig,
         gamma: float = 0.9,
+        max_grad_norm: float = 5.0,
         **kwargs,
     ):
         """
@@ -57,6 +58,7 @@ class GraphWorker(BaseWorker):
         """
         super().__init__(worker_id, device_id, rank, world_size, init_method)
         self.gamma = gamma
+        self.max_grad_norm = max_grad_norm
 
         # Initialize RL models
         self.eval_agent_group = agent_group_config.get_agent_group()
@@ -325,8 +327,8 @@ class GraphWorker(BaseWorker):
         self.reduce_gradients()
 
         # Clip gradients
-        torch.nn.utils.clip_grad_norm_(self.eval_critic.parameters(), max_norm=5.0)
-        torch.nn.utils.clip_grad_norm_(self.eval_agent_group.parameters(), max_norm=5.0)
+        torch.nn.utils.clip_grad_norm_(self.eval_critic.parameters(), max_norm=self.max_grad_norm)
+        torch.nn.utils.clip_grad_norm_(self.eval_agent_group.parameters(), max_norm=self.max_grad_norm)
 
         # Optimizer steps
         self.critic_optimizer.step()

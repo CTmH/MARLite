@@ -35,6 +35,7 @@ from marlite.algorithm.agents.gnn_comm_agent_group import (
 from marlite.algorithm.agents.g2anet_agent_group import G2ANetAgentGroup
 from marlite.algorithm.agents.group_consensus_agent_group import GroupConsensusAgentGroup
 from marlite.algorithm.agents.mappo_agent_group import MAPPOAgentGroup
+from marlite.algorithm.agents.vaegc_mappo_agent_group import VAEGroupConsensusMAPPOAgentGroup
 from marlite.algorithm.model import ModelConfig
 from marlite.algorithm.graph_builder import GraphBuilderConfig
 from marlite.algorithm.group_builder import GroupBuilderConfig
@@ -309,6 +310,15 @@ def create_group_consensus_agent_group(
     )
 
 
+def create_vaegc_mappo_agent_group(
+    agent_group_config: Dict[str, Any]
+) -> VAEGroupConsensusMAPPOAgentGroup:
+    """Create a VAEGroupConsensusMAPPOAgentGroup from config."""
+    return _create_group_consensus_agent_group(
+        VAEGroupConsensusMAPPOAgentGroup, agent_group_config
+    )
+
+
 def _create_group_consensus_agent_group(
     agent_group_class: Type[AgentGroup], agent_group_config: Dict[str, Any]
 ) -> AgentGroup:
@@ -367,6 +377,7 @@ registered_agent_groups = {
     "MAgentPrey": create_magent_prey_agent_group,
     "MAgentBattle": create_magent_battle_agent_group,
     "GroupConsensusQMIX": create_group_consensus_agent_group,
+    "VAEGroupConsensusMAPPO": create_vaegc_mappo_agent_group,
 }
 
 

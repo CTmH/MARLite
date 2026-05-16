@@ -44,6 +44,7 @@ class MsgAggrQMIXTrainer(OffPolicyTrainer):
             critic_optimizer_config=self.critic_optimizer_config,
             agent_optimizer_config=self.agent_optimizer_config,
             gamma=self.gamma,
+            max_grad_norm=self.max_grad_norm,
             warmup_epochs=self.warmup_epochs,
             msg_aggr_weight=self.msg_aggr_weight,
             is_probabilistic=False,
@@ -204,10 +205,10 @@ class MsgAggrQMIXTrainer(OffPolicyTrainer):
                     self.eval_critic.zero_grad()
                     critic_loss.backward()
                     torch.nn.utils.clip_grad_norm_(
-                        self.eval_critic.parameters(), max_norm=5.0
+                        self.eval_critic.parameters(), max_norm=self.max_grad_norm
                     )
                     torch.nn.utils.clip_grad_norm_(
-                        self.eval_agent_group.parameters(), max_norm=5.0
+                        self.eval_agent_group.parameters(), max_norm=self.max_grad_norm
                     )
                     self.critic_optimizer.step()
                     self.agent_optimizer.step()
@@ -284,6 +285,7 @@ class ProbMsgAggrQMIXTrainer(OffPolicyTrainer):
             critic_optimizer_config=self.critic_optimizer_config,
             agent_optimizer_config=self.agent_optimizer_config,
             gamma=self.gamma,
+            max_grad_norm=self.max_grad_norm,
             warmup_epochs=self.warmup_epochs,
             msg_aggr_weight=self.msg_aggr_weight,
             is_probabilistic=True,
@@ -443,10 +445,10 @@ class ProbMsgAggrQMIXTrainer(OffPolicyTrainer):
                     self.eval_critic.zero_grad()
                     critic_loss.backward()
                     torch.nn.utils.clip_grad_norm_(
-                        self.eval_critic.parameters(), max_norm=5.0
+                        self.eval_critic.parameters(), max_norm=self.max_grad_norm
                     )
                     torch.nn.utils.clip_grad_norm_(
-                        self.eval_agent_group.parameters(), max_norm=5.0
+                        self.eval_agent_group.parameters(), max_norm=self.max_grad_norm
                     )
                     self.critic_optimizer.step()
                     self.agent_optimizer.step()

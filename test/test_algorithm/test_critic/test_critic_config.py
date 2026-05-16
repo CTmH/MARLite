@@ -1,7 +1,6 @@
 import unittest
 import yaml
-from marlite.algorithm.critic import CriticConfig
-from marlite.algorithm.critic.mixer import QMixer, SeqQMixer
+from marlite.algorithm.critic import CriticConfig, QMixer, SeqQMixer
 from marlite.algorithm.critic.group_consensus_mixer import GroupConsensusMixer
 
 class TestCriticConfig(unittest.TestCase):

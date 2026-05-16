@@ -9,6 +9,7 @@ from marlite.trainer.vae_graph_qmix_trainer import VAEGraphQMIXTrainer
 from marlite.trainer.group_consensus_trainer import GroupConsensusTrainer
 from marlite.trainer.vae_group_consensus_trainer import VAEGroupConsensusQMIXTrainer
 from marlite.trainer.mappo_trainer import MAPPOTrainer
+from marlite.trainer.vaegc_mappo_trainer import VAEGroupConsensusMAPPOTrainer
 from marlite.config_processor import REGISTERED_PROCESSORS
 
 REGISTERED_TRAINERS: Dict[str, Type[Trainer]] = {
@@ -20,6 +21,7 @@ REGISTERED_TRAINERS: Dict[str, Type[Trainer]] = {
     'GroupConsensusQMIX': GroupConsensusTrainer,
     'VAEGroupConsensusQMIX': VAEGroupConsensusQMIXTrainer,
     'MAPPO': MAPPOTrainer,
+    'VAEGroupConsensusMAPPO': VAEGroupConsensusMAPPOTrainer,
 }
 
 class TrainerConfig:

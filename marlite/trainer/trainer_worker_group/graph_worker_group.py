@@ -28,6 +28,7 @@ class GraphWorkerGroup(BaseWorkerGroup):
         critic_optimizer_config,
         agent_optimizer_config,
         gamma: float = 0.9,
+        max_grad_norm: float = 5.0,
         init_method: str = None,
     ):
         """
@@ -47,6 +48,7 @@ class GraphWorkerGroup(BaseWorkerGroup):
         self.critic_optimizer_config = critic_optimizer_config
         self.agent_optimizer_config = agent_optimizer_config
         self.gamma = gamma
+        self.max_grad_norm = max_grad_norm
 
         super().__init__(
             device_ids=device_ids,

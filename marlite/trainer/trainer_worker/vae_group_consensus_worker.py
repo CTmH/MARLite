@@ -29,6 +29,7 @@ class VAEGroupConsensusWorker(BaseWorker):
         critic_optimizer_config: OptimizerConfig,
         agent_optimizer_config: OptimizerConfig,
         gamma: float = 0.9,
+        max_grad_norm: float = 5.0,
         ssl_model_config: ModelConfig = None,
         ssl_optimizer_config: OptimizerConfig = None,
         reconstruction_loss=None,
@@ -43,12 +44,10 @@ class VAEGroupConsensusWorker(BaseWorker):
         kl_on_consensus: bool = True,
         **kwargs,
     ):
-        super().__init__(worker_id, device_id, rank, world_size, init_method)
-        self.gamma = gamma
-        self.kl_divergence_weight = kl_divergence_weight
-        self.warmup_epochs = warmup_epochs
-        self.loss_combination_method = loss_combination_method
-        self.pit_loss_alpha = pit_loss_alpha
+        if recon_mode not in ("per_agent", "per_group"):
+            raise ValueError(
+                f"recon_mode must be 'per_agent' or 'per_group', got '{recon_mode}'"
+            )
         self.recon_mode = recon_mode
         self.kl_on_group = kl_on_group
         self.kl_on_consensus = kl_on_consensus
@@ -337,10 +336,10 @@ class VAEGroupConsensusWorker(BaseWorker):
 
         self.reduce_gradients()
 
-        torch.nn.utils.clip_grad_norm_(self.eval_critic.parameters(), max_norm=5.0)
-        torch.nn.utils.clip_grad_norm_(self.eval_agent_group.parameters(), max_norm=5.0)
+        torch.nn.utils.clip_grad_norm_(self.eval_critic.parameters(), max_norm=self.max_grad_norm)
+        torch.nn.utils.clip_grad_norm_(self.eval_agent_group.parameters(), max_norm=self.max_grad_norm)
         if self.ssl_model is not None and not is_warmup:
-            torch.nn.utils.clip_grad_norm_(self.ssl_model.parameters(), max_norm=5.0)
+            torch.nn.utils.clip_grad_norm_(self.ssl_model.parameters(), max_norm=self.max_grad_norm)
 
         self.critic_optimizer.step()
         self.agent_optimizer.step()

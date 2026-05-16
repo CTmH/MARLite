@@ -98,6 +98,7 @@ class VAEGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
             critic_optimizer_config=self.critic_optimizer_config,
             agent_optimizer_config=self.agent_optimizer_config,
             gamma=self.gamma,
+            max_grad_norm=self.max_grad_norm,
             ssl_model_config=self.ssl_model_config,
             ssl_optimizer_config=self.ssl_optimizer_config,
             reconstruction_loss=self.reconstruction_loss,
@@ -185,13 +186,13 @@ class VAEGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
                     combined_loss.backward()
 
                     torch.nn.utils.clip_grad_norm_(
-                        self.eval_critic.parameters(), max_norm=5.0
+                        self.eval_critic.parameters(), max_norm=self.max_grad_norm
                     )
                     torch.nn.utils.clip_grad_norm_(
-                        self.eval_agent_group.parameters(), max_norm=5.0
+                        self.eval_agent_group.parameters(), max_norm=self.max_grad_norm
                     )
                     torch.nn.utils.clip_grad_norm_(
-                        self.ssl_model.parameters(), max_norm=5.0
+                        self.ssl_model.parameters(), max_norm=self.max_grad_norm
                     )
 
                     self.critic_optimizer.step()

@@ -94,7 +94,7 @@ class MAPPOTrainer(OnPolicyTrainer):
     # PPO learning (single- and multi-GPU)
     # ------------------------------------------------------------------
 
-    def learn(self, sample_size, batch_size: int, ppo_epochs: int = 4):
+    def learn(self, sample_size, batch_size: int, times: int = 4):
         """Run PPO updates on data sampled from the replay buffer.
 
         Parameters
@@ -103,7 +103,7 @@ class MAPPOTrainer(OnPolicyTrainer):
             Number of transitions to sample from the replay buffer.
         batch_size : int
             Mini-batch size for gradient computation.
-        ppo_epochs : int
+        times : int
             Number of PPO epochs per learning call.
 
         Returns
@@ -112,10 +112,10 @@ class MAPPOTrainer(OnPolicyTrainer):
             Combined loss (actor + vf_coef * critic) averaged over batches.
         """
         if not self.use_multi_gpu:
-            return self._learn_single_gpu(sample_size, batch_size, ppo_epochs)
-        return self._learn_multi_gpu(sample_size, batch_size, ppo_epochs)
+            return self._learn_single_gpu(sample_size, batch_size, times)
+        return self._learn_multi_gpu(sample_size, batch_size, times)
 
-    def _learn_single_gpu(self, sample_size, batch_size: int, ppo_epochs: int = 4):
+    def _learn_single_gpu(self, sample_size, batch_size: int, times: int = 4):
         """Single-GPU PPO learning loop."""
         total_actor_loss = 0.0
         total_critic_loss = 0.0
@@ -132,7 +132,7 @@ class MAPPOTrainer(OnPolicyTrainer):
             num_workers=self.n_workers,
         )
 
-        for epoch in range(ppo_epochs):
+        for epoch in range(times):
             for batch in dataloader:
                 alive_mask = batch["alive_mask"].to(dtype=torch.bool)
                 observations = batch["observations"].to(dtype=torch.float32)
@@ -169,54 +169,27 @@ class MAPPOTrainer(OnPolicyTrainer):
                     [timestep_padding_mask] * n_agents, dim=1
                 ).to(device)
 
-                # ---- Critic forward: V(s) for all timesteps ----
+                # ---- Critic forward: full sequence -> V(s_{T-1}) only ----
                 self.eval_critic.train()
-                ret_critic = self.eval_critic(
-                    states_dev, alive_mask, timestep_padding_mask
-                )
-                v_all = ret_critic["v"].squeeze(-1)  # (B, T)
+                v = self.eval_critic(states_dev, alive_mask, timestep_padding_mask)["v"]
+                v_last = v[:, 0]  # (B,) — value at the last timestep of the segment
 
-                # ---- Bootstrap value from next state ----
+                # ---- Bootstrap: V(s_T) from the next state after the segment ----
                 with torch.no_grad():
-                    ret_critic_next = self.eval_critic(
+                    v_next = self.eval_critic(
                         next_states_dev[:, -1:, ...],
-                        next_alive_mask[:, -1:, :],
+                        next_alive_mask[:, -1:, ...],
                         next_timestep_padding_mask[:, -1:],
-                    )
-                    v_next_bootstrap = ret_critic_next["v"].squeeze(-1)[:, 0]  # (B,)
+                    )["v"][:, 0]  # (B,)
 
-                # ---- GAE advantage computation ----
-                timestep_valid = (~timestep_padding_mask).to(
+                # ---- Single-step TD residual as advantage (GAE with one timestep) ----
+                r_last = rewards.sum(dim=2)[:, -1].to(device)  # (B,)
+                done_last = terminations.any(dim=2)[:, -1].to(
                     dtype=torch.float32, device=device
                 )
-
-                v_next_padded = torch.cat(
-                    [v_all[:, 1:], v_next_bootstrap.unsqueeze(1)], dim=1
-                )
-                delta = (
-                    rewards_sum
-                    + self.gamma * v_next_padded * (1.0 - terminations_any)
-                    - v_all
-                )
-
-                advantages = torch.zeros_like(rewards_sum)
-                gae = torch.zeros(bs, device=device)
-                for t in reversed(range(t_steps)):
-                    gae = delta[:, t] + self.gamma * self.gae_lambda * (
-                        1.0 - terminations_any[:, t]
-                    ) * gae
-                    gae = gae * timestep_valid[:, t]
-                    advantages[:, t] = gae
-                returns = advantages + v_all
-
-                # Normalize advantages over valid timesteps
-                valid_count = timestep_valid.sum()
-                if valid_count > 0:
-                    adv_mean = (advantages * timestep_valid).sum() / valid_count
-                    adv_var = (
-                        ((advantages - adv_mean) ** 2) * timestep_valid
-                    ).sum() / valid_count
-                    advantages = (advantages - adv_mean) / (adv_var.sqrt() + 1e-8)
+                delta = r_last + self.gamma * v_next * (1.0 - done_last) - v_last
+                advantages_last = delta  # (B,)
+                returns = delta + v_last  # (B,) — TD target for the critic
 
                 # ---- Actor forward: action logits for last timestep ----
                 observations_transposed = torch.transpose(observations, 1, 2).to(
@@ -244,13 +217,13 @@ class MAPPOTrainer(OnPolicyTrainer):
                 alive_last_count = alive_last_flag.sum()
 
                 ratio = torch.exp(new_log_probs - log_probs_old)
-                advantages_last = advantages[:, -1].unsqueeze(-1).expand(-1, n_agents)
-                surr1 = ratio * advantages_last
+                adv_expanded = advantages_last.unsqueeze(-1).expand(-1, n_agents)  # (B, N)
+                surr1 = ratio * adv_expanded
                 surr2 = (
                     torch.clamp(
                         ratio, 1.0 - self.clip_epsilon, 1.0 + self.clip_epsilon
                     )
-                    * advantages_last
+                    * adv_expanded
                 )
                 actor_loss = (
                     -(torch.min(surr1, surr2) * alive_last_flag).sum()
@@ -262,11 +235,8 @@ class MAPPOTrainer(OnPolicyTrainer):
                 )
                 actor_loss = actor_loss + self.entropy_coef * entropy_loss
 
-                # ---- Critic value loss ----
-                critic_loss_mse = F.mse_loss(v_all, returns, reduction="none")
-                critic_loss = (critic_loss_mse * timestep_valid).sum() / max(
-                    valid_count, torch.tensor(1.0, device=device)
-                )
+                # ---- Critic value loss (single timestep) ----
+                critic_loss = F.mse_loss(v_last, returns.detach())
 
                 # ---- Backward pass: actor ----
                 self.agent_optimizer.zero_grad()
@@ -297,7 +267,7 @@ class MAPPOTrainer(OnPolicyTrainer):
         avg_critic = total_critic_loss / max(total_batches, 1)
         return avg_actor + avg_critic * self.vf_coef
 
-    def _learn_multi_gpu(self, sample_size, batch_size: int, ppo_epochs: int = 4):
+    def _learn_multi_gpu(self, sample_size, batch_size: int, times: int = 4):
         """Multi-GPU PPO learning via worker processes.
 
         Each worker holds a full copy of the eval models and optimizers.
@@ -309,7 +279,7 @@ class MAPPOTrainer(OnPolicyTrainer):
         total_combined = 0.0
         total_batches = 0
 
-        for epoch in range(ppo_epochs):
+        for epoch in range(times):
             dataset = self.replaybuffer.sample(sample_size)
             dataloader = TrajectoryDataLoader(
                 dataset,
@@ -336,7 +306,7 @@ class MAPPOTrainer(OnPolicyTrainer):
         iterations,
         target_first_metric,
         batch_size=64,
-        ppo_epochs=4,
+        learning_times_per_iteration=4,
     ):
         """Run the on-policy MAPPO training loop.
 
@@ -358,7 +328,7 @@ class MAPPOTrainer(OnPolicyTrainer):
             Target value for the first eval metric (early stopping threshold).
         batch_size : int
             Mini-batch size for PPO updates.
-        ppo_epochs : int
+        learning_times_per_iteration : int
             Number of PPO epochs per iteration.
 
         Returns
@@ -386,7 +356,7 @@ class MAPPOTrainer(OnPolicyTrainer):
                 loss = self.learn(
                     sample_size=sample_size,
                     batch_size=batch_size,
-                    ppo_epochs=ppo_epochs,
+                    times=learning_times_per_iteration,
                 )
                 self._sync_eval_params_from_workers()
                 logging.info(f"Iteration {iteration}: Loss {loss:.4f}")

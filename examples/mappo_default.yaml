@@ -68,7 +68,6 @@ replaybuffer_config:
 trainer_config:
   type: "MAPPO"
   gamma: 0.99
-  eval_epsilon: 0.05
   workdir: "./results/mappo_default"
   train_device: "cpu"
   clip_epsilon: 0.2
@@ -76,12 +75,6 @@ trainer_config:
   entropy_coef: 0.01
   vf_coef: 0.5
   max_grad_norm: 5.0
-
-  epsilon_scheduler:
-    type: "logarithmic"
-    start_value: 1.0
-    end_value: 0.05
-    decay_steps: 100
 
   sample_ratio_scheduler:
     type: "linear"
@@ -93,7 +86,7 @@ trainer_config:
     iterations: 100
     target_first_metric: -9999
     batch_size: 128
-    ppo_epochs: 4
+    learning_times_per_iteration: 4
 
 analyzer_config:
   type: "default"

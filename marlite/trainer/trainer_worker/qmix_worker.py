@@ -40,6 +40,7 @@ class QMIXWorker(BaseWorker):
         critic_optimizer_config: OptimizerConfig,
         agent_optimizer_config: OptimizerConfig,
         gamma: float = 0.9,
+        max_grad_norm: float = 5.0,
         **kwargs,
     ):
         """
@@ -59,6 +60,7 @@ class QMIXWorker(BaseWorker):
         """
         super().__init__(worker_id, device_id, rank, world_size, init_method)
         self.gamma = gamma
+        self.max_grad_norm = max_grad_norm
 
         self.eval_agent_group = agent_group_config.get_agent_group()
         self.target_agent_group = agent_group_config.get_agent_group()
@@ -210,8 +212,8 @@ class QMIXWorker(BaseWorker):
         self.reduce_gradients()
 
         # Clip gradients and optimize
-        torch.nn.utils.clip_grad_norm_(self.eval_critic.parameters(), max_norm=5.0)
-        torch.nn.utils.clip_grad_norm_(self.eval_agent_group.parameters(), max_norm=5.0)
+        torch.nn.utils.clip_grad_norm_(self.eval_critic.parameters(), max_norm=self.max_grad_norm)
+        torch.nn.utils.clip_grad_norm_(self.eval_agent_group.parameters(), max_norm=self.max_grad_norm)
         self.critic_optimizer.step()
         self.agent_optimizer.step()
 

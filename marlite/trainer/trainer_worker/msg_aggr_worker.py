@@ -37,6 +37,7 @@ class MsgAggrWorker(BaseWorker):
         critic_optimizer_config: OptimizerConfig,
         agent_optimizer_config: OptimizerConfig,
         gamma: float = 0.9,
+        max_grad_norm: float = 5.0,
         warmup_epochs: int = 0,
         msg_aggr_weight: float = 1.0,
         **kwargs,
@@ -55,11 +56,13 @@ class MsgAggrWorker(BaseWorker):
             critic_optimizer_config: Configuration for critic optimizer
             agent_optimizer_config: Configuration for agent group optimizer
             gamma: Discount factor
+            max_grad_norm: Maximum gradient norm for clipping
             warmup_epochs: Number of warmup epochs before message aggregation loss is used
             msg_aggr_weight: Weight for message aggregation loss
         """
         super().__init__(worker_id, device_id, rank, world_size, init_method)
         self.gamma = gamma
+        self.max_grad_norm = max_grad_norm
         self.warmup_epochs = warmup_epochs
         self.msg_aggr_weight = msg_aggr_weight
 
@@ -219,8 +222,8 @@ class MsgAggrWorker(BaseWorker):
         self.reduce_gradients()
 
         # Clip gradients and optimize
-        torch.nn.utils.clip_grad_norm_(self.eval_critic.parameters(), max_norm=5.0)
-        torch.nn.utils.clip_grad_norm_(self.eval_agent_group.parameters(), max_norm=5.0)
+        torch.nn.utils.clip_grad_norm_(self.eval_critic.parameters(), max_norm=self.max_grad_norm)
+        torch.nn.utils.clip_grad_norm_(self.eval_agent_group.parameters(), max_norm=self.max_grad_norm)
         self.critic_optimizer.step()
         self.agent_optimizer.step()
 
@@ -246,6 +249,7 @@ class ProbMsgAggrWorker(MsgAggrWorker):
         critic_optimizer_config=None,
         agent_optimizer_config=None,
         gamma: float = 0.9,
+        max_grad_norm: float = 5.0,
         warmup_epochs: int = 0,
         msg_aggr_weight: float = 1.0,
         **kwargs,
@@ -264,6 +268,7 @@ class ProbMsgAggrWorker(MsgAggrWorker):
             critic_optimizer_config: Configuration for critic optimizer
             agent_optimizer_config: Configuration for agent group optimizer
             gamma: Discount factor
+            max_grad_norm: Maximum gradient norm for clipping
             warmup_epochs: Number of warmup epochs before message aggregation loss is used
             msg_aggr_weight: Weight for message aggregation loss
         """
@@ -278,6 +283,7 @@ class ProbMsgAggrWorker(MsgAggrWorker):
             critic_optimizer_config,
             agent_optimizer_config,
             gamma,
+            max_grad_norm,
             warmup_epochs,
             msg_aggr_weight,
             **kwargs,
@@ -425,8 +431,8 @@ class ProbMsgAggrWorker(MsgAggrWorker):
         self.reduce_gradients()
 
         # Clip gradients and optimize
-        torch.nn.utils.clip_grad_norm_(self.eval_critic.parameters(), max_norm=5.0)
-        torch.nn.utils.clip_grad_norm_(self.eval_agent_group.parameters(), max_norm=5.0)
+        torch.nn.utils.clip_grad_norm_(self.eval_critic.parameters(), max_norm=self.max_grad_norm)
+        torch.nn.utils.clip_grad_norm_(self.eval_agent_group.parameters(), max_norm=self.max_grad_norm)
         self.critic_optimizer.step()
         self.agent_optimizer.step()
 

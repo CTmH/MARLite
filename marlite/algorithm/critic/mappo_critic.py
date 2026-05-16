@@ -1,12 +1,28 @@
+"""MAPPOCritic — state-value critic that uses only the last timestep.
+
+Follows the same pattern as QMixer (``critic/qmix_mixer.py``): the feature
+extractor and base model operate only on the final timestep of the state
+sequence, producing a single scalar value V(s_{T-1}).
+"""
+
 import torch
-import torch.nn as nn
 from typing import Dict
 
-from marlite.algorithm.model import ModelConfig
-from marlite.algorithm.model import MaskedModel
+from marlite.algorithm.model import ModelConfig, MaskedModel
+from marlite.algorithm.critic.critic import Critic
 
 
-class MAPPOCritic(nn.Module):
+class MAPPOCritic(Critic):
+    """Value network that estimates V(s) from the last timestep only.
+
+    Parameters
+    ----------
+    base_model_config : ModelConfig
+        Model that maps state features to a scalar value.
+    feature_extractor_config : ModelConfig
+        Feature extractor applied to the last timestep's state.
+    """
+
     def __init__(
         self,
         base_model_config: ModelConfig,
@@ -23,24 +39,33 @@ class MAPPOCritic(nn.Module):
         alive_mask: torch.Tensor,
         padding_mask: torch.Tensor,
     ) -> Dict[str, torch.Tensor]:
-        bs = states.shape[0]
-        ts = states.shape[1]
+        """Forward pass.
 
-        if states.dim() == 4:
-            n_agents = states.shape[2]
-            state_rest = list(states.shape[3:])
-            states_flat = states.reshape(bs * ts, n_agents, *state_rest)
+        Args:
+            states: ``(B, T, state_dim)`` or ``(B, T, N, state_dim)``
+            alive_mask: ``(B, T)`` or ``(B, T, N)``
+            padding_mask: ``(B, T)``
+
+        Returns:
+            ``{"v": (B, 1)}`` — value of the **last** timestep only.
+        """
+        # Use only the last timestep — ``...`` handles any trailing dims generically.
+        states_last = states[:, -1, ...]
+        alive_last = alive_mask[:, -1, ...]
+
+        if self._fe_is_masked:
+            # MaskedModel expects (B, state_dim) with an optional mask of shape (B, N)
+            # or (B, H*W) etc.  Flatten the mask when it has trailing dims.
+            mask_flat = alive_last.reshape(alive_last.shape[0], -1) if alive_last.dim() > 1 else alive_last
+            state_features = self.feature_extractor(states_last, mask_flat)
         else:
-            states_flat = states.reshape(bs * ts, *states.shape[2:])
+            state_features = self.feature_extractor(states_last)
 
-        if self._fe_is_masked and states.dim() == 4:
-            alive_flat = alive_mask.reshape(bs * ts, n_agents)
-            state_features = self.feature_extractor(states_flat, alive_flat)
-        else:
-            state_features = self.feature_extractor(states_flat)
+        # Flatten leading dims if the FE retained structure
+        if state_features.dim() > 2:
+            state_features = state_features.reshape(state_features.shape[0], -1)
 
-        state_features = state_features.reshape(bs * ts, -1)
         value = self.base_model(state_features)
-        value = value.reshape(bs, ts, -1)
+        value = value.reshape(states.shape[0], -1)
 
         return {"v": value}

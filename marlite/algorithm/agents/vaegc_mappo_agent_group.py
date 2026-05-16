@@ -1,28 +1,44 @@
+"""VAE Group Consensus MAPPO agent group.
+
+Extends GroupConsensusAgentGroup to output action logits (for PPO policy)
+instead of Q-values.  The VAE consensus pipeline (dual encoders, group merging,
+scattering, and reparameterisation) is inherited unchanged.
+"""
+
 import numpy as np
 import torch
 from torch.distributions import Categorical
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
-from marlite.algorithm.agents.qmix_agent_group import QMIXAgentGroup
+from marlite.algorithm.agents.group_consensus_agent_group import (
+    GroupConsensusAgentGroup,
+)
 
 
-class MAPPOAgentGroup(QMIXAgentGroup):
-    """Agent group that outputs action logits for PPO instead of Q-values.
+class VAEGroupConsensusMAPPOAgentGroup(GroupConsensusAgentGroup):
+    """GroupConsensus agent group that outputs action logits for PPO.
 
-    Inherits all model management and observation-processing logic from
-    :class:`QMIXAgentGroup`.  The forward pass is identical except that
-    the model output is returned under the key ``"action_logits"``.
-    The ``act()`` method samples from a categorical distribution and
-    returns per-action log-probabilities.
+    The forward pass is identical to the parent class except that the decoder
+    output is returned under the key ``"action_logits"`` instead of ``"q_val"``.
+    The ``act()`` method samples from a categorical distribution and returns
+    per-action log-probabilities, as required by on-policy PPO.
+
+    All VAE consensus functionality (latent estimation, group merging,
+    scattering, reparameterisation) is inherited from
+    :class:`GroupConsensusAgentGroup`.
     """
 
     def forward(
         self,
         observations: torch.Tensor,
+        states: np.ndarray,
         traj_padding_mask: torch.Tensor,
         alive_mask: torch.Tensor,
+        group_indices: Optional[np.ndarray] = None,
     ) -> Dict[str, Any]:
-        result = super().forward(observations, traj_padding_mask, alive_mask)
+        result = super().forward(
+            observations, states, traj_padding_mask, alive_mask, group_indices
+        )
         result["action_logits"] = result.pop("q_val")
         return result
 
@@ -53,8 +69,11 @@ class MAPPOAgentGroup(QMIXAgentGroup):
         alive_mask = alive_mask.unsqueeze(0).to(self.device)
 
         with torch.no_grad():
-            ret = self(obs, padding_mask, alive_mask)
+            ret = self(
+                obs, np.expand_dims(state, axis=0), padding_mask, alive_mask
+            )
             logits = ret["action_logits"].squeeze(0).detach()
+            group_indices_arr = ret["group_indices"].squeeze(0)
 
         action_mask_array = isinstance(
             next(iter(avail_actions.values())), np.ndarray
@@ -99,12 +118,28 @@ class MAPPOAgentGroup(QMIXAgentGroup):
                 all_actions[agent] = 0
                 all_log_probs[agent] = 0.0
 
-        actual_actions = {agent: all_actions[agent] for agent in alive_agents}
-        log_probs = {agent: all_log_probs[agent] for agent in alive_agents}
+        actual_actions = {
+            agent: all_actions[agent] for agent in alive_agents
+        }
+        log_probs = {
+            agent: all_log_probs[agent] for agent in alive_agents
+        }
+
+        all_group_indices = {
+            agent: int(gid)
+            for agent, gid in zip(
+                self.agent_model_dict.keys(), group_indices_arr
+            )
+        }
+        actual_group_indices = {
+            agent: all_group_indices[agent] for agent in alive_agents
+        }
 
         return {
             "actions": actual_actions,
             "all_actions": all_actions,
             "log_probs": log_probs,
             "all_log_probs": all_log_probs,
+            "group_indices": actual_group_indices,
+            "all_group_indices": all_group_indices,
         }

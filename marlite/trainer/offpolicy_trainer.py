@@ -25,7 +25,14 @@ from marlite.util.serialization import (
 
 
 class OffPolicyTrainer(Trainer):
-    def __init__(self, **kwargs):
+    def __init__(
+        self,
+        epsilon_scheduler: Scheduler = None,
+        eval_epsilon: float = 0.01,
+        **kwargs,
+    ):
+        self.epsilon = epsilon_scheduler
+        self.eval_epsilon = eval_epsilon
         super().__init__(**kwargs)
 
         self.target_agent_group = self.agent_group_config.get_agent_group()
@@ -72,6 +79,9 @@ class OffPolicyTrainer(Trainer):
             self.eval_agent_group, eval_params["eval_agent_group"]
         )
         load_state_dict_into(self.eval_critic, eval_params["eval_critic"])
+
+    def evaluate(self):
+        return super().evaluate(eval_epsilon=self.eval_epsilon)
 
     def update_target_model_params(self):
         load_state_dict_into(

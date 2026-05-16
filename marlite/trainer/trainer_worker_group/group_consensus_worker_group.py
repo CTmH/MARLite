@@ -12,6 +12,7 @@ class GroupConsensusWorkerGroup(BaseWorkerGroup):
         critic_optimizer_config,
         agent_optimizer_config,
         gamma: float = 0.9,
+        max_grad_norm: float = 5.0,
         kl_divergence_weight: float = 0.005,
         warmup_epochs: int = 0,
         init_method: str = None,
@@ -21,6 +22,7 @@ class GroupConsensusWorkerGroup(BaseWorkerGroup):
         self.critic_optimizer_config = critic_optimizer_config
         self.agent_optimizer_config = agent_optimizer_config
         self.gamma = gamma
+        self.max_grad_norm = max_grad_norm
         self.kl_divergence_weight = kl_divergence_weight
         self.warmup_epochs = warmup_epochs
 
@@ -36,6 +38,7 @@ class GroupConsensusWorkerGroup(BaseWorkerGroup):
     def _create_worker_kwargs(self) -> Dict[str, Any]:
         kwargs = super()._create_worker_kwargs()
         kwargs["gamma"] = self.gamma
+        kwargs["max_grad_norm"] = self.max_grad_norm
         kwargs["agent_group_config"] = self.agent_group_config
         kwargs["critic_config"] = self.critic_config
         kwargs["critic_optimizer_config"] = self.critic_optimizer_config
