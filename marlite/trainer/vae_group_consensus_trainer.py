@@ -69,7 +69,7 @@ class VAEGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
         loss_combination_method: str = "weighted_sum",
         pit_loss_alpha: float = 0.9,
         kl_on_group: bool = False,
-        kl_on_consensus: bool = True,
+        kl_on_agent: bool = True,
         **kwargs,
     ):
         if recon_mode not in ("per_agent", "per_group"):
@@ -78,7 +78,7 @@ class VAEGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
         self.kl_divergence_weight = kl_divergence_weight
         self.warmup_epochs = warmup_epochs
         self.kl_on_group = kl_on_group
-        self.kl_on_consensus = kl_on_consensus
+        self.kl_on_agent = kl_on_agent
         super().__init__(
             loss_combination_method=loss_combination_method,
             pit_loss_alpha=pit_loss_alpha,
@@ -109,7 +109,7 @@ class VAEGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
             warmup_epochs=self.warmup_epochs,
             recon_mode=self.recon_mode,
             kl_on_group=self.kl_on_group,
-            kl_on_consensus=self.kl_on_consensus,
+            kl_on_agent=self.kl_on_agent,
         )
 
     def _sync_params_to_workers(self):
@@ -529,7 +529,7 @@ class VAEGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
 
             # ── 3d. KL divergence: KL(N(μ, σ²) || N(0, 1)) ──────────
             kl_divergence = 0.0
-            if self.kl_on_consensus:
+            if self.kl_on_agent:
                 kl_mu = agent_mu
                 kl_log_var = agent_log_var
                 mask = alive_mask[:, -1, :].unsqueeze(-1).expand_as(agent_mu)

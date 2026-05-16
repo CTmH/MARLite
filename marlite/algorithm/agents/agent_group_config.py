@@ -34,6 +34,7 @@ from marlite.algorithm.agents.gnn_comm_agent_group import (
 )
 from marlite.algorithm.agents.g2anet_agent_group import G2ANetAgentGroup
 from marlite.algorithm.agents.group_consensus_agent_group import GroupConsensusAgentGroup
+from marlite.algorithm.agents.mappo_agent_group import MAPPOAgentGroup
 from marlite.algorithm.model import ModelConfig
 from marlite.algorithm.graph_builder import GraphBuilderConfig
 from marlite.algorithm.group_builder import GroupBuilderConfig
@@ -265,6 +266,19 @@ def _create_dual_path_gnn_agent_group(
     )
 
 
+def create_mappo_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
+    agents = agent_group_config.pop("agent_list")
+    text_model_configs = agent_group_config.pop("model_configs")
+    model_configs = {}
+    feature_extractor_configs = {}
+    for model_id, conf in text_model_configs.items():
+        feature_extractor_configs[model_id] = ModelConfig(**conf["feature_extractor"])
+        model_configs[model_id] = ModelConfig(**conf["model"])
+    return MAPPOAgentGroup(
+        agents, model_configs, feature_extractor_configs, **agent_group_config
+    )
+
+
 def create_random_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
     agents = agent_group_config["agent_list"]
     return RandomAgentGroup(agents)
@@ -331,6 +345,7 @@ def _create_group_consensus_agent_group(
 
 registered_agent_groups = {
     "QMIX": create_qmix_agent_group,
+    "MAPPO": create_mappo_agent_group,
     "MsgAggr": create_obs_msg_aggr_agent_group,
     "ObsMsgAggr": create_obs_msg_aggr_agent_group,
     "SeqMsgAggr": create_seq_msg_aggr_agent_group,

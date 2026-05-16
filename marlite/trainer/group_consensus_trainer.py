@@ -2,14 +2,14 @@ import torch
 import numpy as np
 from tqdm import tqdm
 
-from marlite.trainer.trainer import Trainer
+from marlite.trainer.offpolicy_trainer import OffPolicyTrainer
 from marlite.trainer.trainer_worker_group.group_consensus_worker_group import (
     GroupConsensusWorkerGroup,
 )
 from marlite.util.trajectory_dataset import TrajectoryDataLoader
 
 
-class GroupConsensusTrainer(Trainer):
+class GroupConsensusTrainer(OffPolicyTrainer):
     def __init__(
         self,
         kl_divergence_weight: float = 0.005,

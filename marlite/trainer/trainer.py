@@ -14,7 +14,6 @@ from marlite.rollout import RolloutManagerConfig
 from marlite.replaybuffer import ReplayBufferConfig
 from marlite.algorithm.agents import AgentGroupConfig
 from marlite.algorithm.critic import CriticConfig
-from marlite.rollout import RolloutManagerConfig
 from marlite.util.optimizer_config import OptimizerConfig
 from marlite.util.lr_scheduler_config import LRSchedulerConfig
 from marlite.util.scheduler import Scheduler
@@ -28,20 +27,6 @@ from marlite.util.serialization import (
 
 
 def get_device_list(train_device: Union[str, List[str]]) -> tuple:
-    """
-    Parse train_device configuration and return device list.
-
-    Args:
-        train_device: Either a string (single device) or a list of strings (multiple devices)
-            - "cpu": CPU training
-            - "cuda" or "cuda:0": Single GPU training
-            - ["cuda:0", "cuda:1", ...]: Multi-GPU training with worker processes
-
-    Returns:
-        tuple of (device_list, use_multi_gpu):
-            - device_list: List of device strings
-            - use_multi_gpu: Whether to use multi-GPU training
-    """
     if isinstance(train_device, str):
         if train_device == "cuda":
             return ["cuda:0"], False
@@ -58,14 +43,6 @@ def get_device_list(train_device: Union[str, List[str]]) -> tuple:
 
 
 class Trainer:
-    """
-    Base Trainer class for multi-agent reinforcement learning.
-
-    Supports two training modes:
-    1. Single-GPU/CPU training: Models stay on main process
-    2. Multi-GPU training: Uses worker processes for parallel gradient computation
-    """
-
     def __init__(
         self,
         env_config: EnvConfig,
@@ -110,45 +87,25 @@ class Trainer:
             )
 
         self.replaybuffer = replaybuffer_config.create_replaybuffer()
+        self.replaybuffer_config = replaybuffer_config
         self.rolloutmanager_config = rolloutmanager_config
         self.analyzer = analyzer_config.create_analyzer()
 
-        # Agent group
         self.agent_group_config = agent_group_config
         self.eval_agent_group = agent_group_config.get_agent_group()
-        self.target_agent_group = agent_group_config.get_agent_group()
-        self.best_agent_group_params = serialize_to_buffer(
-            get_state_dict(self.eval_agent_group)
-        )
-        load_state_dict_into(
-            self.target_agent_group,
-            deserialize_from_buffer(self.best_agent_group_params),
-        )
-        self._cached_agent_group_params = serialize_to_buffer(
-            get_state_dict(self.eval_agent_group)
-        )
 
-        # Critic
         self.eval_critic = critic_config.get_critic()
-        self.target_critic = critic_config.get_critic()
-        load_state_dict_into(self.target_critic, get_state_dict(self.eval_critic))
-        self.best_critic_params = serialize_to_buffer(
-            get_state_dict(self.eval_critic)
-        )
-        self._cached_critic_params = serialize_to_buffer(
-            get_state_dict(self.eval_critic)
-        )
         self.critic_optimizer_config = critic_optimizer_config
-        self.lr_scheduler_conf = lr_scheduler_conf
-        self.agent_lr_scheduler_conf = agent_lr_scheduler_conf
 
         self.critic_optimizer = self.critic_optimizer_config.get_optimizer(
             self.eval_critic.parameters()
         )
-
         self.agent_optimizer = self.agent_optimizer_config.get_optimizer(
             self.eval_agent_group.parameters()
         )
+
+        self.lr_scheduler_conf = lr_scheduler_conf
+        self.agent_lr_scheduler_conf = agent_lr_scheduler_conf
 
         if isinstance(lr_scheduler_conf, LRSchedulerConfig):
             self.lr_scheduler = lr_scheduler_conf.get_lr_scheduler(
@@ -164,26 +121,32 @@ class Trainer:
         else:
             self.agent_lr_scheduler = None
 
-        # Work directory
         self.workdir = workdir
         self.logdir = os.path.join(workdir, "logs")
         self.checkpointdir = os.path.join(workdir, "checkpoints")
 
         self.training_history = {}
 
-        # Configure absl logging
         os.makedirs(self.logdir, exist_ok=True)
         logging.get_absl_handler().use_absl_log_file("training", self.logdir)
         logging.set_verbosity(logging.INFO)
         logging.get_absl_handler().python_handler.stream = sys.stdout
 
-        # Device configuration
         self.train_device_config = train_device
         self.device_list, self.use_multi_gpu = get_device_list(train_device)
-
-        # Multi-GPU worker group (to be created by subclasses)
         self.worker_group = None
 
+        if self.use_multi_gpu:
+            self.train_device = self.device_list[0]
+        else:
+            self.train_device = self.device_list[0]
+            logging.info(f"Using single device: {self.train_device}")
+
+        self.compile_models = compile_models
+        self.best_metrics = {key: -np.inf for key in self.eval_metric_list}
+        self.current_epoch = 0
+
+    def _setup_multi_gpu(self):
         if self.use_multi_gpu:
             self.train_device = self.device_list[0]
             self.worker_group = self._create_worker_group()
@@ -193,69 +156,40 @@ class Trainer:
             logging.info(
                 f"Using multi-GPU training with {len(self.device_list)} devices: {self.device_list}"
             )
-        else:
-            self.train_device = self.device_list[0]
-            logging.info(f"Using single device: {self.train_device}")
 
-        # torch.compile (single-GPU only — multi-GPU uses worker processes)
-        self.compile_models = compile_models
-        if self.compile_models:
-            if self.use_multi_gpu:
-                logging.warning(
-                    "Model compilation is not supported in multi-GPU mode. Skipping."
-                )
-                self.compile_models = False
-            else:
-                logging.info("Compiling models...")
-                self.eval_agent_group = torch.compile(
-                    self.eval_agent_group.to(self.train_device)
-                ).to("cpu")
-                self.target_agent_group = torch.compile(
-                    self.target_agent_group.to(self.train_device)
-                ).to("cpu")
-                self.eval_critic = torch.compile(
-                    self.eval_critic.to(self.train_device)
-                ).to("cpu")
-                self.target_critic = torch.compile(
-                    self.target_critic.to(self.train_device)
-                ).to("cpu")
-
-        # Metrics
-        self.best_metrics = {key: -np.inf for key in self.eval_metric_list}
-
-        self.current_epoch = 0
+    def _compile_eval_models(self):
+        if self.compile_models and not self.use_multi_gpu:
+            logging.info("Compiling models...")
+            self.eval_agent_group = torch.compile(
+                self.eval_agent_group.to(self.train_device)
+            ).to("cpu")
+            self.eval_critic = torch.compile(
+                self.eval_critic.to(self.train_device)
+            ).to("cpu")
 
     @abstractmethod
     def _create_worker_group(self):
-        """
-        Create and return the appropriate worker group for this trainer.
-
-        Subclasses should override this to create their specific worker group.
-
-        Returns:
-            WorkerGroup instance or None if not using multi-GPU
-        """
         pass
 
     def _sync_params_to_workers(self):
-        """Synchronize model parameters and learning rates to all workers."""
         if self.worker_group is None:
             return
 
         trainable_params = {
             "eval_agent_group": get_state_dict(self.eval_agent_group),
-            "target_agent_group": get_state_dict(self.target_agent_group),
             "eval_critic": get_state_dict(self.eval_critic),
-            "target_critic": get_state_dict(self.target_critic),
         }
+        self._add_target_params_for_sync(trainable_params)
         self.worker_group.broadcast_params(trainable_params)
 
         critic_lr = self.critic_optimizer.param_groups[0]["lr"]
         agent_lr = self.agent_optimizer.param_groups[0]["lr"]
         self.worker_group.sync_lr_to_workers(critic_lr, agent_lr)
 
+    def _add_target_params_for_sync(self, trainable_params):
+        pass
+
     def _sync_eval_params_from_workers(self):
-        """Sync eval model parameters from workers to trainer before evaluation."""
         if self.worker_group is None:
             return
         eval_params = self.worker_group.read_params_from_worker0()
@@ -264,6 +198,7 @@ class Trainer:
         )
         load_state_dict_into(self.eval_critic, eval_params["eval_critic"])
 
+    @abstractmethod
     def learn(self, sample_size, batch_size: int, times: int):
         raise NotImplementedError
 
@@ -295,37 +230,13 @@ class Trainer:
         load_state_dict_into(
             self.eval_critic, torch.load(critic_path, weights_only=True)
         )
-        self.best_agent_group_params = serialize_to_buffer(
-            get_state_dict(self.eval_agent_group)
-        )
-        self.best_critic_params = serialize_to_buffer(
-            get_state_dict(self.eval_critic)
-        )
-        self._cached_agent_group_params = serialize_to_buffer(
-            get_state_dict(self.eval_agent_group)
-        )
-        self._cached_critic_params = serialize_to_buffer(
-            get_state_dict(self.eval_critic)
-        )
-        self.update_target_model_params()
         return self
 
     def save_best_model(self):
-        load_state_dict_into(
-            self.eval_agent_group,
-            deserialize_from_buffer(self.best_agent_group_params),
-        )
-        load_state_dict_into(
-            self.eval_critic,
-            deserialize_from_buffer(self.best_critic_params),
-        )
         self.save_current_model(checkpoint="best")
         return self
 
     def collect_experience(self, epsilon: float):
-        """
-        Collect experiences using multiple rollout workers.
-        """
         self.eval_agent_group.eval().to("cpu")
         serialized_params = serialize_to_buffer(
             get_state_dict(self.eval_agent_group)
@@ -340,18 +251,6 @@ class Trainer:
 
         self.eval_agent_group.to("cpu")
         torch.cuda.empty_cache()
-
-        return self
-
-    def update_target_model_params(self):
-        load_state_dict_into(
-            self.target_agent_group,
-            get_state_dict(self.eval_agent_group),
-        )
-        load_state_dict_into(
-            self.target_critic,
-            get_state_dict(self.eval_critic),
-        )
         return self
 
     def evaluate(self):
@@ -387,147 +286,9 @@ class Trainer:
 
         return result
 
-    def train(
-        self,
-        epochs,
-        target_first_metric,
-        eval_interval=1,
-        update_target_interval=1,
-        batch_size=64,
-        learning_times_per_epoch=1,
-    ):
-        for epoch in range(epochs):
-            self.current_epoch = epoch
-
-            logging.info(f"Epoch {epoch}: Collecting experiences")
-            self.collect_experience(epsilon=self.epsilon.get_value(epoch))
-
-            if self.sample_mode == "ratio":
-                sample_ratio = self.sample_ratio.get_value(epoch)
-                sample_size = len(self.replaybuffer.buffer) * sample_ratio
-                sample_size = round(sample_size)
-            else:
-                sample_size = round(self.sample_ratio.get_value(epoch))
-            sample_size = min(sample_size, len(self.replaybuffer.buffer))
-
-            # Learn and update eval model
-            agent_group_lr = self.agent_optimizer.param_groups[0]["lr"]
-            critic_lr = self.critic_optimizer.param_groups[0]["lr"]
-            logging.info(
-                f"Epoch {epoch}: Batch size: {batch_size}, Critic learning rate: {critic_lr:.8f}, Agent learning rate: {agent_group_lr:.8f}"
-            )
-            logging.info(
-                f"Epoch {epoch}: Learning {learning_times_per_epoch} times per epoch ..."
-            )
-
-            # Sync params if using multi-GPU (e.g., after checkpoint load)
-            self._sync_params_to_workers()
-
-            loss = self.learn(
-                sample_size=sample_size,
-                batch_size=batch_size,
-                times=learning_times_per_epoch,
-            )
-            logging.info(f"Epoch {epoch}: Loss {loss:.4f}")
-
-            # Sync eval params from workers before evaluation
-            self._sync_eval_params_from_workers()
-
-            # Save checkpoint
-            checkpoint_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            checkpoint_name = f"checkpoint_{checkpoint_time}_{epoch}"
-            self.save_current_model(checkpoint_name)
-            logging.info(f"Checkpoint saved at {checkpoint_name}")
-
-            result = self.evaluate()
-            metrics = {key: result[key]["mean"] for key in self.eval_metric_list}
-            first_metric = next(iter(metrics.values()))
-            first_metric_name = next(iter(metrics.keys()))
-            self.save_intermediate_results(epoch, result)
-
-            if isinstance(
-                self.lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau
-            ):
-                self.lr_scheduler.step(first_metric)
-            elif isinstance(self.lr_scheduler, torch.optim.lr_scheduler.LRScheduler):
-                self.lr_scheduler.step()
-
-            if isinstance(
-                self.agent_lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau
-            ):
-                self.agent_lr_scheduler.step(first_metric)
-            elif isinstance(
-                self.agent_lr_scheduler, torch.optim.lr_scheduler.LRScheduler
-            ):
-                self.agent_lr_scheduler.step()
-
-            cache_params = []
-            update_best = []
-            for metric_name in self.eval_metric_list:
-                metric = metrics[metric_name]
-                best_metric = self.best_metrics[metric_name]
-                cache_params.append(
-                    (metric - best_metric) / max(abs(best_metric), 1)
-                    >= -self.eval_threshold
-                )
-                update_best.append(metric >= best_metric)
-            cache_params = np.array(cache_params, dtype=np.bool_)
-            update_best = np.array(update_best, dtype=np.bool_)
-
-            if cache_params.any():
-                self._cached_agent_group_params = serialize_to_buffer(
-                    get_state_dict(self.eval_agent_group)
-                )
-                self._cached_critic_params = serialize_to_buffer(
-                    get_state_dict(self.eval_critic)
-                )
-                logging.info(
-                    f"Epoch {epoch}: Cached parameters updated with current parameters."
-                )
-
-            if update_best.any():
-                self.best_metrics = metrics
-                self.best_agent_group_params = serialize_to_buffer(
-                    get_state_dict(self.eval_agent_group)
-                )
-                self.best_critic_params = serialize_to_buffer(
-                    get_state_dict(self.eval_critic)
-                )
-                logging.info(
-                    f"Epoch {epoch}: New best {first_metric_name}: {first_metric:.4f}"
-                )
-
-            if first_metric >= target_first_metric:
-                logging.info(
-                    f"Epoch {epoch}: {first_metric_name} reached: {first_metric:.4f} >= {target_first_metric:.4f}"
-                )
-                break
-
-            if epoch % eval_interval == 0:
-                load_state_dict_into(
-                    self.eval_agent_group,
-                    deserialize_from_buffer(self._cached_agent_group_params),
-                )
-                load_state_dict_into(
-                    self.eval_critic,
-                    deserialize_from_buffer(self._cached_critic_params),
-                )
-                self.update_target_model_params()
-                logging.info(
-                    f"Epoch {epoch}: Eval model and Target model updated with cached parameters."
-                )
-
-            if epoch % update_target_interval == 0:
-                self.update_target_model_params()
-                logging.info(
-                    f"Epoch {epoch}: Target model updated with eval model parameters."
-                )
-
-        logging.info(
-            f"Best strategy: {yaml.dump(self.best_metrics, default_flow_style=False, sort_keys=False)}"
-        )
-        self.save_best_model()
-        return self.best_metrics
+    @abstractmethod
+    def train(self, **kwargs):
+        raise NotImplementedError
 
     def save_intermediate_results(self, epoch, metrics):
         self.training_history[epoch] = metrics
@@ -540,5 +301,5 @@ class Trainer:
         )
 
     def __del__(self):
-        if self.worker_group is not None:
+        if hasattr(self, "worker_group") and self.worker_group is not None:
             self.worker_group.shutdown()

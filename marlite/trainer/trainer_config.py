@@ -1,6 +1,6 @@
 from copy import deepcopy
 from typing import Dict, Type
-from marlite.trainer.trainer import Trainer
+from marlite.trainer.trainer import Trainer  # abstract base; keep for type hints
 from marlite.trainer.qmix_trainer import QMIXTrainer
 from marlite.trainer.graph_qmix_trainer import GraphQMIXTrainer
 from marlite.trainer.msg_aggr_qmix_trainer import MsgAggrQMIXTrainer, ProbMsgAggrQMIXTrainer
@@ -8,6 +8,7 @@ from marlite.trainer.self_supervised_qmix_trainer import SelfSupervisedQMIXTrain
 from marlite.trainer.vae_graph_qmix_trainer import VAEGraphQMIXTrainer
 from marlite.trainer.group_consensus_trainer import GroupConsensusTrainer
 from marlite.trainer.vae_group_consensus_trainer import VAEGroupConsensusQMIXTrainer
+from marlite.trainer.mappo_trainer import MAPPOTrainer
 from marlite.config_processor import REGISTERED_PROCESSORS
 
 REGISTERED_TRAINERS: Dict[str, Type[Trainer]] = {
@@ -18,6 +19,7 @@ REGISTERED_TRAINERS: Dict[str, Type[Trainer]] = {
     'VAEGraphQMIX': VAEGraphQMIXTrainer,
     'GroupConsensusQMIX': GroupConsensusTrainer,
     'VAEGroupConsensusQMIX': VAEGroupConsensusQMIXTrainer,
+    'MAPPO': MAPPOTrainer,
 }
 
 class TrainerConfig:

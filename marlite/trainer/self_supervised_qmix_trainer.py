@@ -7,7 +7,7 @@ from absl import logging
 from torch.nn.modules.loss import _Loss
 
 from marlite.algorithm.model import ModelConfig
-from marlite.trainer.trainer import Trainer
+from marlite.trainer.offpolicy_trainer import OffPolicyTrainer
 from marlite.util.serialization import (
     serialize_to_buffer,
     deserialize_from_buffer,
@@ -22,7 +22,7 @@ from marlite.util.self_supervised_data_constructor.self_supervised_data_construc
 from marlite.util.loss_func import ReconstructionLoss, PITLoss
 
 
-class SelfSupervisedQMIXTrainer(Trainer):
+class SelfSupervisedQMIXTrainer(OffPolicyTrainer):
     """
     Base trainer class for self-supervised learning combined with QMIX.
 

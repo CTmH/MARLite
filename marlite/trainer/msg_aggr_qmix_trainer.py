@@ -3,13 +3,13 @@ import torch
 from tqdm import tqdm
 from torch.distributions import Normal, kl_divergence
 
-from marlite.trainer.trainer import Trainer
+from marlite.trainer.offpolicy_trainer import OffPolicyTrainer
 from marlite.trainer.trainer_worker_group import MsgAggrWorkerGroup
 from marlite.util.trajectory_dataset import TrajectoryDataLoader
 from marlite.util.loss_func import PITLoss
 
 
-class MsgAggrQMIXTrainer(Trainer):
+class MsgAggrQMIXTrainer(OffPolicyTrainer):
     def __init__(self, **kwargs):
         margin = kwargs.pop("triplet_loss_margin", 1.0)
         pit_loss_alpha = kwargs.pop("pit_loss_alpha", 0.9)
@@ -255,7 +255,7 @@ class MsgAggrQMIXTrainer(Trainer):
         return total_loss / total_batches
 
 
-class ProbMsgAggrQMIXTrainer(Trainer):
+class ProbMsgAggrQMIXTrainer(OffPolicyTrainer):
     def __init__(self, **kwargs):
         pit_loss_alpha = kwargs.pop("pit_loss_alpha", 0.9)
         loss_type = kwargs.pop("loss_type", "weighted_sum")

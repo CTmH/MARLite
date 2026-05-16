@@ -1,12 +1,12 @@
 import torch
 from tqdm import tqdm
 
-from marlite.trainer.trainer import Trainer
+from marlite.trainer.offpolicy_trainer import OffPolicyTrainer
 from marlite.trainer.trainer_worker_group import GraphWorkerGroup
 from marlite.util.trajectory_dataset import TrajectoryDataLoader
 
 
-class GraphQMIXTrainer(Trainer):
+class GraphQMIXTrainer(OffPolicyTrainer):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 

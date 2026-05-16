@@ -1,5 +1,5 @@
 agent_group_config:
-  type: "QMIX"
+  type: "MAPPO"
   agent_list:
     agent_0: model1
     agent_1: model1
@@ -22,15 +22,27 @@ agent_group_config:
 env_config:
   module_name: "mpe2"
   env_name: "simple_spread_v3"
+  env_config:
+    max_cycles: 100
+    N: 3
+    local_ratio: 0.5
 
 critic_config:
-  type: "QMixer"
+  type: "MAPPOCritic"
   model:
-    model_type: QMixModel
-    state_shape: 54
-    input_dim: 15
-    qmix_hidden_dim: 128
-    hyper_hidden_dim: 64
+    model_type: "Custom"
+    layers:
+      - type: "Linear"
+        in_features: 54
+        out_features: 128
+      - type: "ReLU"
+      - type: "Linear"
+        in_features: 128
+        out_features: 128
+      - type: "ReLU"
+      - type: "Linear"
+        in_features: 128
+        out_features: 1
   feature_extractor:
     model_type: "Identity"
   optimizer:
@@ -42,10 +54,10 @@ rollout_config:
   manager_type: "multi-process"
   worker_type: "multi-process"
   n_workers: 8
-  n_episodes: 1000
+  n_episodes: 500
   n_eval_episodes: 100
   traj_len: 5
-  episode_limit: 500
+  episode_limit: 300
   device: "cpu"
 
 replaybuffer_config:
@@ -54,11 +66,16 @@ replaybuffer_config:
   traj_len: 5
 
 trainer_config:
-  type: "QMIX"
-  gamma: 0.95
-  eval_epsilon: 0.01
-  workdir: "./results/qmix_default"
+  type: "MAPPO"
+  gamma: 0.99
+  eval_epsilon: 0.05
+  workdir: "./results/mappo_default"
   train_device: "cpu"
+  clip_epsilon: 0.2
+  gae_lambda: 0.95
+  entropy_coef: 0.01
+  vf_coef: 0.5
+  max_grad_norm: 5.0
 
   epsilon_scheduler:
     type: "logarithmic"
@@ -73,8 +90,10 @@ trainer_config:
     decay_steps: 100
 
   train_args:
-    epochs: 100
-    target_first_metric: 100
-    eval_interval: 1
+    iterations: 100
+    target_first_metric: -9999
     batch_size: 128
-    learning_times_per_epoch: 1
+    ppo_epochs: 4
+
+analyzer_config:
+  type: "default"

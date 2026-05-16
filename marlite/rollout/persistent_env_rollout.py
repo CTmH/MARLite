@@ -70,6 +70,8 @@ def persistent_env_rollout(
             "edge_indices": [],
             "group_indices": [],
             "actions": [],
+            "all_log_probs": [],
+            "log_probs": [],
             "rewards": [],
             "avail_actions": [],
             "truncations": [],
@@ -96,6 +98,8 @@ def persistent_env_rollout(
         default_rewards = {agent: 0 for agent in env.possible_agents}
         default_terminations = {agent: True for agent in env.possible_agents}
         default_truncations = {agent: True for agent in env.possible_agents}
+        default_all_log_probs = {agent: 0.0 for agent in env.possible_agents}
+        default_log_probs = {agent: 0.0 for agent in env.possible_agents}
         use_action_mask = False
 
         for i in range(episode_limit + 1):
@@ -147,6 +151,8 @@ def persistent_env_rollout(
                 episode["edge_indices"].append(edge_indices)
                 episode["group_indices"].append(all_group_indices)
                 episode["actions"].append(all_actions)
+                episode["all_log_probs"].append(all_log_probs)
+                episode["log_probs"].append(log_probs)
                 episode["avail_actions"].append(avail_actions)
                 episode["infos"].append(infos)
 
@@ -163,6 +169,8 @@ def persistent_env_rollout(
                         "edge_indices",
                         "group_indices",
                         "actions",
+                        "all_log_probs",
+                        "log_probs",
                         "avail_actions",
                         "infos",
                     ]:
@@ -237,6 +245,8 @@ def persistent_env_rollout(
             actions, all_actions = ret["actions"], ret["all_actions"]
             edge_indices = ret.get("edge_indices", np.zeros((2, 0)))
             all_group_indices = ret.get("all_group_indices", {agent: -1 for agent in env.possible_agents})
+            all_log_probs = ret.get("all_log_probs", default_all_log_probs)
+            log_probs = ret.get("log_probs", default_log_probs)
 
             if i > 0:
                 episode["next_alive_mask"].append(alive_mask)

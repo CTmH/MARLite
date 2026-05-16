@@ -5,6 +5,7 @@ from torch.nn import Module
 
 from marlite.algorithm.critic.mixer import QMixer, SeqQMixer, ProbQMixer, ProbSeqQMixer
 from marlite.algorithm.critic.group_consensus_mixer import GroupConsensusMixer
+from marlite.algorithm.critic.mappo_critic import MAPPOCritic
 from marlite.algorithm.model import ModelConfig
 
 
@@ -60,6 +61,14 @@ def create_group_consensus_mixer(critic_config: Dict[str, Any]) -> GroupConsensu
     )
 
 
+def create_mappo_critic(critic_config: Dict[str, Any]) -> MAPPOCritic:
+    """Create a MAPPOCritic value network from config."""
+    model_config = ModelConfig(**critic_config["model"])
+    fe_config_dict = critic_config.get("feature_extractor", {"model_type": "Identity"})
+    fe_config = ModelConfig(**fe_config_dict)
+    return MAPPOCritic(model_config, fe_config)
+
+
 # Registry mapping critic type names to creator functions
 registered_critic_creators: Dict[str, Callable[[Dict[str, Any]], Module]] = {
     "QMixer": create_qmixer,
@@ -67,6 +76,7 @@ registered_critic_creators: Dict[str, Callable[[Dict[str, Any]], Module]] = {
     "ProbQMixer": create_prob_qmixer,
     "ProbSeqQMixer": create_prob_seq_qmixer,
     "GroupConsensusMixer": create_group_consensus_mixer,
+    "MAPPOCritic": create_mappo_critic,
 }
 
 
