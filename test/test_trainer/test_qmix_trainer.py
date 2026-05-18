@@ -14,11 +14,11 @@ class TestQMixTrainer(unittest.TestCase):
         self.config_path = "test/config/qmix_default.yaml"
         with open(self.config_path, "r") as file:
             self.config = yaml.safe_load(file)
-        self.config["trainer_config"]["train_args"]["epochs"] = 2
-        self.config["rollout_config"]["n_episodes"] = 2
-        self.config["rollout_config"]["n_eval_episodes"] = 2
-        self.config["rollout_config"]["episode_limit"] = 20
-        self.config["replaybuffer_config"]["capacity"] = 5
+        self.config["trainer"]["train_args"]["epochs"] = 2
+        self.config["rollout"]["n_episodes"] = 2
+        self.config["rollout"]["n_eval_episodes"] = 2
+        self.config["rollout"]["episode_limit"] = 20
+        self.config["replay_buffer"]["capacity"] = 5
         self.trainer_config = TrainerConfig(self.config)
 
     def test_collect_experience(self):
@@ -213,13 +213,13 @@ class TestQMixTrainer(unittest.TestCase):
         self.config_path = "test/config/qmix_default.yaml"
         with open(self.config_path, "r") as file:
             self.config = yaml.safe_load(file)
-        self.config["trainer_config"]["train_args"]["epochs"] = 2
-        self.config["rollout_config"]["n_episodes"] = 2
-        self.config["rollout_config"]["n_eval_episodes"] = 2
-        self.config["rollout_config"]["episode_limit"] = 2
-        self.config["replaybuffer_config"]["capacity"] = 2
+        self.config["trainer"]["train_args"]["epochs"] = 2
+        self.config["rollout"]["n_episodes"] = 2
+        self.config["rollout"]["n_eval_episodes"] = 2
+        self.config["rollout"]["episode_limit"] = 2
+        self.config["replay_buffer"]["capacity"] = 2
         device_list = [f"cuda:{i}" for i in range(gpu_count)]
-        self.config["trainer_config"]["train_device"] = device_list
+        self.config["trainer"]["train_device"] = device_list
         self.trainer_config = TrainerConfig(self.config)
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -249,12 +249,12 @@ class TestQMixTrainer(unittest.TestCase):
         self.config_path = "test/config/qmix_default.yaml"
         with open(self.config_path, "r") as file:
             self.config = yaml.safe_load(file)
-        self.config["trainer_config"]["train_args"]["epochs"] = 2
-        self.config["rollout_config"]["n_episodes"] = 2
-        self.config["rollout_config"]["n_eval_episodes"] = 2
-        self.config["rollout_config"]["episode_limit"] = 20
-        self.config["replaybuffer_config"]["capacity"] = 2
-        self.config["trainer_config"]["compile_models"] = True
+        self.config["trainer"]["train_args"]["epochs"] = 2
+        self.config["rollout"]["n_episodes"] = 2
+        self.config["rollout"]["n_eval_episodes"] = 2
+        self.config["rollout"]["episode_limit"] = 20
+        self.config["replay_buffer"]["capacity"] = 2
+        self.config["trainer"]["compile_models"] = True
         self.trainer_config = TrainerConfig(self.config)
         with tempfile.TemporaryDirectory() as temp_dir:
             self.trainer = self.trainer_config.create_trainer()

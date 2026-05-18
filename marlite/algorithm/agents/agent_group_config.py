@@ -112,7 +112,7 @@ def _create_gnn_agent_group(
         decoder_configs[model_id] = ModelConfig(**conf["decoder"])
     graph_model_config = ModelConfig(**agent_group_config.pop("graph_model_config"))
     graph_builder_config = GraphBuilderConfig(
-        **agent_group_config.pop("graph_builder_config")
+        **agent_group_config.pop("graph_builder")
     )
     return agent_group_class(
         agents,
@@ -253,7 +253,7 @@ def _create_dual_path_gnn_agent_group(
 
     graph_model_config = ModelConfig(**agent_group_config.pop("graph_model_config"))
     graph_builder_config = GraphBuilderConfig(
-        **agent_group_config.pop("graph_builder_config")
+        **agent_group_config.pop("graph_builder")
     )
     return agent_group_class(
         agent_model_dict=agents,
@@ -339,7 +339,7 @@ def _create_group_consensus_agent_group(
         decoder_configs[model_id] = ModelConfig(**conf["decoder"])
 
     group_builder_config = GroupBuilderConfig(
-        **agent_group_config.pop("group_builder_config")
+        **agent_group_config.pop("group_builder")
     )
 
     return agent_group_class(

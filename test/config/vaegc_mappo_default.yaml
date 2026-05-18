@@ -1,4 +1,4 @@
-agent_group_config:
+agent_group:
   type: "VAEGroupConsensusMAPPO"
   deterministic_eval: true
   enable_rl_grad_to_group_estimate: false
@@ -26,7 +26,7 @@ agent_group_config:
           - type: "Linear"
             in_features: 64
             out_features: 5
-  group_builder_config:
+  group_builder:
     type: "Fixed"
     group_ids: [0, 0, 0]
   optimizer:
@@ -34,11 +34,11 @@ agent_group_config:
     lr: 0.0005
     weight_decay: 0.0001
 
-env_config:
+environment:
   module_name: "mpe2"
   env_name: "simple_spread_v3"
 
-critic_config:
+critic:
   type: "MAPPOCritic"
   model:
     model_type: "Custom"
@@ -57,7 +57,7 @@ critic_config:
     lr: 0.0005
     weight_decay: 0.0001
 
-rollout_config:
+rollout:
   manager_type: "multi-process"
   worker_type: "multi-process"
   n_workers: 8
@@ -67,15 +67,15 @@ rollout_config:
   episode_limit: 500
   device: "cpu"
 
-replaybuffer_config:
+replay_buffer:
   type: "Normal"
   capacity: 50000
   traj_len: 7
 
-analyzer_config:
+analyzer:
   type: "default"
 
-self_supervised_learning_config:
+self_supervised_learning:
   model:
     model_type: "Custom"
     layers:
@@ -96,14 +96,14 @@ self_supervised_learning_config:
     factor: 0.5
     patience: 8
     min_lr: 0.000001
-  data_constructor_config:
+  data_constructor:
     type: "MagentVecObs"
     max_entities_perception: 1
     n_workers: 0
-  reconstruction_loss_config:
+  reconstruction_loss:
     type: "MSE"
 
-trainer_config:
+trainer:
   type: "VAEGroupConsensusMAPPO"
   gamma: 0.99
   workdir: "./test/results/vaegc_mappo"

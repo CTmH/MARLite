@@ -1,4 +1,4 @@
-agent_group_config:
+agent_group:
   type: "MAPPO"
   agent_list:
     agent_0: model1
@@ -19,11 +19,11 @@ agent_group_config:
     lr: 0.0005
     weight_decay: 0.0001
 
-env_config:
+environment:
   module_name: "mpe2"
   env_name: "simple_spread_v3"
 
-critic_config:
+critic:
   type: "MAPPOCritic"
   model:
     model_type: "Custom"
@@ -46,7 +46,7 @@ critic_config:
     lr: 0.0005
     weight_decay: 0.0001
 
-rollout_config:
+rollout:
   manager_type: "multi-process"
   worker_type: "multi-process"
   n_workers: 8
@@ -56,15 +56,15 @@ rollout_config:
   episode_limit: 500
   device: "cpu"
 
-replaybuffer_config:
+replay_buffer:
   type: "Normal"
   capacity: 50000
   traj_len: 7
 
-analyzer_config:
+analyzer:
   type: "default"
 
-trainer_config:
+trainer:
   type: "MAPPO"
   gamma: 0.99
   workdir: "./test/results/mappo_default"

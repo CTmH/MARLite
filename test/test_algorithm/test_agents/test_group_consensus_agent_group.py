@@ -40,7 +40,7 @@ class TestGroupConsensusAgentGroup(unittest.TestCase):
         )
         with open(config_path, "r") as f:
             config = yaml.safe_load(f)
-        self.agent_group_config = AgentGroupConfig(**config["agent_group_config"])
+        self.agent_group_config = AgentGroupConfig(**config["agent_group"])
         self.agent_group = self.agent_group_config.get_agent_group()
 
     def test_agent_group_type(self):

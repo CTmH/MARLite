@@ -29,7 +29,7 @@ class TrainerConfig:
         self.config = deepcopy(config_dict)
 
         # Extract trainer_type to select the appropriate processor
-        trainer_type = config_dict['trainer_config']['type']
+        trainer_type = config_dict['trainer']['type']
 
         # Get the appropriate config processor
         processor_class = REGISTERED_PROCESSORS[trainer_type]

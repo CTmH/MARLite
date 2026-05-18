@@ -9,7 +9,7 @@ class TestCriticConfig(unittest.TestCase):
         config_path = 'test/config/qmix_default.yaml'
         with open(config_path, 'r') as file:
             config = yaml.safe_load(file)
-        critic_config_dict = config['critic_config']
+        critic_config_dict = config['critic']
         critic_config_dict.pop('optimizer')
         if 'lr_scheduler' in critic_config_dict:
             critic_config_dict.pop('lr_scheduler')
@@ -21,7 +21,7 @@ class TestCriticConfig(unittest.TestCase):
         config_path = 'test/config/seq_msg_aggr_smac.yaml'
         with open(config_path, 'r') as file:
             config = yaml.safe_load(file)
-        critic_config_dict = config['critic_config']
+        critic_config_dict = config['critic']
         critic_config_dict.pop('optimizer')
         if 'lr_scheduler' in critic_config_dict:
             critic_config_dict.pop('lr_scheduler')
@@ -33,7 +33,7 @@ class TestCriticConfig(unittest.TestCase):
         config_path = 'test/config/group_consensus_default.yaml'
         with open(config_path, 'r') as file:
             config = yaml.safe_load(file)
-        critic_config_dict = config['critic_config']
+        critic_config_dict = config['critic']
         critic_config_dict.pop('optimizer')
         if 'lr_scheduler' in critic_config_dict:
             critic_config_dict.pop('lr_scheduler')

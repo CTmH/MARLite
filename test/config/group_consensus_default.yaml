@@ -1,4 +1,4 @@
-agent_group_config:
+agent_group:
   type: "GroupConsensusQMIX"
   agent_list:
     agent_0: model1
@@ -30,7 +30,7 @@ agent_group_config:
         - type: Linear
           in_features: 128
           out_features: 5
-  group_builder_config:
+  group_builder:
     type: "Fixed"
     group_ids: [0, 0, 1]
   deterministic_eval: true
@@ -40,11 +40,11 @@ agent_group_config:
     lr: 0.0005
     weight_decay: 0.0001
 
-env_config:
+environment:
   module_name: "mpe2"
   env_name: "simple_spread_v3"
 
-critic_config:
+critic:
   type: "GroupConsensusMixer"
   feature_extractor:
     model_type: "Custom"
@@ -70,7 +70,7 @@ critic_config:
     lr: 0.0005
     weight_decay: 0.0001
 
-rollout_config:
+rollout:
   manager_type: "multi-process"
   worker_type: "multi-process"
   n_workers: 8
@@ -80,15 +80,15 @@ rollout_config:
   episode_limit: 500
   device: "cpu"
 
-replaybuffer_config:
+replay_buffer:
   type: "Normal"
   capacity: 50000
   traj_len: 7
 
-analyzer_config:
+analyzer:
   type: "default"
 
-trainer_config:
+trainer:
   type: "GroupConsensusQMIX"
   gamma: 0.95
   eval_epsilon: 0.01

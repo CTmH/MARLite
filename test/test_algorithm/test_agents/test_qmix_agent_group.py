@@ -20,7 +20,7 @@ class TestQMIXAgentGroup(unittest.TestCase):
         config_path = "test/config/qmix_default.yaml"
         with open(config_path, "r") as file:
             config = yaml.safe_load(file)
-        self.agent_group_config = AgentGroupConfig(**config["agent_group_config"])
+        self.agent_group_config = AgentGroupConfig(**config["agent_group"])
 
         # Initialize QMIXAgents
         self.agent_group = self.agent_group_config.get_agent_group()

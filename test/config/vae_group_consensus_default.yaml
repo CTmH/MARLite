@@ -1,4 +1,4 @@
-agent_group_config:
+agent_group:
   type: "GroupConsensusQMIX"
   deterministic_eval: true
   enable_rl_grad_to_group_estimate: false
@@ -114,7 +114,7 @@ agent_group_config:
         - type: Linear
           in_features: 128
           out_features: 21
-  group_builder_config:
+  group_builder:
     type: "MAgentVecLP"
     n_groups: 6
     coord_dims: [3, 4]
@@ -136,10 +136,10 @@ agent_group_config:
     patience: 8
     min_lr: 0.000001
 
-env_config:
+environment:
   module_name: "magent2.environments"
   env_name: "battle_v4"
-  env_config:
+  env_params:
     map_size: 32
     step_reward: -0.0001
     dead_penalty: -1.0
@@ -147,13 +147,13 @@ env_config:
     attack_opponent_reward: 0.8
     extra_features: true
     minimap_mode: true
-  wrapper_config:
+  wrapper:
     type: battle
     opp_obs_queue_len: 1
     channel_first: true
     vector_state: true
     vector_observation: false
-    opponent_agent_group_config:
+    opponent_agent_group:
       type: "MAgentBattle"
       strategy: "advanced"
       agent_list:
@@ -194,7 +194,7 @@ env_config:
         blue_34: policy
         blue_35: policy
 
-critic_config:
+critic:
   type: "SeqQMixer"
   model:
     model_type: QMixModel
@@ -229,7 +229,7 @@ critic_config:
     patience: 8
     min_lr: 0.000001
 
-self_supervised_learning_config:
+self_supervised_learning:
   model:
     model_type: "Custom"
     layers:
@@ -254,7 +254,7 @@ self_supervised_learning_config:
     factor: 0.5
     patience: 8
     min_lr: 0.000001
-  data_constructor_config:
+  data_constructor:
     type: "MagentVecStateGroupFeatures"
     observation_range: 0.40625
     n_groups: 6
@@ -266,10 +266,10 @@ self_supervised_learning_config:
     action_dim: 21
     n_offsets: 12
     n_workers: 0
-  reconstruction_loss_config:
+  reconstruction_loss:
     type: "PointSetMSE"
 
-rollout_config:
+rollout:
   manager_type: "persistent-env"
   worker_type: "persistent-env"
   n_workers: 8
@@ -280,17 +280,17 @@ rollout_config:
   victory_checker: "battle_wrapper"
   device: ["cuda:0", "cuda:1"]
 
-replaybuffer_config:
+replay_buffer:
   type: "Prioritized"
   capacity: 600
   traj_len: 8
   priority_attr: all_agents_sum_rewards
   alpha: 0.45
 
-analyzer_config:
+analyzer:
   type: "default"
 
-trainer_config:
+trainer:
   type: "VAEGroupConsensusQMIX"
   gamma: 0.95
   eval_epsilon: 0.001

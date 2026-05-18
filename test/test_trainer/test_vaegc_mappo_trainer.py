@@ -14,11 +14,11 @@ class TestVAEGCMAPPOTrainer(unittest.TestCase):
         self.config_path = "test/config/vaegc_mappo_default.yaml"
         with open(self.config_path, "r") as file:
             self.config = yaml.safe_load(file)
-        self.config["trainer_config"]["train_args"]["iterations"] = 2
-        self.config["rollout_config"]["n_episodes"] = 2
-        self.config["rollout_config"]["n_eval_episodes"] = 2
-        self.config["rollout_config"]["episode_limit"] = 20
-        self.config["replaybuffer_config"]["capacity"] = 5
+        self.config["trainer"]["train_args"]["iterations"] = 2
+        self.config["rollout"]["n_episodes"] = 2
+        self.config["rollout"]["n_eval_episodes"] = 2
+        self.config["rollout"]["episode_limit"] = 20
+        self.config["replay_buffer"]["capacity"] = 5
         self.trainer_config = TrainerConfig(self.config)
 
     def test_collect_experience(self):

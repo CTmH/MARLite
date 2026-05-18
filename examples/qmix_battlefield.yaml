@@ -1,4 +1,4 @@
-agent_group_config:
+agent_group:
   type: "QMIX"
   agent_list:
     red_0: model1
@@ -62,14 +62,14 @@ agent_group_config:
     lr: 0.0005
     weight_decay: 0.0001
 
-env_config:
+environment:
   module_name: "magent2.environments"
   env_name: "battlefield_v5"
-  env_config:
+  env_params:
     extra_features: true
-  wrapper_config:
+  wrapper:
     type: battlefield
-    opponent_agent_group_config:
+    opponent_agent_group:
       type: "Random"
       agent_list:
         blue_0: random1
@@ -99,7 +99,7 @@ sample_ratio_scheduler:
   end_value: 0.3
   decay_steps: 100
 
-critic_config:
+critic:
   type: "QMixer"
   model:
     model_type: QMixModel
@@ -174,7 +174,7 @@ critic_config:
     lr: 0.0005
     weight_decay: 0.0001
 
-rollout_config:
+rollout:
   manager_type: "multi-process"
   worker_type: "multi-process"
   n_workers: 8
@@ -184,14 +184,14 @@ rollout_config:
   episode_limit: 500
   device: "cpu"
 
-replaybuffer_config:
+replay_buffer:
   type: "Prioritized"
   capacity: 50000
   traj_len: 5
   priority_attr: all_agents_sum_rewards
   alpha: 0.7
 
-trainer_config:
+trainer:
   type: "QMIX"
   gamma: 0.95
   eval_epsilon: 0.01

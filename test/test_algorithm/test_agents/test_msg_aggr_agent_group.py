@@ -13,7 +13,7 @@ class TestSeqMsgAggrAgentGroup(unittest.TestCase):
         config_path = "test/config/seq_msg_aggr_smac.yaml"
         with open(config_path, "r") as file:
             config = yaml.safe_load(file)
-        self.agent_group_config = AgentGroupConfig(**config["agent_group_config"])
+        self.agent_group_config = AgentGroupConfig(**config["agent_group"])
 
         # Environment setup and model configuration
         self.env_config = EnvConfig(**config["env_config"])

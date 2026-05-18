@@ -16,7 +16,7 @@ class TestAgentGroupConfig(unittest.TestCase):
         config_path = 'test/config/qmix_default.yaml'
         with open(config_path, 'r') as file:
             config = yaml.safe_load(file)
-        self.agent_group_config = AgentGroupConfig(**config['agent_group_config'])
+        self.agent_group_config = AgentGroupConfig(**config['agent_group'])
         self.agent_group = self.agent_group_config.get_agent_group()
         self.assertIsInstance(self.agent_group, AgentGroup)
 
@@ -25,7 +25,7 @@ class TestAgentGroupConfig(unittest.TestCase):
         config_path = 'test/config/gnn_default.yaml'
         with open(config_path, 'r') as file:
             config = yaml.safe_load(file)
-        self.agent_group_config = AgentGroupConfig(**config['agent_group_config'])
+        self.agent_group_config = AgentGroupConfig(**config['agent_group'])
         self.agent_group = self.agent_group_config.get_agent_group()
         self.assertIsInstance(self.agent_group, AgentGroup)
 
@@ -35,7 +35,7 @@ class TestAgentGroupConfig(unittest.TestCase):
 
         with open(config_path) as f:
             conf = yaml.safe_load(f)
-        self.agent_group_config = AgentGroupConfig(**conf['agent_group_config'])
+        self.agent_group_config = AgentGroupConfig(**conf['agent_group'])
         self.agent_group = self.agent_group_config.get_agent_group()
         self.assertIsInstance(self.agent_group, GroupConsensusAgentGroup)
 

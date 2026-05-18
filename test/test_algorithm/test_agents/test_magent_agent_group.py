@@ -49,7 +49,7 @@ class TestMAgentPreyAgentGroup(unittest.TestCase):
 
         """
         conf_dict = yaml.safe_load(yaml_conf)
-        conf_dict = conf_dict['env_config']
+        conf_dict = conf_dict['env_params']
         self.env_conf = EnvConfig(**conf_dict)
         env = self.env_conf.create_env()
         self.agents = {f'prey_{i}': 'policy' for i in range(50)}
@@ -215,7 +215,7 @@ class TestBattleAgentGroup(unittest.TestCase):
                             blue_35: policy
         """
         conf_dict = yaml.safe_load(yaml_conf)
-        conf_dict = conf_dict['env_config']
+        conf_dict = conf_dict['env_params']
         self.env_conf = EnvConfig(**conf_dict)
         env = self.env_conf.create_env()
         self.agents = {f'red_{i}': 'policy' for i in range(36)}

@@ -8,7 +8,7 @@ class TestEnvConfig(unittest.TestCase):
         self.config_path = 'test/config/gnn_default.yaml'
         with open(self.config_path, 'r') as file:
             self.config = yaml.safe_load(file)
-        env_config = self.config['env_config']
+        env_config = self.config['environment']
         self.env_config = EnvConfig(**env_config)
 
     def test_create_env(self):

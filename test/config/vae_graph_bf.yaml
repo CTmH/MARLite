@@ -1,4 +1,4 @@
-agent_group_config:
+agent_group:
   type: "ProbObsGNNComm"
   agent_list:
     red_0: model_0
@@ -61,7 +61,7 @@ agent_group_config:
         - type: Linear
           in_features: 128
           out_features: 21
-  graph_builder_config:
+  graph_builder:
     type: "FullConn"
     valid_node_list: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35]
     add_self_loop: true
@@ -85,10 +85,10 @@ agent_group_config:
     patience: 4
     min_lr: 0.00001
 
-env_config:
+environment:
   module_name: "magent2.environments"
   env_name: "battle_v4"
-  env_config:
+  env_params:
     map_size: 32
     step_reward: -0.00
     dead_penalty: -1.0
@@ -96,13 +96,13 @@ env_config:
     attack_opponent_reward: 1.0
     extra_features: true
     minimap_mode: true
-  wrapper_config:
+  wrapper:
     type: battle
     opp_obs_queue_len: 1
     channel_first: true
     vector_state: true
     vector_observation: true
-    opponent_agent_group_config:
+    opponent_agent_group:
       type: "MAgentBattle"
       agent_list:
         blue_0: policy
@@ -142,7 +142,7 @@ env_config:
         blue_34: policy
         blue_35: policy
 
-critic_config:
+critic:
   type: "QMixer"
   model:
     model_type: QMixModel
@@ -169,7 +169,7 @@ critic_config:
     patience: 4
     min_lr: 0.00001
 
-self_supervised_learning_config:
+self_supervised_learning:
   model:
     model_type: "Custom"
     layers:
@@ -186,17 +186,17 @@ self_supervised_learning_config:
     factor: 0.5
     patience: 4
     min_lr: 0.00001
-  data_constructor_config:
+  data_constructor:
     type: "MagentVecObs"
     max_entities_perception: 16
     n_workers: 8
     with_time_seq: false
     include_features: [ 0, 1, 2, 3, 4, 5, 6, 39, 40, 41, 42]
-  reconstruction_loss_config:
+  reconstruction_loss:
     type: "ChamferDist"
     use_squared_distance: True
 
-rollout_config:
+rollout:
   manager_type: "multi-process"
   worker_type: "multi-process"
   n_workers: 4
@@ -207,16 +207,16 @@ rollout_config:
   victory_checker: "default"
   device: "cpu"
 
-replaybuffer_config:
+replay_buffer:
   type: "Prioritized"
   capacity: 3200
   traj_len: 8
   priority_attr: "all_agents_sum_rewards"
 
-analyzer_config:
+analyzer:
   type: "default"
 
-trainer_config:
+trainer:
   type: "VAEGraphQMIX"
   gamma: 0.95
   eval_epsilon: 0.005

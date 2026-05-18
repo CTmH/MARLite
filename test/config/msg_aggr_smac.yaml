@@ -1,4 +1,4 @@
-agent_group_config:
+agent_group:
   type: "MsgAggr"
   agent_list:
     stalker_0: model_0
@@ -80,15 +80,15 @@ agent_group_config:
     mode: "max"
     patience: 3
 
-env_config:
+environment:
   module_name: "smac_pettingzoo"
   env_name: "smacv1_pettingzoo_v1"
-  env_config:
+  env_params:
     map_name: "2s3z"
-  wrapper_config:
+  wrapper:
     type: smac
 
-critic_config:
+critic:
   type: "QMixer"
   model:
     model_type: QMixModel
@@ -113,7 +113,7 @@ critic_config:
     mode: "max"
     patience: 3
 
-rollout_config:
+rollout:
   manager_type: "persistent-env"
   worker_type: "persistent-env"
   n_workers: 1
@@ -124,16 +124,16 @@ rollout_config:
   device: "cpu"
   victory_checker: smac
 
-replaybuffer_config:
+replay_buffer:
   type: "Prioritized"
   capacity: 2000
   traj_len: 5
   priority_attr: "all_agents_sum_rewards"
 
-analyzer_config:
+analyzer:
   type: "default"
 
-trainer_config:
+trainer:
   type: "MsgAggr"
   gamma: 0.95
   eval_epsilon: 0.01

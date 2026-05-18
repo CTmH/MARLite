@@ -23,7 +23,7 @@ class QMIXConfigProcessor(ConfigProcessor):
         self, config: Dict[str, Dict]
     ) -> Tuple[AgentGroupConfig, OptimizerConfig, Optional[LRSchedulerConfig]]:
         """Parse agent group configuration and extract optimizer/lr_scheduler"""
-        agent_group_conf = deepcopy(config["agent_group_config"])
+        agent_group_conf = deepcopy(config["agent_group"])
         agent_optimizer_conf = agent_group_conf.pop("optimizer")
         agent_optimizer_config = OptimizerConfig(**agent_optimizer_conf)
         agent_lr_scheduler_conf = (
@@ -36,13 +36,15 @@ class QMIXConfigProcessor(ConfigProcessor):
 
     def parse_env_config(self, config: Dict[str, Dict]) -> EnvConfig:
         """Parse environment configuration"""
-        return EnvConfig(**config["env_config"])
+        env_data = config["environment"]
+        env_data["env_config"] = env_data.pop("env_params", {})
+        return EnvConfig(**env_data)
 
     def parse_critic_config(
         self, config: Dict[str, Dict]
     ) -> Tuple[CriticConfig, OptimizerConfig, LRSchedulerConfig]:
         """Parse critic configuration"""
-        critic_conf = config["critic_config"].copy()
+        critic_conf = config["critic"].copy()
         critic_optimizer_conf = critic_conf.pop("optimizer")
         critic_optimizer_config = OptimizerConfig(**critic_optimizer_conf)
         lr_scheduler_conf = (
@@ -55,21 +57,21 @@ class QMIXConfigProcessor(ConfigProcessor):
 
     def parse_rollout_config(self, config: Dict[str, Dict]) -> RolloutManagerConfig:
         """Parse rollout configuration"""
-        return RolloutManagerConfig(**config["rollout_config"])
+        return RolloutManagerConfig(**config["rollout"])
 
     def parse_replaybuffer_config(self, config: Dict[str, Dict]) -> ReplayBufferConfig:
         """Parse replay buffer configuration"""
-        return ReplayBufferConfig(**config["replaybuffer_config"])
+        return ReplayBufferConfig(**config["replay_buffer"])
 
     def parse_analyzer_config(self, config: Dict[str, Dict]) -> AnalyzerConfig:
         """Parse analyzer configuration"""
-        return AnalyzerConfig(**config["analyzer_config"])
+        return AnalyzerConfig(**config["analyzer"])
 
     def parse_trainer_config(
         self, config: Dict[str, Dict]
     ) -> Tuple[Scheduler, Scheduler, Dict, Dict, str, str]:
         """Parse trainer configuration and return trainer_config, train_args, checkpoint and trainer_type"""
-        trainer_config = deepcopy(config["trainer_config"])
+        trainer_config = deepcopy(config["trainer"])
 
         # Extract training arguments and checkpoint settings
         train_args = trainer_config.pop("train_args")
@@ -141,16 +143,16 @@ class SemiSupervisedQMIXConfigProcessor(QMIXConfigProcessor):
         self, config: Dict[str, Dict]
     ) -> Tuple[ModelConfig, SelfSupervisedDataConstructorConfig, Any]:
         """Parse self-supervised learning configuration"""
-        ssl_config = deepcopy(config["self_supervised_learning_config"])
+        ssl_config = deepcopy(config["self_supervised_learning"])
         ssl_model_config = ModelConfig(**ssl_config.pop("model"))
         ssl_optimizer_config = OptimizerConfig(**ssl_config.pop("optimizer"))
         ssl_lr_scheduler_conf = LRSchedulerConfig(**ssl_config.pop("lr_scheduler"))
         data_constructor_config = SelfSupervisedDataConstructorConfig(
-            **ssl_config.pop("data_constructor_config")
+            **ssl_config.pop("data_constructor")
         )
 
         reconstruction_loss_config: Dict[str, Any] = ssl_config.pop(
-            "reconstruction_loss_config"
+            "reconstruction_loss"
         )
         reconstruction_loss_type = reconstruction_loss_config.pop("type")
         reconstruction_loss_class = REGISTERED_RECONSTRUCTION_LOSS[

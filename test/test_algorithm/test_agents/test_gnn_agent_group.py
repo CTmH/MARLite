@@ -13,7 +13,7 @@ class TestGNNAgentGroup(unittest.TestCase):
         config_path = "test/config/gnn_default.yaml"
         with open(config_path, "r") as file:
             config = yaml.safe_load(file)
-        self.agent_group_config = AgentGroupConfig(**config["agent_group_config"])
+        self.agent_group_config = AgentGroupConfig(**config["agent_group"])
 
         # Environment setup and model configuration
         self.env_config = EnvConfig(**config["env_config"])
@@ -203,7 +203,7 @@ agent_group_config:
     patience: 3
         """
         config = yaml.safe_load(config)
-        self.agent_group_config = AgentGroupConfig(**config["agent_group_config"])
+        self.agent_group_config = AgentGroupConfig(**config["agent_group"])
 
         self.obs_shape = 8
         self.action_space_shape = 5
@@ -400,7 +400,7 @@ agent_group_config:
     patience: 3
         """
         config = yaml.safe_load(config)
-        self.agent_group_config = AgentGroupConfig(**config["agent_group_config"])
+        self.agent_group_config = AgentGroupConfig(**config["agent_group"])
 
         self.obs_shape = 8
         self.action_space_shape = 5
@@ -597,7 +597,7 @@ agent_group_config:
     patience: 3
         """
         config = yaml.safe_load(config)
-        self.agent_group_config = AgentGroupConfig(**config["agent_group_config"])
+        self.agent_group_config = AgentGroupConfig(**config["agent_group"])
 
         self.obs_shape = 8
         self.action_space_shape = 5

@@ -20,7 +20,7 @@ class MAPPOConfigProcessor(QMIXConfigProcessor):
     def parse_trainer_config(
         self, config: Dict[str, Dict]
     ) -> Tuple[Scheduler, Scheduler, Dict, Dict, str, str]:
-        trainer_config = deepcopy(config["trainer_config"])
+        trainer_config = deepcopy(config["trainer"])
         train_args = trainer_config.pop("train_args")
         checkpoint = trainer_config.pop("checkpoint", None)
         trainer_type = trainer_config.pop("type")
