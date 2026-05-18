@@ -91,18 +91,15 @@ class PersistentEnvRolloutManager(RolloutManager):
                     )
                 ]
 
-                completed_count = 0
-                pbar = tqdm(total=n_workers, desc="Generating Episodes")
+                pbar = tqdm(total=self.n_episodes, desc="Generating Episodes")
                 for future in as_completed(futures):
                     try:
                         worker_episodes = future.result()
                         episodes.extend(worker_episodes)
-                        completed_count += 1
+                        pbar.update(len(worker_episodes))
                     except Exception as e:
                         print(f"Worker failed with error: {e}")
-                        completed_count += 1
                         continue
-                    pbar.update(completed_count)
                 pbar.close()
         finally:
             shm.close()

@@ -32,7 +32,7 @@ class RolloutManagerConfig:
         self.manager_type = self.config.pop("manager_type")
         self.worker_type = self.config.pop("worker_type")
         self.n_episodes = self.config.pop("n_episodes")
-        self.n_eval_episodes = self.config.pop("n_eval_episodes", 100)
+        self.n_eval_episodes = self.config.pop("n_eval_episodes", 10)
 
         if self.manager_type not in _MANAGER_REGISTRY:
             raise ValueError(

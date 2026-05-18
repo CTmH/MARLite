@@ -7,7 +7,6 @@ def train(config_path):
     with open(config_path, 'r') as file:
             config = yaml.safe_load(file)
     trainer_config = TrainerConfig(config)
-    trainer_config.create_trainer()
     results = trainer_config.run()
     print("Training completed.")
 

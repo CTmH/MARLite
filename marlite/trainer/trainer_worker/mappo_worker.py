@@ -131,13 +131,15 @@ class MAPPOWorker(BaseWorker):
         """
         alive_mask = batch["alive_mask"].to(dtype=torch.bool)
         observations = batch["observations"].to(dtype=torch.float32)
-        timestep_padding_mask = batch["timestep_padding_mask"].to(dtype=torch.bool)
+        timestep_padding_mask = batch["timestep_padding_mask"].to(
+            dtype=torch.bool, device=self.device
+        )
         states = batch["states"].to(dtype=torch.float32)
         actions = batch["actions"].to(dtype=torch.int)
         rewards = batch["rewards"].to(dtype=torch.float32)
         next_states = batch["next_states"].to(dtype=torch.float32)
         next_timestep_padding_mask = batch["next_timestep_padding_mask"].to(
-            dtype=torch.bool
+            dtype=torch.bool, device=self.device
         )
         next_alive_mask = batch["next_alive_mask"].to(dtype=torch.bool)
         all_log_probs = batch["all_log_probs"].to(dtype=torch.float32)

@@ -108,6 +108,9 @@ class BaseWorker:
         if "target_critic" in params and self.target_critic is not None:
             local_params = {k: v.clone() for k, v in params["target_critic"].items()}
             self.target_critic.load_state_dict(local_params)
+        if "ssl_model" in params and hasattr(self, "ssl_model") and self.ssl_model is not None:
+            local_params = {k: v.clone() for k, v in params["ssl_model"].items()}
+            self.ssl_model.load_state_dict(local_params)
 
     def move_to_device(self, device: str):
         """
@@ -124,6 +127,8 @@ class BaseWorker:
             self.eval_critic.to(device)
         if self.target_critic is not None:
             self.target_critic.to(device)
+        if hasattr(self, "ssl_model") and self.ssl_model is not None:
+            self.ssl_model.to(device)
         self.device = device
 
     def get_params_for_main(self) -> Dict[str, Any]:

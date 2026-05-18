@@ -123,7 +123,7 @@ class VAEGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
             "eval_critic": get_state_dict(self.eval_critic),
             "target_critic": get_state_dict(self.target_critic),
         }
-        if hasattr(self, "ssl_model") and self.ssl_model is not None:
+        if self.ssl_model is not None:
             trainable_params["ssl_model"] = get_state_dict(self.ssl_model)
         self.worker_group.broadcast_params(trainable_params)
 
@@ -139,7 +139,7 @@ class VAEGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
             self.eval_agent_group, eval_params["eval_agent_group"]
         )
         load_state_dict_into(self.eval_critic, eval_params["eval_critic"])
-        if "ssl_model" in eval_params and hasattr(self, "ssl_model"):
+        if "ssl_model" in eval_params and self.ssl_model is not None:
             load_state_dict_into(self.ssl_model, eval_params["ssl_model"])
 
     # ── Training loop ────────────────────────────────────────────────────

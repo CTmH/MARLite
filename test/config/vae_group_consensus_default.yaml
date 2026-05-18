@@ -320,7 +320,6 @@ trainer_config:
   train_args:
     epochs: 200
     target_first_metric: 10000000
-    eval_interval: 4
     update_target_interval: 1
     batch_size: 256
     learning_times_per_epoch: 1

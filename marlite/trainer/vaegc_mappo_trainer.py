@@ -12,11 +12,15 @@ import torch
 import torch.nn.functional as F
 from torch.distributions import Categorical
 from torch.nn.modules.loss import _Loss
+from tqdm import tqdm
 from absl import logging
 
 from marlite.algorithm.model import ModelConfig
 from marlite.trainer.mappo_trainer import MAPPOTrainer
 from marlite.trainer.onpolicy_trainer import OnPolicyTrainer
+from marlite.trainer.trainer_worker_group.vaegc_mappo_worker_group import (
+    VAEGroupConsensusMAPPOWorkerGroup,
+)
 from marlite.util.serialization import (
     serialize_to_buffer,
     deserialize_from_buffer,
@@ -118,6 +122,21 @@ class VAEGroupConsensusMAPPOTrainer(MAPPOTrainer):
         else:
             self.data_constructor = None
 
+        # Create ssl_model and ssl_optimizer before super().__init__() so that
+        # _sync_params_to_workers() (called during _setup_multi_gpu()) can access them.
+        self.ssl_model_config = ssl_model_config
+        self.ssl_optimizer_config = ssl_optimizer_config
+        if ssl_model_config is not None:
+            self.ssl_model = ssl_model_config.get_model()
+        else:
+            self.ssl_model = None
+        if ssl_optimizer_config is not None and self.ssl_model is not None:
+            self.ssl_optimizer = ssl_optimizer_config.get_optimizer(
+                self.ssl_model.parameters()
+            )
+        else:
+            self.ssl_optimizer = None
+
         super().__init__(
             clip_epsilon=clip_epsilon,
             gae_lambda=gae_lambda,
@@ -126,18 +145,6 @@ class VAEGroupConsensusMAPPOTrainer(MAPPOTrainer):
             max_grad_norm=max_grad_norm,
             **kwargs,
         )
-
-        if ssl_model_config is not None:
-            self.ssl_model = ssl_model_config.get_model()
-        else:
-            self.ssl_model = None
-
-        if ssl_optimizer_config is not None and self.ssl_model is not None:
-            self.ssl_optimizer = ssl_optimizer_config.get_optimizer(
-                self.ssl_model.parameters()
-            )
-        else:
-            self.ssl_optimizer = None
 
         if (
             ssl_lr_scheduler_conf is not None
@@ -249,10 +256,123 @@ class VAEGroupConsensusMAPPOTrainer(MAPPOTrainer):
         return kl
 
     # ------------------------------------------------------------------
+    # Multi-GPU support
+    # ------------------------------------------------------------------
+
+    def _create_worker_group(self):
+        if not self.use_multi_gpu:
+            return None
+        return VAEGroupConsensusMAPPOWorkerGroup(
+            device_ids=list(range(len(self.device_list))),
+            agent_group_config=self.agent_group_config,
+            critic_config=self.critic_config,
+            critic_optimizer_config=self.critic_optimizer_config,
+            agent_optimizer_config=self.agent_optimizer_config,
+            gamma=self.gamma,
+            clip_epsilon=self.clip_epsilon,
+            gae_lambda=self.gae_lambda,
+            entropy_coef=self.entropy_coef,
+            vf_coef=self.vf_coef,
+            max_grad_norm=self.max_grad_norm,
+            ssl_model_config=self.ssl_model_config,
+            ssl_optimizer_config=self.ssl_optimizer_config,
+            reconstruction_loss=self.reconstruction_loss,
+            data_constructor=self.data_constructor,
+            self_supervised_learning_loss_weight=self.self_supervised_learning_loss_weight,
+            loss_combination_method=self.loss_combination_method,
+            pit_loss_alpha=self.pit_loss_alpha,
+            kl_divergence_weight=self.kl_divergence_weight,
+            recon_mode=self.recon_mode,
+            kl_on_agent=self.kl_on_agent,
+            kl_on_group=self.kl_on_group,
+            warmup_iterations=self.warmup_iterations,
+        )
+
+    def _sync_params_to_workers(self):
+        if self.worker_group is None:
+            return
+        trainable_params = {
+            "eval_agent_group": get_state_dict(self.eval_agent_group),
+            "eval_critic": get_state_dict(self.eval_critic),
+        }
+        if self.ssl_model is not None:
+            trainable_params["ssl_model"] = get_state_dict(self.ssl_model)
+        self.worker_group.broadcast_params(trainable_params)
+        critic_lr = self.critic_optimizer.param_groups[0]["lr"]
+        agent_lr = self.agent_optimizer.param_groups[0]["lr"]
+        self.worker_group.sync_lr_to_workers(critic_lr, agent_lr)
+
+    def _sync_eval_params_from_workers(self):
+        if self.worker_group is None:
+            return
+        eval_params = self.worker_group.read_params_from_worker0()
+        load_state_dict_into(self.eval_agent_group, eval_params["eval_agent_group"])
+        load_state_dict_into(self.eval_critic, eval_params["eval_critic"])
+        if "ssl_model" in eval_params and self.ssl_model is not None:
+            load_state_dict_into(self.ssl_model, eval_params["ssl_model"])
+
+    def _learn_multi_gpu(self, sample_size, batch_size: int, times: int = 1):
+        """Multi-GPU PPO + VAE learning via worker processes.
+
+        Each worker holds eval models, critic, and SSL model.
+        Batches are sliced across workers, gradients are synchronised via
+        all_reduce, and the combined (RL + SSL) loss is returned.
+        VAE reconstruction loss and KL divergence are computed inside each
+        worker's ``train_step()``.
+        """
+        self.worker_group.move_models_to_gpu()
+        total_combined = 0.0
+        total_critic = 0.0
+        total_vae = 0.0
+        total_batches = 0
+        for epoch in range(times):
+            dataset = self.replaybuffer.sample(sample_size)
+            dataloader = TrajectoryDataLoader(
+                dataset, batch_size=batch_size, shuffle=True, num_workers=self.n_workers
+            )
+            with tqdm(
+                total=sample_size, desc=f"Times {epoch + 1}/{times}", unit="batch"
+            ) as pbar:
+                for batch in dataloader:
+                    batch["epoch"] = self.current_epoch
+                    result = self.worker_group.train_step(batch)
+                    if isinstance(result, tuple):
+                        combined, critic, vae = result
+                        total_combined += combined
+                        total_critic += critic
+                        total_vae += vae
+                    else:
+                        total_combined += result
+                    total_batches += 1
+
+                    bs = batch["states"].shape[0]
+                    pbar.update(bs)
+
+            self.worker_group.move_models_to_cpu()
+        torch.cuda.empty_cache()
+        avg_rl = total_critic / max(total_batches, 1)
+        avg_vae = total_vae / max(total_batches, 1)
+        logging.info(f"  Iter {self.current_epoch}: RL Loss {avg_rl:.4f}, VAE Loss {avg_vae:.4f}")
+        return total_combined / max(total_batches, 1)
+
+    # ------------------------------------------------------------------
     # PPO + VAE learning
     # ------------------------------------------------------------------
 
     def _learn_single_gpu(self, sample_size, batch_size: int, times: int = 4):
+        """Single-GPU PPO + VAE joint learning loop.
+
+        For each PPO epoch (``times``), the sampled dataset is iterated
+        in mini-batches.  Each batch runs:
+          - critic forward: V(s) for the last timestep
+          - agent forward: action logits + VAE consensus
+          - single-step TD residual advantage
+          - PPO clipped surrogate + entropy bonus (actor)
+          - MSE value loss (critic)
+          - VAE reconstruction loss + KL divergence  (if not warmup)
+          - combined backward pass with gradient clipping
+          - three optimiser steps (agent, critic, ssl_model)
+        """
         total_actor_loss = 0.0
         total_critic_loss = 0.0
         total_vae_loss = 0.0
@@ -266,213 +386,182 @@ class VAEGroupConsensusMAPPOTrainer(MAPPOTrainer):
         is_warmup = self.current_epoch < self.warmup_iterations
 
         dataset = self.replaybuffer.sample(sample_size)
-        dataloader = TrajectoryDataLoader(
-            dataset, batch_size=batch_size, shuffle=True, num_workers=self.n_workers
-        )
 
         for epoch in range(times):
-            for batch in dataloader:
-                alive_mask = batch["alive_mask"].to(dtype=torch.bool)
-                observations = batch["observations"].to(dtype=torch.float32)
-                timestep_padding_mask = batch["timestep_padding_mask"].to(
-                    dtype=torch.bool
-                )
-                states = batch["states"].to(dtype=torch.float32)
-                actions = batch["actions"].to(dtype=torch.int)
-                rewards = batch["rewards"].to(dtype=torch.float32)
-                next_states = batch["next_states"].to(dtype=torch.float32)
-                next_timestep_padding_mask = batch[
-                    "next_timestep_padding_mask"
-                ].to(dtype=torch.bool)
-                next_alive_mask = batch["next_alive_mask"].to(dtype=torch.bool)
-                all_log_probs = batch["all_log_probs"].to(dtype=torch.float32)
-                terminations = batch["terminations"].to(dtype=torch.bool)
-
-                bs = states.shape[0]
-                n_agents = rewards.shape[2]
-                t_steps = rewards.shape[1]
-                device = self.train_device
-
-                alive_mask_d = alive_mask.to(device)
-                next_alive_mask_d = next_alive_mask.to(device)
-                states_dev = states.to(device)
-                next_states_dev = next_states.to(device)
-
-                # ── Precompute group_indices from batch ──
-                group_indices_batch = batch.get("group_indices")
-                if group_indices_batch is not None:
-                    group_indices_np = group_indices_batch[:, -1, :].numpy()
-                else:
-                    group_indices_np = np.zeros((bs, n_agents), dtype=np.int64) - 1
-
-                # ── Critic forward: full sequence → V(s_{T-1}) only ──
-                self.eval_critic.train()
-                v = self.eval_critic(states_dev, alive_mask_d, timestep_padding_mask)["v"]
-                v_last = v[:, 0]  # (B,)
-
-                with torch.no_grad():
-                    v_next = self.eval_critic(
-                        next_states_dev[:, -1:, ...],
-                        next_alive_mask_d[:, -1:, ...],
-                        next_timestep_padding_mask[:, -1:],
-                    )["v"][:, 0]  # (B,)
-
-                # ── Single-step TD residual as advantage ──
-                r_last = rewards.sum(dim=2)[:, -1].to(device)
-                done_last = terminations.any(dim=2)[:, -1].to(
-                    dtype=torch.float32, device=device
-                )
-                delta = r_last + self.gamma * v_next * (1.0 - done_last) - v_last
-                advantages_last = delta  # (B,)
-                returns = delta + v_last  # (B,)
-
-                # ── Agent forward: action_logits + consensus ──
-                states_last_np = states_dev[:, -1].detach().cpu().numpy()
-                timestep_padding_mask_expanded = torch.stack(
-                    [timestep_padding_mask] * n_agents, dim=1
-                ).to(device)
-                observations_transposed = torch.transpose(
-                    observations, 1, 2
-                ).to(device)
-
-                self.eval_agent_group.reset().train()
-                ret_agent = self.eval_agent_group(
-                    observations_transposed,
-                    states_last_np,
-                    timestep_padding_mask_expanded,
-                    alive_mask_d[:, -1, :],
-                    group_indices_np,
-                )
-                action_logits = ret_agent["action_logits"]
-                group_consensus = ret_agent.get("group_consensus")
-                group_mu = ret_agent.get("group_mu")
-                group_log_var = ret_agent.get("group_log_var")
-                agent_mu = ret_agent.get("agent_mu")
-                agent_log_var = ret_agent.get("agent_log_var")
-
-                # ── PPO actor loss ──
-                actions_last = actions[:, -1].to(
-                    dtype=torch.int64, device=device
-                )
-                log_probs_old = all_log_probs[:, -1, :].to(device)
-
-                dist = Categorical(logits=action_logits)
-                new_log_probs = dist.log_prob(actions_last)
-                entropy = dist.entropy()
-
-                alive_last_flag = alive_mask_d[:, -1, :].to(
-                    dtype=torch.float32, device=device
-                )
-                alive_last_count = alive_last_flag.sum()
-
-                ratio = torch.exp(new_log_probs - log_probs_old)
-                adv_expanded = advantages_last.unsqueeze(-1).expand(-1, n_agents)
-                surr1 = ratio * adv_expanded
-                surr2 = (
-                    torch.clamp(
-                        ratio,
-                        1.0 - self.clip_epsilon,
-                        1.0 + self.clip_epsilon,
+            dataloader = TrajectoryDataLoader(
+                dataset, batch_size=batch_size, shuffle=True, num_workers=self.n_workers
+            )
+            with tqdm(
+                total=sample_size, desc=f"Times {epoch + 1}/{times}", unit="batch"
+            ) as pbar:
+                for batch in dataloader:
+                    alive_mask = batch["alive_mask"].to(dtype=torch.bool)
+                    observations = batch["observations"].to(dtype=torch.float32)
+                    timestep_padding_mask = batch["timestep_padding_mask"].to(
+                        dtype=torch.bool, device=self.train_device
                     )
-                    * adv_expanded
-                )
-                actor_loss = (
-                    -(torch.min(surr1, surr2) * alive_last_flag).sum()
-                    / max(
-                        alive_last_count,
-                        torch.tensor(1.0, device=device),
-                    )
-                )
-                entropy_loss = (
-                    -(entropy * alive_last_flag).sum()
-                    / max(
-                        alive_last_count,
-                        torch.tensor(1.0, device=device),
-                    )
-                )
-                actor_loss = actor_loss + self.entropy_coef * entropy_loss
+                    states = batch["states"].to(dtype=torch.float32)
+                    actions = batch["actions"].to(dtype=torch.int)
+                    rewards = batch["rewards"].to(dtype=torch.float32)
+                    next_states = batch["next_states"].to(dtype=torch.float32)
+                    next_timestep_padding_mask = batch[
+                        "next_timestep_padding_mask"
+                    ].to(dtype=torch.bool, device=self.train_device)
+                    next_alive_mask = batch["next_alive_mask"].to(dtype=torch.bool)
+                    all_log_probs = batch["all_log_probs"].to(dtype=torch.float32)
+                    terminations = batch["terminations"].to(dtype=torch.bool)
 
-                # ── PPO critic loss ──
-                critic_loss = F.mse_loss(v_last, returns.detach())
+                    bs = states.shape[0]
+                    n_agents = rewards.shape[2]
+                    t_steps = rewards.shape[1]
+                    device = self.train_device
 
-                # ── VAE reconstruction loss ──
-                if (
-                    is_warmup
-                    or self.data_constructor is None
-                    or self.ssl_model is None
-                    or group_consensus is None
-                ):
-                    vae_loss = torch.tensor(0.0, device=device)
-                else:
-                    targets, construct_mask = self._build_recon_targets(
-                        observations, states, group_indices_np, alive_mask
-                    )
-                    if self.recon_mode == "per_group":
-                        recon_loss = self._recon_loss_per_group(
-                            group_consensus, targets, construct_mask
-                        )
+                    alive_mask_d = alive_mask.to(device)
+                    next_alive_mask_d = next_alive_mask.to(device)
+                    states_dev = states.to(device)
+                    next_states_dev = next_states.to(device)
+
+                    # ── Precompute group_indices from batch ──
+                    group_indices_batch = batch.get("group_indices")
+                    if group_indices_batch is not None:
+                        group_indices_np = group_indices_batch[:, -1, :].numpy()
                     else:
-                        recon_loss = self._recon_loss_per_agent(
-                            group_consensus,
-                            group_indices_np,
-                            targets,
-                            construct_mask,
-                            alive_mask_d,
+                        group_indices_np = np.zeros((bs, n_agents), dtype=np.int64) - 1
+
+                    # ── Critic forward: full sequence → V(s_{T-1}) only ──
+                    self.eval_critic.train()
+                    v = self.eval_critic(states_dev, alive_mask_d, timestep_padding_mask)["v"]
+                    v_last = v[:, 0]
+
+                    with torch.no_grad():
+                        v_next = self.eval_critic(
+                            next_states_dev[:, -1:, ...],
+                            next_alive_mask_d[:, -1:, ...],
+                            next_timestep_padding_mask[:, -1:],
+                        )["v"][:, 0]
+
+                    # ── Single-step TD residual as advantage ──
+                    r_last = rewards.sum(dim=2)[:, -1].to(device)
+                    done_last = terminations.any(dim=2)[:, -1].to(
+                        dtype=torch.float32, device=device
+                    )
+                    delta = r_last + self.gamma * v_next * (1.0 - done_last) - v_last
+                    advantages_last = delta
+                    returns = delta + v_last
+
+                    # ── Agent forward: action_logits + consensus ──
+                    states_last_np = states_dev[:, -1].detach().cpu().numpy()
+                    timestep_padding_mask_expanded = torch.stack(
+                        [timestep_padding_mask] * n_agents, dim=1
+                    ).to(device)
+                    observations_transposed = torch.transpose(observations, 1, 2).to(device)
+
+                    self.eval_agent_group.reset().train()
+                    ret_agent = self.eval_agent_group(
+                        observations_transposed, states_last_np,
+                        timestep_padding_mask_expanded, alive_mask_d[:, -1, :],
+                        group_indices_np,
+                    )
+                    action_logits = ret_agent["action_logits"]
+                    group_consensus = ret_agent.get("group_consensus")
+                    group_mu = ret_agent.get("group_mu")
+                    group_log_var = ret_agent.get("group_log_var")
+                    agent_mu = ret_agent.get("agent_mu")
+                    agent_log_var = ret_agent.get("agent_log_var")
+
+                    # ── PPO actor loss ──
+                    actions_last = actions[:, -1].to(dtype=torch.int64, device=device)
+                    log_probs_old = all_log_probs[:, -1, :].to(device)
+
+                    dist = Categorical(logits=action_logits)
+                    new_log_probs = dist.log_prob(actions_last)
+                    entropy = dist.entropy()
+
+                    alive_last_flag = alive_mask_d[:, -1, :].to(dtype=torch.float32, device=device)
+                    alive_last_count = alive_last_flag.sum()
+
+                    ratio = torch.exp(new_log_probs - log_probs_old)
+                    adv_expanded = advantages_last.unsqueeze(-1).expand(-1, n_agents)
+                    surr1 = ratio * adv_expanded
+                    surr2 = (
+                        torch.clamp(ratio, 1.0 - self.clip_epsilon, 1.0 + self.clip_epsilon)
+                        * adv_expanded
+                    )
+                    actor_loss = (
+                        -(torch.min(surr1, surr2) * alive_last_flag).sum()
+                        / max(alive_last_count, torch.tensor(1.0, device=device))
+                    )
+                    entropy_loss = (
+                        -(entropy * alive_last_flag).sum()
+                        / max(alive_last_count, torch.tensor(1.0, device=device))
+                    )
+                    actor_loss = actor_loss + self.entropy_coef * entropy_loss
+
+                    # ── PPO critic loss ──
+                    critic_loss = F.mse_loss(v_last, returns.detach())
+
+                    # ── VAE reconstruction loss ──
+                    if is_warmup or self.data_constructor is None or self.ssl_model is None or group_consensus is None:
+                        vae_loss = torch.tensor(0.0, device=device)
+                    else:
+                        targets, construct_mask = self._build_recon_targets(
+                            observations, states, group_indices_np, alive_mask
                         )
-                    kl = self._compute_kl_divergence(
-                        agent_mu,
-                        agent_log_var,
-                        alive_mask_d,
-                        group_mu,
-                        group_log_var,
-                        construct_mask,
-                    )
-                    vae_loss = recon_loss + self.kl_divergence_weight * kl
+                        if self.recon_mode == "per_group":
+                            recon_loss = self._recon_loss_per_group(
+                                group_consensus, targets, construct_mask
+                            )
+                        else:
+                            recon_loss = self._recon_loss_per_agent(
+                                group_consensus, group_indices_np, targets,
+                                construct_mask, alive_mask_d,
+                            )
+                        kl = self._compute_kl_divergence(
+                            agent_mu, agent_log_var, alive_mask_d,
+                            group_mu, group_log_var, construct_mask,
+                        )
+                        vae_loss = recon_loss + self.kl_divergence_weight * kl
 
-                # ── Combined loss ──
-                rl_loss = actor_loss + self.vf_coef * critic_loss
-                if is_warmup or vae_loss.item() == 0.0:
-                    combined_loss = rl_loss
-                else:
-                    combined_loss = self._combine_rl_ssl_loss(
-                        rl_loss, vae_loss
-                    )
+                    # ── Combined loss ──
+                    rl_loss = actor_loss + self.vf_coef * critic_loss
+                    if is_warmup or vae_loss.item() == 0.0:
+                        combined_loss = rl_loss
+                    else:
+                        combined_loss = self._combine_rl_ssl_loss(rl_loss, vae_loss)
 
-                # ── Backward ──
-                self.agent_optimizer.zero_grad()
-                self.critic_optimizer.zero_grad()
-                if self.ssl_optimizer is not None:
-                    self.ssl_optimizer.zero_grad()
+                    # ── Backward ──
+                    self.agent_optimizer.zero_grad()
+                    self.critic_optimizer.zero_grad()
+                    if self.ssl_optimizer is not None:
+                        self.ssl_optimizer.zero_grad()
 
-                combined_loss.backward()
+                    combined_loss.backward()
 
-                torch.nn.utils.clip_grad_norm_(
-                    self.eval_agent_group.parameters(),
-                    max_norm=self.max_grad_norm,
-                )
-                torch.nn.utils.clip_grad_norm_(
-                    self.eval_critic.parameters(),
-                    max_norm=self.max_grad_norm,
-                )
-                if self.ssl_model is not None:
                     torch.nn.utils.clip_grad_norm_(
-                        self.ssl_model.parameters(),
-                        max_norm=self.max_grad_norm,
+                        self.eval_agent_group.parameters(), max_norm=self.max_grad_norm,
                     )
+                    torch.nn.utils.clip_grad_norm_(
+                        self.eval_critic.parameters(), max_norm=self.max_grad_norm,
+                    )
+                    if self.ssl_model is not None:
+                        torch.nn.utils.clip_grad_norm_(
+                            self.ssl_model.parameters(), max_norm=self.max_grad_norm,
+                        )
 
-                self.agent_optimizer.step()
-                self.critic_optimizer.step()
-                if self.ssl_optimizer is not None:
-                    self.ssl_optimizer.step()
+                    self.agent_optimizer.step()
+                    self.critic_optimizer.step()
+                    if self.ssl_optimizer is not None:
+                        self.ssl_optimizer.step()
 
-                total_actor_loss += actor_loss.detach().cpu().item()
-                total_critic_loss += critic_loss.detach().cpu().item()
-                total_vae_loss += (
-                    vae_loss.detach().cpu().item()
-                    if isinstance(vae_loss, torch.Tensor)
-                    else vae_loss
-                )
-                total_batches += 1
+                    total_actor_loss += actor_loss.detach().cpu().item()
+                    total_critic_loss += critic_loss.detach().cpu().item()
+                    total_vae_loss += (
+                        vae_loss.detach().cpu().item()
+                        if isinstance(vae_loss, torch.Tensor) else vae_loss
+                    )
+                    total_batches += 1
+
+                    pbar.update(bs)
 
         self.eval_agent_group.to("cpu")
         self.eval_critic.to("cpu")
@@ -530,7 +619,7 @@ class VAEGroupConsensusMAPPOTrainer(MAPPOTrainer):
         iterations,
         target_first_metric,
         batch_size=64,
-        learning_times_per_iteration=4,
+        learning_times_per_iteration=1,
     ):
         self.eval_episodes_to_replay_ratio = 1.0
         self.evaluate()
@@ -539,6 +628,12 @@ class VAEGroupConsensusMAPPOTrainer(MAPPOTrainer):
             self.current_epoch = iteration
 
             sample_size = len(self.replaybuffer.buffer)
+            if self.sample_mode == "ratio":
+                sample_ratio = self.sample_ratio.get_value(iteration)
+                sample_size = round(sample_size * sample_ratio)
+            else:
+                sample_size = round(self.sample_ratio.get_value(iteration))
+            sample_size = min(sample_size, len(self.replaybuffer.buffer))
             if sample_size > 0:
                 agent_group_lr = self.agent_optimizer.param_groups[0]["lr"]
                 critic_lr = self.critic_optimizer.param_groups[0]["lr"]

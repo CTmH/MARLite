@@ -198,6 +198,6 @@ trainer_config:
   train_args:
     epochs: 100
     target_first_metric: 100
-    eval_interval: 1
+    rollback_interval: 1
     batch_size: 128
     learning_times_per_epoch: 1

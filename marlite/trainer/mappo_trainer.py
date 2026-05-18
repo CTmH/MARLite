@@ -10,10 +10,12 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.distributions import Categorical
+from tqdm import tqdm
 from absl import logging
 
 from marlite.trainer.onpolicy_trainer import OnPolicyTrainer
 from marlite.trainer.trainer_worker_group.mappo_worker_group import MAPPOWorkerGroup
+from marlite.algorithm.critic.mixer import Mixer as MixerCritic
 from marlite.util.trajectory_dataset import TrajectoryDataLoader
 
 
@@ -63,6 +65,10 @@ class MAPPOTrainer(OnPolicyTrainer):
         self.vf_coef = vf_coef
         self.max_grad_norm = max_grad_norm
         super().__init__(**kwargs)
+        if isinstance(self.eval_critic, MixerCritic):
+            raise TypeError(
+                "Critic subclass required, not Mixer subclass"
+            )
 
     # ------------------------------------------------------------------
     # Multi-GPU worker group factory
@@ -116,7 +122,17 @@ class MAPPOTrainer(OnPolicyTrainer):
         return self._learn_multi_gpu(sample_size, batch_size, times)
 
     def _learn_single_gpu(self, sample_size, batch_size: int, times: int = 4):
-        """Single-GPU PPO learning loop."""
+        """Single-GPU PPO learning loop.
+
+        For each PPO epoch (``times``), the full sampled dataset is
+        iterated over in mini-batches.  Each batch runs:
+          - forward pass through the critic (V(s))
+          - forward pass through the agent (action logits)
+          - TD residual advantage estimation
+          - PPO clipped surrogate + entropy bonus  (actor)
+          - MSE value loss  (critic)
+          - separate backward passes with gradient clipping and optimizer steps.
+        """
         total_actor_loss = 0.0
         total_critic_loss = 0.0
         total_batches = 0
@@ -125,49 +141,52 @@ class MAPPOTrainer(OnPolicyTrainer):
         self.eval_critic.to(self.train_device)
 
         dataset = self.replaybuffer.sample(sample_size)
-        dataloader = TrajectoryDataLoader(
-            dataset,
-            batch_size=batch_size,
-            shuffle=True,
-            num_workers=self.n_workers,
-        )
 
         for epoch in range(times):
-            for batch in dataloader:
-                alive_mask = batch["alive_mask"].to(dtype=torch.bool)
-                observations = batch["observations"].to(dtype=torch.float32)
-                timestep_padding_mask = batch["timestep_padding_mask"].to(
-                    dtype=torch.bool
-                )
-                states = batch["states"].to(dtype=torch.float32)
-                actions = batch["actions"].to(dtype=torch.int)
-                rewards = batch["rewards"].to(dtype=torch.float32)
-                next_states = batch["next_states"].to(dtype=torch.float32)
-                next_timestep_padding_mask = batch["next_timestep_padding_mask"].to(
-                    dtype=torch.bool
-                )
-                next_alive_mask = batch["next_alive_mask"].to(dtype=torch.bool)
-                all_log_probs = batch["all_log_probs"].to(dtype=torch.float32)
-                terminations = batch["terminations"].to(dtype=torch.bool)
+            dataloader = TrajectoryDataLoader(
+                dataset,
+                batch_size=batch_size,
+                shuffle=True,
+                num_workers=self.n_workers,
+            )
+            with tqdm(
+                total=sample_size, desc=f"Times {epoch + 1}/{times}", unit="batch"
+            ) as pbar:
+                for batch in dataloader:
+                    alive_mask = batch["alive_mask"].to(dtype=torch.bool)
+                    observations = batch["observations"].to(dtype=torch.float32)
+                    timestep_padding_mask = batch["timestep_padding_mask"].to(
+                        dtype=torch.bool, device=self.train_device
+                    )
+                    states = batch["states"].to(dtype=torch.float32)
+                    actions = batch["actions"].to(dtype=torch.int)
+                    rewards = batch["rewards"].to(dtype=torch.float32)
+                    next_states = batch["next_states"].to(dtype=torch.float32)
+                    next_timestep_padding_mask = batch["next_timestep_padding_mask"].to(
+                        dtype=torch.bool, device=self.train_device
+                    )
+                    next_alive_mask = batch["next_alive_mask"].to(dtype=torch.bool)
+                    all_log_probs = batch["all_log_probs"].to(dtype=torch.float32)
+                    terminations = batch["terminations"].to(dtype=torch.bool)
 
-                bs = states.shape[0]
-                n_agents = rewards.shape[2]
-                t_steps = rewards.shape[1]
+                    bs = states.shape[0]
+                    n_agents = rewards.shape[2]
+                    t_steps = rewards.shape[1]
 
-                device = self.train_device
-                alive_mask = alive_mask.to(device)
-                next_alive_mask = next_alive_mask.to(device)
-                states_dev = states.to(device)
-                next_states_dev = next_states.to(device)
+                    device = self.train_device
+                    alive_mask = alive_mask.to(device)
+                    next_alive_mask = next_alive_mask.to(device)
+                    states_dev = states.to(device)
+                    next_states_dev = next_states.to(device)
 
-                rewards_sum = rewards.sum(dim=2).to(device)
-                terminations_any = terminations.any(dim=2).to(
-                    dtype=torch.float32, device=device
-                )
+                    rewards_sum = rewards.sum(dim=2).to(device)
+                    terminations_any = terminations.any(dim=2).to(
+                        dtype=torch.float32, device=device
+                    )
 
-                timestep_padding_mask_expanded = torch.stack(
-                    [timestep_padding_mask] * n_agents, dim=1
-                ).to(device)
+                    timestep_padding_mask_expanded = torch.stack(
+                        [timestep_padding_mask] * n_agents, dim=1
+                    ).to(device)
 
                 # ---- Critic forward: full sequence -> V(s_{T-1}) only ----
                 self.eval_critic.train()
@@ -259,6 +278,9 @@ class MAPPOTrainer(OnPolicyTrainer):
                 total_critic_loss += critic_loss.detach().cpu().item()
                 total_batches += 1
 
+                bs = batch["states"].shape[0]
+                pbar.update(bs)
+
         self.eval_agent_group.to("cpu")
         self.eval_critic.to("cpu")
         torch.cuda.empty_cache()
@@ -271,8 +293,10 @@ class MAPPOTrainer(OnPolicyTrainer):
         """Multi-GPU PPO learning via worker processes.
 
         Each worker holds a full copy of the eval models and optimizers.
-        Batches are sliced across workers, gradients are synchronized via
-        all_reduce, and average loss is collected from all workers.
+        Batches are sliced across workers, gradients are synchronised via
+        all_reduce, and the average combined loss is collected.
+
+        For each PPO epoch (``times``), a progress bar shows batch progress.
         """
         self.worker_group.move_models_to_gpu()
 
@@ -287,10 +311,16 @@ class MAPPOTrainer(OnPolicyTrainer):
                 shuffle=True,
                 num_workers=self.n_workers,
             )
-            for batch in dataloader:
-                loss = self.worker_group.train_step(batch)
-                total_combined += loss
-                total_batches += 1
+            with tqdm(
+                total=sample_size, desc=f"Times {epoch + 1}/{times}", unit="batch"
+            ) as pbar:
+                for batch in dataloader:
+                    loss = self.worker_group.train_step(batch)
+                    total_combined += loss
+                    total_batches += 1
+
+                    bs = batch["states"].shape[0]
+                    pbar.update(bs)
 
         self.worker_group.move_models_to_cpu()
         torch.cuda.empty_cache()
@@ -306,7 +336,7 @@ class MAPPOTrainer(OnPolicyTrainer):
         iterations,
         target_first_metric,
         batch_size=64,
-        learning_times_per_iteration=4,
+        learning_times_per_iteration=1,
     ):
         """Run the on-policy MAPPO training loop.
 
@@ -345,6 +375,12 @@ class MAPPOTrainer(OnPolicyTrainer):
             self.current_epoch = iteration
 
             sample_size = len(self.replaybuffer.buffer)
+            if self.sample_mode == "ratio":
+                sample_ratio = self.sample_ratio.get_value(iteration)
+                sample_size = round(sample_size * sample_ratio)
+            else:
+                sample_size = round(self.sample_ratio.get_value(iteration))
+            sample_size = min(sample_size, len(self.replaybuffer.buffer))
             if sample_size > 0:
                 agent_group_lr = self.agent_optimizer.param_groups[0]["lr"]
                 critic_lr = self.critic_optimizer.param_groups[0]["lr"]

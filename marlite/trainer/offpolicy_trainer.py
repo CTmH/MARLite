@@ -15,6 +15,7 @@ from marlite.algorithm.critic import CriticConfig
 from marlite.util.optimizer_config import OptimizerConfig
 from marlite.util.lr_scheduler_config import LRSchedulerConfig
 from marlite.util.scheduler import Scheduler
+from marlite.algorithm.critic.mixer import Mixer as MixerCritic
 from marlite.analyzer import AnalyzerConfig
 from marlite.util.serialization import (
     serialize_to_buffer,
@@ -34,6 +35,10 @@ class OffPolicyTrainer(Trainer):
         self.epsilon = epsilon_scheduler
         self.eval_epsilon = eval_epsilon
         super().__init__(**kwargs)
+        if not isinstance(self.eval_critic, MixerCritic):
+            raise TypeError(
+                "Mixer subclass required"
+            )
 
         self.target_agent_group = self.agent_group_config.get_agent_group()
         self.best_agent_group_params = serialize_to_buffer(
@@ -127,7 +132,7 @@ class OffPolicyTrainer(Trainer):
         self,
         epochs,
         target_first_metric,
-        eval_interval=1,
+        rollback_interval=1,
         update_target_interval=1,
         batch_size=64,
         learning_times_per_epoch=1,
@@ -235,7 +240,7 @@ class OffPolicyTrainer(Trainer):
                 )
                 break
 
-            if epoch % eval_interval == 0:
+            if epoch % rollback_interval == 0:
                 load_state_dict_into(
                     self.eval_agent_group,
                     deserialize_from_buffer(self._cached_agent_group_params),

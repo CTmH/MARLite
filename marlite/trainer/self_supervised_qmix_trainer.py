@@ -73,16 +73,17 @@ class SelfSupervisedQMIXTrainer(OffPolicyTrainer):
         # Create data_constructor before super().__init__ because _create_worker_group needs it
         self.data_constructor = self.data_constructor_config.get_data_constructor()
 
-        super().__init__(**kwargs)
-
+        # Create ssl_model and ssl_optimizer before super().__init__() so that
+        # _sync_params_to_workers() (called during _setup_multi_gpu()) can access them.
         self.ssl_model = ssl_model_config.get_model()
-        self.best_ssl_model_params = serialize_to_buffer(self.ssl_model.state_dict())
-        self._cached_ssl_model_params = serialize_to_buffer(self.ssl_model.state_dict())
-
-        # ssl_optimizer only optimizes ssl_model, not eval_agent_group
         self.ssl_optimizer = self.ssl_optimizer_config.get_optimizer(
             self.ssl_model.parameters()
         )
+
+        super().__init__(**kwargs)
+
+        self.best_ssl_model_params = serialize_to_buffer(self.ssl_model.state_dict())
+        self._cached_ssl_model_params = serialize_to_buffer(self.ssl_model.state_dict())
 
         # Optionally compile ssl_model (only on single-GPU)
         if self.compile_models:
@@ -217,7 +218,7 @@ class SelfSupervisedQMIXTrainer(OffPolicyTrainer):
         self,
         epochs,
         target_first_metric,
-        eval_interval=1,
+        rollback_interval=1,
         update_target_interval=1,
         batch_size=64,
         learning_times_per_epoch=1,
@@ -344,7 +345,7 @@ class SelfSupervisedQMIXTrainer(OffPolicyTrainer):
                 )
                 break
 
-            if epoch % eval_interval == 0:
+            if epoch % rollback_interval == 0:
                 load_state_dict_into(
                     self.eval_agent_group,
                     deserialize_from_buffer(self._cached_agent_group_params),
