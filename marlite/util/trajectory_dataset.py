@@ -199,50 +199,61 @@ def trajectory_collate_fn(batch):
 
 
 class SSLEnrichedTrajectoryDataset(Dataset):
-    """
-    A TrajectoryDataset wrapper that precomputes and enriches samples with SSL data.
+    """Base class that precomputes SSL reconstruction data for an entire dataset.
 
-    Instead of computing SSL data per-batch in collate_fn (which is slow),
-    this dataset:
-    1. Materializes all samples via list(trajectory_dataset)
-    2. Extracts SSL-relevant fields (observations, states, edge_indices, alive_mask)
-    3. Processes all SSL data in a single call to data_constructor.process()
-    4. Enriches each sample dict with formatted_obs and construct_padding_mask
-    5. Returns enriched samples that work with standard TrajectoryDataLoader
+    Materialises all samples, extracts common fields, and calls
+    ``data_constructor.process()`` **once** (instead of per batch).
+    Subclasses implement :meth:`_get_process_extra` to supply the
+    constructor-specific extra arguments.
 
-    This approach is faster because:
-    - SSL data construction happens once, not per-batch
-    - data_constructor.process() can process all samples together (batch processing)
-    - Collate_fn just converts to tensors without complex processing
+    Subclasses
+    ----------
+    GraphSSLEnrichedTrajectoryDataset
+        Passes ``edge_indices`` — for ``SelfSupervisedDataConstructor``.
+    GroupSSLEnrichedTrajectoryDataset
+        Passes ``group_indices`` (last timestep) as ``grouping`` — for
+        GroupConsensus constructors (``MagentGroupWindow``, etc.).
     """
 
     def __init__(self, trajectory_dataset, data_constructor):
-        """
-        Initialize SSLEnrichedTrajectoryDataset.
-
-        Args:
-            trajectory_dataset: TrajectoryDataset instance to wrap
-            data_constructor: SelfSupervisedDataConstructor instance for SSL preprocessing
-        """
         self.base_dataset = trajectory_dataset
         self.data_constructor = data_constructor
         self.traj_len = trajectory_dataset.traj_len
-
         self._enrich_all_samples()
 
+    # -- subclasses override this ------------------------------------------
+
+    def _get_process_extra(self, all_samples):
+        """Return ``(extra_pos, extra_kw)`` for ``data_constructor.process()``.
+
+        Parameters
+        ----------
+        all_samples : list[dict]
+            Every sample dict from the base dataset (already materialised).
+
+        Returns
+        -------
+        extra_pos : tuple
+            Extra **positional** args to pass after ``states``.
+        extra_kw : dict
+            Extra **keyword** args to pass at the end.
+        """
+        raise NotImplementedError("subclass must implement _get_process_extra")
+
+    # -- shared enrichment -------------------------------------------------
+
     def _enrich_all_samples(self):
-        """
-        Materialize all samples and compute SSL data for all at once.
-        """
+        """Materialise all samples, build SSL targets, and enrich dicts."""
         all_samples = list(self.base_dataset)
 
         observations = np.array([s["observations"] for s in all_samples])
         states = np.array([s["states"] for s in all_samples])
         alive_masks = np.array([s["alive_mask"] for s in all_samples])
-        edge_indices = [s["edge_indices"] for s in all_samples]
+
+        extra_pos, extra_kw = self._get_process_extra(all_samples)
 
         formatted_obs, construct_padding_mask = self.data_constructor.process(
-            observations, states, edge_indices, alive_masks
+            observations, states, *extra_pos, alive_mask=alive_masks, **extra_kw,
         )
 
         for i, sample in enumerate(all_samples):
@@ -256,3 +267,42 @@ class SSLEnrichedTrajectoryDataset(Dataset):
 
     def __getitem__(self, idx):
         return self._enriched_samples[idx]
+
+
+# ---------------------------------------------------------------------------
+#  Concrete subclasses
+# ---------------------------------------------------------------------------
+
+
+class GraphSSLEnrichedTrajectoryDataset(SSLEnrichedTrajectoryDataset):
+    """Enriches samples with graph-based SSL data.
+
+    Passes ``edge_indices`` as the third positional argument to
+    ``data_constructor.process()``.  Compatible with all
+    ``SelfSupervisedDataConstructor`` subclasses.
+    """
+
+    def _get_process_extra(self, all_samples):
+        edge_indices = [s["edge_indices"] for s in all_samples]
+        return (edge_indices,), {}
+
+
+class GroupSSLEnrichedTrajectoryDataset(SSLEnrichedTrajectoryDataset):
+    """Enriches samples with group-based SSL data.
+
+    Extracts ``group_indices`` (only the **last timestep** per sample,
+    stored as a list of ``(N,)`` numpy arrays — see
+    ``TrajectoryDataset.__getitem__``, ``DICT_ATTR`` path) and passes it
+    as ``grouping=`` keyword argument to ``data_constructor.process()``.
+    Compatible with ``MagentGroupWindowConstructor``,
+    ``MagentGroupFeaturesConstructor``, etc.
+    """
+
+    def _get_process_extra(self, all_samples):
+        # ``group_indices`` per sample is a *list* of (N,) numpy
+        # arrays (one per timestep).  We keep ONLY the last timestep
+        # and stack across samples → (K, N).
+        group_indices = np.array([
+            s["group_indices"][-1] for s in all_samples
+        ])
+        return (), {"grouping": group_indices}

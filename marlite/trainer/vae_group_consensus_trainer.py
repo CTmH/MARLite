@@ -1,5 +1,6 @@
 import torch
 import torch.nn.functional as F
+import time
 import numpy as np
 import absl.logging as logging
 from tqdm import tqdm
@@ -10,6 +11,7 @@ from marlite.trainer.trainer_worker_group.vae_group_consensus_worker_group impor
 )
 from marlite.util.trajectory_dataset import (
     TrajectoryDataLoader,
+    GroupSSLEnrichedTrajectoryDataset,
 )
 from marlite.util.serialization import get_state_dict, load_state_dict_into
 
@@ -165,8 +167,23 @@ class VAEGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
 
         for t in range(times):
             dataset = self.replaybuffer.sample(sample_size)
+
+            # ── Pre-generate all reconstruction targets once per epoch ──
+            use_ssl = not is_warmup
+            if use_ssl:
+                t0 = time.time()
+                ssl_dataset = GroupSSLEnrichedTrajectoryDataset(
+                    dataset, self.data_constructor
+                )
+                logging.info(
+                    f"  SSL enrichment done in {time.time() - t0:.2f}s "
+                    f"({len(dataset)} samples)"
+                )
+            else:
+                ssl_dataset = dataset
+
             dataloader = TrajectoryDataLoader(
-                dataset,
+                ssl_dataset,
                 batch_size=batch_size,
                 shuffle=True,
                 num_workers=self.n_workers,
@@ -232,10 +249,27 @@ class VAEGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
         total_vae = 0.0
         total_batches = 0
 
+        is_warmup = self.current_epoch < self.warmup_epochs
+
         for t in range(times):
             dataset = self.replaybuffer.sample(sample_size)
+
+            # Pre-generate all reconstruction targets once per epoch.
+            use_ssl = not is_warmup
+            if use_ssl:
+                t0 = time.time()
+                ssl_dataset = GroupSSLEnrichedTrajectoryDataset(
+                    dataset, self.data_constructor
+                )
+                logging.info(
+                    f"  SSL enrichment done in {time.time() - t0:.2f}s "
+                    f"({len(dataset)} samples)"
+                )
+            else:
+                ssl_dataset = dataset
+
             dataloader = TrajectoryDataLoader(
-                dataset,
+                ssl_dataset,
                 batch_size=batch_size,
                 shuffle=True,
                 num_workers=self.n_workers,
@@ -494,13 +528,23 @@ class VAEGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
         if is_warmup:
             vae_loss = torch.tensor(0.0, device=self.train_device)
         else:
-            # ── 3a. Build reconstruction targets from state & grouping ───
-            targets, construct_mask = self._build_recon_targets(
-                observations,         # (B, T, N, obs_dim)
-                states,               # (B, T, H,W,C)
-                group_indices,        # (B, N) numpy (pre-computed)
-                alive_mask,           # (B, T, N)
-            )
+            # ── 3a. Obtain reconstruction targets ──────────────────────
+            # Pre-generated path: targets already computed by
+            # GroupSSLEnrichedTrajectoryDataset on the trainer, stored in batch.
+            if "formatted_obs" in batch:
+                targets = batch["formatted_obs"].to(
+                    dtype=torch.float32, device=self.train_device
+                )
+                #   (B, G, …)  torch float32
+                construct_mask = batch["construct_padding_mask"].to(
+                    dtype=torch.bool, device=self.train_device
+                )
+                #   (B, G)  torch bool
+            else:
+                # Fallback: compute on-the-fly (legacy compatibility)
+                targets, construct_mask = self._build_recon_targets(
+                    observations, states, group_indices, alive_mask,
+                )
             #   (B, G, …)  shape depends on constructor:
             #     A2 (MagentGroupWindowConstructor):
             #       channel_first=F → (B, G, K, K, C_sel)

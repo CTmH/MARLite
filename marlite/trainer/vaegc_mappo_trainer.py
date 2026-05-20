@@ -4,96 +4,57 @@ Combines the on-policy MAPPO algorithm (PPO clipped surrogate, GAE,
 centralised value critic) with VAE-based group consensus learning.
 The consensus latent is trained via self-supervised reconstruction of
 global state, while the PPO objectives drive the policy and value updates.
+
+SSL infrastructure (model, optimiser, data constructor, checkpoint)
+is provided by :class:`SelfSupervisedMAPPOTrainer`.  This class only
+adds VAE-specific logic (KL divergence, reconstruction modes, warmup).
 """
 
-import os
+import time
 import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.distributions import Categorical
-from torch.nn.modules.loss import _Loss
 from tqdm import tqdm
 from absl import logging
 
-from marlite.algorithm.model import ModelConfig
-from marlite.trainer.mappo_trainer import MAPPOTrainer
-from marlite.trainer.onpolicy_trainer import OnPolicyTrainer
+from marlite.trainer.self_supervised_mappo_trainer import SelfSupervisedMAPPOTrainer
 from marlite.trainer.trainer_worker_group.vaegc_mappo_worker_group import (
     VAEGroupConsensusMAPPOWorkerGroup,
 )
-from marlite.util.serialization import (
-    serialize_to_buffer,
-    deserialize_from_buffer,
-    get_state_dict,
-    load_state_dict_into,
+from marlite.util.serialization import get_state_dict, load_state_dict_into
+from marlite.util.trajectory_dataset import (
+    TrajectoryDataLoader,
+    GroupSSLEnrichedTrajectoryDataset,
 )
-from marlite.util.optimizer_config import OptimizerConfig
-from marlite.util.lr_scheduler_config import LRSchedulerConfig
-from marlite.util.self_supervised_data_constructor.self_supervised_data_constructor_config import (
-    SelfSupervisedDataConstructorConfig,
-)
-from marlite.util.loss_func import ReconstructionLoss, PITLoss
-from marlite.util.trajectory_dataset import TrajectoryDataLoader
 
 
-class VAEGroupConsensusMAPPOTrainer(MAPPOTrainer):
+class VAEGroupConsensusMAPPOTrainer(SelfSupervisedMAPPOTrainer):
     """MAPPO trainer with VAE group consensus self-supervised learning.
 
-    Extends :class:`MAPPOTrainer` with:
-    - SSL decoder model for reconstructing global state from group consensus.
+    Extends :class:`SelfSupervisedMAPPOTrainer` with:
     - KL divergence regularisation on the latent distributions.
+    - Per-agent or per-group reconstruction modes.
     - Optional warmup phase (PPO-only before enabling SSL).
-    - Flexible loss combination ("weighted_sum" or "pit_loss").
 
     Parameters
     ----------
-    ssl_model_config : ModelConfig
-        Configuration for the SSL decoder model.
-    ssl_optimizer_config : OptimizerConfig
-        Optimizer configuration for the SSL model.
-    ssl_lr_scheduler_conf : LRSchedulerConfig
-        LR scheduler configuration for the SSL optimizer.
-    data_constructor_config : SelfSupervisedDataConstructorConfig
-        Configuration for the data constructor that builds reconstruction
-        targets from global state and group assignments.
-    reconstruction_loss : _Loss
-        Loss function for reconstruction (e.g. PointSetMSELoss).
-    self_supervised_learning_loss_weight : float
-        Weight w_ssl for VAE loss in combined loss.
-    loss_combination_method : str
-        "weighted_sum" or "pit_loss".
-    pit_loss_alpha : float
-        Alpha parameter for PITLoss exponential decay.
     kl_divergence_weight : float
         Beta_KL weight for KL divergence term.
     recon_mode : str
-        "per_agent" or "per_group" reconstruction mode.
+        ``"per_agent"`` or ``"per_group"`` reconstruction mode.
     kl_on_agent : bool
         Apply KL divergence on per-agent latent distributions.
     kl_on_group : bool
         Apply KL divergence on per-group (deduplicated) distributions.
     warmup_iterations : int
         Number of initial iterations with PPO-only (no SSL).
+    **kwargs
+        Forwarded to :class:`SelfSupervisedMAPPOTrainer`.
     """
 
     def __init__(
         self,
-        # MAPPO params (see MAPPOTrainer)
-        clip_epsilon: float = 0.2,
-        gae_lambda: float = 0.95,
-        entropy_coef: float = 0.01,
-        vf_coef: float = 0.5,
-        max_grad_norm: float = 5.0,
-        # SSL params
-        ssl_model_config: ModelConfig = None,
-        ssl_optimizer_config: OptimizerConfig = None,
-        ssl_lr_scheduler_conf: LRSchedulerConfig = None,
-        data_constructor_config: SelfSupervisedDataConstructorConfig = None,
-        reconstruction_loss: _Loss = None,
-        self_supervised_learning_loss_weight: float = 1.0,
-        loss_combination_method: str = "weighted_sum",
-        pit_loss_alpha: float = 0.9,
-        # VAE params
         kl_divergence_weight: float = 0.005,
         recon_mode: str = "per_agent",
         kl_on_agent: bool = True,
@@ -110,98 +71,12 @@ class VAEGroupConsensusMAPPOTrainer(MAPPOTrainer):
         self.kl_on_agent = kl_on_agent
         self.kl_on_group = kl_on_group
         self.warmup_iterations = warmup_iterations
-        self.self_supervised_learning_loss_weight = (
-            self_supervised_learning_loss_weight
-        )
-        self.loss_combination_method = loss_combination_method
-        self.pit_loss_alpha = pit_loss_alpha
-        self.reconstruction_loss = reconstruction_loss
 
-        if data_constructor_config is not None:
-            self.data_constructor = data_constructor_config.get_data_constructor()
-        else:
-            self.data_constructor = None
-
-        # Create ssl_model and ssl_optimizer before super().__init__() so that
-        # _sync_params_to_workers() (called during _setup_multi_gpu()) can access them.
-        self.ssl_model_config = ssl_model_config
-        self.ssl_optimizer_config = ssl_optimizer_config
-        if ssl_model_config is not None:
-            self.ssl_model = ssl_model_config.get_model()
-        else:
-            self.ssl_model = None
-        if ssl_optimizer_config is not None and self.ssl_model is not None:
-            self.ssl_optimizer = ssl_optimizer_config.get_optimizer(
-                self.ssl_model.parameters()
-            )
-        else:
-            self.ssl_optimizer = None
-
-        super().__init__(
-            clip_epsilon=clip_epsilon,
-            gae_lambda=gae_lambda,
-            entropy_coef=entropy_coef,
-            vf_coef=vf_coef,
-            max_grad_norm=max_grad_norm,
-            **kwargs,
-        )
-
-        if (
-            ssl_lr_scheduler_conf is not None
-            and self.ssl_optimizer is not None
-        ):
-            self.ssl_lr_scheduler = ssl_lr_scheduler_conf.get_lr_scheduler(
-                self.ssl_optimizer
-            )
-        else:
-            self.ssl_lr_scheduler = None
-
-        if self.compile_models and self.ssl_model is not None:
-            self.ssl_model = torch.compile(
-                self.ssl_model.to(self.train_device)
-            ).to("cpu")
-
-        self.pit_loss = PITLoss(
-            num_tasks=2, alpha=self.pit_loss_alpha, reduction="mean"
-        )
+        super().__init__(**kwargs)
 
     # ------------------------------------------------------------------
-    # SSL helper methods
+    # VAE reconstruction helpers
     # ------------------------------------------------------------------
-
-    def _compute_ssl_loss(self, pred_set, target_set, mask=None):
-        if isinstance(self.reconstruction_loss, ReconstructionLoss):
-            return self.reconstruction_loss(pred_set, target_set, mask)
-        return self.reconstruction_loss(pred_set, target_set)
-
-    def _combine_rl_ssl_loss(self, rl_loss, ssl_loss):
-        if self.loss_combination_method == "pit_loss":
-            losses = torch.stack([rl_loss, ssl_loss])
-            return self.pit_loss(losses)
-        return rl_loss + self.self_supervised_learning_loss_weight * ssl_loss
-
-    def _build_recon_targets(self, observations, states, group_indices, alive_mask):
-        obs_np = observations.detach().cpu().numpy()
-        st_np = (
-            states.detach().cpu().numpy()
-            if isinstance(states, torch.Tensor)
-            else states
-        )
-        alv_np = alive_mask.detach().cpu().numpy()
-
-        targets_np, construct_mask_np = self.data_constructor.process(
-            observations=obs_np,
-            states=st_np,
-            grouping=group_indices,
-            alive_mask=alv_np,
-        )
-        targets = torch.tensor(
-            targets_np, dtype=torch.float32, device=self.train_device
-        )
-        construct_mask = torch.tensor(
-            construct_mask_np, dtype=torch.bool, device=self.train_device
-        )
-        return targets, construct_mask
 
     def _recon_loss_per_group(self, consensus, targets, construct_mask):
         bs, G, L = consensus.shape
@@ -288,47 +163,43 @@ class VAEGroupConsensusMAPPOTrainer(MAPPOTrainer):
             warmup_iterations=self.warmup_iterations,
         )
 
-    def _sync_params_to_workers(self):
-        if self.worker_group is None:
-            return
-        trainable_params = {
-            "eval_agent_group": get_state_dict(self.eval_agent_group),
-            "eval_critic": get_state_dict(self.eval_critic),
-        }
-        if self.ssl_model is not None:
-            trainable_params["ssl_model"] = get_state_dict(self.ssl_model)
-        self.worker_group.broadcast_params(trainable_params)
-        critic_lr = self.critic_optimizer.param_groups[0]["lr"]
-        agent_lr = self.agent_optimizer.param_groups[0]["lr"]
-        self.worker_group.sync_lr_to_workers(critic_lr, agent_lr)
-
-    def _sync_eval_params_from_workers(self):
-        if self.worker_group is None:
-            return
-        eval_params = self.worker_group.read_params_from_worker0()
-        load_state_dict_into(self.eval_agent_group, eval_params["eval_agent_group"])
-        load_state_dict_into(self.eval_critic, eval_params["eval_critic"])
-        if "ssl_model" in eval_params and self.ssl_model is not None:
-            load_state_dict_into(self.ssl_model, eval_params["ssl_model"])
+    # ------------------------------------------------------------------
+    # PPO + VAE learning (multi-GPU)
+    # ------------------------------------------------------------------
 
     def _learn_multi_gpu(self, sample_size, batch_size: int, times: int = 1):
         """Multi-GPU PPO + VAE learning via worker processes.
 
-        Each worker holds eval models, critic, and SSL model.
-        Batches are sliced across workers, gradients are synchronised via
-        all_reduce, and the combined (RL + SSL) loss is returned.
-        VAE reconstruction loss and KL divergence are computed inside each
-        worker's ``train_step()``.
+        Reconstruction targets are pre-generated **once** on the trainer
+        via ``GroupSSLEnrichedTrajectoryDataset`` so workers read
+        ``formatted_obs`` / ``construct_padding_mask`` from the batch.
         """
         self.worker_group.move_models_to_gpu()
         total_combined = 0.0
         total_critic = 0.0
         total_vae = 0.0
         total_batches = 0
+
+        is_warmup = self.current_epoch < self.warmup_iterations
+
         for epoch in range(times):
             dataset = self.replaybuffer.sample(sample_size)
+
+            if not is_warmup:
+                t0 = time.time()
+                ssl_dataset = GroupSSLEnrichedTrajectoryDataset(
+                    dataset, self.data_constructor
+                )
+                logging.info(
+                    f"  SSL enrichment done in {time.time() - t0:.2f}s "
+                    f"({len(dataset)} samples)"
+                )
+            else:
+                ssl_dataset = dataset
+
             dataloader = TrajectoryDataLoader(
-                dataset, batch_size=batch_size, shuffle=True, num_workers=self.n_workers
+                ssl_dataset, batch_size=batch_size, shuffle=True,
+                num_workers=self.n_workers,
             )
             with tqdm(
                 total=sample_size, desc=f"Times {epoch + 1}/{times}", unit="batch"
@@ -356,22 +227,16 @@ class VAEGroupConsensusMAPPOTrainer(MAPPOTrainer):
         return total_combined / max(total_batches, 1)
 
     # ------------------------------------------------------------------
-    # PPO + VAE learning
+    # PPO + VAE learning (single-GPU)
     # ------------------------------------------------------------------
 
     def _learn_single_gpu(self, sample_size, batch_size: int, times: int = 4):
         """Single-GPU PPO + VAE joint learning loop.
 
-        For each PPO epoch (``times``), the sampled dataset is iterated
-        in mini-batches.  Each batch runs:
-          - critic forward: V(s) for the last timestep
-          - agent forward: action logits + VAE consensus
-          - single-step TD residual advantage
-          - PPO clipped surrogate + entropy bonus (actor)
-          - MSE value loss (critic)
-          - VAE reconstruction loss + KL divergence  (if not warmup)
-          - combined backward pass with gradient clipping
-          - three optimiser steps (agent, critic, ssl_model)
+        Reconstruction targets are pre-generated **once** for the entire
+        sampled dataset via ``GroupSSLEnrichedTrajectoryDataset``.  The
+        pre-generated ``formatted_obs`` / ``construct_padding_mask`` are
+        read directly from each batch.
         """
         total_actor_loss = 0.0
         total_critic_loss = 0.0
@@ -380,16 +245,29 @@ class VAEGroupConsensusMAPPOTrainer(MAPPOTrainer):
 
         self.eval_agent_group.to(self.train_device)
         self.eval_critic.to(self.train_device)
-        if self.ssl_model is not None:
-            self.ssl_model.to(self.train_device)
+        self.ssl_model.to(self.train_device)
 
         is_warmup = self.current_epoch < self.warmup_iterations
 
         dataset = self.replaybuffer.sample(sample_size)
 
+        # ── Pre-generate all reconstruction targets once ──
+        if not is_warmup:
+            t0 = time.time()
+            ssl_dataset = GroupSSLEnrichedTrajectoryDataset(
+                dataset, self.data_constructor
+            )
+            logging.info(
+                f"  SSL enrichment done in {time.time() - t0:.2f}s "
+                f"({len(dataset)} samples)"
+            )
+        else:
+            ssl_dataset = dataset
+
         for epoch in range(times):
             dataloader = TrajectoryDataLoader(
-                dataset, batch_size=batch_size, shuffle=True, num_workers=self.n_workers
+                ssl_dataset, batch_size=batch_size, shuffle=True,
+                num_workers=self.n_workers,
             )
             with tqdm(
                 total=sample_size, desc=f"Times {epoch + 1}/{times}", unit="batch"
@@ -413,7 +291,6 @@ class VAEGroupConsensusMAPPOTrainer(MAPPOTrainer):
 
                     bs = states.shape[0]
                     n_agents = rewards.shape[2]
-                    t_steps = rewards.shape[1]
                     device = self.train_device
 
                     alive_mask_d = alive_mask.to(device)
@@ -501,11 +378,14 @@ class VAEGroupConsensusMAPPOTrainer(MAPPOTrainer):
                     critic_loss = F.mse_loss(v_last, returns.detach())
 
                     # ── VAE reconstruction loss ──
-                    if is_warmup or self.data_constructor is None or self.ssl_model is None or group_consensus is None:
+                    if is_warmup or group_consensus is None:
                         vae_loss = torch.tensor(0.0, device=device)
                     else:
-                        targets, construct_mask = self._build_recon_targets(
-                            observations, states, group_indices_np, alive_mask
+                        targets = batch["formatted_obs"].to(
+                            dtype=torch.float32, device=device
+                        )
+                        construct_mask = batch["construct_padding_mask"].to(
+                            dtype=torch.bool, device=device
                         )
                         if self.recon_mode == "per_group":
                             recon_loss = self._recon_loss_per_group(
@@ -532,8 +412,7 @@ class VAEGroupConsensusMAPPOTrainer(MAPPOTrainer):
                     # ── Backward ──
                     self.agent_optimizer.zero_grad()
                     self.critic_optimizer.zero_grad()
-                    if self.ssl_optimizer is not None:
-                        self.ssl_optimizer.zero_grad()
+                    self.ssl_optimizer.zero_grad()
 
                     combined_loss.backward()
 
@@ -543,15 +422,13 @@ class VAEGroupConsensusMAPPOTrainer(MAPPOTrainer):
                     torch.nn.utils.clip_grad_norm_(
                         self.eval_critic.parameters(), max_norm=self.max_grad_norm,
                     )
-                    if self.ssl_model is not None:
-                        torch.nn.utils.clip_grad_norm_(
-                            self.ssl_model.parameters(), max_norm=self.max_grad_norm,
-                        )
+                    torch.nn.utils.clip_grad_norm_(
+                        self.ssl_model.parameters(), max_norm=self.max_grad_norm,
+                    )
 
                     self.agent_optimizer.step()
                     self.critic_optimizer.step()
-                    if self.ssl_optimizer is not None:
-                        self.ssl_optimizer.step()
+                    self.ssl_optimizer.step()
 
                     total_actor_loss += actor_loss.detach().cpu().item()
                     total_critic_loss += critic_loss.detach().cpu().item()
@@ -565,8 +442,7 @@ class VAEGroupConsensusMAPPOTrainer(MAPPOTrainer):
 
         self.eval_agent_group.to("cpu")
         self.eval_critic.to("cpu")
-        if self.ssl_model is not None:
-            self.ssl_model.to("cpu")
+        self.ssl_model.to("cpu")
         torch.cuda.empty_cache()
 
         avg_rl = (total_actor_loss + total_critic_loss * self.vf_coef) / max(
@@ -577,134 +453,3 @@ class VAEGroupConsensusMAPPOTrainer(MAPPOTrainer):
             f"  Iter {self.current_epoch}: RL Loss {avg_rl:.4f}, VAE Loss {avg_vae:.4f}"
         )
         return avg_rl + avg_vae
-
-    # ------------------------------------------------------------------
-    # Checkpoint (includes ssl_model)
-    # ------------------------------------------------------------------
-
-    def save_current_model(self, checkpoint: str):
-        super().save_current_model(checkpoint)
-        if self.ssl_model is not None:
-            ssl_path = os.path.join(
-                self.checkpointdir, checkpoint, "ssl_model"
-            )
-            os.makedirs(ssl_path, exist_ok=True)
-            self.ssl_model.to("cpu")
-            torch.save(
-                get_state_dict(self.ssl_model),
-                os.path.join(ssl_path, "ssl_model.pth"),
-            )
-        return self
-
-    def load_checkpoint(self, checkpoint: str):
-        super().load_checkpoint(checkpoint)
-        if self.ssl_model is not None:
-            ssl_path = os.path.join(
-                self.checkpointdir, checkpoint, "ssl_model", "ssl_model.pth"
-            )
-            if os.path.exists(ssl_path):
-                self.ssl_model.to("cpu")
-                load_state_dict_into(
-                    self.ssl_model,
-                    torch.load(ssl_path, weights_only=True),
-                )
-        return self
-
-    # ------------------------------------------------------------------
-    # On-policy training loop (extends MAPPO with SSL LR scheduler)
-    # ------------------------------------------------------------------
-
-    def train(
-        self,
-        iterations,
-        target_first_metric,
-        batch_size=64,
-        learning_times_per_iteration=1,
-    ):
-        self.eval_episodes_to_replay_ratio = 1.0
-        self.evaluate()
-
-        for iteration in range(iterations):
-            self.current_epoch = iteration
-
-            sample_size = len(self.replaybuffer.buffer)
-            if self.sample_mode == "ratio":
-                sample_ratio = self.sample_ratio.get_value(iteration)
-                sample_size = round(sample_size * sample_ratio)
-            else:
-                sample_size = round(self.sample_ratio.get_value(iteration))
-            sample_size = min(sample_size, len(self.replaybuffer.buffer))
-            if sample_size > 0:
-                agent_group_lr = self.agent_optimizer.param_groups[0]["lr"]
-                critic_lr = self.critic_optimizer.param_groups[0]["lr"]
-                ssl_lr = (
-                    self.ssl_optimizer.param_groups[0]["lr"]
-                    if self.ssl_optimizer is not None
-                    else 0.0
-                )
-                logging.info(
-                    f"Iteration {iteration}: Batch size: {batch_size}, "
-                    f"Critic lr: {critic_lr:.8f}, Agent lr: {agent_group_lr:.8f}, "
-                    f"SSL lr: {ssl_lr:.8f}"
-                )
-                self._sync_params_to_workers()
-                loss = self.learn(
-                    sample_size=sample_size,
-                    batch_size=batch_size,
-                    times=learning_times_per_iteration,
-                )
-                self._sync_eval_params_from_workers()
-                logging.info(f"Iteration {iteration}: Loss {loss:.4f}")
-
-            self.replaybuffer = self.replaybuffer_config.create_replaybuffer()
-            result = self.evaluate()
-            metrics = {
-                key: result[key]["mean"] for key in self.eval_metric_list
-            }
-            first_metric = next(iter(metrics.values()))
-            first_metric_name = next(iter(metrics.keys()))
-            self.save_intermediate_results(iteration, result)
-
-            if isinstance(
-                self.lr_scheduler,
-                torch.optim.lr_scheduler.ReduceLROnPlateau,
-            ):
-                self.lr_scheduler.step(first_metric)
-            elif isinstance(
-                self.lr_scheduler, torch.optim.lr_scheduler.LRScheduler
-            ):
-                self.lr_scheduler.step()
-
-            if isinstance(
-                self.agent_lr_scheduler,
-                torch.optim.lr_scheduler.ReduceLROnPlateau,
-            ):
-                self.agent_lr_scheduler.step(first_metric)
-            elif isinstance(
-                self.agent_lr_scheduler,
-                torch.optim.lr_scheduler.LRScheduler,
-            ):
-                self.agent_lr_scheduler.step()
-
-            if self.ssl_lr_scheduler is not None:
-                if isinstance(
-                    self.ssl_lr_scheduler,
-                    torch.optim.lr_scheduler.ReduceLROnPlateau,
-                ):
-                    self.ssl_lr_scheduler.step(first_metric)
-                elif isinstance(
-                    self.ssl_lr_scheduler,
-                    torch.optim.lr_scheduler.LRScheduler,
-                ):
-                    self.ssl_lr_scheduler.step()
-
-            if first_metric >= self.best_metrics.get(
-                first_metric_name, -np.inf
-            ):
-                self.best_metrics = metrics
-                self.save_current_model(checkpoint="best")
-
-            if first_metric >= target_first_metric:
-                break
-
-        return self.best_metrics

@@ -409,11 +409,18 @@ class PointSetMSELoss(ReconstructionLoss):
                 f"Shape mismatch: pred_set {pred_set.shape} vs target_set {target_set.shape}"
             )
 
-        B, N, D = pred_set.shape
+        B, N = pred_set.shape[0], pred_set.shape[1]
+
+        # Flatten trailing dims so the loss works with any shape (B, N, ...):
+        #   (B, N, D)          → (B, N, D)
+        #   (B, G, C, K, K)    → (B, G, C*K*K)
+        #   (B, G, K, K, C)    → (B, G, K*K*C)
+        pred_flat = pred_set.reshape(B, N, -1)
+        target_flat = target_set.reshape(B, N, -1)
 
         # Compute squared error for each point (average over feature dimension)
-        # (B, N, D) -> (B, N)
-        point_wise_mse = F.mse_loss(pred_set, target_set, reduction="none").mean(dim=-1)
+        # (B, N, D') -> (B, N)
+        point_wise_mse = F.mse_loss(pred_flat, target_flat, reduction="none").mean(dim=-1)
 
         # Apply mask if provided
         if mask is not None:

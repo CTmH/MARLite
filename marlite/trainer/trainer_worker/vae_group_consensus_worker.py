@@ -41,7 +41,7 @@ class VAEGroupConsensusWorker(BaseWorker):
         warmup_epochs: int = 0,
         recon_mode: str = "per_agent",
         kl_on_group: bool = False,
-        kl_on_consensus: bool = True,
+        kl_on_agent: bool = True,
         **kwargs,
     ):
         if recon_mode not in ("per_agent", "per_group"):
@@ -50,7 +50,11 @@ class VAEGroupConsensusWorker(BaseWorker):
             )
         self.recon_mode = recon_mode
         self.kl_on_group = kl_on_group
-        self.kl_on_consensus = kl_on_consensus
+        self.kl_on_agent = kl_on_agent
+        self.warmup_epochs = warmup_epochs
+        self.pit_loss_alpha = pit_loss_alpha
+        self.kl_divergence_weight = kl_divergence_weight
+        self.loss_combination_method = loss_combination_method
 
         self.eval_agent_group = agent_group_config.get_agent_group()
         self.target_agent_group = agent_group_config.get_agent_group()
@@ -69,23 +73,19 @@ class VAEGroupConsensusWorker(BaseWorker):
             self.eval_agent_group.parameters()
         )
 
-        self.ssl_model = None
-        self.ssl_optimizer = None
-        self.reconstruction_loss = None
         self.self_supervised_learning_loss_weight = self_supervised_learning_loss_weight
         self.data_constructor = data_constructor
 
-        if ssl_model_config is not None:
-            self.ssl_model = ssl_model_config.get_model()
-            self.reconstruction_loss = reconstruction_loss
-            self.ssl_optimizer = ssl_optimizer_config.get_optimizer(
-                self.ssl_model.parameters()
-            )
-            self.pit_loss = PITLoss(
-                num_tasks=2,
-                alpha=self.pit_loss_alpha,
-                reduction="mean",
-            )
+        self.ssl_model = ssl_model_config.get_model()
+        self.reconstruction_loss = reconstruction_loss
+        self.ssl_optimizer = ssl_optimizer_config.get_optimizer(
+            self.ssl_model.parameters()
+        )
+        self.pit_loss = PITLoss(
+            num_tasks=2,
+            alpha=self.pit_loss_alpha,
+            reduction="mean",
+        )
 
     def move_to_device(self, device: str):
         if self.eval_agent_group is not None:
@@ -96,8 +96,7 @@ class VAEGroupConsensusWorker(BaseWorker):
             self.eval_critic.to(device)
         if self.target_critic is not None:
             self.target_critic.to(device)
-        if self.ssl_model is not None:
-            self.ssl_model.to(device)
+        self.ssl_model.to(device)
         self.device = device
 
     def reduce_gradients(self):
@@ -111,11 +110,10 @@ class VAEGroupConsensusWorker(BaseWorker):
                 dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
                 param.grad.data /= self.world_size
 
-        if self.ssl_model is not None:
-            for param in self.ssl_model.parameters():
-                if param.grad is not None:
-                    dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
-                    param.grad.data /= self.world_size
+        for param in self.ssl_model.parameters():
+            if param.grad is not None:
+                dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
+                param.grad.data /= self.world_size
 
     def get_params_for_main(self) -> Dict[str, Any]:
         params = {
@@ -133,11 +131,10 @@ class VAEGroupConsensusWorker(BaseWorker):
             "target_critic": {
                 k: v.clone().cpu() for k, v in self.target_critic.state_dict().items()
             },
-        }
-        if self.ssl_model is not None:
-            params["ssl_model"] = {
+            "ssl_model": {
                 k: v.clone().cpu() for k, v in self.ssl_model.state_dict().items()
-            }
+            },
+        }
         return params
 
     def sync_params_from_main(self, params):
@@ -161,10 +158,9 @@ class VAEGroupConsensusWorker(BaseWorker):
             self.target_critic.load_state_dict(
                 {k: v.clone() for k, v in params["target_critic"].items()}
             )
-        if "ssl_model" in params and self.ssl_model is not None:
-            self.ssl_model.load_state_dict(
-                {k: v.clone() for k, v in params["ssl_model"].items()}
-            )
+        self.ssl_model.load_state_dict(
+            {k: v.clone() for k, v in params["ssl_model"].items()}
+        )
 
     def train_step(self, batch: Dict[str, Any]) -> tuple:
         current_epoch = batch.get("epoch", 0)
@@ -284,11 +280,16 @@ class VAEGroupConsensusWorker(BaseWorker):
         critic_loss = torch.nn.functional.mse_loss(q_tot, y_tot.detach())
 
         # === VAE Reconstruction Loss ===
-        if is_warmup or self.ssl_model is None:
+        if is_warmup:
             vae_loss = torch.tensor(0.0, device=self.device)
         else:
-            targets, construct_mask = self._build_recon_targets(
-                observations, states, group_indices, alive_mask
+            # Pre-generated targets provided by trainer via
+            # SSLEnrichedTrajectoryDataset — no per-batch GPU↔CPU round-trip.
+            targets = batch["formatted_obs"].to(
+                dtype=torch.float32, device=self.device
+            )
+            construct_mask = batch["construct_padding_mask"].to(
+                dtype=torch.bool, device=self.device
             )
 
             if self.recon_mode == "per_group":
@@ -302,7 +303,7 @@ class VAEGroupConsensusWorker(BaseWorker):
                 )
 
             kl_divergence = 0.0
-            if self.kl_on_consensus:
+            if self.kl_on_agent:
                 kl_mu = agent_mu
                 kl_log_var = agent_log_var
                 mask = alive_mask[:, -1, :].unsqueeze(-1).expand_as(agent_mu)
@@ -321,7 +322,7 @@ class VAEGroupConsensusWorker(BaseWorker):
 
             vae_loss = reconstruction_loss + self.kl_divergence_weight * kl_divergence
 
-        if is_warmup or self.ssl_model is None:
+        if is_warmup:
             combined_loss = critic_loss
         else:
             combined_loss = self._combine_rl_ssl_loss(critic_loss, vae_loss)
@@ -329,8 +330,7 @@ class VAEGroupConsensusWorker(BaseWorker):
         # === Backward Pass ===
         self.critic_optimizer.zero_grad()
         self.agent_optimizer.zero_grad()
-        if self.ssl_optimizer is not None:
-            self.ssl_optimizer.zero_grad()
+        self.ssl_optimizer.zero_grad()
 
         combined_loss.backward()
 
@@ -338,27 +338,24 @@ class VAEGroupConsensusWorker(BaseWorker):
 
         torch.nn.utils.clip_grad_norm_(self.eval_critic.parameters(), max_norm=self.max_grad_norm)
         torch.nn.utils.clip_grad_norm_(self.eval_agent_group.parameters(), max_norm=self.max_grad_norm)
-        if self.ssl_model is not None and not is_warmup:
+        if not is_warmup:
             torch.nn.utils.clip_grad_norm_(self.ssl_model.parameters(), max_norm=self.max_grad_norm)
 
         self.critic_optimizer.step()
         self.agent_optimizer.step()
-        if self.ssl_optimizer is not None and not is_warmup:
+        if not is_warmup:
             self.ssl_optimizer.step()
 
-        if self.ssl_model is not None:
-            vae_loss_value = (
-                vae_loss.detach().cpu().item()
-                if isinstance(vae_loss, torch.Tensor)
-                else vae_loss
-            )
-            return (
-                combined_loss.detach().cpu().item(),
-                critic_loss.detach().cpu().item(),
-                vae_loss_value,
-            )
-        else:
-            return critic_loss.detach().cpu().item()
+        vae_loss_value = (
+            vae_loss.detach().cpu().item()
+            if isinstance(vae_loss, torch.Tensor)
+            else vae_loss
+        )
+        return (
+            combined_loss.detach().cpu().item(),
+            critic_loss.detach().cpu().item(),
+            vae_loss_value,
+        )
 
     def _build_recon_targets(self, observations, states, group_indices, alive_mask):
         obs_np = observations.detach().cpu().numpy()
@@ -457,11 +454,8 @@ class VAEGroupConsensusWorker(BaseWorker):
             batch = data_queue.get()
             result = self.train_step(batch)
             del batch
-            if self.ssl_model is not None:
-                combined, critic, vae = result
-                loss_queue.put((combined, critic, vae))
-            else:
-                loss_queue.put(result)
+            combined, critic, vae = result
+            loss_queue.put((combined, critic, vae))
 
         elif cmd == "MOVE_TO_GPU":
             self.move_to_device(self.assigned_device)
@@ -482,7 +476,7 @@ class VAEGroupConsensusWorker(BaseWorker):
             if "agent_lr" in lr_data:
                 for param_group in self.agent_optimizer.param_groups:
                     param_group["lr"] = lr_data["agent_lr"]
-            if "ssl_lr" in lr_data and self.ssl_optimizer is not None:
+            if "ssl_lr" in lr_data:
                 for param_group in self.ssl_optimizer.param_groups:
                     param_group["lr"] = lr_data["ssl_lr"]
             if ack_queue:

@@ -26,6 +26,7 @@ from marlite.algorithm.model.resnet import ResAttObsEnc, SimpleResAttObsEnc
 from marlite.algorithm.model.qmix_critic_model import QMixModel
 from marlite.algorithm.model.graphmix_critic_model import GraphMixModel
 from marlite.algorithm.model.hypernet import HyperNetwork
+from marlite.algorithm.model.decoder import NearestDecoder
 
 
 registered_models = {
@@ -53,6 +54,7 @@ registered_models = {
     "QMixModel": QMixModel,
     "GraphMixModel": GraphMixModel,
     "HyperNetwork": HyperNetwork,
+    "NearestDecoder": NearestDecoder,
 }
 
 

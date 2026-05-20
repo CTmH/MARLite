@@ -7,7 +7,7 @@ from tqdm import tqdm
 from marlite.trainer.self_supervised_qmix_trainer import SelfSupervisedQMIXTrainer
 from marlite.trainer.trainer_worker_group import VAEGraphWorkerGroup
 from marlite.util.trajectory_dataset import (
-    SSLEnrichedTrajectoryDataset,
+    GraphSSLEnrichedTrajectoryDataset,
     TrajectoryDataLoader,
 )
 
@@ -139,7 +139,7 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
         for t in range(times):
             dataset = self.replaybuffer.sample(sample_size)
             ssl_start = time.time()
-            ssl_dataset = SSLEnrichedTrajectoryDataset(dataset, self.data_constructor)
+            ssl_dataset = GraphSSLEnrichedTrajectoryDataset(dataset, self.data_constructor)
             dataloader = TrajectoryDataLoader(
                 ssl_dataset,
                 batch_size=batch_size,
@@ -237,7 +237,7 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
         for t in range(times):
             dataset = self.replaybuffer.sample(sample_size)
             ssl_start = time.time()
-            ssl_dataset = SSLEnrichedTrajectoryDataset(dataset, self.data_constructor)
+            ssl_dataset = GraphSSLEnrichedTrajectoryDataset(dataset, self.data_constructor)
             dataloader = TrajectoryDataLoader(
                 ssl_dataset,
                 batch_size=batch_size,
