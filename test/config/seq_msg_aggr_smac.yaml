@@ -6,7 +6,7 @@ agent_group:
     zealot_0: model_1
     zealot_1: model_1
     zealot_2: model_1
-  model_configs:
+  models:
     model_0:
       feature_extractor:
         model_type: "Custom"

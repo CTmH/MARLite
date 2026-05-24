@@ -365,6 +365,11 @@ class PointSetMSELoss(ReconstructionLoss):
     Args:
         reduction (str, optional): Specifies the reduction to apply to the output.
             Default: 'mean'. Options: 'none', 'mean', 'sum'
+        foreground_weight (float, optional): Weight multiplier for MSE on non-zero
+            target pixels.  Values > 1.0 penalise mistakes on informative
+            (non-zero) positions more heavily, preventing the model from
+            collapsing to all-zero predictions on sparse reconstruction targets.
+            Default: 1.0 (no extra weighting).
 
     Example:
         >>> loss_fn = PointSetMSELoss(reduction='mean')
@@ -375,8 +380,9 @@ class PointSetMSELoss(ReconstructionLoss):
         >>> loss = loss_fn(pred, target, mask)
     """
 
-    def __init__(self, reduction="mean"):
-        super().__init__(reduction=reduction)
+    def __init__(self, reduction="mean", foreground_weight=1.0, **kwargs):
+        super().__init__(reduction=reduction, **kwargs)
+        self.foreground_weight = foreground_weight
 
     def forward(
         self,
@@ -418,9 +424,23 @@ class PointSetMSELoss(ReconstructionLoss):
         pred_flat = pred_set.reshape(B, N, -1)
         target_flat = target_set.reshape(B, N, -1)
 
+        # Per-element squared error  (B, N, D')
+        se = (pred_flat - target_flat).pow(2)
+
+        # Optional foreground-weighting to penalise non-zero target pixels
+        # more heavily, preventing collapse to all-zeros on sparse targets.
+        if self.foreground_weight > 1.0:
+            # ``torch.no_grad()`` keeps the weight map from contaminating
+            # the gradient graph.  ``torch.ne`` (≠) is used instead of
+            # ``!=`` so that the dispatch is explicit.
+            with torch.no_grad():
+                foreground = torch.ne(target_flat, 0).float()  # (B, N, D')
+            w = 1.0 + (self.foreground_weight - 1.0) * foreground
+            se = se * w
+
         # Compute squared error for each point (average over feature dimension)
         # (B, N, D') -> (B, N)
-        point_wise_mse = F.mse_loss(pred_flat, target_flat, reduction="none").mean(dim=-1)
+        point_wise_mse = se.mean(dim=-1)
 
         # Apply mask if provided
         if mask is not None:

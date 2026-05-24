@@ -24,7 +24,7 @@ def _create_agent_group_config(env):
     agent_group_cfg = {
         "type": "QMIX",
         "agent_list": agents,
-        "model_configs": {
+        "models": {
             name: {
                 "model": model_layers,
                 "feature_extractor": {"model_type": "Identity"},

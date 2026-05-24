@@ -26,7 +26,7 @@ agent_group:
     predator_22: model1
     predator_23: model1
     predator_24: model1
-  model_configs:
+  models:
     model1:
       feature_extractor:
         model_type: "Custom"

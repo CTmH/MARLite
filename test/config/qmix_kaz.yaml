@@ -5,7 +5,7 @@ agent_group:
     archer_1: model1
     knight_0: model2
     knight_1: model2
-  model_configs:
+  models:
     model1:
       feature_extractor:
         model_type: "Custom"

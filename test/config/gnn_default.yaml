@@ -26,7 +26,7 @@ agent_group:
     predator_22: model1
     predator_23: model1
     predator_24: model1
-  model_configs:
+  models:
     model1:
       feature_extractor:
         model_type: "Custom"
@@ -77,7 +77,7 @@ agent_group:
     valid_node_list: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24]
     target_node_list: [36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71]
     update_interval: 5
-  graph_model_config:
+  graph_model:
     model_type: "GAT"
     input_dim: 128
     hidden_dim: 128

@@ -159,7 +159,7 @@ agent_group_config:
     predator_2: model1
     predator_3: model1
     predator_4: model1
-  model_configs:
+  models:
     model1:
       feature_extractor:
         model_type: "Custom"
@@ -188,7 +188,7 @@ agent_group_config:
   graph_builder_config:
     type: "FullConn"
     valid_node_list: [0, 1, 2, 3, 4]
-  graph_model_config:
+  graph_model:
     model_type: "GAT"
     input_dim: 8
     hidden_dim: 8
@@ -350,7 +350,7 @@ agent_group_config:
     predator_2: model1
     predator_3: model1
     predator_4: model1
-  model_configs:
+  models:
     model1:
       feature_extractor:
         model_type: "Custom"
@@ -385,7 +385,7 @@ agent_group_config:
   graph_builder_config:
     type: "FullConn"
     valid_node_list: [0, 1, 2, 3, 4]
-  graph_model_config:
+  graph_model:
     model_type: "GAT"
     input_dim: 8
     hidden_dim: 8
@@ -547,7 +547,7 @@ agent_group_config:
     predator_2: model1
     predator_3: model1
     predator_4: model1
-  model_configs:
+  models:
     model1:
       feature_extractor:
         model_type: "Custom"
@@ -582,7 +582,7 @@ agent_group_config:
   graph_builder_config:
     type: "FullConn"
     valid_node_list: [0, 1, 2, 3, 4]
-  graph_model_config:
+  graph_model:
     model_type: "GAT"
     input_dim: 8
     hidden_dim: 8

@@ -76,7 +76,7 @@ class TestPrioritizedReplayBuffer(unittest.TestCase):
         agent_group_cfg = {
             "type": "QMIX",
             "agent_list": self.agents,
-            "model_configs": {
+            "models": {
                 name: {
                     "model": self.model_layers.copy(),
                     "feature_extractor": {"model_type": "Identity"},

@@ -39,7 +39,7 @@ agent_group:
     red_33: model_0
     red_34: model_0
     red_35: model_0
-  model_configs:
+  models:
     model_0:
       group_estimate_feature_extractor:
         model_type: "Custom"

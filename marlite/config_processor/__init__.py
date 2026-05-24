@@ -13,6 +13,7 @@ REGISTERED_PROCESSORS: Dict[str, Type[ConfigProcessor]] = {
     'VAEGroupConsensusQMIX': SemiSupervisedQMIXConfigProcessor,
     'MAPPO': MAPPOConfigProcessor,
     'VAEGroupConsensusMAPPO': SemiSupervisedMAPPOConfigProcessor,
+    'G2ANetMAPPO': MAPPOConfigProcessor,
 }
 
 __all__ = ['ConfigProcessor', 'REGISTERED_PROCESSORS']

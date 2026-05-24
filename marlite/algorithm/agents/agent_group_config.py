@@ -33,6 +33,7 @@ from marlite.algorithm.agents.gnn_comm_agent_group import (
     DualPathProbObsGNNCommAgentGroup,
 )
 from marlite.algorithm.agents.g2anet_agent_group import G2ANetAgentGroup
+from marlite.algorithm.agents.g2anet_mappo_agent_group import G2ANetMAPPOAgentGroup
 from marlite.algorithm.agents.group_consensus_agent_group import GroupConsensusAgentGroup
 from marlite.algorithm.agents.mappo_agent_group import MAPPOAgentGroup
 from marlite.algorithm.agents.vaegc_mappo_agent_group import VAEGroupConsensusMAPPOAgentGroup
@@ -43,7 +44,7 @@ from marlite.algorithm.group_builder import GroupBuilderConfig
 
 def create_qmix_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
     agents = agent_group_config.pop("agent_list")
-    text_model_configs = agent_group_config.pop("model_configs")
+    text_model_configs = agent_group_config.pop("models")
     model_configs = {}
     feature_extractor_configs = {}
     for model_id, conf in text_model_configs.items():
@@ -98,11 +99,15 @@ def create_g2anet_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
     return _create_gnn_agent_group(G2ANetAgentGroup, agent_group_config)
 
 
+def create_g2anet_mappo_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
+    return _create_gnn_agent_group(G2ANetMAPPOAgentGroup, agent_group_config)
+
+
 def _create_gnn_agent_group(
     agent_group_class: Type[AgentGroup], agent_group_config: Dict[str, Any]
 ) -> AgentGroup:
     agents = agent_group_config.pop("agent_list")
-    text_model_configs = agent_group_config.pop("model_configs")
+    text_model_configs = agent_group_config.pop("models")
     encoder_configs = {}
     feature_extractor_configs = {}
     decoder_configs = {}
@@ -110,7 +115,7 @@ def _create_gnn_agent_group(
         feature_extractor_configs[model_id] = ModelConfig(**conf["feature_extractor"])
         encoder_configs[model_id] = ModelConfig(**conf["encoder"])
         decoder_configs[model_id] = ModelConfig(**conf["decoder"])
-    graph_model_config = ModelConfig(**agent_group_config.pop("graph_model_config"))
+    graph_model_config = ModelConfig(**agent_group_config.pop("graph_model"))
     graph_builder_config = GraphBuilderConfig(
         **agent_group_config.pop("graph_builder")
     )
@@ -177,7 +182,7 @@ def _create_msg_agent_group(
     agent_group_class: Type[AgentGroup], agent_group_config: Dict[str, Any]
 ) -> AgentGroup:
     agents = agent_group_config.pop("agent_list")
-    text_model_configs = agent_group_config.pop("model_configs")
+    text_model_configs = agent_group_config.pop("models")
 
     feature_extractor_configs = {}
     encoder_configs = {}
@@ -204,7 +209,7 @@ def _create_dual_path_msg_agent_group(
     agent_group_class: Type[AgentGroup], agent_group_config: Dict[str, Any]
 ) -> AgentGroup:
     agents = agent_group_config.pop("agent_list")
-    text_model_configs = agent_group_config.pop("model_configs")
+    text_model_configs = agent_group_config.pop("models")
 
     feature_extractor_configs = {}
     msg_feature_extractor_configs = {}
@@ -236,7 +241,7 @@ def _create_dual_path_gnn_agent_group(
     agent_group_class: Type[AgentGroup], agent_group_config: Dict[str, Any]
 ) -> AgentGroup:
     agents = agent_group_config.pop("agent_list")
-    text_model_configs = agent_group_config.pop("model_configs")
+    text_model_configs = agent_group_config.pop("models")
 
     feature_extractor_configs = {}
     msg_feature_extractor_configs = {}
@@ -251,7 +256,7 @@ def _create_dual_path_gnn_agent_group(
         encoder_configs[model_id] = ModelConfig(**conf["encoder"])
         decoder_configs[model_id] = ModelConfig(**conf["decoder"])
 
-    graph_model_config = ModelConfig(**agent_group_config.pop("graph_model_config"))
+    graph_model_config = ModelConfig(**agent_group_config.pop("graph_model"))
     graph_builder_config = GraphBuilderConfig(
         **agent_group_config.pop("graph_builder")
     )
@@ -269,7 +274,7 @@ def _create_dual_path_gnn_agent_group(
 
 def create_mappo_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
     agents = agent_group_config.pop("agent_list")
-    text_model_configs = agent_group_config.pop("model_configs")
+    text_model_configs = agent_group_config.pop("models")
     model_configs = {}
     feature_extractor_configs = {}
     for model_id, conf in text_model_configs.items():
@@ -323,7 +328,7 @@ def _create_group_consensus_agent_group(
     agent_group_class: Type[AgentGroup], agent_group_config: Dict[str, Any]
 ) -> AgentGroup:
     agents = agent_group_config.pop("agent_list")
-    text_model_configs = agent_group_config.pop("model_configs")
+    text_model_configs = agent_group_config.pop("models")
 
     feature_extractor_configs = {}
     group_estimate_feature_extractor_configs = {}
@@ -373,6 +378,7 @@ registered_agent_groups = {
     "DualPathObsGNNComm": create_dual_path_obs_gnn_comm_agent_group,
     "DualPathProbObsGNNComm": create_dual_path_prob_obs_gnn_comm_agent_group,
     "G2ANet": create_g2anet_agent_group,
+    "G2ANetMAPPO": create_g2anet_mappo_agent_group,
     "Random": create_random_agent_group,
     "MAgentPrey": create_magent_prey_agent_group,
     "MAgentBattle": create_magent_battle_agent_group,

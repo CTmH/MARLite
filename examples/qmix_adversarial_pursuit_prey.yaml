@@ -51,7 +51,7 @@ agent_group:
     prey_47: model1
     prey_48: model1
     prey_49: model1
-  model_configs:
+  models:
     model1:
       feature_extractor:
         model_type: "Custom"

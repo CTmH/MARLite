@@ -7,7 +7,7 @@ agent_group:
     agent_0: model1
     agent_1: model1
     agent_2: model1
-  model_configs:
+  models:
     model1:
       group_estimate_feature_extractor:
         model_type: "Identity"
