@@ -7,7 +7,7 @@ for joint RL+SSL training with VAEGraphQMIXTrainer.
 
 from typing import Any, Dict
 from marlite.trainer.trainer_worker_group.base_worker_group import (
-    BaseWorkerGroup,
+    OffPolicyWorkerGroup,
     _slice_batch,
 )
 

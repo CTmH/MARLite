@@ -4,7 +4,7 @@ VAE Group Consensus MAPPO worker group for multi-GPU training.
 
 from typing import Any, Dict
 from marlite.trainer.trainer_worker_group.base_worker_group import (
-    BaseWorkerGroup,
+    OnPolicyWorkerGroup,
     _slice_batch,
 )
 
