@@ -5,11 +5,11 @@ This module provides GraphWorkerGroup that manages Graph workers for multi-GPU t
 """
 
 from typing import Any, Dict
-from marlite.trainer.trainer_worker_group.base_worker_group import BaseWorkerGroup
+from marlite.trainer.trainer_worker_group.base_worker_group import OffPolicyWorkerGroup, _slice_batch
 from marlite.trainer.trainer_worker.graph_worker import GraphWorker
 
 
-class GraphWorkerGroup(BaseWorkerGroup):
+class GraphWorkerGroup(OffPolicyWorkerGroup):
     """
     Worker group for GraphQMIX algorithm multi-GPU training.
 

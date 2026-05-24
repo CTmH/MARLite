@@ -6,11 +6,11 @@ for multi-GPU training with the MAPPO algorithm.
 """
 
 from typing import Any, Dict
-from marlite.trainer.trainer_worker_group.base_worker_group import BaseWorkerGroup
+from marlite.trainer.trainer_worker_group.base_worker_group import OnPolicyWorkerGroup
 from marlite.trainer.trainer_worker.mappo_worker import MAPPOWorker
 
 
-class MAPPOWorkerGroup(BaseWorkerGroup):
+class MAPPOWorkerGroup(OnPolicyWorkerGroup):
     """
     Worker group for MAPPO algorithm multi-GPU training.
 

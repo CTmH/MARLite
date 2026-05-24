@@ -15,10 +15,10 @@ from typing import Any, Dict
 from marlite.algorithm.agents import AgentGroupConfig
 from marlite.algorithm.critic import CriticConfig
 from marlite.util.optimizer_config import OptimizerConfig
-from marlite.trainer.trainer_worker.base_worker import BaseWorker
+from marlite.trainer.trainer_worker.onpolicy_worker import OnPolicyWorker
 
 
-class MAPPOWorker(BaseWorker):
+class MAPPOWorker(OnPolicyWorker):
     """
     Worker for MAPPO algorithm multi-GPU training.
 

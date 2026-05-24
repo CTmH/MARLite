@@ -6,10 +6,10 @@ copies of the eval agent group and critic models for graph-based PPO.
 """
 
 from typing import Any, Dict
-from marlite.trainer.trainer_worker_group.base_worker_group import BaseWorkerGroup
+from marlite.trainer.trainer_worker_group.base_worker_group import OnPolicyWorkerGroup, _slice_batch
 
 
-class G2ANetMAPPOWorkerGroup(BaseWorkerGroup):
+class G2ANetMAPPOWorkerGroup(OnPolicyWorkerGroup):
     """Worker group for G2ANet MAPPO multi-GPU training."""
 
     def __init__(

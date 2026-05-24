@@ -5,7 +5,7 @@ from marlite.trainer.trainer_worker_group.base_worker_group import (
 )
 
 
-class VAEGroupConsensusWorkerGroup(BaseWorkerGroup):
+class VAEGroupConsensusWorkerGroup(OffPolicyWorkerGroup):
     def __init__(
         self,
         device_ids: list,

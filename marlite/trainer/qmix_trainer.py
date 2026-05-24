@@ -17,7 +17,7 @@ class QMIXTrainer(OffPolicyTrainer):
             return None
 
         return QMIXWorkerGroup(
-            device_ids=list(range(len(self.device_list))),
+            device_ids=self._get_device_ids(),
             agent_group_config=self.agent_group_config,
             critic_config=self.critic_config,
             critic_optimizer_config=self.critic_optimizer_config,

@@ -19,10 +19,10 @@ from marlite.algorithm.critic import CriticConfig
 from marlite.algorithm.model import ModelConfig
 from marlite.util.optimizer_config import OptimizerConfig
 from marlite.util.loss_func import PITLoss
-from marlite.trainer.trainer_worker.base_worker import BaseWorker
+from marlite.trainer.trainer_worker.offpolicy_worker import OffPolicyWorker
 
 
-class VAEGraphQMIXWorker(BaseWorker):
+class VAEGraphQMIXWorker(OffPolicyWorker):
     """
     Worker for VAE-based GraphQMIX algorithm multi-GPU training.
 

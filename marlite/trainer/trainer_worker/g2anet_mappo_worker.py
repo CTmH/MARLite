@@ -16,10 +16,10 @@ from typing import Any, Dict
 from marlite.algorithm.agents import AgentGroupConfig
 from marlite.algorithm.critic import CriticConfig
 from marlite.util.optimizer_config import OptimizerConfig
-from marlite.trainer.trainer_worker.base_worker import BaseWorker
+from marlite.trainer.trainer_worker.onpolicy_worker import OnPolicyWorker
 
 
-class G2ANetMAPPOWorker(BaseWorker):
+class G2ANetMAPPOWorker(OnPolicyWorker):
     """PPO worker with G2ANet graph communication for multi-GPU training."""
 
     critic_optimizer: torch.optim.Optimizer

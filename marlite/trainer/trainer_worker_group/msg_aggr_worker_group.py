@@ -6,14 +6,14 @@ for multi-GPU training.
 """
 
 from typing import Any, Dict
-from marlite.trainer.trainer_worker_group.base_worker_group import BaseWorkerGroup
+from marlite.trainer.trainer_worker_group.base_worker_group import OffPolicyWorkerGroup, _slice_batch
 from marlite.trainer.trainer_worker.msg_aggr_worker import (
     MsgAggrWorker,
     ProbMsgAggrWorker,
 )
 
 
-class MsgAggrWorkerGroup(BaseWorkerGroup):
+class MsgAggrWorkerGroup(OffPolicyWorkerGroup):
     """
     Worker group for MsgAggrQMIX algorithm multi-GPU training.
 

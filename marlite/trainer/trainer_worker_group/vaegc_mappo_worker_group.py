@@ -9,7 +9,7 @@ from marlite.trainer.trainer_worker_group.base_worker_group import (
 )
 
 
-class VAEGroupConsensusMAPPOWorkerGroup(BaseWorkerGroup):
+class VAEGroupConsensusMAPPOWorkerGroup(OnPolicyWorkerGroup):
     def __init__(
         self,
         device_ids: list,

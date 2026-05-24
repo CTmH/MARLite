@@ -1,9 +1,9 @@
 from typing import Any, Dict
-from marlite.trainer.trainer_worker_group.base_worker_group import BaseWorkerGroup
+from marlite.trainer.trainer_worker_group.base_worker_group import OffPolicyWorkerGroup, _slice_batch
 from marlite.trainer.trainer_worker.group_consensus_worker import GroupConsensusWorker
 
 
-class GroupConsensusWorkerGroup(BaseWorkerGroup):
+class GroupConsensusWorkerGroup(OffPolicyWorkerGroup):
     def __init__(
         self,
         device_ids: list,

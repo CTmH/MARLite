@@ -15,10 +15,10 @@ from marlite.algorithm.critic import CriticConfig
 from marlite.algorithm.model import ModelConfig
 from marlite.util.optimizer_config import OptimizerConfig
 from marlite.util.loss_func import PITLoss
-from marlite.trainer.trainer_worker.base_worker import BaseWorker
+from marlite.trainer.trainer_worker.onpolicy_worker import OnPolicyWorker
 
 
-class VAEGroupConsensusMAPPOWorker(BaseWorker):
+class VAEGroupConsensusMAPPOWorker(OnPolicyWorker):
     critic_optimizer: torch.optim.Optimizer
     agent_optimizer: torch.optim.Optimizer
     ssl_optimizer: torch.optim.Optimizer

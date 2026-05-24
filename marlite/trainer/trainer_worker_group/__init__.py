@@ -5,7 +5,11 @@ This module provides worker group classes that manage multiple worker processes
 for parallel training across multiple GPUs.
 """
 
-from marlite.trainer.trainer_worker_group.base_worker_group import BaseWorkerGroup
+from marlite.trainer.trainer_worker_group.base_worker_group import (
+    BaseWorkerGroup,
+    OffPolicyWorkerGroup,
+    OnPolicyWorkerGroup,
+)
 from marlite.trainer.trainer_worker_group.qmix_worker_group import QMIXWorkerGroup
 from marlite.trainer.trainer_worker_group.graph_worker_group import GraphWorkerGroup
 from marlite.trainer.trainer_worker_group.msg_aggr_worker_group import (
@@ -29,6 +33,8 @@ from marlite.trainer.trainer_worker_group.vaegc_mappo_worker_group import (
 
 __all__ = [
     "BaseWorkerGroup",
+    "OffPolicyWorkerGroup",
+    "OnPolicyWorkerGroup",
     "QMIXWorkerGroup",
     "GraphWorkerGroup",
     "MsgAggrWorkerGroup",

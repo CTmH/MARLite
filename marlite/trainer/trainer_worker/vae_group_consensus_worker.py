@@ -9,10 +9,10 @@ from marlite.algorithm.critic import CriticConfig
 from marlite.algorithm.model import ModelConfig
 from marlite.util.optimizer_config import OptimizerConfig
 from marlite.util.loss_func import PITLoss
-from marlite.trainer.trainer_worker.base_worker import BaseWorker
+from marlite.trainer.trainer_worker.offpolicy_worker import OffPolicyWorker
 
 
-class VAEGroupConsensusWorker(BaseWorker):
+class VAEGroupConsensusWorker(OffPolicyWorker):
     critic_optimizer: torch.optim.Optimizer
     agent_optimizer: torch.optim.Optimizer
     ssl_optimizer: torch.optim.Optimizer

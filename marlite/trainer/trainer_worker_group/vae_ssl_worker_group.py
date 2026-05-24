@@ -12,7 +12,7 @@ from marlite.trainer.trainer_worker_group.base_worker_group import (
 )
 
 
-class VAEGraphWorkerGroup(BaseWorkerGroup):
+class VAEGraphWorkerGroup(OffPolicyWorkerGroup):
     """
     Worker group for VAE-based joint RL+SSL multi-GPU training.
 

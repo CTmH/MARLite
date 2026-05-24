@@ -42,6 +42,11 @@ def get_device_list(train_device: Union[str, List[str]]) -> tuple:
         )
 
 
+def _extract_cuda_ids(device_list: List[str]) -> List[int]:
+    """Return integer GPU ids from a list of ``"cuda:N"`` strings."""
+    return [int(d.split(":")[-1]) for d in device_list]
+
+
 class Trainer:
     def __init__(
         self,
@@ -186,6 +191,10 @@ class Trainer:
 
     def _add_target_params_for_sync(self, trainable_params):
         pass
+
+    def _get_device_ids(self) -> List[int]:
+        """Return integer GPU ids from ``self.device_list``."""
+        return _extract_cuda_ids(self.device_list)
 
     def _sync_eval_params_from_workers(self):
         if self.worker_group is None:

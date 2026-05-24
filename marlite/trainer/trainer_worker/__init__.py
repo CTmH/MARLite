@@ -7,6 +7,8 @@ implements training logic specific to its algorithm.
 """
 
 from marlite.trainer.trainer_worker.base_worker import BaseWorker
+from marlite.trainer.trainer_worker.offpolicy_worker import OffPolicyWorker
+from marlite.trainer.trainer_worker.onpolicy_worker import OnPolicyWorker
 from marlite.trainer.trainer_worker.qmix_worker import QMIXWorker
 from marlite.trainer.trainer_worker.graph_worker import GraphWorker
 from marlite.trainer.trainer_worker.vae_graph_worker import VAEGraphQMIXWorker
@@ -21,6 +23,8 @@ from marlite.trainer.trainer_worker.vaegc_mappo_worker import VAEGroupConsensusM
 
 __all__ = [
     "BaseWorker",
+    "OffPolicyWorker",
+    "OnPolicyWorker",
     "QMIXWorker",
     "GraphWorker",
     "VAEGraphQMIXWorker",

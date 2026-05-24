@@ -5,11 +5,11 @@ This module provides QMIXWorkerGroup that manages QMIX workers for multi-GPU tra
 """
 
 from typing import Any, Dict
-from marlite.trainer.trainer_worker_group.base_worker_group import BaseWorkerGroup
+from marlite.trainer.trainer_worker_group.base_worker_group import OffPolicyWorkerGroup, _slice_batch
 from marlite.trainer.trainer_worker.qmix_worker import QMIXWorker
 
 
-class QMIXWorkerGroup(BaseWorkerGroup):
+class QMIXWorkerGroup(OffPolicyWorkerGroup):
     """
     Worker group for QMIX algorithm multi-GPU training.
 

@@ -457,3 +457,11 @@ class BaseWorkerGroup(ABC):
                 p.terminate()
 
         self.workers = []
+
+
+class OffPolicyWorkerGroup(BaseWorkerGroup):
+    """Base for off-policy worker groups (QMIX, GraphQMIX, etc.)."""
+
+
+class OnPolicyWorkerGroup(BaseWorkerGroup):
+    """Base for on-policy worker groups (MAPPO, G2ANetMAPPO, etc.)."""

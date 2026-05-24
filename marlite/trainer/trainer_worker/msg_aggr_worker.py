@@ -12,10 +12,10 @@ from typing import Any, Dict
 from marlite.algorithm.agents import AgentGroupConfig
 from marlite.algorithm.critic import CriticConfig
 from marlite.util.optimizer_config import OptimizerConfig
-from marlite.trainer.trainer_worker.base_worker import BaseWorker
+from marlite.trainer.trainer_worker.offpolicy_worker import OffPolicyWorker
 
 
-class MsgAggrWorker(BaseWorker):
+class MsgAggrWorker(OffPolicyWorker):
     """
     Worker for MsgAggrQMIX algorithm multi-GPU training.
 
