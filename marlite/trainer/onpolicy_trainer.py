@@ -48,9 +48,5 @@ class OnPolicyTrainer(Trainer):
 
         return result
 
-    def save_best_model(self):
-        self.save_current_model(checkpoint="best")
-        return self
-
     def train(self, **kwargs):
         raise NotImplementedError

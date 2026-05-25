@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
+from absl import logging
 from typing import Dict, Any, List, Optional
 from marlite.algorithm.model.model_config import ModelConfig
 from marlite.algorithm.model import RNNModel, Conv1DModel, AttentionModel
@@ -188,6 +189,17 @@ class GroupConsensusAgentGroup(AgentGroup):
         return agent_latent, local_obs
 
     def _merge_group_distributions(self, agent_mu, agent_log_var, group_indices):
+        if group_indices.max() < 0:
+            logging.warning(
+                "GroupConsensus: all group_indices are -1 "
+                "(no agents grouped — check agent_presence_dim config). "
+                "Returning zero-filled group_mu / group_log_var."
+            )
+            bs, n_agents, f_z = agent_mu.shape
+            return (
+                torch.zeros(bs, 1, f_z, device=self.device, dtype=agent_mu.dtype),
+                torch.zeros(bs, 1, f_z, device=self.device, dtype=agent_log_var.dtype),
+            )
         if self.merge_mode == "sample_mean":
             return GroupConsensusAgentGroup._merge_sample_mean(
                 self, agent_mu, agent_log_var, group_indices

@@ -7,6 +7,7 @@ handling) are **required** and initialised unconditionally — subclasses
 """
 
 import os
+import yaml
 import time
 import numpy as np
 import torch
@@ -153,6 +154,12 @@ class SelfSupervisedMAPPOTrainer(OnPolicyTrainer):
         )
 
         # -- Checkpoint caches ---------------------------------------------
+        self.best_agent_group_params = serialize_to_buffer(
+            get_state_dict(self.eval_agent_group)
+        )
+        self.best_critic_params = serialize_to_buffer(
+            get_state_dict(self.eval_critic)
+        )
         self.best_ssl_model_params = serialize_to_buffer(
             self.ssl_model.state_dict()
         )
@@ -242,13 +249,27 @@ class SelfSupervisedMAPPOTrainer(OnPolicyTrainer):
         return self
 
     def save_best_model(self):
-        """Restore best ssl_model params and delegate to parent save."""
-        load_state_dict_into(
-            self.ssl_model,
-            deserialize_from_buffer(self.best_ssl_model_params),
+        """Write cached best params (agent, critic, ssl) directly to disk."""
+        import os
+        best_dir = os.path.join(self.checkpointdir, "best")
+        agent_dir = os.path.join(best_dir, "agent")
+        os.makedirs(agent_dir, exist_ok=True)
+        torch.save(
+            deserialize_from_buffer(self.best_agent_group_params),
+            os.path.join(agent_dir, "agent.pth"),
         )
-        super().save_current_model(checkpoint="best")
-        return self
+        critic_dir = os.path.join(best_dir, "critic")
+        os.makedirs(critic_dir, exist_ok=True)
+        torch.save(
+            deserialize_from_buffer(self.best_critic_params),
+            os.path.join(critic_dir, "critic.pth"),
+        )
+        ssl_dir = os.path.join(best_dir, "ssl_model")
+        os.makedirs(ssl_dir, exist_ok=True)
+        torch.save(
+            deserialize_from_buffer(self.best_ssl_model_params),
+            os.path.join(ssl_dir, "ssl_model.pth"),
+        )
 
     # ------------------------------------------------------------------
     # On-policy training loop (extends MAPPO with SSL LR scheduler)
@@ -338,9 +359,21 @@ class SelfSupervisedMAPPOTrainer(OnPolicyTrainer):
                 first_metric_name, -np.inf
             ):
                 self.best_metrics = metrics
-                self.save_current_model(checkpoint="best")
+                self.best_agent_group_params = serialize_to_buffer(
+                    get_state_dict(self.eval_agent_group)
+                )
+                self.best_critic_params = serialize_to_buffer(
+                    get_state_dict(self.eval_critic)
+                )
+                self.best_ssl_model_params = serialize_to_buffer(
+                    get_state_dict(self.ssl_model)
+                )
 
             if first_metric >= target_first_metric:
                 break
 
+        logging.info(
+            f"Best strategy: {yaml.dump(self.best_metrics, default_flow_style=False, sort_keys=False)}"
+        )
+        self.save_best_model()
         return self.best_metrics

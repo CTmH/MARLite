@@ -6,6 +6,8 @@ computation.  Single- and multi-GPU learning loops are implemented
 directly (cf. :class:`GraphQMIXTrainer` for the off-policy analogue).
 """
 
+import os
+import yaml
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -18,7 +20,12 @@ from marlite.trainer.trainer_worker_group.g2anet_mappo_worker_group import (
     G2ANetMAPPOWorkerGroup,
 )
 from marlite.util.trajectory_dataset import TrajectoryDataLoader
-from marlite.util.serialization import get_state_dict, load_state_dict_into
+from marlite.util.serialization import (
+    serialize_to_buffer,
+    deserialize_from_buffer,
+    get_state_dict,
+    load_state_dict_into,
+)
 
 
 class G2ANetMAPPOTrainer(OnPolicyTrainer):
@@ -55,6 +62,33 @@ class G2ANetMAPPOTrainer(OnPolicyTrainer):
         self.vf_coef = vf_coef
         self.max_grad_norm = max_grad_norm
         super().__init__(**kwargs)
+
+        self.best_agent_group_params = serialize_to_buffer(
+            get_state_dict(self.eval_agent_group)
+        )
+        self.best_critic_params = serialize_to_buffer(
+            get_state_dict(self.eval_critic)
+        )
+
+    # ------------------------------------------------------------------
+    # Best-model persistence
+    # ------------------------------------------------------------------
+
+    def save_best_model(self):
+        """Write cached best agent and critic params directly to disk."""
+        best_dir = os.path.join(self.checkpointdir, "best")
+        agent_dir = os.path.join(best_dir, "agent")
+        os.makedirs(agent_dir, exist_ok=True)
+        torch.save(
+            deserialize_from_buffer(self.best_agent_group_params),
+            os.path.join(agent_dir, "agent.pth"),
+        )
+        critic_dir = os.path.join(best_dir, "critic")
+        os.makedirs(critic_dir, exist_ok=True)
+        torch.save(
+            deserialize_from_buffer(self.best_critic_params),
+            os.path.join(critic_dir, "critic.pth"),
+        )
 
     # ------------------------------------------------------------------
     # Multi-GPU
@@ -381,9 +415,18 @@ class G2ANetMAPPOTrainer(OnPolicyTrainer):
                 first_metric_name, -np.inf
             ):
                 self.best_metrics = metrics
-                self.save_current_model(checkpoint="best")
+                self.best_agent_group_params = serialize_to_buffer(
+                    get_state_dict(self.eval_agent_group)
+                )
+                self.best_critic_params = serialize_to_buffer(
+                    get_state_dict(self.eval_critic)
+                )
 
             if first_metric >= target_first_metric:
                 break
 
+        logging.info(
+            f"Best strategy: {yaml.dump(self.best_metrics, default_flow_style=False, sort_keys=False)}"
+        )
+        self.save_best_model()
         return self.best_metrics

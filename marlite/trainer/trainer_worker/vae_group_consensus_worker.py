@@ -55,6 +55,10 @@ class VAEGroupConsensusWorker(OffPolicyWorker):
         self.pit_loss_alpha = pit_loss_alpha
         self.kl_divergence_weight = kl_divergence_weight
         self.loss_combination_method = loss_combination_method
+        self.gamma = gamma
+        self.max_grad_norm = max_grad_norm
+
+        super().__init__(worker_id, device_id, rank, world_size, init_method)
 
         self.eval_agent_group = agent_group_config.get_agent_group()
         self.target_agent_group = agent_group_config.get_agent_group()

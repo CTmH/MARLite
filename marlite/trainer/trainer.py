@@ -240,8 +240,13 @@ class Trainer:
         return self
 
     def save_best_model(self):
-        self.save_current_model(checkpoint="best")
-        return self
+        raise NotImplementedError("subclass must implement save_best_model")
+
+    def save_best_model_impl(self, model, path):
+        """Utility: save a single model's state dict to a file path."""
+        import os
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        torch.save(model.state_dict(), path)
 
     def collect_experience(self, epsilon: float):
         self.eval_agent_group.eval().to("cpu")

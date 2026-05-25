@@ -100,15 +100,21 @@ class OffPolicyTrainer(Trainer):
         return self
 
     def save_best_model(self):
-        load_state_dict_into(
-            self.eval_agent_group,
+        """Write cached best agent and critic params directly to disk."""
+        import os
+        best_dir = os.path.join(self.checkpointdir, "best")
+        agent_dir = os.path.join(best_dir, "agent")
+        os.makedirs(agent_dir, exist_ok=True)
+        torch.save(
             deserialize_from_buffer(self.best_agent_group_params),
+            os.path.join(agent_dir, "agent.pth"),
         )
-        load_state_dict_into(
-            self.eval_critic,
+        critic_dir = os.path.join(best_dir, "critic")
+        os.makedirs(critic_dir, exist_ok=True)
+        torch.save(
             deserialize_from_buffer(self.best_critic_params),
+            os.path.join(critic_dir, "critic.pth"),
         )
-        self.save_current_model(checkpoint="best")
         return self
 
     def load_checkpoint(self, checkpoint: str):

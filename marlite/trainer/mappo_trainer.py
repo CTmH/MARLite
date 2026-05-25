@@ -6,6 +6,8 @@ and per-agent stochastic policies (categorical distributions).  Supports both
 single-GPU and multi-GPU training via replicated workers.
 """
 
+import os
+import yaml
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -16,6 +18,11 @@ from absl import logging
 from marlite.trainer.onpolicy_trainer import OnPolicyTrainer
 from marlite.trainer.trainer_worker_group.mappo_worker_group import MAPPOWorkerGroup
 from marlite.algorithm.critic.mixer import Mixer as MixerCritic
+from marlite.util.serialization import (
+    serialize_to_buffer,
+    deserialize_from_buffer,
+    get_state_dict,
+)
 from marlite.util.trajectory_dataset import TrajectoryDataLoader
 
 
@@ -70,9 +77,32 @@ class MAPPOTrainer(OnPolicyTrainer):
                 "Critic subclass required, not Mixer subclass"
             )
 
+        self.best_agent_group_params = serialize_to_buffer(
+            get_state_dict(self.eval_agent_group)
+        )
+        self.best_critic_params = serialize_to_buffer(
+            get_state_dict(self.eval_critic)
+        )
+
     # ------------------------------------------------------------------
-    # Multi-GPU worker group factory
+    # Best-model persistence (direct write, no eval-model restore)
     # ------------------------------------------------------------------
+
+    def save_best_model(self):
+        """Write cached best agent and critic params directly to disk."""
+        best_dir = os.path.join(self.checkpointdir, "best")
+        agent_dir = os.path.join(best_dir, "agent")
+        os.makedirs(agent_dir, exist_ok=True)
+        torch.save(
+            deserialize_from_buffer(self.best_agent_group_params),
+            os.path.join(agent_dir, "agent.pth"),
+        )
+        critic_dir = os.path.join(best_dir, "critic")
+        os.makedirs(critic_dir, exist_ok=True)
+        torch.save(
+            deserialize_from_buffer(self.best_critic_params),
+            os.path.join(critic_dir, "critic.pth"),
+        )
 
     def _create_worker_group(self):
         """Create a MAPPOWorkerGroup for multi-GPU training.
@@ -425,9 +455,18 @@ class MAPPOTrainer(OnPolicyTrainer):
 
             if first_metric >= self.best_metrics.get(first_metric_name, -np.inf):
                 self.best_metrics = metrics
-                self.save_current_model(checkpoint="best")
+                self.best_agent_group_params = serialize_to_buffer(
+                    get_state_dict(self.eval_agent_group)
+                )
+                self.best_critic_params = serialize_to_buffer(
+                    get_state_dict(self.eval_critic)
+                )
 
             if first_metric >= target_first_metric:
                 break
 
+        logging.info(
+            f"Best strategy: {yaml.dump(self.best_metrics, default_flow_style=False, sort_keys=False)}"
+        )
+        self.save_best_model()
         return self.best_metrics

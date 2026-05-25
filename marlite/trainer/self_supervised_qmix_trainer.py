@@ -186,20 +186,27 @@ class SelfSupervisedQMIXTrainer(OffPolicyTrainer):
         return self
 
     def save_best_model(self):
-        """Save best model including self_supervised_model parameters"""
-        load_state_dict_into(
-            self.eval_agent_group,
+        """Write cached best params (agent, critic, ssl) directly to disk."""
+        import os
+        best_dir = os.path.join(self.checkpointdir, "best")
+        agent_dir = os.path.join(best_dir, "agent")
+        os.makedirs(agent_dir, exist_ok=True)
+        torch.save(
             deserialize_from_buffer(self.best_agent_group_params),
+            os.path.join(agent_dir, "agent.pth"),
         )
-        load_state_dict_into(
-            self.eval_critic,
+        critic_dir = os.path.join(best_dir, "critic")
+        os.makedirs(critic_dir, exist_ok=True)
+        torch.save(
             deserialize_from_buffer(self.best_critic_params),
+            os.path.join(critic_dir, "critic.pth"),
         )
-        load_state_dict_into(
-            self.ssl_model,
+        ssl_dir = os.path.join(best_dir, "self_supervised_model")
+        os.makedirs(ssl_dir, exist_ok=True)
+        torch.save(
             deserialize_from_buffer(self.best_ssl_model_params),
+            os.path.join(ssl_dir, "self_supervised_model.pth"),
         )
-        self.save_current_model(checkpoint="best")
         return self
 
     def update_target_model_params(self):
