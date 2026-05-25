@@ -8,7 +8,7 @@ import torch
 from marlite.trainer import TrainerConfig
 
 
-class TestG2ANetMAPPOTrainer(unittest.TestCase):
+class TestGraphMAPPOTrainer(unittest.TestCase):
     def setUp(self):
         self.config_path = "test/config/g2anet_mappo_default.yaml"
         with open(self.config_path, "r") as file:

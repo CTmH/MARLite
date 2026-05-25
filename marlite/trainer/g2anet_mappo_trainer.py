@@ -1,9 +1,11 @@
-"""G2ANet MAPPO trainer — on-policy PPO with G2ANet graph communication.
+"""Graph MAPPO trainer — on-policy PPO with graph-based agent communication.
 
-Extends :class:`OnPolicyTrainer` with G2ANet-specific forward calls
+Extends :class:`OnPolicyTrainer` with graph-specific forward calls
 (5 arguments including ``states`` and ``edge_indices``) and PPO loss
-computation.  Single- and multi-GPU learning loops are implemented
-directly (cf. :class:`GraphQMIXTrainer` for the off-policy analogue).
+computation.  Compatible with any :class:`GraphAgentGroup` subclass
+(G2ANet, GNN, etc.).  Single- and multi-GPU learning loops are
+implemented directly (cf. :class:`GraphQMIXTrainer` for the off-policy
+analogue).
 """
 
 import os
@@ -28,8 +30,13 @@ from marlite.util.serialization import (
 )
 
 
-class G2ANetMAPPOTrainer(OnPolicyTrainer):
-    """On-policy MAPPO trainer with G2ANet multi-agent communication graph.
+class GraphMAPPOTrainer(OnPolicyTrainer):
+    """On-policy MAPPO trainer with graph-based multi-agent communication.
+
+    Generic graph-enabled MAPPO trainer.  Works with any graph-based
+    agent group (:class:`G2ANetMAPPOAgentGroup`, :class:`GNNAgentGroup`,
+    etc.) that implements the 5-argument ``forward()`` signature with
+    ``edge_indices``.
 
     Parameters
     ----------

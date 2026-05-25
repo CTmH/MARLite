@@ -1,5 +1,5 @@
 agent_group:
-  type: "G2ANetMAPPO"
+  type: "GraphMAPPO"
   agent_list:
     predator_0: model1
     predator_1: model1
@@ -162,7 +162,7 @@ analyzer:
   type: "default"
 
 trainer:
-  type: "G2ANetMAPPO"
+  type: "GraphMAPPO"
   gamma: 0.95
   clip_epsilon: 0.2
   gae_lambda: 0.95

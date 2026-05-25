@@ -13,7 +13,8 @@ REGISTERED_PROCESSORS: Dict[str, Type[ConfigProcessor]] = {
     'VAEGroupConsensusQMIX': SemiSupervisedQMIXConfigProcessor,
     'MAPPO': MAPPOConfigProcessor,
     'VAEGroupConsensusMAPPO': SemiSupervisedMAPPOConfigProcessor,
-    'G2ANetMAPPO': MAPPOConfigProcessor,
+    'GraphMAPPO': MAPPOConfigProcessor,
+    'G2ANetMAPPO': MAPPOConfigProcessor,  # backward-compatible alias
 }
 
 __all__ = ['ConfigProcessor', 'REGISTERED_PROCESSORS']
