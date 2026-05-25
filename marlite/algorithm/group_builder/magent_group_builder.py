@@ -20,6 +20,7 @@ class MAgentLabelPropagationGroupBuilder(GroupBuilder):
         n_workers: int = 0,
         valid_node_list: Union[List[int], None] = None,
         n_groups: Optional[int] = None,
+        update_interval: int = 1,
         channel_first: bool = False,
         dtype=np.int16,
     ):
@@ -31,7 +32,10 @@ class MAgentLabelPropagationGroupBuilder(GroupBuilder):
         self.n_workers = n_workers
         self.valid_node_list = valid_node_list
         self.n_groups = n_groups
+        self.update_interval = update_interval
         self.channel_first = channel_first
+        self.step_counter = 0
+        self.cached_labels = None
 
     @staticmethod
     def _merge_excess_groups(coords, labels, n_groups):
@@ -151,6 +155,14 @@ class MAgentLabelPropagationGroupBuilder(GroupBuilder):
             states = np.transpose(states, (0, 2, 3, 1))
         bs = states.shape[0]
 
+        if not self.training:
+            self.step_counter += 1
+            if (
+                self.step_counter % self.update_interval != 0
+                and self.cached_labels is not None
+            ):
+                return deepcopy(self.cached_labels).astype(self.dtype)
+
         results = []
         for b in range(bs):
             labels = self._process_sample(
@@ -165,9 +177,15 @@ class MAgentLabelPropagationGroupBuilder(GroupBuilder):
             results.append(labels)
 
         group_indices = np.stack(results, axis=0)
+
+        if not self.training:
+            self.cached_labels = group_indices
+
         return group_indices.astype(self.dtype)
 
     def reset(self):
+        self.step_counter = 0
+        self.cached_labels = None
         return self
 
 
@@ -322,6 +340,7 @@ class MagentKMeansGroupBuilder(GroupBuilder):
         min_group_size: int = 1,
         n_workers: int = 0,
         valid_node_list: Union[List[int], None] = None,
+        update_interval: int = 1,
         channel_first: bool = False,
         dtype=np.int16,
     ):
@@ -332,7 +351,10 @@ class MagentKMeansGroupBuilder(GroupBuilder):
         self.min_group_size = min_group_size
         self.n_workers = n_workers
         self.valid_node_list = valid_node_list
+        self.update_interval = update_interval
         self.channel_first = channel_first
+        self.step_counter = 0
+        self.cached_labels = None
 
     @staticmethod
     def _compute_n_clusters(n_alive, n_groups, min_group_size):
@@ -415,6 +437,15 @@ class MagentKMeansGroupBuilder(GroupBuilder):
         if self.channel_first:
             states = np.transpose(states, (0, 2, 3, 1))
         bs = states.shape[0]
+
+        if not self.training:
+            self.step_counter += 1
+            if (
+                self.step_counter % self.update_interval != 0
+                and self.cached_labels is not None
+            ):
+                return deepcopy(self.cached_labels).astype(self.dtype)
+
         rng = np.random.default_rng()
 
         results = []
@@ -431,9 +462,15 @@ class MagentKMeansGroupBuilder(GroupBuilder):
             results.append(labels)
 
         group_indices = np.stack(results, axis=0)
+
+        if not self.training:
+            self.cached_labels = group_indices
+
         return group_indices.astype(self.dtype)
 
     def reset(self):
+        self.step_counter = 0
+        self.cached_labels = None
         return self
 
 
