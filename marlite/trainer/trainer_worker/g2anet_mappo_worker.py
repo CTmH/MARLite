@@ -247,6 +247,9 @@ class G2ANetMAPPOWorker(OnPolicyWorker):
                     {k: v.clone() for k, v in params["eval_critic"].items()}
                 )
             del params
+        elif cmd == "SYNC_TO_MAIN":
+            params = self.get_params_for_main()
+            param_queue.put(params)
         elif cmd == "TRAIN_STEP":
             batch = data_queue.get()
             loss = self.train_step(batch)
