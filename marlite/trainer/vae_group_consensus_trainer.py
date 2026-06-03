@@ -472,11 +472,14 @@ class VAEGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
         q_tot = ret_critic["q_tot"]          # (B,)
 
         # ═══════════════════════════════════════════════════════════════════
-        #  PART 2 : TD Targets
+        #  PART 2 : TD Targets  (Double Q-learning)
+        #
+        #  eval_agent_group selects actions, target_agent_group evaluates
+        #  them — this decouples action selection from value estimation
+        #  and reduces the maximisation bias that causes Q-value inflation.
         # ═══════════════════════════════════════════════════════════════════
 
         with torch.no_grad():
-            self.target_agent_group.reset().eval()
             next_observations_t = torch.transpose(next_observations, 1, 2).to(
                 self.train_device
             )
@@ -488,22 +491,36 @@ class VAEGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
             next_group_indices = batch["next_group_indices"][:, -1, :].numpy()
             #   (B, T, N) → (B, N)  numpy
 
-            ret_next = self.target_agent_group(
-                next_observations_t,                 # (B, N, T, obs_dim)
-                next_states_last_np,                 # (B, H,W,C) numpy
-                next_timestep_padding_mask,          # (B, N, T)
-                next_alive_mask[:, -1, :],           # (B, T, N) → (B, N)
-                next_group_indices,                  # (B, N) numpy
+            # -- Double Q: eval agent group selects best actions -----------
+            self.eval_agent_group.eval()
+            ret_next_eval = self.eval_agent_group(
+                next_observations_t,
+                next_states_last_np,
+                next_timestep_padding_mask,
+                next_alive_mask[:, -1, :],
+                next_group_indices,
             )
-            q_val_next = ret_next["q_val"]           # (B, N, A)
+            q_val_next_eval = ret_next_eval["q_val"]  # (B, N, A)
 
-            # Action masking
             if use_action_mask:
-                q_val_next = torch.masked_fill(
-                    q_val_next, ~next_avail_actions, -torch.inf
+                q_val_next_eval = torch.masked_fill(
+                    q_val_next_eval, ~next_avail_actions, -torch.inf
                 )
-                #   (B, N, A) — unavailable → -inf
-            q_val_next = q_val_next.max(dim=-1).values  # (B, N, A) → (B, N)
+            best_actions = q_val_next_eval.argmax(dim=-1)  # (B, N)
+
+            # -- Double Q: target agent group evaluates chosen actions -----
+            self.target_agent_group.reset().eval()
+            ret_next_target = self.target_agent_group(
+                next_observations_t,
+                next_states_last_np,
+                next_timestep_padding_mask,
+                next_alive_mask[:, -1, :],
+                next_group_indices,
+            )
+            q_val_next_target = ret_next_target["q_val"]  # (B, N, A)
+            q_val_next = q_val_next_target.gather(
+                dim=-1, index=best_actions.unsqueeze(-1)
+            ).squeeze(-1)  # (B, N)
 
             self.target_critic.eval()
             ret_next_critic = self.target_critic(
@@ -514,7 +531,7 @@ class VAEGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
             )
             q_tot_next = ret_next_critic["q_tot"]        # (B,)
 
-        # TD target: y = r + γ·(1 - done)·Q_target(s', argmax Q_target)
+        # TD target: y = r + γ·(1 - done)·Q_target(s', argmax_{a'} Q_eval(s', a'))
         y_tot = rewards + (1 - terminations) * self.gamma * q_tot_next
         #   (B,) + (B,) · scalar · (B,) → (B,)
 

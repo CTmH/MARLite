@@ -247,29 +247,45 @@ class VAEGroupConsensusWorker(OffPolicyWorker):
         )
         q_tot = ret_critic["q_tot"]
 
-        # === TD Targets ===
+        # === TD Targets (Double Q-learning) ===
+        # eval_agent_group selects actions, target_agent_group evaluates.
         with torch.no_grad():
-            self.target_agent_group.reset().eval()
             next_observations_t = torch.transpose(next_observations, 1, 2).to(
                 self.device
             )
             next_states_last_np = next_states[:, -1].detach().cpu().numpy()
             next_group_indices = batch["next_group_indices"][:, -1, :].numpy()
 
-            ret_next = self.target_agent_group(
+            # -- Double Q: eval agent group selects best actions -----------
+            self.eval_agent_group.eval()
+            ret_next_eval = self.eval_agent_group(
                 next_observations_t,
                 next_states_last_np,
                 next_timestep_padding_mask,
                 next_alive_mask[:, -1, :],
                 next_group_indices,
             )
-            q_val_next = ret_next["q_val"]
+            q_val_next_eval = ret_next_eval["q_val"]
 
             if use_action_mask:
-                q_val_next = torch.masked_fill(
-                    q_val_next, ~next_avail_actions, -torch.inf
+                q_val_next_eval = torch.masked_fill(
+                    q_val_next_eval, ~next_avail_actions, -torch.inf
                 )
-            q_val_next = q_val_next.max(dim=-1).values
+            best_actions = q_val_next_eval.argmax(dim=-1)
+
+            # -- Double Q: target agent group evaluates chosen actions -----
+            self.target_agent_group.reset().eval()
+            ret_next_target = self.target_agent_group(
+                next_observations_t,
+                next_states_last_np,
+                next_timestep_padding_mask,
+                next_alive_mask[:, -1, :],
+                next_group_indices,
+            )
+            q_val_next_target = ret_next_target["q_val"]
+            q_val_next = q_val_next_target.gather(
+                dim=-1, index=best_actions.unsqueeze(-1)
+            ).squeeze(-1)
 
             self.target_critic.eval()
             ret_next_critic = self.target_critic(

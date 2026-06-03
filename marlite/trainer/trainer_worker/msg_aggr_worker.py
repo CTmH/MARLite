@@ -164,29 +164,33 @@ class MsgAggrWorker(OffPolicyWorker):
         )
         q_tot = ret["q_tot"]
 
-        # Use target model for stability
+        # Use target model for stability (Double Q-learning)
         with torch.no_grad():
-            self.target_critic.eval()
-            ret = self.target_critic(
-                q_val, states, alive_mask, timestep_padding_mask[:, 0, :]
-            )
-            state_features = ret["state_features"]
-
-        # Compute TD targets
-        with torch.no_grad():
-            self.target_agent_group.eval()
+            # Double Q: eval agent group selects best actions
+            self.eval_agent_group.eval()
             next_observations = torch.transpose(next_observations, 1, 2).to(self.device)
-            ret_next = self.target_agent_group(
+            ret_next_eval = self.eval_agent_group(
                 next_observations,
                 next_timestep_padding_mask,
                 next_alive_mask[:, -1, :],
             )
-            q_val_next = ret_next["q_val"]
+            q_val_next_eval = ret_next_eval["q_val"]
             if use_action_mask:
-                q_val_next = torch.masked_fill(
-                    q_val_next, ~next_avail_actions, -torch.inf
+                q_val_next_eval = torch.masked_fill(
+                    q_val_next_eval, ~next_avail_actions, -torch.inf
                 )
-            q_val_next = q_val_next.max(dim=-1).values
+            best_actions = q_val_next_eval.argmax(dim=-1)
+
+            # Double Q: target agent group evaluates chosen actions
+            self.target_agent_group.eval()
+            ret_next_target = self.target_agent_group(
+                next_observations,
+                next_timestep_padding_mask,
+                next_alive_mask[:, -1, :],
+            )
+            q_val_next = ret_next_target["q_val"].gather(
+                dim=-1, index=best_actions.unsqueeze(-1)
+            ).squeeze(-1)
             next_states = next_states.to(self.device)
             self.target_critic.eval()
             ret_next = self.target_critic(
@@ -370,30 +374,33 @@ class ProbMsgAggrWorker(MsgAggrWorker):
         )
         q_tot = ret["q_tot"]
 
-        # Use target model for stability
+        # Use target model for stability (Double Q-learning)
         with torch.no_grad():
-            self.target_critic.eval()
-            ret = self.target_critic(
-                q_val, states, alive_mask, timestep_padding_mask[:, 0, :]
-            )
-            critic_mu = ret["mu"]
-            critic_std = ret["std"]
-
-        # Compute TD targets
-        with torch.no_grad():
-            self.target_agent_group.eval()
+            # Double Q: eval agent group selects best actions
+            self.eval_agent_group.eval()
             next_observations = torch.transpose(next_observations, 1, 2).to(self.device)
-            ret_next = self.target_agent_group(
+            ret_next_eval = self.eval_agent_group(
                 next_observations,
                 next_timestep_padding_mask,
                 next_alive_mask[:, -1, :],
             )
-            q_val_next = ret_next["q_val"]
+            q_val_next_eval = ret_next_eval["q_val"]
             if use_action_mask:
-                q_val_next = torch.masked_fill(
-                    q_val_next, ~next_avail_actions, -torch.inf
+                q_val_next_eval = torch.masked_fill(
+                    q_val_next_eval, ~next_avail_actions, -torch.inf
                 )
-            q_val_next = q_val_next.max(dim=-1).values
+            best_actions = q_val_next_eval.argmax(dim=-1)
+
+            # Double Q: target agent group evaluates chosen actions
+            self.target_agent_group.eval()
+            ret_next_target = self.target_agent_group(
+                next_observations,
+                next_timestep_padding_mask,
+                next_alive_mask[:, -1, :],
+            )
+            q_val_next = ret_next_target["q_val"].gather(
+                dim=-1, index=best_actions.unsqueeze(-1)
+            ).squeeze(-1)
             next_states = next_states.to(self.device)
             self.target_critic.eval()
             ret_next = self.target_critic(

@@ -129,24 +129,38 @@ class GraphQMIXTrainer(OffPolicyTrainer):
                     q_tot = ret["q_tot"]
 
                     with torch.no_grad():
-                        self.target_agent_group.reset().eval()
+                        # Double Q: eval agent group selects best actions
+                        self.eval_agent_group.reset().eval()
                         next_observations = torch.transpose(next_observations, 1, 2).to(
                             self.train_device
                         )
                         next_states = next_states.to(self.train_device)
-                        ret_next = self.target_agent_group(
+                        ret_next_eval = self.eval_agent_group(
                             next_observations,
                             next_states,
                             next_timestep_padding_mask,
                             next_alive_mask[:, -1, :],
                             last_next_edge_indices,
                         )
-                        q_val_next = ret_next["q_val"]
+                        q_val_next_eval = ret_next_eval["q_val"]
                         if use_action_mask:
-                            q_val_next = torch.masked_fill(
-                                q_val_next, ~next_avail_actions, -torch.inf
+                            q_val_next_eval = torch.masked_fill(
+                                q_val_next_eval, ~next_avail_actions, -torch.inf
                             )
-                        q_val_next = q_val_next.max(dim=-1).values
+                        best_actions = q_val_next_eval.argmax(dim=-1)
+
+                        # Double Q: target agent group evaluates chosen actions
+                        self.target_agent_group.reset().eval()
+                        ret_next_target = self.target_agent_group(
+                            next_observations,
+                            next_states,
+                            next_timestep_padding_mask,
+                            next_alive_mask[:, -1, :],
+                            last_next_edge_indices,
+                        )
+                        q_val_next = ret_next_target["q_val"].gather(
+                            dim=-1, index=best_actions.unsqueeze(-1)
+                        ).squeeze(-1)
                         self.target_critic.eval()
                         ret_next = self.target_critic(
                             q_val_next,
