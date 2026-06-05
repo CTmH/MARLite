@@ -21,14 +21,14 @@ from marlite.trainer.trainer_worker_group.vae_ssl_worker_group import (
 from marlite.trainer.trainer_worker_group.group_consensus_worker_group import (
     GroupConsensusWorkerGroup,
 )
-from marlite.trainer.trainer_worker_group.vae_group_consensus_worker_group import (
-    VAEGroupConsensusWorkerGroup,
+from marlite.trainer.trainer_worker_group.ssl_group_consensus_worker_group import (
+    SSLGroupConsensusWorkerGroup,
 )
 from marlite.trainer.trainer_worker_group.mappo_worker_group import (
     MAPPOWorkerGroup,
 )
-from marlite.trainer.trainer_worker_group.vaegc_mappo_worker_group import (
-    VAEGroupConsensusMAPPOWorkerGroup,
+from marlite.trainer.trainer_worker_group.ssl_gc_mappo_worker_group import (
+    SSLGroupConsensusMAPPOWorkerGroup,
 )
 
 __all__ = [
@@ -40,7 +40,7 @@ __all__ = [
     "MsgAggrWorkerGroup",
     "VAEGraphWorkerGroup",
     "GroupConsensusWorkerGroup",
-    "VAEGroupConsensusWorkerGroup",
+    "SSLGroupConsensusWorkerGroup",
     "MAPPOWorkerGroup",
-    "VAEGroupConsensusMAPPOWorkerGroup",
+    "SSLGroupConsensusMAPPOWorkerGroup",
 ]

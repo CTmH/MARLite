@@ -12,7 +12,7 @@ from marlite.util.loss_func import PITLoss
 from marlite.trainer.trainer_worker.offpolicy_worker import OffPolicyWorker
 
 
-class VAEGroupConsensusWorker(OffPolicyWorker):
+class SSLGroupConsensusWorker(OffPolicyWorker):
     critic_optimizer: torch.optim.Optimizer
     agent_optimizer: torch.optim.Optimizer
     ssl_optimizer: torch.optim.Optimizer
@@ -42,6 +42,7 @@ class VAEGroupConsensusWorker(OffPolicyWorker):
         recon_mode: str = "per_agent",
         kl_on_group: bool = False,
         kl_on_agent: bool = True,
+        consensus_mode: str = "vae",
         **kwargs,
     ):
         if recon_mode not in ("per_agent", "per_group"):
@@ -57,6 +58,7 @@ class VAEGroupConsensusWorker(OffPolicyWorker):
         self.loss_combination_method = loss_combination_method
         self.gamma = gamma
         self.max_grad_norm = max_grad_norm
+        self.consensus_mode = consensus_mode
 
         super().__init__(worker_id, device_id, rank, world_size, init_method)
 
@@ -299,9 +301,9 @@ class VAEGroupConsensusWorker(OffPolicyWorker):
         y_tot = rewards + (1 - terminations) * self.gamma * q_tot_next
         critic_loss = torch.nn.functional.mse_loss(q_tot, y_tot.detach())
 
-        # === VAE Reconstruction Loss ===
+        # === SSL Reconstruction Loss ===
         if is_warmup:
-            vae_loss = torch.tensor(0.0, device=self.device)
+            ssl_loss = torch.tensor(0.0, device=self.device)
         else:
             # Pre-generated targets provided by trainer via
             # SSLEnrichedTrajectoryDataset — no per-batch GPU↔CPU round-trip.
@@ -322,30 +324,33 @@ class VAEGroupConsensusWorker(OffPolicyWorker):
                     construct_mask, alive_mask
                 )
 
-            kl_divergence = 0.0
-            if self.kl_on_agent:
-                kl_mu = agent_mu
-                kl_log_var = agent_log_var
-                mask = alive_mask[:, -1, :].unsqueeze(-1).expand_as(agent_mu)
-                kl_per_dim = 1 + kl_log_var - kl_mu.pow(2) - torch.exp(kl_log_var)
-                kl_divergence = kl_divergence + -0.5 * (
-                    kl_per_dim * mask
-                ).sum() / mask.sum().clamp(min=1)
-            if self.kl_on_group:
-                kl_mu = group_mu
-                kl_log_var = group_log_var
-                mask = construct_mask.unsqueeze(-1).expand_as(group_mu)
-                kl_per_dim = 1 + kl_log_var - kl_mu.pow(2) - torch.exp(kl_log_var)
-                kl_divergence = kl_divergence + -0.5 * (
-                    kl_per_dim * mask
-                ).sum() / mask.sum().clamp(min=1)
+            if self.consensus_mode == "ae":
+                kl_divergence = torch.tensor(0.0, device=self.device)
+            else:
+                kl_divergence = 0.0
+                if self.kl_on_agent:
+                    kl_mu = agent_mu
+                    kl_log_var = agent_log_var
+                    mask = alive_mask[:, -1, :].unsqueeze(-1).expand_as(agent_mu)
+                    kl_per_dim = 1 + kl_log_var - kl_mu.pow(2) - torch.exp(kl_log_var)
+                    kl_divergence = kl_divergence + -0.5 * (
+                        kl_per_dim * mask
+                    ).sum() / mask.sum().clamp(min=1)
+                if self.kl_on_group:
+                    kl_mu = group_mu
+                    kl_log_var = group_log_var
+                    mask = construct_mask.unsqueeze(-1).expand_as(group_mu)
+                    kl_per_dim = 1 + kl_log_var - kl_mu.pow(2) - torch.exp(kl_log_var)
+                    kl_divergence = kl_divergence + -0.5 * (
+                        kl_per_dim * mask
+                    ).sum() / mask.sum().clamp(min=1)
 
-            vae_loss = reconstruction_loss + self.kl_divergence_weight * kl_divergence
+            ssl_loss = reconstruction_loss + self.kl_divergence_weight * kl_divergence
 
         if is_warmup:
             combined_loss = critic_loss
         else:
-            combined_loss = self._combine_rl_ssl_loss(critic_loss, vae_loss)
+            combined_loss = self._combine_rl_ssl_loss(critic_loss, ssl_loss)
 
         # === Backward Pass ===
         self.critic_optimizer.zero_grad()
@@ -366,15 +371,15 @@ class VAEGroupConsensusWorker(OffPolicyWorker):
         if not is_warmup:
             self.ssl_optimizer.step()
 
-        vae_loss_value = (
-            vae_loss.detach().cpu().item()
-            if isinstance(vae_loss, torch.Tensor)
-            else vae_loss
+        ssl_loss_value = (
+            ssl_loss.detach().cpu().item()
+            if isinstance(ssl_loss, torch.Tensor)
+            else ssl_loss
         )
         return (
             combined_loss.detach().cpu().item(),
             critic_loss.detach().cpu().item(),
-            vae_loss_value,
+            ssl_loss_value,
         )
 
     def _build_recon_targets(self, observations, states, group_indices, alive_mask):
@@ -433,13 +438,13 @@ class VAEGroupConsensusWorker(OffPolicyWorker):
         else:
             return self.reconstruction_loss(pred_set, target_set)
 
-    def _combine_rl_ssl_loss(self, critic_loss, vae_loss):
+    def _combine_rl_ssl_loss(self, critic_loss, ssl_loss):
         if self.loss_combination_method == "pit_loss":
-            losses = torch.stack([critic_loss, vae_loss])
+            losses = torch.stack([critic_loss, ssl_loss])
             combined_loss = self.pit_loss(losses)
         else:
             combined_loss = (
-                critic_loss + self.self_supervised_learning_loss_weight * vae_loss
+                critic_loss + self.self_supervised_learning_loss_weight * ssl_loss
             )
         return combined_loss
 
@@ -474,8 +479,8 @@ class VAEGroupConsensusWorker(OffPolicyWorker):
             batch = data_queue.get()
             result = self.train_step(batch)
             del batch
-            combined, critic, vae = result
-            loss_queue.put((combined, critic, vae))
+            combined, critic, ssl = result
+            loss_queue.put((combined, critic, ssl))
 
         elif cmd == "MOVE_TO_GPU":
             self.move_to_device(self.assigned_device)

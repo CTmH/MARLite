@@ -2,8 +2,8 @@ agent_group:
   type: "GroupConsensusMAPPO"
   deterministic_eval: true
   enable_rl_grad_to_group_estimate: false
+  consensus_mode: "ae"
   merge_mode: "bayesian"
-  consensus_mode: "vae"
   agent_list:
     agent_0: model1
     agent_1: model1
@@ -11,7 +11,11 @@ agent_group:
   models:
     model1:
       group_estimate_feature_extractor:
-        model_type: "Identity"
+        model_type: "Custom"
+        layers:
+          - type: "Linear"
+            in_features: 18
+            out_features: 9
       feature_extractor:
         model_type: "Identity"
       encoder:
@@ -107,19 +111,19 @@ self_supervised_learning:
 trainer:
   type: "SSLGroupConsensusMAPPO"
   gamma: 0.99
-  workdir: "./test/results/vaegc_mappo"
+  workdir: "./test/results/ae_gc_mappo"
   train_device: "cpu"
   clip_epsilon: 0.2
   gae_lambda: 0.95
   entropy_coef: 0.01
   vf_coef: 0.5
   max_grad_norm: 5.0
-  consensus_mode: "vae"
-  kl_divergence_weight: 0.005
+  consensus_mode: "ae"
+  kl_divergence_weight: 0
   recon_mode: "per_group"
-  kl_on_agent: true
+  kl_on_agent: false
   kl_on_group: false
-  warmup_iterations: 99999
+  warmup_iterations: 0
 
   sample_ratio_scheduler:
     type: "linear"

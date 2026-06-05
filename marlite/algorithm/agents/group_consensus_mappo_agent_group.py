@@ -1,8 +1,10 @@
-"""VAE Group Consensus MAPPO agent group.
+"""Group Consensus MAPPO agent group.
 
 Extends GroupConsensusAgentGroup to output action logits (for PPO policy)
-instead of Q-values.  The VAE consensus pipeline (dual encoders, group merging,
-scattering, and reparameterisation) is inherited unchanged.
+instead of Q-values.  The group consensus pipeline (dual encoders, group
+merging, scattering, and optional reparameterisation) is inherited
+unchanged.  Supports both ``consensus_mode="vae"`` (probabilistic) and
+``consensus_mode="ae"`` (deterministic mean) via the parent class.
 """
 
 import numpy as np
@@ -15,7 +17,7 @@ from marlite.algorithm.agents.group_consensus_agent_group import (
 )
 
 
-class VAEGroupConsensusMAPPOAgentGroup(GroupConsensusAgentGroup):
+class GroupConsensusMAPPOAgentGroup(GroupConsensusAgentGroup):
     """GroupConsensus agent group that outputs action logits for PPO.
 
     The forward pass is identical to the parent class except that the decoder
@@ -23,7 +25,7 @@ class VAEGroupConsensusMAPPOAgentGroup(GroupConsensusAgentGroup):
     The ``act()`` method samples from a categorical distribution and returns
     per-action log-probabilities, as required by on-policy PPO.
 
-    All VAE consensus functionality (latent estimation, group merging,
+    All group consensus functionality (latent estimation, group merging,
     scattering, reparameterisation) is inherited from
     :class:`GroupConsensusAgentGroup`.
     """

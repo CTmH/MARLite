@@ -2,7 +2,7 @@ agent_group:
   type: "GroupConsensusQMIX"
   deterministic_eval: true
   enable_rl_grad_to_group_estimate: false
-  consensus_mode: "vae"
+  consensus_mode: "ae"
   agent_list:
     red_0: model_0
     red_1: model_0
@@ -66,7 +66,7 @@ agent_group:
         - type: GELU
         - type: Linear
           in_features: 256
-          out_features: 128
+          out_features: 64
       feature_extractor:
         model_type: "Custom"
         layers:
@@ -297,13 +297,15 @@ trainer:
   eval_epsilon: 0.001
   eval_threshold: 0.01
   eval_episodes_to_replay_ratio: 0.125
-  workdir: "./test/results/bf_vae_group/"
+  workdir: "./test/results/bf_ae_group/"
   train_device: "cuda:0"
   compile_models: false
   sample_mode: "direct"
   n_workers: 0
-  consensus_mode: "vae"
-  kl_divergence_weight: 0.005
+  kl_divergence_weight: 0
+  kl_on_agent: false
+  kl_on_group: false
+  consensus_mode: "ae"
   loss_combination_method: "pit_loss"
   warmup_epochs: 0
 

@@ -10,9 +10,9 @@ REGISTERED_PROCESSORS: Dict[str, Type[ConfigProcessor]] = {
     'ProbMsgAggr': QMIXConfigProcessor,
     'VAEGraphQMIX': SemiSupervisedQMIXConfigProcessor,
     'GroupConsensusQMIX': QMIXConfigProcessor,
-    'VAEGroupConsensusQMIX': SemiSupervisedQMIXConfigProcessor,
+    'SSLGroupConsensusQMIX': SemiSupervisedQMIXConfigProcessor,
     'MAPPO': MAPPOConfigProcessor,
-    'VAEGroupConsensusMAPPO': SemiSupervisedMAPPOConfigProcessor,
+    'SSLGroupConsensusMAPPO': SemiSupervisedMAPPOConfigProcessor,
     'GraphMAPPO': MAPPOConfigProcessor,
     'G2ANetMAPPO': MAPPOConfigProcessor,  # backward-compatible alias
 }

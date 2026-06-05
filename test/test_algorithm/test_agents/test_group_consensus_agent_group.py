@@ -52,6 +52,200 @@ class TestGroupConsensusAgentGroupConfig(unittest.TestCase):
         from marlite.algorithm.agents.agent_group_config import registered_agent_groups
         self.assertIn("GroupConsensusQMIX", registered_agent_groups)
 
+    def test_ssl_group_consensus_mappo_registration(self):
+        from marlite.algorithm.agents.agent_group_config import registered_agent_groups
+        self.assertIn("SSLGroupConsensusMAPPO", registered_agent_groups)
+
+    def test_group_consensus_mappo_registration(self):
+        from marlite.algorithm.agents.agent_group_config import registered_agent_groups
+        self.assertIn("GroupConsensusMAPPO", registered_agent_groups)
+
+
+def _merge_group_mean_reference(agent_vectors, group_indices, device):
+    bs, n_agents, f_z = agent_vectors.shape
+    G = int(group_indices.max()) + 1
+    gids = torch.as_tensor(group_indices, dtype=torch.long, device=device)
+
+    group_mean = agent_vectors.new_zeros(bs, G, f_z)
+
+    for b in range(bs):
+        for g in range(G):
+            mask = gids[b] == g
+            if not mask.any():
+                continue
+            group_mean[b, g] = agent_vectors[b, mask].mean(dim=0)
+
+    return group_mean, torch.zeros_like(group_mean)
+
+
+class TestAEMerge(unittest.TestCase):
+    def setUp(self):
+        self.fake_self = FakeAgentGroup()
+        self.bs, self.n_agents, self.f_z = 4, 6, 8
+
+    def test_ae_mean_correctness(self):
+        agent_vectors = torch.randn(self.bs, self.n_agents, self.f_z)
+        group_indices = np.array([
+            [0, 0, 1, 1, 2, 2],
+            [0, 1, 2, 0, 1, 2],
+            [0, 0, 0, 1, 1, 1],
+            [2, 1, 0, 0, 1, 2],
+        ], dtype=np.int16)
+
+        ref_mean, ref_lv = _merge_group_mean_reference(
+            agent_vectors, group_indices, self.fake_self.device
+        )
+        new_mean, new_lv = GroupConsensusAgentGroup._merge_group_mean(
+            self.fake_self, agent_vectors, group_indices
+        )
+
+        torch.testing.assert_close(new_mean, ref_mean, atol=1e-5, rtol=1e-5)
+        torch.testing.assert_close(new_lv, ref_lv, atol=1e-5, rtol=1e-5)
+
+    def test_ae_mean_with_dead_agents(self):
+        agent_vectors = torch.randn(self.bs, self.n_agents, self.f_z)
+        group_indices = np.array([
+            [0, 0, -1, 1, 1, -1],
+            [0, -1, -1, 1, 2, 2],
+            [0, 0, 0, -1, -1, -1],
+            [-1, -1, -1, -1, -1, -1],
+        ], dtype=np.int16)
+
+        ref_mean, ref_lv = _merge_group_mean_reference(
+            agent_vectors, group_indices, self.fake_self.device
+        )
+        new_mean, new_lv = GroupConsensusAgentGroup._merge_group_mean(
+            self.fake_self, agent_vectors, group_indices
+        )
+
+        torch.testing.assert_close(new_mean, ref_mean, atol=1e-5, rtol=1e-5)
+        torch.testing.assert_close(new_lv, ref_lv, atol=1e-5, rtol=1e-5)
+
+    def test_ae_mean_no_nan_inf(self):
+        agent_vectors = torch.randn(2, self.n_agents, self.f_z)
+        group_indices = np.array([
+            [0, 0, 1, 1, 2, 2],
+            [0, 0, 0, 1, 1, 1],
+        ], dtype=np.int16)
+
+        new_mean, new_lv = GroupConsensusAgentGroup._merge_group_mean(
+            self.fake_self, agent_vectors, group_indices
+        )
+
+        self.assertFalse(torch.isnan(new_mean).any())
+        self.assertFalse(torch.isnan(new_lv).any())
+        self.assertFalse(torch.isinf(new_mean).any())
+        self.assertFalse(torch.isinf(new_lv).any())
+
+    def test_ae_mean_backward(self):
+        agent_vectors = torch.randn(
+            1, self.n_agents, self.f_z, requires_grad=True
+        )
+        group_indices = np.array([[0, 0, 1, 1, 2, 2]], dtype=np.int16)
+
+        new_mean, new_lv = GroupConsensusAgentGroup._merge_group_mean(
+            self.fake_self, agent_vectors, group_indices
+        )
+        loss = new_mean.sum()
+        loss.backward()
+
+        self.assertIsNotNone(agent_vectors.grad)
+        self.assertFalse(torch.isnan(agent_vectors.grad).any())
+        self.assertFalse(torch.isinf(agent_vectors.grad).any())
+
+    def test_ae_mean_identical_agents(self):
+        group_indices = np.array([[0, 0, 1, 1, 2, 2]], dtype=np.int16)
+        agent_vectors = torch.ones(1, self.n_agents, self.f_z) * 5.0
+
+        new_mean, new_lv = GroupConsensusAgentGroup._merge_group_mean(
+            self.fake_self, agent_vectors, group_indices
+        )
+
+        self.assertTrue((new_mean[0, 0].abs().sub(5.0).abs().max() < 1e-5).item())
+        self.assertTrue(torch.all(new_lv == 0))
+
+
+class TestConsensusModeDispatch(unittest.TestCase):
+    def setUp(self):
+        self.fake = FakeAgentGroup()
+        self.bs, self.n_agents, self.f_z = 4, 6, 8
+
+    def test_ae_dispatch_matches_merge_group_mean(self):
+        self.fake.merge_mode = "bayesian"
+        agent_vectors = torch.randn(self.bs, self.n_agents, self.f_z)
+        group_indices = np.array([
+            [0, 0, 1, 1, 2, 2],
+            [0, 1, 2, 0, 1, 2],
+            [0, 0, 0, 1, 1, 1],
+            [2, 1, 0, 0, 1, 2],
+        ], dtype=np.int16)
+
+        ae_mean, ae_lv = GroupConsensusAgentGroup._merge_group_mean(
+            self.fake, agent_vectors, group_indices
+        )
+
+        self.assertTrue(torch.all(ae_lv == 0))
+
+        for b in range(self.bs):
+            for g in range(int(group_indices[b].max()) + 1):
+                mask = group_indices[b] == g
+                if mask.any():
+                    expected = agent_vectors[b, mask].mean(dim=0)
+                    torch.testing.assert_close(
+                        ae_mean[b, g], expected, atol=1e-5, rtol=1e-5
+                    )
+
+    def test_ae_mean_same_as_sample_mean_mu(self):
+        agent_vectors = torch.randn(self.bs, self.n_agents, self.f_z)
+        agent_log_var = torch.randn(self.bs, self.n_agents, self.f_z) * 3.0 - 1.0
+        group_indices = np.array([
+            [0, 0, 1, 1, 2, 2],
+            [0, 1, 2, 0, 1, 2],
+            [0, 0, 0, 1, 1, 1],
+            [2, 1, 0, 0, 1, 2],
+        ], dtype=np.int16)
+
+        fake_sm = FakeAgentGroup()
+        fake_sm.merge_mode = "sample_mean"
+
+        ae_mean, ae_lv = GroupConsensusAgentGroup._merge_group_mean(
+            fake_sm, agent_vectors, group_indices
+        )
+        sm_mean, sm_lv = GroupConsensusAgentGroup._merge_sample_mean(
+            fake_sm, agent_vectors, agent_log_var, group_indices
+        )
+
+        self.assertTrue(torch.allclose(ae_mean, sm_mean, atol=1e-5, rtol=1e-5),
+                         "AE mean should produce same mu as sample_mean")
+        self.assertFalse(torch.allclose(ae_lv, sm_lv),
+                         "AE log_var (zeros) and sample_mean log_var should differ")
+        self.assertTrue(torch.all(ae_lv == 0), "AE log_var should be all zeros")
+
+    def test_ae_differs_from_bayesian(self):
+        agent_vectors = torch.randn(self.bs, self.n_agents, self.f_z)
+        agent_log_var = torch.randn(self.bs, self.n_agents, self.f_z) * 3.0 - 1.0
+        group_indices = np.array([
+            [0, 0, 1, 1, 2, 2],
+            [0, 1, 2, 0, 1, 2],
+            [0, 0, 0, 1, 1, 1],
+            [2, 1, 0, 0, 1, 2],
+        ], dtype=np.int16)
+
+        fake_bs = FakeAgentGroup()
+        fake_bs.merge_mode = "bayesian"
+
+        ae_mean, ae_lv = GroupConsensusAgentGroup._merge_group_mean(
+            fake_bs, agent_vectors, group_indices
+        )
+        bay_mean, bay_lv = GroupConsensusAgentGroup._merge_bayesian(
+            fake_bs, agent_vectors, agent_log_var, group_indices
+        )
+
+        self.assertFalse(torch.allclose(ae_mean, bay_mean),
+                         "AE mean and bayesian should produce different mu")
+        self.assertFalse(torch.allclose(ae_lv, bay_lv),
+                         "AE log_var (zeros) and bayesian log_var should differ")
+
 
 class TestBayesianMerge(unittest.TestCase):
     def setUp(self):

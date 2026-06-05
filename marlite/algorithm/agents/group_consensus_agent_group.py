@@ -23,6 +23,7 @@ class GroupConsensusAgentGroup(AgentGroup):
         deterministic_eval: bool = True,
         enable_rl_grad_to_group_estimate: bool = False,
         merge_mode: str = "bayesian",
+        consensus_mode: str = "vae",
     ) -> None:
         super().__init__()
         self.agent_model_dict = agent_model_dict
@@ -33,6 +34,11 @@ class GroupConsensusAgentGroup(AgentGroup):
                 f"merge_mode must be 'sample_mean' or 'bayesian', got '{merge_mode}'"
             )
         self.merge_mode = merge_mode
+        if consensus_mode not in ("vae", "ae"):
+            raise ValueError(
+                f"consensus_mode must be 'vae' or 'ae', got '{consensus_mode}'"
+            )
+        self.consensus_mode = consensus_mode
 
         self.feature_extractors = nn.ModuleDict()
         for model_name, config in feature_extractor_configs.items():
@@ -281,6 +287,26 @@ class GroupConsensusAgentGroup(AgentGroup):
 
         return group_mu, group_log_var
 
+    def _merge_group_mean(self, agent_vectors, group_indices):
+        bs, n_agents, f_z = agent_vectors.shape
+        G = int(group_indices.max()) + 1
+
+        gids = torch.as_tensor(group_indices, dtype=torch.long, device=self.device)
+        dead = gids < 0
+        gids_safe = gids.clamp(min=0)
+
+        mask = F.one_hot(gids_safe, num_classes=G).float()
+        mask[dead] = 0.0
+
+        count = mask.sum(dim=1)
+        count_safe = count.clamp(min=1)
+        count_mask = (count > 0).unsqueeze(-1)
+
+        group_mean = torch.bmm(mask.transpose(1, 2), agent_vectors) / count_safe.unsqueeze(-1)
+        group_mean = group_mean * count_mask
+
+        return group_mean, torch.zeros_like(group_mean)
+
     @staticmethod
     def _scatter(g_t, group_indices):
         bs, G = g_t.shape[:2]
@@ -331,21 +357,29 @@ class GroupConsensusAgentGroup(AgentGroup):
             observations, traj_padding_mask
         )
 
-        dim = agent_latent.size(-1) // 2
-        agent_mu = agent_latent[:, :, :dim]
-        agent_log_var = agent_latent[:, :, dim:]
-
         if group_indices is None:
             group_indices = self.group_builder(states)
 
-        group_mu, group_log_var = self._merge_group_distributions(
-            agent_mu, agent_log_var, group_indices
-        )
+        if self.consensus_mode == "ae":
+            agent_mu = agent_latent
+            agent_log_var = torch.zeros_like(agent_latent)
+            group_mu, group_log_var = self._merge_group_mean(
+                agent_mu, group_indices
+            )
+            group_consensus = group_mu
+        else:
+            dim = agent_latent.size(-1) // 2
+            agent_mu = agent_latent[:, :, :dim]
+            agent_log_var = agent_latent[:, :, dim:]
 
-        deterministic = self.deterministic_eval and not self.training
-        group_consensus, group_log_var, group_mu, _ = process_probabilistic_output(
-            torch.cat([group_mu, group_log_var], dim=-1), deterministic
-        )
+            group_mu, group_log_var = self._merge_group_distributions(
+                agent_mu, agent_log_var, group_indices
+            )
+
+            deterministic = self.deterministic_eval and not self.training
+            group_consensus, group_log_var, group_mu, _ = process_probabilistic_output(
+                torch.cat([group_mu, group_log_var], dim=-1), deterministic
+            )
 
         # Scatter group-level (B,G,L) → per-agent (B,N,L) for RL path
         consensus_per_agent = self._scatter(group_consensus, group_indices)

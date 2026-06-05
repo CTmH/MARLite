@@ -3,7 +3,7 @@
 Mirrors ``SelfSupervisedQMIXTrainer`` for the on-policy MAPPO family.
 All SSL components (model, optimiser, data constructor, checkpoint
 handling) are **required** and initialised unconditionally — subclasses
-(``VAEGroupConsensusMAPPOTrainer``) only add VAE-specific logic.
+(``SSLGroupConsensusMAPPOTrainer``) only add SSL-specific logic.
 """
 
 import os

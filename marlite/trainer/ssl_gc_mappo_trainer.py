@@ -1,13 +1,13 @@
-"""VAE Group Consensus MAPPO trainer.
+"""SSL Group Consensus MAPPO trainer.
 
 Combines the on-policy MAPPO algorithm (PPO clipped surrogate, GAE,
-centralised value critic) with VAE-based group consensus learning.
+centralised value critic) with SSL-based group consensus learning.
 The consensus latent is trained via self-supervised reconstruction of
 global state, while the PPO objectives drive the policy and value updates.
 
 SSL infrastructure (model, optimiser, data constructor, checkpoint)
 is provided by :class:`SelfSupervisedMAPPOTrainer`.  This class only
-adds VAE-specific logic (KL divergence, reconstruction modes, warmup).
+adds SSL-specific logic (KL divergence, reconstruction modes, warmup).
 """
 
 import time
@@ -19,8 +19,8 @@ from tqdm import tqdm
 from absl import logging
 
 from marlite.trainer.self_supervised_mappo_trainer import SelfSupervisedMAPPOTrainer
-from marlite.trainer.trainer_worker_group.vaegc_mappo_worker_group import (
-    VAEGroupConsensusMAPPOWorkerGroup,
+from marlite.trainer.trainer_worker_group.ssl_gc_mappo_worker_group import (
+    SSLGroupConsensusMAPPOWorkerGroup,
 )
 from marlite.util.serialization import get_state_dict, load_state_dict_into
 from marlite.util.trajectory_dataset import (
@@ -29,8 +29,8 @@ from marlite.util.trajectory_dataset import (
 )
 
 
-class VAEGroupConsensusMAPPOTrainer(SelfSupervisedMAPPOTrainer):
-    """MAPPO trainer with VAE group consensus self-supervised learning.
+class SSLGroupConsensusMAPPOTrainer(SelfSupervisedMAPPOTrainer):
+    """MAPPO trainer with SSL group consensus self-supervised learning.
 
     Extends :class:`SelfSupervisedMAPPOTrainer` with:
     - KL divergence regularisation on the latent distributions.
@@ -60,6 +60,7 @@ class VAEGroupConsensusMAPPOTrainer(SelfSupervisedMAPPOTrainer):
         kl_on_agent: bool = True,
         kl_on_group: bool = False,
         warmup_iterations: int = 0,
+        consensus_mode: str = "vae",
         **kwargs,
     ):
         if recon_mode not in ("per_agent", "per_group"):
@@ -71,11 +72,12 @@ class VAEGroupConsensusMAPPOTrainer(SelfSupervisedMAPPOTrainer):
         self.kl_on_agent = kl_on_agent
         self.kl_on_group = kl_on_group
         self.warmup_iterations = warmup_iterations
+        self.consensus_mode = consensus_mode
 
         super().__init__(**kwargs)
 
     # ------------------------------------------------------------------
-    # VAE reconstruction helpers
+    # SSL reconstruction helpers
     # ------------------------------------------------------------------
 
     def _recon_loss_per_group(self, consensus, targets, construct_mask):
@@ -115,6 +117,8 @@ class VAEGroupConsensusMAPPOTrainer(SelfSupervisedMAPPOTrainer):
     def _compute_kl_divergence(
         self, agent_mu, agent_log_var, alive_mask, group_mu, group_log_var, construct_mask
     ):
+        if self.consensus_mode == "ae":
+            return torch.tensor(0.0, device=self.train_device)
         kl = torch.tensor(0.0, device=self.train_device)
         if self.kl_on_agent:
             mask = alive_mask[:, -1, :].unsqueeze(-1).expand_as(agent_mu)
@@ -137,7 +141,7 @@ class VAEGroupConsensusMAPPOTrainer(SelfSupervisedMAPPOTrainer):
     def _create_worker_group(self):
         if not self.use_multi_gpu:
             return None
-        return VAEGroupConsensusMAPPOWorkerGroup(
+        return SSLGroupConsensusMAPPOWorkerGroup(
             device_ids=self._get_device_ids(),
             agent_group_config=self.agent_group_config,
             critic_config=self.critic_config,
@@ -161,14 +165,15 @@ class VAEGroupConsensusMAPPOTrainer(SelfSupervisedMAPPOTrainer):
             kl_on_agent=self.kl_on_agent,
             kl_on_group=self.kl_on_group,
             warmup_iterations=self.warmup_iterations,
+            consensus_mode=self.consensus_mode,
         )
 
     # ------------------------------------------------------------------
-    # PPO + VAE learning (multi-GPU)
+    # PPO + SSL learning (multi-GPU)
     # ------------------------------------------------------------------
 
     def _learn_multi_gpu(self, sample_size, batch_size: int, times: int = 1):
-        """Multi-GPU PPO + VAE learning via worker processes.
+        """Multi-GPU PPO + SSL learning via worker processes.
 
         Reconstruction targets are pre-generated **once** on the trainer
         via ``GroupSSLEnrichedTrajectoryDataset`` so workers read
@@ -177,7 +182,7 @@ class VAEGroupConsensusMAPPOTrainer(SelfSupervisedMAPPOTrainer):
         self.worker_group.move_models_to_gpu()
         total_combined = 0.0
         total_critic = 0.0
-        total_vae = 0.0
+        total_ssl = 0.0
         total_batches = 0
 
         is_warmup = self.current_epoch < self.warmup_iterations
@@ -208,10 +213,10 @@ class VAEGroupConsensusMAPPOTrainer(SelfSupervisedMAPPOTrainer):
                     batch["epoch"] = self.current_epoch
                     result = self.worker_group.train_step(batch)
                     if isinstance(result, tuple):
-                        combined, critic, vae = result
+                        combined, critic, ssl = result
                         total_combined += combined
                         total_critic += critic
-                        total_vae += vae
+                        total_ssl += ssl
                     else:
                         total_combined += result
                     total_batches += 1
@@ -222,16 +227,16 @@ class VAEGroupConsensusMAPPOTrainer(SelfSupervisedMAPPOTrainer):
             self.worker_group.move_models_to_cpu()
         torch.cuda.empty_cache()
         avg_rl = total_critic / max(total_batches, 1)
-        avg_vae = total_vae / max(total_batches, 1)
-        logging.info(f"  Iter {self.current_epoch}: RL Loss {avg_rl:.4f}, VAE Loss {avg_vae:.4f}")
+        avg_ssl = total_ssl / max(total_batches, 1)
+        logging.info(f"  Iter {self.current_epoch}: RL Loss {avg_rl:.4f}, SSL Loss {avg_ssl:.4f}")
         return total_combined / max(total_batches, 1)
 
     # ------------------------------------------------------------------
-    # PPO + VAE learning (single-GPU)
+    # PPO + SSL learning (single-GPU)
     # ------------------------------------------------------------------
 
     def _learn_single_gpu(self, sample_size, batch_size: int, times: int = 4):
-        """Single-GPU PPO + VAE joint learning loop.
+        """Single-GPU PPO + SSL joint learning loop.
 
         Reconstruction targets are pre-generated **once** for the entire
         sampled dataset via ``GroupSSLEnrichedTrajectoryDataset``.  The
@@ -240,7 +245,7 @@ class VAEGroupConsensusMAPPOTrainer(SelfSupervisedMAPPOTrainer):
         """
         total_actor_loss = 0.0
         total_critic_loss = 0.0
-        total_vae_loss = 0.0
+        total_ssl_loss = 0.0
         total_batches = 0
 
         self.eval_agent_group.to(self.train_device)
@@ -377,9 +382,9 @@ class VAEGroupConsensusMAPPOTrainer(SelfSupervisedMAPPOTrainer):
                     # ── PPO critic loss ──
                     critic_loss = F.mse_loss(v_last, returns.detach())
 
-                    # ── VAE reconstruction loss ──
+                    # ── SSL reconstruction loss ──
                     if is_warmup or group_consensus is None:
-                        vae_loss = torch.tensor(0.0, device=device)
+                        ssl_loss = torch.tensor(0.0, device=device)
                     else:
                         targets = batch["formatted_obs"].to(
                             dtype=torch.float32, device=device
@@ -400,14 +405,14 @@ class VAEGroupConsensusMAPPOTrainer(SelfSupervisedMAPPOTrainer):
                             agent_mu, agent_log_var, alive_mask_d,
                             group_mu, group_log_var, construct_mask,
                         )
-                        vae_loss = recon_loss + self.kl_divergence_weight * kl
+                        ssl_loss = recon_loss + self.kl_divergence_weight * kl
 
                     # ── Combined loss ──
                     rl_loss = actor_loss + self.vf_coef * critic_loss
-                    if is_warmup or vae_loss.item() == 0.0:
+                    if is_warmup or ssl_loss.item() == 0.0:
                         combined_loss = rl_loss
                     else:
-                        combined_loss = self._combine_rl_ssl_loss(rl_loss, vae_loss)
+                        combined_loss = self._combine_rl_ssl_loss(rl_loss, ssl_loss)
 
                     # ── Backward ──
                     self.agent_optimizer.zero_grad()
@@ -432,9 +437,9 @@ class VAEGroupConsensusMAPPOTrainer(SelfSupervisedMAPPOTrainer):
 
                     total_actor_loss += actor_loss.detach().cpu().item()
                     total_critic_loss += critic_loss.detach().cpu().item()
-                    total_vae_loss += (
-                        vae_loss.detach().cpu().item()
-                        if isinstance(vae_loss, torch.Tensor) else vae_loss
+                    total_ssl_loss += (
+                        ssl_loss.detach().cpu().item()
+                        if isinstance(ssl_loss, torch.Tensor) else ssl_loss
                     )
                     total_batches += 1
 
@@ -448,8 +453,8 @@ class VAEGroupConsensusMAPPOTrainer(SelfSupervisedMAPPOTrainer):
         avg_rl = (total_actor_loss + total_critic_loss * self.vf_coef) / max(
             total_batches, 1
         )
-        avg_vae = total_vae_loss / max(total_batches, 1)
+        avg_ssl = total_ssl_loss / max(total_batches, 1)
         logging.info(
-            f"  Iter {self.current_epoch}: RL Loss {avg_rl:.4f}, VAE Loss {avg_vae:.4f}"
+            f"  Iter {self.current_epoch}: RL Loss {avg_rl:.4f}, SSL Loss {avg_ssl:.4f}"
         )
-        return avg_rl + avg_vae
+        return avg_rl + avg_ssl

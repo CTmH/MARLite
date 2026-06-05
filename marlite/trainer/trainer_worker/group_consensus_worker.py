@@ -28,6 +28,7 @@ class GroupConsensusWorker(OffPolicyWorker):
         max_grad_norm: float = 5.0,
         kl_divergence_weight: float = 0.005,
         warmup_epochs: int = 0,
+        consensus_mode: str = "vae",
         **kwargs,
     ):
         super().__init__(worker_id, device_id, rank, world_size, init_method)
@@ -35,6 +36,7 @@ class GroupConsensusWorker(OffPolicyWorker):
         self.max_grad_norm = max_grad_norm
         self.kl_divergence_weight = kl_divergence_weight
         self.warmup_epochs = warmup_epochs
+        self.consensus_mode = consensus_mode
 
         self.eval_agent_group = agent_group_config.get_agent_group()
         self.target_agent_group = agent_group_config.get_agent_group()
@@ -249,6 +251,8 @@ class GroupConsensusWorker(OffPolicyWorker):
         td_error = torch.nn.functional.mse_loss(q_tot, y_tot.detach())
 
         if is_warmup:
+            kl_divergence = torch.tensor(0.0, device=self.device)
+        elif self.consensus_mode == "ae":
             kl_divergence = torch.tensor(0.0, device=self.device)
         else:
             kl_divergence = -0.5 * torch.sum(

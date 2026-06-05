@@ -83,7 +83,7 @@ class MAPPOConfigProcessor(QMIXConfigProcessor):
 class SemiSupervisedMAPPOConfigProcessor(
     SemiSupervisedQMIXConfigProcessor, MAPPOConfigProcessor
 ):
-    """Config processor for VAEGroupConsensusMAPPO (SSL + on-policy MAPPO)."""
+    """Config processor for SSLGroupConsensusMAPPO (SSL + on-policy MAPPO)."""
 
     def process(self, config: Dict[str, Dict]) -> Tuple[Dict, Dict, str]:
         config = deepcopy(config)

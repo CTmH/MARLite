@@ -6,8 +6,8 @@ import absl.logging as logging
 from tqdm import tqdm
 
 from marlite.trainer.self_supervised_qmix_trainer import SelfSupervisedQMIXTrainer
-from marlite.trainer.trainer_worker_group.vae_group_consensus_worker_group import (
-    VAEGroupConsensusWorkerGroup,
+from marlite.trainer.trainer_worker_group.ssl_group_consensus_worker_group import (
+    SSLGroupConsensusWorkerGroup,
 )
 from marlite.util.trajectory_dataset import (
     TrajectoryDataLoader,
@@ -31,8 +31,8 @@ from marlite.util.serialization import get_state_dict, load_state_dict_into
 # ────────────────────────────────────────────────────────────────────────
 
 
-class VAEGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
-    """GroupConsensus trainer with VAE-style reconstruction loss for consensus.
+class SSLGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
+    """GroupConsensus trainer with SSL-style reconstruction loss for consensus.
 
     Uses a data constructor (MagentGroupWindowConstructor or
     MagentGroupFeaturesConstructor) to generate reconstruction targets from
@@ -72,6 +72,7 @@ class VAEGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
         pit_loss_alpha: float = 0.9,
         kl_on_group: bool = False,
         kl_on_agent: bool = True,
+        consensus_mode: str = "vae",
         **kwargs,
     ):
         if recon_mode not in ("per_agent", "per_group"):
@@ -81,6 +82,7 @@ class VAEGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
         self.warmup_epochs = warmup_epochs
         self.kl_on_group = kl_on_group
         self.kl_on_agent = kl_on_agent
+        self.consensus_mode = consensus_mode
         super().__init__(
             loss_combination_method=loss_combination_method,
             pit_loss_alpha=pit_loss_alpha,
@@ -93,7 +95,7 @@ class VAEGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
         if not self.use_multi_gpu:
             return None
 
-        return VAEGroupConsensusWorkerGroup(
+        return SSLGroupConsensusWorkerGroup(
             device_ids=self._get_device_ids(),
             agent_group_config=self.agent_group_config,
             critic_config=self.critic_config,
@@ -113,6 +115,7 @@ class VAEGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
             recon_mode=self.recon_mode,
             kl_on_group=self.kl_on_group,
             kl_on_agent=self.kl_on_agent,
+            consensus_mode=self.consensus_mode,
         )
 
     def _sync_params_to_workers(self):
@@ -154,7 +157,7 @@ class VAEGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
     def _joint_learn_single_gpu(self, sample_size, batch_size: int, times: int = 1):
         total_combined = 0.0
         total_critic = 0.0
-        total_vae = 0.0
+        total_ssl = 0.0
         total_batches = 0
 
         self.eval_agent_group.to(self.train_device)
@@ -192,7 +195,7 @@ class VAEGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
                 total=sample_size, desc=f"Times {t + 1}/{times}", unit="batch"
             ) as pbar:
                 for batch in dataloader:
-                    combined_loss, critic_loss, vae_loss = self._compute_loss(
+                    combined_loss, critic_loss, ssl_loss = self._compute_loss(
                         batch, is_warmup
                     )
 
@@ -218,8 +221,8 @@ class VAEGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
 
                     total_combined += combined_loss.detach().cpu().item()
                     total_critic += critic_loss.detach().cpu().item()
-                    if isinstance(vae_loss, torch.Tensor):
-                        total_vae += vae_loss.detach().cpu().item()
+                    if isinstance(ssl_loss, torch.Tensor):
+                        total_ssl += ssl_loss.detach().cpu().item()
                     total_batches += 1
 
                     bs = batch["states"].shape[0]
@@ -234,9 +237,9 @@ class VAEGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
 
         avg_combined = total_combined / total_batches
         avg_critic = total_critic / total_batches
-        avg_vae = total_vae / total_batches
+        avg_ssl = total_ssl / total_batches
         logging.info(
-            f"  Combined Loss: {avg_combined:.4f}, RL Loss: {avg_critic:.4f}, VAE Loss: {avg_vae:.4f}"
+            f"  Combined Loss: {avg_combined:.4f}, RL Loss: {avg_critic:.4f}, SSL Loss: {avg_ssl:.4f}"
         )
 
         return avg_combined
@@ -246,7 +249,7 @@ class VAEGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
 
         total_combined = 0.0
         total_critic = 0.0
-        total_vae = 0.0
+        total_ssl = 0.0
         total_batches = 0
 
         is_warmup = self.current_epoch < self.warmup_epochs
@@ -279,11 +282,11 @@ class VAEGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
             ) as pbar:
                 for batch in dataloader:
                     batch["epoch"] = self.current_epoch
-                    combined, critic, vae = self.worker_group.train_step(batch)
+                    combined, critic, ssl = self.worker_group.train_step(batch)
 
                     total_combined += combined
                     total_critic += critic
-                    total_vae += vae
+                    total_ssl += ssl
                     total_batches += 1
 
                     bs = batch["states"].shape[0]
@@ -294,9 +297,9 @@ class VAEGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
 
         avg_combined = total_combined / total_batches
         avg_critic = total_critic / total_batches
-        avg_vae = total_vae / total_batches
+        avg_ssl = total_ssl / total_batches
         logging.info(
-            f"  Combined Loss: {avg_combined:.4f}, RL Loss: {avg_critic:.4f}, VAE Loss: {avg_vae:.4f}"
+            f"  Combined Loss: {avg_combined:.4f}, RL Loss: {avg_critic:.4f}, SSL Loss: {avg_ssl:.4f}"
         )
 
         return avg_combined
@@ -335,7 +338,7 @@ class VAEGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
             merge({μ_i,σ²_i}_{i∈g})              → group_mu       (B,N,L)
                                                   → group_log_var  (B,N,L)
 
-        ─── VAE path (after warmup) ───
+        ─── SSL path (after warmup) ───
             data_constructor(state, grouping)     → targets           (B,G,…)
             c_sample ~ N(group_mu, group_log_var) → consensus_sample  (B,N,L)
 
@@ -539,11 +542,11 @@ class VAEGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
         #   scalar
 
         # ═══════════════════════════════════════════════════════════════════
-        #  PART 3 : VAE Reconstruction Loss  (after warmup)
+        #  PART 3 : SSL Reconstruction Loss  (after warmup)
         # ═══════════════════════════════════════════════════════════════════
 
         if is_warmup:
-            vae_loss = torch.tensor(0.0, device=self.train_device)
+            ssl_loss = torch.tensor(0.0, device=self.train_device)
         else:
             # ── 3a. Obtain reconstruction targets ──────────────────────
             # Pre-generated path: targets already computed by
@@ -590,25 +593,28 @@ class VAEGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
             #   scalar
 
             # ── 3d. KL divergence: KL(N(μ, σ²) || N(0, 1)) ──────────
-            kl_divergence = 0.0
-            if self.kl_on_agent:
-                kl_mu = agent_mu
-                kl_log_var = agent_log_var
-                mask = alive_mask[:, -1, :].unsqueeze(-1).expand_as(agent_mu)
-                kl_per_dim = 1 + kl_log_var - kl_mu.pow(2) - torch.exp(kl_log_var)
-                kl_divergence = kl_divergence + -0.5 * (
-                    kl_per_dim * mask
-                ).sum() / mask.sum().clamp(min=1)
-            if self.kl_on_group:
-                kl_mu = group_mu
-                kl_log_var = group_log_var
-                mask = construct_mask.unsqueeze(-1).expand_as(group_mu)
-                kl_per_dim = 1 + kl_log_var - kl_mu.pow(2) - torch.exp(kl_log_var)
-                kl_divergence = kl_divergence + -0.5 * (
-                    kl_per_dim * mask
-                ).sum() / mask.sum().clamp(min=1)
+            if self.consensus_mode == "ae":
+                kl_divergence = torch.tensor(0.0, device=self.train_device)
+            else:
+                kl_divergence = 0.0
+                if self.kl_on_agent:
+                    kl_mu = agent_mu
+                    kl_log_var = agent_log_var
+                    mask = alive_mask[:, -1, :].unsqueeze(-1).expand_as(agent_mu)
+                    kl_per_dim = 1 + kl_log_var - kl_mu.pow(2) - torch.exp(kl_log_var)
+                    kl_divergence = kl_divergence + -0.5 * (
+                        kl_per_dim * mask
+                    ).sum() / mask.sum().clamp(min=1)
+                if self.kl_on_group:
+                    kl_mu = group_mu
+                    kl_log_var = group_log_var
+                    mask = construct_mask.unsqueeze(-1).expand_as(group_mu)
+                    kl_per_dim = 1 + kl_log_var - kl_mu.pow(2) - torch.exp(kl_log_var)
+                    kl_divergence = kl_divergence + -0.5 * (
+                        kl_per_dim * mask
+                    ).sum() / mask.sum().clamp(min=1)
 
-            vae_loss = reconstruction_loss + self.kl_divergence_weight * kl_divergence
+            ssl_loss = reconstruction_loss + self.kl_divergence_weight * kl_divergence
             #   scalar
 
         # ═══════════════════════════════════════════════════════════════════
@@ -618,11 +624,11 @@ class VAEGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
         if is_warmup:
             combined_loss = critic_loss
         else:
-            combined_loss = self._combine_rl_ssl_loss(critic_loss, vae_loss)
-            #   weighted_sum: L_TD + w_ssl * L_VAE
-            #   pit_loss:     PITLoss([L_TD, L_VAE])
+            combined_loss = self._combine_rl_ssl_loss(critic_loss, ssl_loss)
+            #   weighted_sum: L_TD + w_ssl * L_SSL
+            #   pit_loss:     PITLoss([L_TD, L_SSL])
 
-        return combined_loss, critic_loss, vae_loss
+        return combined_loss, critic_loss, ssl_loss
 
     # ── Reconstruction target builder ────────────────────────────────────
 

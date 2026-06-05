@@ -7,9 +7,9 @@ from marlite.trainer.msg_aggr_qmix_trainer import MsgAggrQMIXTrainer, ProbMsgAgg
 from marlite.trainer.self_supervised_qmix_trainer import SelfSupervisedQMIXTrainer
 from marlite.trainer.vae_graph_qmix_trainer import VAEGraphQMIXTrainer
 from marlite.trainer.group_consensus_trainer import GroupConsensusTrainer
-from marlite.trainer.vae_group_consensus_trainer import VAEGroupConsensusQMIXTrainer
+from marlite.trainer.ssl_group_consensus_trainer import SSLGroupConsensusQMIXTrainer
 from marlite.trainer.mappo_trainer import MAPPOTrainer
-from marlite.trainer.vaegc_mappo_trainer import VAEGroupConsensusMAPPOTrainer
+from marlite.trainer.ssl_gc_mappo_trainer import SSLGroupConsensusMAPPOTrainer
 from marlite.trainer.g2anet_mappo_trainer import GraphMAPPOTrainer
 from marlite.config_processor import REGISTERED_PROCESSORS
 
@@ -20,9 +20,9 @@ REGISTERED_TRAINERS: Dict[str, Type[Trainer]] = {
     'ProbMsgAggr': ProbMsgAggrQMIXTrainer,
     'VAEGraphQMIX': VAEGraphQMIXTrainer,
     'GroupConsensusQMIX': GroupConsensusTrainer,
-    'VAEGroupConsensusQMIX': VAEGroupConsensusQMIXTrainer,
+    'SSLGroupConsensusQMIX': SSLGroupConsensusQMIXTrainer,
     'MAPPO': MAPPOTrainer,
-    'VAEGroupConsensusMAPPO': VAEGroupConsensusMAPPOTrainer,
+    'SSLGroupConsensusMAPPO': SSLGroupConsensusMAPPOTrainer,
     'GraphMAPPO': GraphMAPPOTrainer,
     'G2ANetMAPPO': GraphMAPPOTrainer,  # backward-compatible alias
 }

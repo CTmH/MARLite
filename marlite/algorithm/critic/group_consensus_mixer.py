@@ -16,6 +16,7 @@ class GroupConsensusMixer(Mixer):
         num_agents: int,
         group_latent_dim: int,
         deterministic_eval: bool = True,
+        consensus_mode: str = "vae",
     ):
         super().__init__()
         self.feature_extractor = feature_extractor_config.get_model()
@@ -24,6 +25,7 @@ class GroupConsensusMixer(Mixer):
         self.num_agents = num_agents
         self.group_latent_dim = group_latent_dim
         self.deterministic_eval = deterministic_eval
+        self.consensus_mode = consensus_mode
 
         if isinstance(self.feature_extractor, MaskedModel):
             self.fe_class_name = "MaskedModel"
@@ -62,15 +64,19 @@ class GroupConsensusMixer(Mixer):
                 for z in unique_groups:
                     mask = (group_indices[b] == z)
                     mu_z = group_mu[b, mask][0]
-                    log_var_z = group_log_var[b, mask][0]
-                    std_z = torch.exp(0.5 * log_var_z)
 
-                    deterministic = self.deterministic_eval and not self.training
-                    if deterministic:
+                    if self.consensus_mode == "ae":
                         sample_z = mu_z
                     else:
-                        eps = torch.randn_like(std_z)
-                        sample_z = mu_z + eps * std_z
+                        log_var_z = group_log_var[b, mask][0]
+                        std_z = torch.exp(0.5 * log_var_z)
+
+                        deterministic = self.deterministic_eval and not self.training
+                        if deterministic:
+                            sample_z = mu_z
+                        else:
+                            eps = torch.randn_like(std_z)
+                            sample_z = mu_z + eps * std_z
 
                     if offset < self.num_agents:
                         end = offset + self.group_latent_dim

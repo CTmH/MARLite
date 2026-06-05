@@ -1,11 +1,15 @@
+"""
+SSL Group Consensus MAPPO worker group for multi-GPU training.
+"""
+
 from typing import Any, Dict
 from marlite.trainer.trainer_worker_group.base_worker_group import (
-    OffPolicyWorkerGroup,
+    OnPolicyWorkerGroup,
     _slice_batch,
 )
 
 
-class VAEGroupConsensusWorkerGroup(OffPolicyWorkerGroup):
+class SSLGroupConsensusMAPPOWorkerGroup(OnPolicyWorkerGroup):
     def __init__(
         self,
         device_ids: list,
@@ -13,8 +17,12 @@ class VAEGroupConsensusWorkerGroup(OffPolicyWorkerGroup):
         critic_config,
         critic_optimizer_config,
         agent_optimizer_config,
-        gamma: float = 0.9,
+        gamma: float = 0.99,
         max_grad_norm: float = 5.0,
+        clip_epsilon: float = 0.2,
+        gae_lambda: float = 0.95,
+        entropy_coef: float = 0.01,
+        vf_coef: float = 0.5,
         ssl_model_config=None,
         ssl_optimizer_config=None,
         reconstruction_loss=None,
@@ -23,14 +31,19 @@ class VAEGroupConsensusWorkerGroup(OffPolicyWorkerGroup):
         self_supervised_learning_loss_weight: float = 1.0,
         loss_combination_method: str = "weighted_sum",
         pit_loss_alpha: float = 0.9,
-        warmup_epochs: int = 0,
+        warmup_iterations: int = 0,
         recon_mode: str = "per_agent",
-        kl_on_group: bool = False,
         kl_on_agent: bool = True,
+        kl_on_group: bool = False,
+        consensus_mode: str = "vae",
         init_method: str = None,
     ):
         self.gamma = gamma
         self.max_grad_norm = max_grad_norm
+        self.clip_epsilon = clip_epsilon
+        self.gae_lambda = gae_lambda
+        self.entropy_coef = entropy_coef
+        self.vf_coef = vf_coef
         self.agent_group_config = agent_group_config
         self.critic_config = critic_config
         self.critic_optimizer_config = critic_optimizer_config
@@ -43,10 +56,11 @@ class VAEGroupConsensusWorkerGroup(OffPolicyWorkerGroup):
         self.self_supervised_learning_loss_weight = self_supervised_learning_loss_weight
         self.loss_combination_method = loss_combination_method
         self.pit_loss_alpha = pit_loss_alpha
-        self.warmup_epochs = warmup_epochs
+        self.warmup_iterations = warmup_iterations
         self.recon_mode = recon_mode
-        self.kl_on_group = kl_on_group
         self.kl_on_agent = kl_on_agent
+        self.kl_on_group = kl_on_group
+        self.consensus_mode = consensus_mode
 
         super().__init__(
             device_ids=device_ids,
@@ -55,11 +69,10 @@ class VAEGroupConsensusWorkerGroup(OffPolicyWorkerGroup):
         )
 
     def _get_worker_class(self):
-        from marlite.trainer.trainer_worker.vae_group_consensus_worker import (
-            VAEGroupConsensusWorker,
+        from marlite.trainer.trainer_worker.ssl_gc_mappo_worker import (
+            SSLGroupConsensusMAPPOWorker,
         )
-
-        return VAEGroupConsensusWorker
+        return SSLGroupConsensusMAPPOWorker
 
     def _create_worker_kwargs(self) -> Dict[str, Any]:
         kwargs = {}
@@ -69,20 +82,23 @@ class VAEGroupConsensusWorkerGroup(OffPolicyWorkerGroup):
         kwargs["agent_optimizer_config"] = self.agent_optimizer_config
         kwargs["gamma"] = self.gamma
         kwargs["max_grad_norm"] = self.max_grad_norm
+        kwargs["clip_epsilon"] = self.clip_epsilon
+        kwargs["gae_lambda"] = self.gae_lambda
+        kwargs["entropy_coef"] = self.entropy_coef
+        kwargs["vf_coef"] = self.vf_coef
         kwargs["ssl_model_config"] = self.ssl_model_config
         kwargs["ssl_optimizer_config"] = self.ssl_optimizer_config
         kwargs["reconstruction_loss"] = self.reconstruction_loss
         kwargs["data_constructor"] = self.data_constructor
         kwargs["kl_divergence_weight"] = self.kl_divergence_weight
-        kwargs["self_supervised_learning_loss_weight"] = (
-            self.self_supervised_learning_loss_weight
-        )
+        kwargs["self_supervised_learning_loss_weight"] = self.self_supervised_learning_loss_weight
         kwargs["loss_combination_method"] = self.loss_combination_method
         kwargs["pit_loss_alpha"] = self.pit_loss_alpha
-        kwargs["warmup_epochs"] = self.warmup_epochs
+        kwargs["warmup_iterations"] = self.warmup_iterations
         kwargs["recon_mode"] = self.recon_mode
-        kwargs["kl_on_group"] = self.kl_on_group
         kwargs["kl_on_agent"] = self.kl_on_agent
+        kwargs["kl_on_group"] = self.kl_on_group
+        kwargs["consensus_mode"] = self.consensus_mode
         return kwargs
 
     def train_step(self, batch: Dict[str, Any]) -> tuple:
@@ -93,15 +109,21 @@ class VAEGroupConsensusWorkerGroup(OffPolicyWorkerGroup):
 
         combined_losses = []
         critic_losses = []
-        vae_losses = []
+        ssl_losses = []
         for _ in range(self.world_size):
-            combined, critic, vae = self.loss_queue.get()
-            combined_losses.append(combined)
-            critic_losses.append(critic)
-            vae_losses.append(vae)
+            result = self.loss_queue.get()
+            if isinstance(result, tuple):
+                combined, critic, ssl = result
+                combined_losses.append(combined)
+                critic_losses.append(critic)
+                ssl_losses.append(ssl)
+            else:
+                combined_losses.append(result)
+                critic_losses.append(result)
+                ssl_losses.append(0.0)
 
         return (
             sum(combined_losses) / len(combined_losses),
             sum(critic_losses) / len(critic_losses),
-            sum(vae_losses) / len(vae_losses),
+            sum(ssl_losses) / len(ssl_losses),
         )

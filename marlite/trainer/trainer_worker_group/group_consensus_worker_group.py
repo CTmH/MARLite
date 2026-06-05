@@ -15,6 +15,7 @@ class GroupConsensusWorkerGroup(OffPolicyWorkerGroup):
         max_grad_norm: float = 5.0,
         kl_divergence_weight: float = 0.005,
         warmup_epochs: int = 0,
+        consensus_mode: str = "vae",
         init_method: str = None,
     ):
         self.agent_group_config = agent_group_config
@@ -25,6 +26,7 @@ class GroupConsensusWorkerGroup(OffPolicyWorkerGroup):
         self.max_grad_norm = max_grad_norm
         self.kl_divergence_weight = kl_divergence_weight
         self.warmup_epochs = warmup_epochs
+        self.consensus_mode = consensus_mode
 
         super().__init__(
             device_ids=device_ids,
@@ -45,4 +47,5 @@ class GroupConsensusWorkerGroup(OffPolicyWorkerGroup):
         kwargs["agent_optimizer_config"] = self.agent_optimizer_config
         kwargs["kl_divergence_weight"] = self.kl_divergence_weight
         kwargs["warmup_epochs"] = self.warmup_epochs
+        kwargs["consensus_mode"] = self.consensus_mode
         return kwargs

@@ -14,10 +14,12 @@ class GroupConsensusTrainer(OffPolicyTrainer):
         self,
         kl_divergence_weight: float = 0.005,
         warmup_epochs: int = 0,
+        consensus_mode: str = "vae",
         **kwargs,
     ):
         self.kl_divergence_weight = kl_divergence_weight
         self.warmup_epochs = warmup_epochs
+        self.consensus_mode = consensus_mode
         super().__init__(**kwargs)
 
     def _create_worker_group(self):
@@ -34,6 +36,7 @@ class GroupConsensusTrainer(OffPolicyTrainer):
             max_grad_norm=self.max_grad_norm,
             kl_divergence_weight=self.kl_divergence_weight,
             warmup_epochs=self.warmup_epochs,
+            consensus_mode=self.consensus_mode,
         )
 
     def learn(self, sample_size, batch_size: int, times: int = 1):
@@ -207,7 +210,7 @@ class GroupConsensusTrainer(OffPolicyTrainer):
                     td_error = torch.nn.functional.mse_loss(q_tot, y_tot.detach())
 
                     # KL divergence: KL(N(μ,σ²) || N(0,1))
-                    if is_warmup:
+                    if is_warmup or self.consensus_mode == "ae":
                         kl_divergence = torch.tensor(0.0, device=self.train_device)
                     else:
                         kl_divergence = -0.5 * torch.sum(
