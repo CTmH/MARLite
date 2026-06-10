@@ -1,4 +1,4 @@
-from typing import List, Any, Callable, Union
+from typing import List, Any, Callable, Optional, Union
 from multiprocessing.shared_memory import SharedMemory
 from marlite.environment import EnvConfig
 from marlite.algorithm.agents import AgentGroupConfig
@@ -17,6 +17,7 @@ class RolloutManager:
         episode_limit: int,
         epsilon: float,
         device: Union[str, List[str]],
+        required_attrs: Optional[Union[str, List[str]]] = None,
     ):
         self.worker_func = worker_func
         self.env_config = env_config
@@ -27,6 +28,7 @@ class RolloutManager:
         self.episode_limit = episode_limit
         self.epsilon = epsilon
         self.device = device
+        self.required_attrs = required_attrs
 
     def generate_episodes(self) -> List[Any]:
         shm = SharedMemory(
@@ -57,6 +59,7 @@ class RolloutManager:
                     self.episode_limit,
                     self.epsilon,
                     devices[i],
+                    required_attrs=self.required_attrs,
                 )
                 episodes.append(episode)
         finally:

@@ -5,12 +5,13 @@ from marlite.util.trajectory_dataset import TrajectoryDataset
 
 class PrioritizedReplayBuffer(ReplayBuffer):
 
-    def __init__(self, capacity, traj_len, priority_attr, alpha=0.8):
+    def __init__(self, capacity, traj_len, priority_attr, alpha=0.8, required_attrs=None):
         super().__init__()
         self.priority_attr = priority_attr
         self.alpha = alpha
         self.traj_len = traj_len
         self.capacity = capacity
+        self.required_attrs = required_attrs
         self.episode_buffer = {i: None for i in range(self.capacity)}
         self.tail = -1
 
@@ -56,8 +57,7 @@ class PrioritizedReplayBuffer(ReplayBuffer):
             normalized_priorities = (priorities - min_priority) / (max_priority - min_priority) # Min-Max Normalization
         else:
             normalized_priorities = np.ones_like(priorities)
-        weights = np.array(normalized_priorities) ** self.alpha  # 使用 alpha 调整优先级的影响
-        # No need to manually normalize weights, random.choices will handle it.
+        weights = np.array(normalized_priorities) ** self.alpha  # Scale influence with alpha
 
         # Sample with replacement based on probabilities
         idx = random.choices(
@@ -67,5 +67,10 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         )
         if len(idx) == 0:
             assert False, "Replay Buffer is empty"
-        samples = TrajectoryDataset(sample_id_list=idx, episode_buffer=self.episode_buffer, traj_len=self.traj_len)
+        samples = TrajectoryDataset(
+            sample_id_list=idx,
+            episode_buffer=self.episode_buffer,
+            traj_len=self.traj_len,
+            required_attrs=self.required_attrs,
+        )
         return samples

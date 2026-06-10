@@ -4,10 +4,11 @@ from marlite.util.trajectory_dataset import TrajectoryDataset
 
 class NormalReplayBuffer(ReplayBuffer):
 
-    def __init__(self, capacity, traj_len):
+    def __init__(self, capacity, traj_len, required_attrs=None):
         super().__init__()
         self.traj_len = traj_len
         self.capacity = capacity
+        self.required_attrs = required_attrs
         self.episode_buffer = {i: None for i in range(self.capacity)}
         self.tail = -1
 
@@ -39,5 +40,10 @@ class NormalReplayBuffer(ReplayBuffer):
         idx = random.sample(list(self.buffer), min(sample_size, len(self.buffer)))
         if len(idx) == 0:
             assert False, "Replay Buffer is empty"
-        samples = TrajectoryDataset(sample_id_list=idx, episode_buffer=self.episode_buffer, traj_len=self.traj_len)
+        samples = TrajectoryDataset(
+            sample_id_list=idx,
+            episode_buffer=self.episode_buffer,
+            traj_len=self.traj_len,
+            required_attrs=self.required_attrs,
+        )
         return samples

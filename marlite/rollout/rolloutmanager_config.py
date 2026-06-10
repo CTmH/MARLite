@@ -1,4 +1,5 @@
 from copy import deepcopy
+from typing import Optional
 from marlite.rollout.rolloutmanager import RolloutManager
 from marlite.rollout.persistent_env_rolloutmanager import PersistentEnvRolloutManager
 from marlite.rollout.multiprocess_rolloutmanager import MultiProcessRolloutManager
@@ -33,6 +34,10 @@ class RolloutManagerConfig:
         self.worker_type = self.config.pop("worker_type")
         self.n_episodes = self.config.pop("n_episodes")
         self.n_eval_episodes = self.config.pop("n_eval_episodes", 10)
+
+        # Store the raw profile name (None or str) — the rollout worker
+        # resolves it via resolve_required_attrs and resolve_phases.
+        self.required_attrs = self.config.pop("required_attrs", None)
 
         if self.manager_type not in _MANAGER_REGISTRY:
             raise ValueError(
@@ -72,6 +77,7 @@ class RolloutManagerConfig:
             n_episodes=self.n_episodes,
             epsilon=epsilon,
             check_victory=_VICTORY_CHECKER_REGISTRY[self.victory_checker_name],
+            required_attrs=self.required_attrs,
             **self.config,
         )
         return manager
@@ -91,6 +97,7 @@ class RolloutManagerConfig:
             n_episodes=self.n_eval_episodes,
             epsilon=epsilon,
             check_victory=_VICTORY_CHECKER_REGISTRY[self.victory_checker_name],
+            required_attrs=self.required_attrs,
             **self.config,
         )
         return manager

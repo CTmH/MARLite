@@ -1,6 +1,6 @@
 import multiprocessing as mp
 from multiprocessing.shared_memory import SharedMemory
-from typing import List, Any, Callable, Union
+from typing import List, Any, Callable, Optional, Union
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from marlite.algorithm.agents import AgentGroupConfig
 from marlite.environment import EnvConfig
@@ -22,6 +22,7 @@ class PersistentEnvRolloutManager(RolloutManager):
         epsilon: float,
         device: Union[str, List[str]],
         check_victory: Callable,
+        required_attrs: Optional[Union[str, List[str]]] = None,
     ):
 
         self.worker_func = worker_func
@@ -35,6 +36,7 @@ class PersistentEnvRolloutManager(RolloutManager):
         self.epsilon = epsilon
         self.device = device
         self.check_victory = check_victory
+        self.required_attrs = required_attrs
 
     def generate_episodes(self) -> List[Any]:
         mp.set_start_method("spawn", force=True)
@@ -85,6 +87,7 @@ class PersistentEnvRolloutManager(RolloutManager):
                         self.epsilon,
                         devices[i],
                         self.check_victory,
+                        self.required_attrs,
                     )
                     for i, (worker_idx, n_episodes) in enumerate(
                         workers_with_episodes[:n_workers]

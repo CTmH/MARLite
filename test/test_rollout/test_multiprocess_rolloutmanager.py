@@ -33,7 +33,7 @@ class TestRolloutManager(unittest.TestCase):
                     agent_0: model1
                     agent_1: model1
                     agent_2: model1
-                model_configs:
+                models:
                     model1:
                         model:
                             model_type: "RNN"
@@ -49,7 +49,7 @@ class TestRolloutManager(unittest.TestCase):
                     weight_decay: 0.0001
         """
         config = yaml.safe_load(config)
-        self.agent_group_config = AgentGroupConfig(**config["agent_group"])
+        self.agent_group_config = AgentGroupConfig(**config["agent_group_config"])
 
         # Initialize QMIXAgents models parameters
         self.agent_group = self.agent_group_config.get_agent_group()
