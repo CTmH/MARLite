@@ -40,6 +40,7 @@ class CollateType(Enum):
 
 ATTR_REGISTRY: Dict[str, Dict] = {
     # --- AS_IS attributes (stored as raw arrays per timestep) ---
+    "all_agents_sum_rewards": {"storage": StorageType.AS_IS, "essential": True,  "collate": CollateType.NUMERIC},
     "states":              {"storage": StorageType.AS_IS, "essential": True,  "collate": CollateType.NUMERIC},
     "next_states":         {"storage": StorageType.AS_IS, "essential": True,  "collate": CollateType.NUMERIC},
     "edge_indices":        {"storage": StorageType.AS_IS, "essential": False, "collate": CollateType.DYNAMIC},
@@ -51,10 +52,9 @@ ATTR_REGISTRY: Dict[str, Dict] = {
     "next_observations":   {"storage": StorageType.DICT, "essential": True,  "collate": CollateType.NUMERIC},
     "next_alive_mask":     {"storage": StorageType.DICT, "essential": True,  "collate": CollateType.NUMERIC},
     "next_avail_actions":  {"storage": StorageType.DICT, "essential": True,  "collate": CollateType.OBJ},
-    "avail_actions":       {"storage": StorageType.DICT, "essential": True,  "collate": CollateType.NUMERIC},
+    "avail_actions":       {"storage": StorageType.DICT, "essential": True,  "collate": CollateType.OBJ},
     "actions":             {"storage": StorageType.DICT, "essential": True,  "collate": CollateType.NUMERIC},
     "rewards":             {"storage": StorageType.DICT, "essential": True,  "collate": CollateType.NUMERIC},
-    "all_agents_sum_rewards": {"storage": StorageType.DICT, "essential": True,  "collate": CollateType.NUMERIC},
     "terminations":        {"storage": StorageType.DICT, "essential": True,  "collate": CollateType.NUMERIC},
     "truncations":         {"storage": StorageType.DICT, "essential": True,  "collate": CollateType.NUMERIC},
     "infos":               {"storage": StorageType.DICT, "essential": True,  "collate": CollateType.SKIP},

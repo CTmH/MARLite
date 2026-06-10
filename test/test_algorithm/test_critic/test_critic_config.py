@@ -6,9 +6,21 @@ from marlite.algorithm.critic.group_consensus_mixer import GroupConsensusMixer
 class TestCriticConfig(unittest.TestCase):
 
     def test_get_critic(self):
-        config_path = 'test/config/qmix_default.yaml'
-        with open(config_path, 'r') as file:
-            config = yaml.safe_load(file)
+        config = yaml.safe_load("""
+critic:
+  type: "QMixer"
+  model:
+    model_type: QMixModel
+    state_shape: 54
+    input_dim: 3
+    qmix_hidden_dim: 128
+  feature_extractor:
+    model_type: "Identity"
+  optimizer:
+    type: "Adam"
+    lr: 0.0005
+    weight_decay: 0.0001
+""")
         critic_config_dict = config['critic']
         critic_config_dict.pop('optimizer')
         if 'lr_scheduler' in critic_config_dict:
@@ -18,9 +30,40 @@ class TestCriticConfig(unittest.TestCase):
         self.assertIsInstance(self.critic, QMixer)
 
     def test_get_seq_critic(self):
-        config_path = 'test/config/seq_msg_aggr_smac.yaml'
-        with open(config_path, 'r') as file:
-            config = yaml.safe_load(file)
+        config = yaml.safe_load("""
+critic:
+  type: "SeqQMixer"
+  model:
+    model_type: QMixModel
+    state_shape: 64
+    input_dim: 5
+    qmix_hidden_dim: 64
+    hypernet_layers: 2
+    hyper_hidden_dim: 128
+  feature_extractor:
+    model_type: "ResAttMaskedStateEnc"
+    input_dim: 173
+    embed_dim: 64
+    num_heads: 4
+    max_seq_len: 5
+    dropout: 0.25
+  seq_model:
+    model_type: "ResAttSeqEnc"
+    input_dim: 64
+    embed_dim: 64
+    output_dim: 64
+    num_heads: 4
+    max_seq_len: 5
+    dropout: 0.25
+  optimizer:
+    type: "Adam"
+    lr: 0.0005
+    weight_decay: 0.00005
+  lr_scheduler:
+    type: "ReduceLROnPlateau"
+    mode: "max"
+    patience: 3
+""")
         critic_config_dict = config['critic']
         critic_config_dict.pop('optimizer')
         if 'lr_scheduler' in critic_config_dict:
@@ -30,9 +73,33 @@ class TestCriticConfig(unittest.TestCase):
         self.assertIsInstance(self.critic, SeqQMixer)
 
     def test_get_group_consensus_mixer(self):
-        config_path = 'test/config/group_consensus_default.yaml'
-        with open(config_path, 'r') as file:
-            config = yaml.safe_load(file)
+        config = yaml.safe_load("""
+critic:
+  type: "GroupConsensusMixer"
+  feature_extractor:
+    model_type: "Custom"
+    layers:
+    - type: Linear
+      in_features: 54
+      out_features: 32
+  consensus_processor:
+    model_type: "HyperNetwork"
+    cond_dim: 32
+    layer_dims: [24, 32, 32]
+    cond_hidden_dim: 64
+  model:
+    model_type: "QMixModel"
+    state_shape: 32
+    input_dim: 3
+    qmix_hidden_dim: 128
+  num_agents: 3
+  group_latent_dim: 8
+  deterministic_eval: true
+  optimizer:
+    type: "Adam"
+    lr: 0.0005
+    weight_decay: 0.0001
+""")
         critic_config_dict = config['critic']
         critic_config_dict.pop('optimizer')
         if 'lr_scheduler' in critic_config_dict:

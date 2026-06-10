@@ -21,19 +21,19 @@ class TestPersistentEnvRolloutManager(unittest.TestCase):
     def setUp(self):
         # Environment setup and model configuration
         self.env_config = {
-            "module_name": "pettingzoo.mpe",
+            "module_name": "mpe2",
             "env_name": "simple_spread_v3",
         }
         self.env_config = EnvConfig(**self.env_config)
         # Agent group configuration
         config = """
-            agent_group_config:
+            agent_group:
                 type: "QMIX"
                 agent_list:
                     agent_0: model1
                     agent_1: model1
                     agent_2: model1
-                model_configs:
+                models:
                     model1:
                         model:
                             model_type: "RNN"

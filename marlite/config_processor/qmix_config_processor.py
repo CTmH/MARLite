@@ -37,7 +37,6 @@ class QMIXConfigProcessor(ConfigProcessor):
     def parse_env_config(self, config: Dict[str, Dict]) -> EnvConfig:
         """Parse environment configuration"""
         env_data = config["environment"]
-        env_data["env_config"] = env_data.pop("env_params", {})
         return EnvConfig(**env_data)
 
     def parse_critic_config(

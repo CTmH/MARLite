@@ -18,11 +18,11 @@ REGISTERED_WRAPPERS = {
 
 class EnvConfig():
 
-    def __init__(self, module_name: str, env_name: str, env_config: Dict[str, Any] | None = None,
+    def __init__(self, module_name: str, env_name: str, env_params: Dict[str, Any] | None = None,
                  wrapper: Dict[str, Any] | None = None, wrapper_config: Dict[str, Any] | None = None) -> None:
         self.module_name = module_name
         self.env_name = env_name
-        self.env_config = env_config or {}
+        self.env_params = env_params or {}
         wrapper_dict = wrapper if wrapper is not None else wrapper_config
         self.wrapper = deepcopy(wrapper_dict) if wrapper_dict else None
         self.wrapper_type = None
@@ -39,15 +39,15 @@ class EnvConfig():
         except (ImportError, AttributeError) as e:
             raise ValueError(f"Error loading environment {self.env_name} from module {self.module_name}: {e}")
 
-        if self.env_config:
-            env:ParallelEnv = env_class.parallel_env(**self.env_config)
+        if self.env_params:
+            env:ParallelEnv = env_class.parallel_env(**self.env_params)
         else:
             env:ParallelEnv = env_class.parallel_env()
         if self.wrapper_type:
             wrapper_params = self.wrapper.copy()
-            wrapper_params["opponent_agent_group_config"] = wrapper_params.pop(
-                "opponent_agent_group", None
-            )
+            opp_agent_group = wrapper_params.pop("opponent_agent_group", None)
+            if opp_agent_group is not None:
+                wrapper_params["opponent_agent_group_config"] = opp_agent_group
             wrapper_class = REGISTERED_WRAPPERS[self.wrapper_type]
             env = wrapper_class(env, **wrapper_params)
 

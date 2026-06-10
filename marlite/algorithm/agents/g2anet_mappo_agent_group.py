@@ -12,38 +12,17 @@ import torch
 from torch.distributions import Categorical
 from typing import Dict, List, Any
 
-from marlite.algorithm.model.model_config import ModelConfig
-from marlite.algorithm.agents.graph_agent_group import GraphAgentGroup
-from marlite.algorithm.graph_builder import GraphBuilderConfig
+from marlite.algorithm.agents.g2anet_agent_group import G2ANetAgentGroup
 
 
-class G2ANetMAPPOAgentGroup(GraphAgentGroup):
+class G2ANetMAPPOAgentGroup(G2ANetAgentGroup):
     """G2ANet agent group that outputs action logits for on-policy MAPPO.
 
-    Inherits graph-builder and graph-model infrastructure from
-    :class:`GraphAgentGroup`.  The ``forward()`` mirrors
-    :class:`G2ANetAgentGroup` but returns ``action_logits`` instead of
-    ``q_val``.  The ``act()`` samples from a categorical distribution
-    and returns per-action log-probabilities required by PPO.
+    Inherits the full ``forward()`` from :class:`~G2ANetAgentGroup` and
+    renames the ``q_val`` key to ``action_logits``.  The ``act()`` method
+    samples from a categorical distribution and returns per-action
+    log-probabilities required by PPO.
     """
-
-    def __init__(
-        self,
-        agent_model_dict: Dict[str, str],
-        feature_extractor_configs: Dict[str, ModelConfig],
-        encoder_configs: Dict[str, ModelConfig],
-        decoder_configs: Dict[str, ModelConfig],
-        graph_builder_config: GraphBuilderConfig,
-        graph_model_config: ModelConfig,
-    ) -> None:
-        super().__init__(
-            agent_model_dict,
-            feature_extractor_configs,
-            encoder_configs,
-            decoder_configs,
-            graph_builder_config,
-            graph_model_config,
-        )
 
     def forward(
         self,
@@ -53,105 +32,10 @@ class G2ANetMAPPOAgentGroup(GraphAgentGroup):
         alive_mask: torch.Tensor,
         edge_indices: List[np.ndarray] | None = None,
     ) -> Dict[str, Any]:
-        """G2ANet forward pass producing action logits.
-
-        Parameters
-        ----------
-        observations : (B, N, T, *obs_shape)
-            Agent observations stacked by agent index.
-        states : (B, H, W, C) or (B, C, H, W)
-            Global state (unused by G2ANet — graph is built from encoded
-            observations alone).
-        traj_padding_mask : (B, N, T)
-            Padding mask for padded trajectory steps.
-        alive_mask : (B, N)
-            Alive agent mask for the last timestep.
-        edge_indices : list, optional
-            Pre-computed edge indices (not used; the graph builder
-            regenerates them from encoded observations).
-
-        Returns
-        -------
-        dict with keys ``action_logits`` (B, N, A) and ``edge_indices``.
-        """
-        msg = [None for _ in range(len(self.agent_model_dict))]
-        for (model_name, fe), (_, enc) in zip(
-            self.feature_extractors.items(), self.encoders.items()
-        ):
-            selected_agents = self.model_to_agents[model_name]
-            idx = self.model_to_agent_indices[model_name]
-            obs = observations[:, idx]            # (B, n_sel, T, *obs_shape)
-            obs = torch.Tensor(obs)
-            bs = obs.shape[0]
-            n_agents = len(selected_agents)
-            ts = obs.shape[2]
-            obs_shape = list(obs.shape[3:])
-
-            model_class_name = self.model_class_names[model_name]
-            if model_class_name == "Conv1DModel":
-                obs = obs.reshape(bs * n_agents * ts, *obs_shape).to(self.device)
-                obs_vectorized = fe(obs)
-                obs_vectorized = obs_vectorized.reshape(bs * n_agents, ts, -1)
-                obs_vectorized = obs_vectorized.permute(0, 2, 1)
-                msg_selected = enc(obs_vectorized)
-            elif model_class_name == "RNNModel":
-                obs = obs.reshape(bs * n_agents * ts, *obs_shape).to(self.device)
-                obs_vectorized = fe(obs)
-                obs_vectorized = obs_vectorized.reshape(bs * n_agents, ts, -1)
-                enc.train()
-                msg_selected = enc(obs_vectorized)
-            elif model_class_name == "AttentionModel":
-                obs = obs.reshape(bs * n_agents * ts, *obs_shape).to(self.device)
-                obs_vectorized = fe(obs)
-                obs_vectorized = obs_vectorized.reshape(bs * n_agents, ts, -1)
-                mask = traj_padding_mask[:, idx]
-                mask = mask.reshape(bs * n_agents, ts)
-                msg_selected = enc(obs_vectorized, mask)
-            else:
-                obs = obs[:, :, -1, :]
-                obs = obs.reshape(bs * n_agents, *obs_shape).to(self.device)
-                obs_vectorized = fe(obs)
-                msg_selected = enc(obs_vectorized)
-
-            msg_selected = msg_selected.reshape(bs, n_agents, -1)
-            msg_selected = msg_selected.permute(1, 0, 2)
-
-            for i, m in zip(idx, msg_selected):
-                msg[i] = m
-
-        msg = torch.stack(msg).to(self.device)     # (N, B, F)
-        msg = msg.permute(1, 0, 2)                  # (B, N, F)
-        local_obs = msg
-
-        # Build graph from encoded observations.
-        adj_matrix, edge_indices = self.graph_builder(msg)
-
-        # Propagate messages through the graph.
-        hidden_states = self.graph_model(msg, adj_matrix)  # (B, N, H)
-
-        # Decoder: concat graph output + local observation, then project.
-        action_logits = [None for _ in range(len(self.agent_model_dict))]
-        emb_size = hidden_states.shape[-1] + local_obs.shape[-1]
-        for model_name, dec in self.decoders.items():
-            selected_agents = self.model_to_agents[model_name]
-            idx = self.model_to_agent_indices[model_name]
-            h = hidden_states[:, idx]         # (B, n_sel, H)
-            lo = local_obs[:, idx]            # (B, n_sel, F)
-            bs = h.shape[0]
-            n_agents = len(selected_agents)
-            emb = torch.cat((h, lo), dim=-1)
-            emb = emb.reshape(bs * n_agents, emb_size)
-            logits_selected = dec(emb)
-            logits_selected = logits_selected.reshape(bs, n_agents, -1)
-            logits_selected = logits_selected.permute(1, 0, 2)
-
-            for i, m in zip(idx, logits_selected):
-                action_logits[i] = m
-
-        action_logits = torch.stack(action_logits).to(self.device)  # (N, B, A)
-        action_logits = action_logits.permute(1, 0, 2)             # (B, N, A)
-
-        return {"action_logits": action_logits, "edge_indices": edge_indices}
+        result = super().forward(
+            observations, states, traj_padding_mask, alive_mask, edge_indices,
+        )
+        return {"action_logits": result["q_val"], "edge_indices": result["edge_indices"]}
 
     def act(
         self,

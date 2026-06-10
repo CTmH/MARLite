@@ -21,7 +21,7 @@ class TestRolloutManager(unittest.TestCase):
     def setUp(self):
         # Environment setup and model configuration
         self.env_config = {
-            "module_name": "pettingzoo.mpe",
+            "module_name": "mpe2",
             "env_name": "simple_spread_v3",
         }
         self.env_config = EnvConfig(**self.env_config)

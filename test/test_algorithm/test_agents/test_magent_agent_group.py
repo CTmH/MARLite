@@ -9,10 +9,10 @@ class TestMAgentPreyAgentGroup(unittest.TestCase):
 
     def setUp(self):
         yaml_conf = """
-            env_config:
+            env_params:
                 module_name: "magent2.environments"
                 env_name: "adversarial_pursuit_v4"
-                env_config:
+                env_params:
                     tag_penalty: -0.01
                     extra_features: true
                 wrapper_config:
@@ -161,10 +161,10 @@ class TestBattleAgentGroup(unittest.TestCase):
 
     def setUp(self):
         yaml_conf = """
-            env_config:
+            env_params:
                 module_name: "magent2.environments"
                 env_name: "battle_v4"
-                env_config:
+                env_params:
                     map_size: 32
                     step_reward: -0.001
                     dead_penalty: -0.1

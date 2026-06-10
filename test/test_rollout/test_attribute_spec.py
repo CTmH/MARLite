@@ -157,7 +157,7 @@ class TestFilterHelpers(unittest.TestCase):
         self.assertIn("next_edge_indices", as_is)
         # states and next_states are essential; edge attrs depend on profile
         as_is_qmix = get_as_is_attrs(self.qmix_profile)
-        self.assertEqual(as_is_qmix, ["states", "next_states"])
+        self.assertEqual(as_is_qmix, ["all_agents_sum_rewards", "states", "next_states"])
 
     def test_get_dict_attrs_returns_correct_count(self):
         """DICT attrs include observations, actions, rewards, etc."""
@@ -223,7 +223,8 @@ class TestCollateHelpers(unittest.TestCase):
         self.assertIn("group_indices", numeric)
         self.assertIn("next_group_indices", numeric)
         self.assertIn("all_agents_sum_rewards", numeric)
-        self.assertIn("avail_actions", numeric)
+        self.assertNotIn("avail_actions", numeric)
+        self.assertIn("all_agents_sum_rewards", numeric)
 
     def test_get_dynamic_attrs_returns_only_edge_indices(self):
         """DYNAMIC attrs are only edge_indices and next_edge_indices."""
@@ -231,10 +232,11 @@ class TestCollateHelpers(unittest.TestCase):
         self.assertEqual(sorted(dynamic),
                          ["edge_indices", "next_edge_indices"])
 
-    def test_get_obj_attrs_returns_only_next_avail_actions(self):
-        """OBJ attr is only next_avail_actions."""
+    def test_get_obj_attrs_returns_avail_actions(self):
+        """OBJ attrs include next_avail_actions and avail_actions."""
         obj = get_obj_attrs(self.full_profile)
-        self.assertEqual(obj, ["next_avail_actions"])
+        self.assertIn("next_avail_actions", obj)
+        self.assertIn("avail_actions", obj)
 
     def test_skip_attrs_not_in_numeric_or_dynamic_or_obj(self):
         """SKIP-type attrs (e.g. infos, episode_*) are excluded."""

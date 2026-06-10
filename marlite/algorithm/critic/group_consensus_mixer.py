@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 import torch.nn as nn
 from typing import Dict, Optional
@@ -58,17 +59,16 @@ class GroupConsensusMixer(Mixer):
                 bs, self.num_agents * self.group_latent_dim, device=device
             )
             for b in range(bs):
-                unique_groups = torch.unique(group_indices[b])
+                unique_groups = np.unique(group_indices[b])
                 unique_groups = unique_groups[unique_groups >= 0]
                 offset = 0
                 for z in unique_groups:
-                    mask = (group_indices[b] == z)
-                    mu_z = group_mu[b, mask][0]
+                    mu_z = group_mu[b, z]
 
                     if self.consensus_mode == "ae":
                         sample_z = mu_z
                     else:
-                        log_var_z = group_log_var[b, mask][0]
+                        log_var_z = group_log_var[b, z]
                         std_z = torch.exp(0.5 * log_var_z)
 
                         deterministic = self.deterministic_eval and not self.training
@@ -78,7 +78,7 @@ class GroupConsensusMixer(Mixer):
                             eps = torch.randn_like(std_z)
                             sample_z = mu_z + eps * std_z
 
-                    if offset < self.num_agents:
+                    if offset < self.num_agents * self.group_latent_dim:
                         end = offset + self.group_latent_dim
                         all_group_consensus[b, offset:end] = sample_z
                         offset = end

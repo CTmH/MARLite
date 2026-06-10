@@ -10,9 +10,102 @@ from marlite.environment import EnvConfig
 class TestSeqMsgAggrAgentGroup(unittest.TestCase):
     def setUp(self):
         # Agent group configuration
-        config_path = "test/config/seq_msg_aggr_smac.yaml"
-        with open(config_path, "r") as file:
-            config = yaml.safe_load(file)
+        config = yaml.safe_load("""
+agent_group:
+  type: "SeqMsgAggr"
+  agent_list:
+    stalker_0: model_0
+    stalker_1: model_0
+    zealot_0: model_1
+    zealot_1: model_1
+    zealot_2: model_1
+  models:
+    model_0:
+      feature_extractor:
+        model_type: "Custom"
+        layers:
+        - type: Flatten
+      encoder:
+        model_type: "ResAttSeqEnc"
+        input_dim: 144
+        embed_dim: 64
+        output_dim: 64
+        num_heads: 4
+        max_seq_len: 5
+        dropout: 0.25
+      decoder:
+        model_type: "Custom"
+        layers:
+        - type: Linear
+          in_features: 128
+          out_features: 11
+    model_1:
+      feature_extractor:
+        model_type: "Custom"
+        layers:
+        - type: Flatten
+      encoder:
+        model_type: "CustomConv1D"
+        layers:
+        - type: Conv1d
+          in_channels: 144
+          out_channels: 64
+          kernel_size: 5
+          stride: 1
+          padding: 0
+        - type: Flatten
+        - type: Linear
+          in_features: 64
+          out_features: 64
+        - type: ELU
+      decoder:
+        model_type: "Custom"
+        layers:
+        - type: Linear
+          in_features: 128
+          out_features: 11
+  aggr_model_config:
+    model_type: "Custom"
+    layers:
+        - type: SelfAttention
+          embed_dim: 64
+          num_heads: 4
+          batch_first: true
+        - type: Permute
+          dims: [0, 2, 1]
+        - type: AdaptiveAvgPool1d
+          output_size: 1
+        - type: Flatten
+        - type: Linear
+          in_features: 64
+          out_features: 64
+        - type: ELU
+  optimizer:
+    type: "Adam"
+    lr: 0.0005
+    weight_decay: 0.00005
+  lr_scheduler:
+    type: "ReduceLROnPlateau"
+    mode: "max"
+    patience: 3
+env_config:
+  module_name: "smac_pettingzoo"
+  env_name: "smacv1_pettingzoo_v1"
+  env_params:
+    map_name: "2s3z"
+  wrapper:
+    type: smac
+rollout_config:
+  manager_type: "persistent-env"
+  worker_type: "persistent-env"
+  n_workers: 1
+  n_episodes: 10
+  n_eval_episodes: 50
+  traj_len: 5
+  episode_limit: 200
+  device: "cpu"
+  victory_checker: smac
+""")
         self.agent_group_config = AgentGroupConfig(**config["agent_group"])
 
         # Environment setup and model configuration

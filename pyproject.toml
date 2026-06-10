@@ -12,13 +12,15 @@ dependencies = [
     "tqdm>=4.67.1",
     "mpe2",
     "networkx>=3.4.2",
-    "pettingzoo[butterfly,mpe]>=1.25.0",
+    "pettingzoo[butterfly]>=1.25.0",
     "smac-pettingzoo",
     "magent2",
     "sumo-rl",
     "libsumo",
     "pyvirtualdisplay",
     "numba>=0.63.1",
+    "pygame",
+    "cython",
 ]
 
 [tool.setuptools.packages.find]
@@ -45,6 +47,7 @@ analysis = [
 [tool.uv]
 index-strategy = "unsafe-best-match"
 package = true
+no-build-isolation-package = ["pygame"]
 
 [tool.uv.sources]
 smac-pettingzoo = { git = "https://github.com/CTmH/SMAC-PettingZoo.git" }
@@ -53,6 +56,7 @@ dm_env = { git = "https://github.com/CTmH/dm_env.git" }
 sumo-rl = { git = "https://github.com/LucasAlegre/sumo-rl.git" }
 torch = { index = "pytorch-rocm" }
 mpe2 = {git = "https://github.com/Farama-Foundation/MPE2.git"}
+pygame = { git = "https://github.com/pygame/pygame.git", rev = "7357d445d7210c0b9309dac51f6229eb5e61a331" }
 
 [[tool.uv.index]]
 name = "pypi"

@@ -7,10 +7,16 @@ from marlite.environment import EnvConfig
 class TestSMACv2Wrapper(unittest.TestCase):
 
     def setUp(self):
-        self.config_path = 'test/config/msg_aggr_smac.yaml'
-        with open(self.config_path, 'r') as file:
-            self.config = yaml.safe_load(file)
-        env_config = self.config['environment']
+        config = yaml.safe_load("""
+environment:
+  module_name: "smac_pettingzoo"
+  env_name: "smacv1_pettingzoo_v1"
+  env_params:
+    map_name: "2s3z"
+  wrapper:
+    type: smac
+""")
+        env_config = config['environment']
         self.env_config = EnvConfig(**env_config)
         self.wrapper = self.env_config.create_env()
         self.n_agent = self.wrapper.max_num_agents

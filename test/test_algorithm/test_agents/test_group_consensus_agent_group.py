@@ -1,4 +1,3 @@
-import os
 import unittest
 import numpy as np
 import yaml
@@ -35,11 +34,49 @@ def _merge_bayesian_reference(agent_mu, agent_log_var, group_indices, device):
 
 class TestGroupConsensusAgentGroup(unittest.TestCase):
     def setUp(self):
-        config_path = os.path.join(
-            os.path.dirname(__file__), "..", "..", "config", "group_consensus_default.yaml"
-        )
-        with open(config_path, "r") as f:
-            config = yaml.safe_load(f)
+        config = yaml.safe_load("""
+agent_group:
+  type: "GroupConsensusQMIX"
+  agent_list:
+    agent_0: model1
+    agent_1: model1
+    agent_2: model1
+  models:
+    model1:
+      feature_extractor:
+        model_type: "Custom"
+        layers:
+        - type: Linear
+          in_features: 18
+          out_features: 32
+      group_estimate_feature_extractor:
+        model_type: "Custom"
+        layers:
+        - type: Linear
+          in_features: 18
+          out_features: 16
+      encoder:
+        model_type: "Custom"
+        layers:
+        - type: Linear
+          in_features: 40
+          out_features: 128
+      decoder:
+        model_type: "Custom"
+        layers:
+        - type: Linear
+          in_features: 128
+          out_features: 5
+  group_builder:
+    type: "Fixed"
+    group_ids: [0, 0, 1]
+  deterministic_eval: true
+  enable_rl_grad_to_group_estimate: false
+  optimizer:
+    type: "Adam"
+    lr: 0.0005
+    weight_decay: 0.0001
+""")
         self.agent_group_config = AgentGroupConfig(**config["agent_group"])
         self.agent_group = self.agent_group_config.get_agent_group()
 

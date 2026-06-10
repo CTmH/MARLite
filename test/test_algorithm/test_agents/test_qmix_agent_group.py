@@ -17,9 +17,28 @@ class TestQMIXAgentGroup(unittest.TestCase):
         self.obs_shape = self.obs_shape[0]
         self.action_space_shape = self.env.action_space(key).n
         # Agent group configuration
-        config_path = "test/config/qmix_default.yaml"
-        with open(config_path, "r") as file:
-            config = yaml.safe_load(file)
+        config = yaml.safe_load("""
+agent_group:
+  type: "QMIX"
+  agent_list:
+    agent_0: model1
+    agent_1: model1
+    agent_2: model1
+  models:
+    model1:
+      feature_extractor:
+        model_type: "Identity"
+      model:
+        model_type: "RNN"
+        input_shape: 18
+        rnn_hidden_dim: 128
+        rnn_layers: 1
+        output_shape: 5
+  optimizer:
+    type: "Adam"
+    lr: 0.0005
+    weight_decay: 0.0001
+""")
         self.agent_group_config = AgentGroupConfig(**config["agent_group"])
 
         # Initialize QMIXAgents
