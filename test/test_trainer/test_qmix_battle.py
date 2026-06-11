@@ -73,14 +73,20 @@ agent_group:
           num_features: 8
         - type: GELU
         - type: Flatten
-      model:
+      encoder:
         model_type: "SimpleResAttSeqEnc"
         input_dim: 1352
         embed_dim: 32
-        output_dim: 21
+        output_dim: 32
         num_heads: 2
         max_seq_len: 8
         dropout: 0.25
+      decoder:
+        model_type: "Custom"
+        layers:
+        - type: "Linear"
+          in_features: 32
+          out_features: 21
   optimizer:
     type: "Adam"
     lr: 0.0005
@@ -145,24 +151,24 @@ critic:
   type: "SeqQMixer"
   model:
     model_type: QMixModel
-    state_shape: 32
+    state_shape: 16
     input_dim: 36
-    qmix_hidden_dim: 32
-    hypernet_layers: 2
-    hyper_hidden_dim: 32
+    qmix_hidden_dim: 16
+    hypernet_layers: 1
+    hyper_hidden_dim: 16
   feature_extractor:
     model_type: "ResAttStateEnc"
     input_dim: 62
-    embed_dim: 32
-    num_heads: 2
+    embed_dim: 16
+    num_heads: 1
     max_seq_len: 72
     dropout: 0.0
   seq_model:
-    model_type: "ResAttSeqEnc"
-    input_dim: 64
-    embed_dim: 32
-    output_dim: 32
-    num_heads: 2
+    model_type: "SimpleResAttSeqEnc"
+    input_dim: 16
+    embed_dim: 16
+    output_dim: 16
+    num_heads: 1
     max_seq_len: 8
     dropout: 0.0
   optimizer:

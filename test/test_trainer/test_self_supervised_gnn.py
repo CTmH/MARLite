@@ -54,22 +54,22 @@ agent_group:
       feature_extractor:
         model_type: "SimpleResAttObsEnc"
         input_dim: 43
-        embed_dim: 32
-        output_dim: 64
+        embed_dim: 16
+        output_dim: 16
         num_heads: 1
         max_seq_len: 8
       encoder:
         model_type: "SimpleResAttSeqEnc"
-        input_dim: 64
-        embed_dim: 32
-        output_dim: 64
+        input_dim: 16
+        embed_dim: 16
+        output_dim: 16
         num_heads: 2
         max_seq_len: 8
         dropout: 0.0
       decoder:
         model_type: "Custom"
         layers:
-        - type: GELU
+        - type: ReLU
         - type: Linear
           in_features: 32
           out_features: 21
@@ -79,11 +79,11 @@ agent_group:
     add_self_loop: true
   graph_model:
     model_type: "GAT"
-    input_dim: 64
-    hidden_dim: 32
+    input_dim: 16
+    hidden_dim: 16
     output_dim: 32
-    head_conv1: 2
-    head_conv2: 2
+    head_conv1: 1
+    head_conv2: 1
     dropout: 0.5
     activation: ELU
   optimizer:
@@ -158,16 +158,16 @@ critic:
   type: "QMixer"
   model:
     model_type: QMixModel
-    state_shape: 32
+    state_shape: 16
     input_dim: 36
-    qmix_hidden_dim: 32
-    hypernet_layers: 2
-    hyper_hidden_dim: 32
+    qmix_hidden_dim: 16
+    hypernet_layers: 1
+    hyper_hidden_dim: 16
   feature_extractor:
     model_type: "SimpleResAttStateEnc"
     input_dim: 62
-    embed_dim: 32
-    num_heads: 2
+    embed_dim: 16
+    num_heads: 1
     max_seq_len: 72
     dropout: 0.0
   optimizer:
@@ -186,7 +186,7 @@ self_supervised_learning:
     model_type: "Custom"
     layers:
     - type: Linear
-      in_features: 64
+      in_features: 16
       out_features: 176
   optimizer:
     type: "Adam"

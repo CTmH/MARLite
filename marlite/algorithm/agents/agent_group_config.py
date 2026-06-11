@@ -45,13 +45,15 @@ from marlite.algorithm.group_builder import GroupBuilderConfig
 def create_qmix_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
     agents = agent_group_config.pop("agent_list")
     text_model_configs = agent_group_config.pop("models")
-    model_configs = {}
+    encoder_configs = {}
+    decoder_configs = {}
     feature_extractor_configs = {}
     for model_id, conf in text_model_configs.items():
         feature_extractor_configs[model_id] = ModelConfig(**conf["feature_extractor"])
-        model_configs[model_id] = ModelConfig(**conf["model"])
+        encoder_configs[model_id] = ModelConfig(**conf["encoder"])
+        decoder_configs[model_id] = ModelConfig(**conf["decoder"])
     return QMIXAgentGroup(
-        agents, model_configs, feature_extractor_configs, **agent_group_config
+        agents, encoder_configs, decoder_configs, feature_extractor_configs, **agent_group_config
     )
 
 
@@ -275,13 +277,15 @@ def _create_dual_path_gnn_agent_group(
 def create_mappo_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
     agents = agent_group_config.pop("agent_list")
     text_model_configs = agent_group_config.pop("models")
-    model_configs = {}
+    encoder_configs = {}
+    decoder_configs = {}
     feature_extractor_configs = {}
     for model_id, conf in text_model_configs.items():
         feature_extractor_configs[model_id] = ModelConfig(**conf["feature_extractor"])
-        model_configs[model_id] = ModelConfig(**conf["model"])
+        encoder_configs[model_id] = ModelConfig(**conf["encoder"])
+        decoder_configs[model_id] = ModelConfig(**conf["decoder"])
     return MAPPOAgentGroup(
-        agents, model_configs, feature_extractor_configs, **agent_group_config
+        agents, encoder_configs, decoder_configs, feature_extractor_configs, **agent_group_config
     )
 
 

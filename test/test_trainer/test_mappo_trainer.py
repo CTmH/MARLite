@@ -21,12 +21,18 @@ agent_group:
     model1:
       feature_extractor:
         model_type: "Identity"
-      model:
+      encoder:
         model_type: "RNN"
         input_shape: 18
         rnn_hidden_dim: 32
         rnn_layers: 1
-        output_shape: 5
+        output_shape: 32
+      decoder:
+        model_type: "Custom"
+        layers:
+        - type: "Linear"
+          in_features: 32
+          out_features: 5
   optimizer:
     type: "Adam"
     lr: 0.0005

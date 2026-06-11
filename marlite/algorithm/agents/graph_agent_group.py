@@ -31,8 +31,6 @@ class GraphAgentGroup(AgentGroup):
         for model_name, config in encoder_configs.items():
             self.encoders[model_name] = config.get_model()
 
-        self.models = self.encoders  # For compatibility
-
         self.decoders = nn.ModuleDict()
         for model_name, config in decoder_configs.items():
             self.decoders[model_name] = config.get_model()

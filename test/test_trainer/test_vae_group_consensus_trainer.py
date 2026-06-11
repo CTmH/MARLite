@@ -299,7 +299,7 @@ trainer:
   type: "SSLGroupConsensusQMIX"
   gamma: 0.95
   eval_epsilon: 0.001
-  eval_threshold: 0.01
+  update_cache_threshold: 0.01
   eval_episodes_to_replay_ratio: 0.125
   workdir: "./test/results/replace_by_tempfile"
   train_device: "cuda:0"

@@ -76,7 +76,7 @@ agent_group:
         layers:
         - type: LeakyReLU
         - type: Linear
-          in_features: 64
+          in_features: 32
           out_features: 13
   graph_builder:
     type: "PartialMAgent"

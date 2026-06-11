@@ -2,7 +2,6 @@ import os
 import sys
 import yaml
 import torch
-import random
 import datetime
 import numpy as np
 from absl import logging
@@ -63,8 +62,6 @@ class Trainer:
         analyzer_config: AnalyzerConfig,
         eval_metric_list: List[str] = ["reward"],
         gamma: float = 0.9,
-        eval_threshold: float = 0.03,
-        eval_episodes_to_replay_ratio: float = 0.25,
         workdir: str = "",
         train_device: Union[str, List[str]] = "cpu",
         n_workers: int = 1,
@@ -76,8 +73,6 @@ class Trainer:
         self.critic_config = critic_config
         self.agent_optimizer_config = agent_optimizer_config
         self.sample_ratio = sample_ratio_scheduler
-        self.eval_threshold = eval_threshold
-        self.eval_episodes_to_replay_ratio = eval_episodes_to_replay_ratio
         self.gamma = gamma
         self.n_workers = n_workers
         self.eval_metric_list = eval_metric_list
@@ -242,12 +237,6 @@ class Trainer:
     def save_best_model(self):
         raise NotImplementedError("subclass must implement save_best_model")
 
-    def save_best_model_impl(self, model, path):
-        """Utility: save a single model's state dict to a file path."""
-        import os
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        torch.save(model.state_dict(), path)
-
     def collect_experience(self, epsilon: float):
         self.eval_agent_group.eval().to("cpu")
         serialized_params = serialize_to_buffer(
@@ -264,39 +253,6 @@ class Trainer:
         self.eval_agent_group.to("cpu")
         torch.cuda.empty_cache()
         return self
-
-    def evaluate(self, eval_epsilon: float = 1.0):
-        self.eval_agent_group.eval().to("cpu")
-        serialized_params = serialize_to_buffer(
-            get_state_dict(self.eval_agent_group)
-        )
-        manager = self.rolloutmanager_config.create_eval_manager(
-            self.agent_group_config,
-            serialized_params,
-            self.env_config,
-            eval_epsilon,
-        )
-
-        episodes = manager.generate_episodes()
-
-        result = self.analyzer(episodes)
-
-        logging.info(f"Evaluation results:")
-        for key in result.keys():
-            logging.info(
-                f"{key}: Mean:{result[key]['mean']:.4f} Std:{result[key].get('std', 0):.4f}"
-            )
-
-        self.eval_agent_group.to("cpu")
-        torch.cuda.empty_cache()
-
-        num_episodes_to_add = int(len(episodes) * self.eval_episodes_to_replay_ratio)
-        if num_episodes_to_add > 0:
-            sampled_indices = random.sample(range(len(episodes)), num_episodes_to_add)
-            for i in sampled_indices:
-                self.replaybuffer.add_episode(episodes[i])
-
-        return result
 
     @abstractmethod
     def train(self, **kwargs):

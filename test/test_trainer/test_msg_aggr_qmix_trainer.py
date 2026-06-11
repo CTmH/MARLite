@@ -49,7 +49,7 @@ agent_group:
           kernel_size: 1
           stride: 1
           padding: 0
-        - type: ELU
+        - type: ReLU
         - type: Conv2d
           in_channels: 8
           out_channels: 4
@@ -59,32 +59,35 @@ agent_group:
         - type: BatchNorm2d
           num_features: 4
         - type: Flatten
+        - type: Linear
+          in_features: 256
+          out_features: 32
       encoder:
         model_type: "CustomConv1D"
         layers:
         - type: Conv1d
-          in_channels: 256
-          out_channels: 128
-          kernel_size: 3
-          stride: 2
+          in_channels: 32
+          out_channels: 32
+          kernel_size: 5
+          stride: 1
           padding: 0
         - type: Flatten
         - type: Linear
-          in_features: 256
-          out_features: 256
-        - type: ELU
+          in_features: 32
+          out_features: 32
+        - type: ReLU
       decoder:
         model_type: "Custom"
         layers:
         - type: Linear
-          in_features: 512
+          in_features: 64
           out_features: 13
   aggr_model_config:
     model_type: "Custom"
     layers:
         - type: SelfAttention
           embed_dim: 32
-          num_heads: 4
+          num_heads: 1
           batch_first: true
         - type: Permute
           dims: [0, 2, 1]
@@ -92,9 +95,9 @@ agent_group:
           output_size: 1
         - type: Flatten
         - type: Linear
-          in_features: 256
-          out_features: 256
-        - type: ELU
+          in_features: 32
+          out_features: 32
+        - type: ReLU
   optimizer:
     type: "Adam"
     lr: 0.0002
@@ -168,10 +171,10 @@ critic:
   type: "QMixer"
   model:
     model_type: QMixModel
-    state_shape: 256
+    state_shape: 32
     input_dim: 25
     qmix_hidden_dim: 32
-    hypernet_layers: 2
+    hypernet_layers: 1
     hyper_hidden_dim: 32
   feature_extractor:
     model_type: "Custom"
@@ -199,8 +202,8 @@ critic:
       - type: Flatten
       - type: Linear
         in_features: 256
-        out_features: 256
-      - type: ELU
+        out_features: 32
+      - type: ReLU
   optimizer:
     type: "Adam"
     lr: 0.0002
@@ -334,10 +337,10 @@ agent_group:
         layers:
         - type: Linear
           in_features: 144
-          out_features: 64
+          out_features: 32
       encoder:
-        model_type: "ResAttSeqEnc"
-        input_dim: 64
+        model_type: "SimpleResAttSeqEnc"
+        input_dim: 32
         embed_dim: 32
         output_dim: 32
         num_heads: 2
@@ -347,7 +350,7 @@ agent_group:
         model_type: "Custom"
         layers:
         - type: Linear
-          in_features: 128
+          in_features: 64
           out_features: 11
     model_1:
       feature_extractor:
@@ -355,33 +358,33 @@ agent_group:
         layers:
         - type: Linear
           in_features: 144
-          out_features: 64
+          out_features: 32
       encoder:
         model_type: "CustomConv1D"
         layers:
         - type: Conv1d
-          in_channels: 64
-          out_channels: 64
+          in_channels: 32
+          out_channels: 32
           kernel_size: 5
           stride: 1
           padding: 0
         - type: Flatten
         - type: Linear
-          in_features: 64
-          out_features: 64
-        - type: ELU
+          in_features: 32
+          out_features: 32
+        - type: ReLU
       decoder:
         model_type: "Custom"
         layers:
         - type: Linear
-          in_features: 128
+          in_features: 64
           out_features: 11
   aggr_model_config:
     model_type: "Custom"
     layers:
         - type: SelfAttention
           embed_dim: 32
-          num_heads: 2
+          num_heads: 1
           batch_first: true
         - type: Permute
           dims: [0, 2, 1]
@@ -389,9 +392,9 @@ agent_group:
           output_size: 1
         - type: Flatten
         - type: Linear
-          in_features: 64
-          out_features: 64
-        - type: ELU
+          in_features: 32
+          out_features: 32
+        - type: ReLU
   optimizer:
     type: "Adam"
     lr: 0.0005
@@ -413,11 +416,11 @@ critic:
   type: "QMixer"
   model:
     model_type: QMixModel
-    state_shape: 64
+    state_shape: 32
     input_dim: 5
-    qmix_hidden_dim: 32
-    hypernet_layers: 2
-    hyper_hidden_dim: 32
+    qmix_hidden_dim: 16
+    hypernet_layers: 1
+    hyper_hidden_dim: 16
   feature_extractor:
     model_type: "ResAttMaskedStateEnc"
     input_dim: 173
@@ -591,10 +594,12 @@ agent_group:
       feature_extractor:
         model_type: "Custom"
         layers:
-        - type: Flatten
+        - type: Linear
+          in_features: 144
+          out_features: 32
       encoder:
-        model_type: "ResAttSeqEnc"
-        input_dim: 64
+        model_type: "SimpleResAttSeqEnc"
+        input_dim: 32
         embed_dim: 32
         output_dim: 32
         num_heads: 2
@@ -604,39 +609,41 @@ agent_group:
         model_type: "Custom"
         layers:
         - type: Linear
-          in_features: 128
+          in_features: 64
           out_features: 11
     model_1:
       feature_extractor:
         model_type: "Custom"
         layers:
-        - type: Flatten
+        - type: Linear
+          in_features: 144
+          out_features: 32
       encoder:
         model_type: "CustomConv1D"
         layers:
         - type: Conv1d
-          in_channels: 144
-          out_channels: 64
+          in_channels: 32
+          out_channels: 32
           kernel_size: 5
           stride: 1
           padding: 0
         - type: Flatten
         - type: Linear
-          in_features: 64
-          out_features: 64
-        - type: ELU
+          in_features: 32
+          out_features: 32
+        - type: ReLU
       decoder:
         model_type: "Custom"
         layers:
         - type: Linear
-          in_features: 128
+          in_features: 64
           out_features: 11
   aggr_model_config:
     model_type: "Custom"
     layers:
         - type: SelfAttention
           embed_dim: 32
-          num_heads: 2
+          num_heads: 1
           batch_first: true
         - type: Permute
           dims: [0, 2, 1]
@@ -644,9 +651,9 @@ agent_group:
           output_size: 1
         - type: Flatten
         - type: Linear
-          in_features: 64
-          out_features: 64
-        - type: ELU
+          in_features: 32
+          out_features: 32
+        - type: ReLU
   optimizer:
     type: "Adam"
     lr: 0.0005
@@ -668,11 +675,11 @@ critic:
   type: "SeqQMixer"
   model:
     model_type: QMixModel
-    state_shape: 64
+    state_shape: 32
     input_dim: 5
-    qmix_hidden_dim: 32
-    hypernet_layers: 2
-    hyper_hidden_dim: 32
+    qmix_hidden_dim: 16
+    hypernet_layers: 1
+    hyper_hidden_dim: 16
   feature_extractor:
     model_type: "ResAttMaskedStateEnc"
     input_dim: 173
@@ -681,11 +688,11 @@ critic:
     max_seq_len: 5
     dropout: 0.25
   seq_model:
-    model_type: "ResAttSeqEnc"
+    model_type: "SimpleResAttSeqEnc"
     input_dim: 32
     embed_dim: 32
     output_dim: 32
-    num_heads: 2
+    num_heads: 1
     max_seq_len: 5
     dropout: 0.25
   optimizer:
@@ -857,20 +864,20 @@ agent_group:
         layers:
         - type: Linear
           in_features: 144
-          out_features: 64
+          out_features: 16
       encoder:
-        model_type: "ResAttSeqEnc"
-        input_dim: 64
-        embed_dim: 32
-        output_dim: 32
-        num_heads: 2
+        model_type: "SimpleResAttSeqEnc"
+        input_dim: 16
+        embed_dim: 16
+        output_dim: 16
+        num_heads: 1
         max_seq_len: 5
         dropout: 0.25
       decoder:
         model_type: "Custom"
         layers:
         - type: Linear
-          in_features: 128
+          in_features: 32
           out_features: 11
     model_1:
       feature_extractor:
@@ -878,33 +885,33 @@ agent_group:
         layers:
         - type: Linear
           in_features: 144
-          out_features: 64
+          out_features: 16
       encoder:
         model_type: "CustomConv1D"
         layers:
         - type: Conv1d
-          in_channels: 64
-          out_channels: 64
+          in_channels: 16
+          out_channels: 16
           kernel_size: 5
           stride: 1
           padding: 0
         - type: Flatten
         - type: Linear
-          in_features: 64
-          out_features: 64
-        - type: ELU
+          in_features: 16
+          out_features: 16
+        - type: ReLU
       decoder:
         model_type: "Custom"
         layers:
         - type: Linear
-          in_features: 128
+          in_features: 32
           out_features: 11
   aggr_model_config:
     model_type: "Custom"
     layers:
         - type: SelfAttention
-          embed_dim: 32
-          num_heads: 2
+          embed_dim: 16
+          num_heads: 1
           batch_first: true
         - type: Permute
           dims: [0, 2, 1]
@@ -912,9 +919,9 @@ agent_group:
           output_size: 1
         - type: Flatten
         - type: Linear
-          in_features: 64
-          out_features: 128
-        - type: ELU
+          in_features: 16
+          out_features: 32
+        - type: ReLU
   optimizer:
     type: "Adam"
     lr: 0.0005
@@ -937,24 +944,24 @@ critic:
   deterministic_eval: false
   model:
     model_type: QMixModel
-    state_shape: 64
+    state_shape: 16
     input_dim: 5
-    qmix_hidden_dim: 32
-    hypernet_layers: 2
-    hyper_hidden_dim: 32
+    qmix_hidden_dim: 16
+    hypernet_layers: 1
+    hyper_hidden_dim: 16
   seq_model:
-    model_type: "ResAttSeqEnc"
-    input_dim: 64
+    model_type: "SimpleResAttSeqEnc"
+    input_dim: 16
     embed_dim: 32
     output_dim: 32
-    num_heads: 2
-    max_seq_len: 8
+    num_heads: 1
+    max_seq_len: 5
     dropout: 0.0
   feature_extractor:
     model_type: "ResAttMaskedStateEnc"
     input_dim: 173
-    embed_dim: 32
-    num_heads: 4
+    embed_dim: 16
+    num_heads: 1
     max_seq_len: 5
     dropout: 0.25
   optimizer:
@@ -1132,26 +1139,26 @@ agent_group:
         layers:
         - type: Linear
           in_features: 144
-          out_features: 64
+          out_features: 16
       msg_feature_extractor:
         model_type: "Custom"
         layers:
         - type: Linear
           in_features: 144
-          out_features: 64
+          out_features: 16
       encoder:
         model_type: "SimpleResAttSeqEnc"
-        input_dim: 64
-        embed_dim: 32
-        output_dim: 32
-        num_heads: 2
+        input_dim: 16
+        embed_dim: 16
+        output_dim: 16
+        num_heads: 1
         max_seq_len: 5
         dropout: 0.25
       decoder:
         model_type: "Custom"
         layers:
         - type: Linear
-          in_features: 128
+          in_features: 32
           out_features: 11
     model_1:
       feature_extractor:
@@ -1159,39 +1166,39 @@ agent_group:
         layers:
         - type: Linear
           in_features: 144
-          out_features: 64
+          out_features: 16
       msg_feature_extractor:
         model_type: "Custom"
         layers:
         - type: Linear
           in_features: 144
-          out_features: 64
+          out_features: 16
       encoder:
         model_type: "CustomConv1D"
         layers:
         - type: Conv1d
-          in_channels: 64
-          out_channels: 64
+          in_channels: 16
+          out_channels: 16
           kernel_size: 5
           stride: 1
           padding: 0
         - type: Flatten
         - type: Linear
-          in_features: 64
-          out_features: 64
-        - type: ELU
+          in_features: 16
+          out_features: 16
+        - type: ReLU
       decoder:
         model_type: "Custom"
         layers:
         - type: Linear
-          in_features: 128
+          in_features: 32
           out_features: 11
   aggr_model_config:
     model_type: "Custom"
     layers:
         - type: SelfAttention
-          embed_dim: 32
-          num_heads: 2
+          embed_dim: 16
+          num_heads: 1
           batch_first: true
         - type: Permute
           dims: [0, 2, 1]
@@ -1199,8 +1206,8 @@ agent_group:
           output_size: 1
         - type: Flatten
         - type: Linear
-          in_features: 64
-          out_features: 64
+          in_features: 16
+          out_features: 16
   optimizer:
     type: "Adam"
     lr: 0.0005
@@ -1222,15 +1229,15 @@ critic:
   type: "QMixer"
   model:
     model_type: QMixModel
-    state_shape: 64
+    state_shape: 16
     input_dim: 5
-    qmix_hidden_dim: 32
-    hypernet_layers: 2
-    hyper_hidden_dim: 32
+    qmix_hidden_dim: 16
+    hypernet_layers: 1
+    hyper_hidden_dim: 16
   feature_extractor:
     model_type: "ResAttMaskedStateEnc"
     input_dim: 173
-    embed_dim: 32
+    embed_dim: 16
     num_heads: 4
     max_seq_len: 5
     dropout: 0.25

@@ -2,6 +2,7 @@ import os
 import yaml
 import torch
 import datetime
+import random
 import numpy as np
 from absl import logging
 from typing import List, Union, Optional
@@ -30,10 +31,22 @@ class OffPolicyTrainer(Trainer):
         self,
         epsilon_scheduler: Scheduler = None,
         eval_epsilon: float = 0.01,
+        update_cache_threshold: float = 0.03,
+        eval_episodes_to_replay_ratio: float = 0.25,
+        target_update_mode: str = "hard",
+        target_update_tau: float = 0.005,
         **kwargs,
     ):
         self.epsilon = epsilon_scheduler
         self.eval_epsilon = eval_epsilon
+        self.update_cache_threshold = update_cache_threshold
+        self.eval_episodes_to_replay_ratio = eval_episodes_to_replay_ratio
+        self.target_update_mode = target_update_mode
+        self.target_update_tau = target_update_tau
+        if self.target_update_mode not in ("hard", "polyak", "ema"):
+            raise ValueError(
+                f"target_update_mode must be 'hard', 'polyak', or 'ema', got '{self.target_update_mode}'"
+            )
         super().__init__(**kwargs)
         if not isinstance(self.eval_critic, MixerCritic):
             raise TypeError(
@@ -86,17 +99,58 @@ class OffPolicyTrainer(Trainer):
         load_state_dict_into(self.eval_critic, eval_params["eval_critic"])
 
     def evaluate(self):
-        return super().evaluate(eval_epsilon=self.eval_epsilon)
+        self.eval_agent_group.eval().to("cpu")
+        serialized_params = serialize_to_buffer(
+            get_state_dict(self.eval_agent_group)
+        )
+        manager = self.rolloutmanager_config.create_eval_manager(
+            self.agent_group_config,
+            serialized_params,
+            self.env_config,
+            self.eval_epsilon,
+        )
+
+        episodes = manager.generate_episodes()
+
+        result = self.analyzer(episodes)
+
+        logging.info(f"Evaluation results:")
+        for key in result.keys():
+            logging.info(
+                f"{key}: Mean:{result[key]['mean']:.4f} Std:{result[key].get('std', 0):.4f}"
+            )
+
+        self.eval_agent_group.to("cpu")
+        torch.cuda.empty_cache()
+
+        num_episodes_to_add = int(len(episodes) * self.eval_episodes_to_replay_ratio)
+        if num_episodes_to_add > 0:
+            sampled_indices = random.sample(range(len(episodes)), num_episodes_to_add)
+            for i in sampled_indices:
+                self.replaybuffer.add_episode(episodes[i])
+
+        return result
+
+    @staticmethod
+    def _ema_update(target, source, tau):
+        """Polyak averaging: θ_target = τ·θ_source + (1-τ)·θ_target."""
+        with torch.no_grad():
+            for tp, sp in zip(target.parameters(), source.parameters()):
+                tp.data.mul_(1 - tau).add_(sp.data, alpha=tau)
 
     def update_target_model_params(self):
-        load_state_dict_into(
-            self.target_agent_group,
-            get_state_dict(self.eval_agent_group),
-        )
-        load_state_dict_into(
-            self.target_critic,
-            get_state_dict(self.eval_critic),
-        )
+        """Update target models per ``target_update_mode``.
+
+        ``"hard"`` copies eval parameters directly (periodic hard sync).
+        ``"polyak"`` blends eval towards target at each update interval.
+        ``"ema"`` applies polyak averaging after every gradient step.
+        """
+        if self.target_update_mode == "hard":
+            load_state_dict_into(self.target_agent_group, get_state_dict(self.eval_agent_group))
+            load_state_dict_into(self.target_critic, get_state_dict(self.eval_critic))
+        else:
+            self._ema_update(self.target_agent_group, self.eval_agent_group, self.target_update_tau)
+            self._ema_update(self.target_critic, self.eval_critic, self.target_update_tau)
         return self
 
     def save_best_model(self):
@@ -131,7 +185,9 @@ class OffPolicyTrainer(Trainer):
         self._cached_critic_params = serialize_to_buffer(
             get_state_dict(self.eval_critic)
         )
-        self.update_target_model_params()
+        # Hard-copy eval → target regardless of target_update_mode.
+        load_state_dict_into(self.target_agent_group, get_state_dict(self.eval_agent_group))
+        load_state_dict_into(self.target_critic, get_state_dict(self.eval_critic))
         return self
 
     def train(
@@ -177,6 +233,10 @@ class OffPolicyTrainer(Trainer):
 
             self._sync_eval_params_from_workers()
 
+            # EMA mode: soft-update target after each learning epoch.
+            if self.target_update_mode == "ema":
+                self.update_target_model_params()
+
             checkpoint_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             checkpoint_name = f"checkpoint_{checkpoint_time}_{epoch}"
             self.save_current_model(checkpoint_name)
@@ -211,7 +271,7 @@ class OffPolicyTrainer(Trainer):
                 best_metric = self.best_metrics[metric_name]
                 cache_params.append(
                     (metric - best_metric) / max(abs(best_metric), 1)
-                    >= -self.eval_threshold
+                    >= -self.update_cache_threshold
                 )
                 update_best.append(metric >= best_metric)
             cache_params = np.array(cache_params, dtype=np.bool_)
@@ -255,15 +315,19 @@ class OffPolicyTrainer(Trainer):
                     self.eval_critic,
                     deserialize_from_buffer(self._cached_critic_params),
                 )
-                self.update_target_model_params()
+                # Rollback: hard-copy eval → target regardless of target_update_mode.
+                load_state_dict_into(self.target_agent_group, get_state_dict(self.eval_agent_group))
+                load_state_dict_into(self.target_critic, get_state_dict(self.eval_critic))
                 logging.info(
-                    f"Epoch {epoch}: Eval model and Target model updated with cached parameters."
+                    f"Epoch {epoch}: Rolled back eval/target to cached parameters."
                 )
 
-            if epoch % update_target_interval == 0:
+            # Periodic target update for hard and polyak modes (EMA updates
+            # after each gradient step, handled separately below).
+            if epoch % update_target_interval == 0 and self.target_update_mode != "ema":
                 self.update_target_model_params()
                 logging.info(
-                    f"Epoch {epoch}: Target model updated with eval model parameters."
+                    f"Epoch {epoch}: Target model updated via '{self.target_update_mode}' mode."
                 )
 
         logging.info(

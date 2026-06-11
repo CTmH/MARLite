@@ -182,7 +182,9 @@ class SelfSupervisedQMIXTrainer(OffPolicyTrainer):
         self._cached_ssl_model_params = serialize_to_buffer(
             get_state_dict(self.ssl_model)
         )
-        self.update_target_model_params()
+        # Hard-copy eval → target regardless of target_update_mode.
+        load_state_dict_into(self.target_agent_group, get_state_dict(self.eval_agent_group))
+        load_state_dict_into(self.target_critic, get_state_dict(self.eval_critic))
         return self
 
     def save_best_model(self):
@@ -210,15 +212,17 @@ class SelfSupervisedQMIXTrainer(OffPolicyTrainer):
         return self
 
     def update_target_model_params(self):
-        """Update target model parameters including self_supervised_model"""
-        load_state_dict_into(
-            self.target_agent_group,
-            get_state_dict(self.eval_agent_group),
-        )
-        load_state_dict_into(
-            self.target_critic,
-            get_state_dict(self.eval_critic),
-        )
+        """Update target models per ``target_update_mode`` (agent + critic only).
+
+        The SSL model is not used for TD-computation, so no target copy is
+        maintained for it.
+        """
+        if self.target_update_mode == "hard":
+            load_state_dict_into(self.target_agent_group, get_state_dict(self.eval_agent_group))
+            load_state_dict_into(self.target_critic, get_state_dict(self.eval_critic))
+        else:
+            self._ema_update(self.target_agent_group, self.eval_agent_group, self.target_update_tau)
+            self._ema_update(self.target_critic, self.eval_critic, self.target_update_tau)
         return self
 
     def train(
@@ -267,6 +271,10 @@ class SelfSupervisedQMIXTrainer(OffPolicyTrainer):
             # Sync eval params from workers before evaluation
             self._sync_eval_params_from_workers()
 
+            # EMA mode: soft-update target after each learning epoch.
+            if self.target_update_mode == "ema":
+                self.update_target_model_params()
+
             # Save checkpoint
             checkpoint_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             checkpoint_name = f"checkpoint_{checkpoint_time}_{epoch}"
@@ -311,7 +319,7 @@ class SelfSupervisedQMIXTrainer(OffPolicyTrainer):
                 best_metric = self.best_metrics[metric_name]
                 cache_params.append(
                     (metric - best_metric) / max(abs(best_metric), 1)
-                    >= -self.eval_threshold
+                    >= -self.update_cache_threshold
                 )
                 update_best.append(metric >= best_metric)
             cache_params = np.array(cache_params, dtype=np.bool_)
@@ -365,15 +373,18 @@ class SelfSupervisedQMIXTrainer(OffPolicyTrainer):
                     self.ssl_model,
                     deserialize_from_buffer(self._cached_ssl_model_params),
                 )
-                self.update_target_model_params()
+                # Rollback: hard-copy eval → target regardless of target_update_mode.
+                load_state_dict_into(self.target_agent_group, get_state_dict(self.eval_agent_group))
+                load_state_dict_into(self.target_critic, get_state_dict(self.eval_critic))
                 logging.info(
-                    f"Epoch {epoch}: Eval model and Target model updated with cached parameters."
+                    f"Epoch {epoch}: Rolled back eval/ssl/target to cached parameters."
                 )
 
-            if epoch % update_target_interval == 0:
+            # Periodic target update for hard and polyak modes
+            if epoch % update_target_interval == 0 and self.target_update_mode != "ema":
                 self.update_target_model_params()
                 logging.info(
-                    f"Epoch {epoch}: Target model updated with eval model parameters."
+                    f"Epoch {epoch}: Target model updated via '{self.target_update_mode}' mode."
                 )
 
         logging.info(
