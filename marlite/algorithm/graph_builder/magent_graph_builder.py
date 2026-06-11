@@ -1,5 +1,6 @@
 from concurrent.futures import ProcessPoolExecutor
 import numpy as np
+import torch
 from typing import Union, Tuple, List
 from numpy import ndarray
 from scipy.spatial.distance import cdist
@@ -84,7 +85,8 @@ class MAgentGraphBuilder(GraphBuilder):
 
         return adj_matrix, edge_index
 
-    def forward(self, states: ndarray) -> Tuple[ndarray, List[ndarray]]:
+    def forward(self, states: torch.Tensor) -> Tuple[torch.Tensor, List[np.ndarray]]:
+        states = states.cpu().numpy()
         if self.channel_first:
             states = np.transpose(states, (0, 2, 3, 1))
         bs = states.shape[0]
@@ -93,7 +95,7 @@ class MAgentGraphBuilder(GraphBuilder):
             if (self.step_counter % self.update_interval != 0
                 and self.cached_adj_matrix is not None
                 and self.cached_edge_indices is not None):
-                return deepcopy(self.cached_adj_matrix), deepcopy(self.cached_edge_indices)
+                return torch.from_numpy(deepcopy(self.cached_adj_matrix)), deepcopy(self.cached_edge_indices)
 
         n_workers = min(bs, self.n_workers)
 
@@ -128,7 +130,7 @@ class MAgentGraphBuilder(GraphBuilder):
             self.cached_adj_matrix = batch_adj_matrix
             self.cached_edge_indices = batch_edge_indices
 
-        return batch_adj_matrix, batch_edge_indices
+        return torch.from_numpy(batch_adj_matrix), batch_edge_indices
 
     def reset(self):
         self.step_counter = 0
@@ -241,7 +243,7 @@ class MAgentVecStateGraphBuilder(GraphBuilder):
 
         return adj_matrix, edge_index
 
-    def forward(self, states: ndarray) -> Tuple[ndarray, List[ndarray]]:
+    def forward(self, states: torch.Tensor) -> Tuple[torch.Tensor, List[np.ndarray]]:
         """
         Build communication graphs for batch of states.
 
@@ -251,6 +253,7 @@ class MAgentVecStateGraphBuilder(GraphBuilder):
         Returns:
             Tuple of (batch_adj_matrix, batch_edge_indices)
         """
+        states = states.cpu().numpy()
         bs = states.shape[0]
 
         if not self.training:
@@ -258,7 +261,7 @@ class MAgentVecStateGraphBuilder(GraphBuilder):
             if (self.step_counter % self.update_interval != 0
                 and self.cached_adj_matrix is not None
                 and self.cached_edge_indices is not None):
-                return deepcopy(self.cached_adj_matrix), deepcopy(self.cached_edge_indices)
+                return torch.from_numpy(deepcopy(self.cached_adj_matrix)), deepcopy(self.cached_edge_indices)
 
         n_workers = min(bs, self.n_workers)
 
@@ -281,7 +284,7 @@ class MAgentVecStateGraphBuilder(GraphBuilder):
             self.cached_adj_matrix = batch_adj_matrix
             self.cached_edge_indices = batch_edge_indices
 
-        return batch_adj_matrix, batch_edge_indices
+        return torch.from_numpy(batch_adj_matrix), batch_edge_indices
 
     def reset(self):
         self.step_counter = 0

@@ -1,5 +1,4 @@
 from copy import deepcopy
-import numpy as np
 from marlite.algorithm.group_builder.group_builder import GroupBuilder
 from marlite.algorithm.group_builder.magent_group_builder import (
     MAgentLabelPropagationGroupBuilder,
@@ -22,9 +21,6 @@ class GroupBuilderConfig:
     def __init__(self, **kwargs) -> None:
         self.conf = deepcopy(kwargs)
         self.builder_type = self.conf.pop("type")
-        dtype = self.conf.get("dtype")
-        if isinstance(dtype, str):
-            self.conf["dtype"] = np.dtype(dtype)
         if self.builder_type not in registered_group_builders:
             raise ValueError(
                 f"Group Builder type {self.builder_type} not registered."

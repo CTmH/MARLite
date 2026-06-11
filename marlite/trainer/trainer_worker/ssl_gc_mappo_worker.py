@@ -14,7 +14,7 @@ from marlite.algorithm.agents import AgentGroupConfig
 from marlite.algorithm.critic import CriticConfig
 from marlite.algorithm.model import ModelConfig
 from marlite.util.optimizer_config import OptimizerConfig
-from marlite.util.loss_func import PITLoss
+from marlite.util.loss_func import PITLoss, ReconstructionLoss
 from marlite.trainer.trainer_worker.onpolicy_worker import OnPolicyWorker
 
 
@@ -34,25 +34,25 @@ class SSLGroupConsensusMAPPOWorker(OnPolicyWorker):
         critic_config: CriticConfig,
         critic_optimizer_config: OptimizerConfig,
         agent_optimizer_config: OptimizerConfig,
-        gamma: float = 0.99,
-        max_grad_norm: float = 5.0,
-        clip_epsilon: float = 0.2,
-        gae_lambda: float = 0.95,
-        entropy_coef: float = 0.01,
-        vf_coef: float = 0.5,
-        ssl_model_config: ModelConfig = None,
-        ssl_optimizer_config: OptimizerConfig = None,
-        reconstruction_loss=None,
-        data_constructor=None,
-        kl_divergence_weight: float = 0.005,
-        self_supervised_learning_loss_weight: float = 1.0,
-        loss_combination_method: str = "weighted_sum",
-        pit_loss_alpha: float = 0.9,
-        warmup_iterations: int = 0,
-        recon_mode: str = "per_agent",
-        kl_on_agent: bool = True,
-        kl_on_group: bool = False,
-        consensus_mode: str = "vae",
+        ssl_model_config: ModelConfig,
+        ssl_optimizer_config: OptimizerConfig,
+        reconstruction_loss,
+        data_constructor,
+        gamma: float,
+        max_grad_norm: float,
+        clip_epsilon: float,
+        gae_lambda: float,
+        entropy_coef: float,
+        vf_coef: float,
+        kl_divergence_weight: float,
+        self_supervised_learning_loss_weight: float,
+        loss_combination_method: str,
+        pit_loss_alpha: float,
+        warmup_iterations: int,
+        recon_mode: str,
+        kl_on_agent: bool,
+        kl_on_group: bool,
+        consensus_mode: str,
         **kwargs,
     ):
         super().__init__(worker_id, device_id, rank, world_size, init_method)
@@ -88,6 +88,11 @@ class SSLGroupConsensusMAPPOWorker(OnPolicyWorker):
 
         self.ssl_model = ssl_model_config.get_model()
         self.reconstruction_loss = reconstruction_loss
+        if not isinstance(self.reconstruction_loss, ReconstructionLoss):
+            raise TypeError(
+                f"reconstruction_loss must be a ReconstructionLoss subclass, "
+                f"got {type(self.reconstruction_loss).__name__}"
+            )
         self.ssl_optimizer = ssl_optimizer_config.get_optimizer(
             self.ssl_model.parameters()
         )
@@ -154,9 +159,7 @@ class SSLGroupConsensusMAPPOWorker(OnPolicyWorker):
     # ── SSL helpers ──────────────────────────────────────────────────────
 
     def _compute_ssl_loss(self, pred_set, target_set, mask=None):
-        if hasattr(self.reconstruction_loss, "reconstruction_loss"):
-            return self.reconstruction_loss.reconstruction_loss(pred_set, target_set, mask)
-        return self.reconstruction_loss(pred_set, target_set)
+        return self.reconstruction_loss(pred_set, target_set, mask)
 
     def _combine_rl_ssl_loss(self, rl_loss, ssl_loss):
         if self.loss_combination_method == "pit_loss":
@@ -267,7 +270,7 @@ class SSLGroupConsensusMAPPOWorker(OnPolicyWorker):
         returns = delta + v_last
 
         # ── agent forward ──
-        states_last_np = states_dev[:, -1].detach().cpu().numpy()
+        states_last = states_dev[:, -1]
         timestep_padding_mask_expanded = torch.stack(
             [timestep_padding_mask] * n_agents, dim=1
         ).to(self.device)
@@ -275,7 +278,7 @@ class SSLGroupConsensusMAPPOWorker(OnPolicyWorker):
 
         self.eval_agent_group.reset().train()
         ret_agent = self.eval_agent_group(
-            observations_transposed, states_last_np,
+            observations_transposed, states_last,
             timestep_padding_mask_expanded, alive_mask[:, -1, :],
             group_indices_np,
         )

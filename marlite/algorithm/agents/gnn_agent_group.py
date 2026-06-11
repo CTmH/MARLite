@@ -30,7 +30,7 @@ class GNNAgentGroup(GraphAgentGroup):
     def forward(
         self,
         observations: torch.Tensor,
-        states: np.ndarray,
+        states: torch.Tensor,
         traj_padding_mask: torch.Tensor,
         alive_mask: torch.Tensor,
         edge_indices: List[np.ndarray] | None = None,
@@ -89,13 +89,11 @@ class GNNAgentGroup(GraphAgentGroup):
                 msg_selected = enc(obs_vectorized)  # (B*N, F) -> (B*N, F)
 
             msg_selected = msg_selected.reshape(bs, n_agents, -1)  # (B, N, F)
-            msg_selected = msg_selected.permute(1, 0, 2)  # (N, B, F)
 
-            for i, m in zip(idx, msg_selected):
-                msg[i] = m
+            for j, agent_idx in enumerate(idx):
+                msg[agent_idx] = msg_selected[:, j, :]  # (B, F)
 
-        msg = torch.stack(msg).to(self.device)  # (N, B, F)
-        msg = msg.permute(1, 0, 2)  # (B, N, F)
+        msg = torch.stack(msg, dim=1).to(self.device)  # (B, N, F)
 
         # Build Graph
         if edge_indices is None:  # If edge_indices are not provided
@@ -127,12 +125,11 @@ class GNNAgentGroup(GraphAgentGroup):
             h = h.reshape(bs * n_agents, hidden_size)  # (B*N, Hidden Size)
             q_selected = dec(h)
             q_selected = q_selected.reshape(bs, n_agents, -1)  # (B, N, Action)
-            q_selected = q_selected.permute(1, 0, 2)  # (N, B, Action)
 
-            for i, m in zip(idx, q_selected):
-                q_val[i] = m
+            for j, agent_idx in enumerate(idx):
+                q_val[agent_idx] = q_selected[:, j, :]  # (B, Action)
 
-        q_val = torch.stack(q_val).to(self.device)  # (N, B, F)
-        q_val = q_val.permute(1, 0, 2)  # (B, N, F)
+        q_val = torch.stack(q_val, dim=1).to(self.device)  # (B, N, Action)
+        q_val = q_val * alive_mask.unsqueeze(-1)
 
         return {"q_val": q_val, "edge_indices": edge_indices}

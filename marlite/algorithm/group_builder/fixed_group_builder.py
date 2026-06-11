@@ -1,18 +1,18 @@
 import numpy as np
+import torch
 from typing import List, Union
-from numpy import ndarray
 from marlite.algorithm.group_builder.group_builder import GroupBuilder
 
 
 class FixedGroupBuilder(GroupBuilder):
-    def __init__(self, group_ids: List[int], dtype=np.int16):
+    def __init__(self, group_ids: List[int], dtype: str = 'int16'):
         super().__init__(dtype=dtype)
         self.group_ids = np.array(group_ids, dtype=dtype)
 
-    def forward(self, states: ndarray) -> ndarray:
+    def forward(self, states: torch.Tensor) -> torch.Tensor:
         bs = states.shape[0]
         group_indices = np.tile(self.group_ids[np.newaxis, :], (bs, 1))
-        return group_indices.astype(self.dtype)
+        return torch.from_numpy(group_indices.astype(self.dtype))
 
     def reset(self):
         return self

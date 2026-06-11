@@ -1,23 +1,33 @@
 import numpy as np
+import torch
 from torch import nn
-from typing import List
+from typing import Dict
 
 
 class GroupBuilder(nn.Module):
-    def __init__(self, dtype=np.int16):
+    _TORCH_DTYPE_MAP: Dict[str, torch.dtype] = {
+        'int8': torch.int8,
+        'int16': torch.int16,
+        'int32': torch.int32,
+        'int64': torch.int64,
+        'float32': torch.float32,
+        'float64': torch.float64,
+    }
+
+    def __init__(self, dtype: str = 'int16'):
         super().__init__()
         self.dtype = dtype
+        self._torch_dtype = self._TORCH_DTYPE_MAP.get(dtype, torch.int16)
 
-    def forward(self, states: np.ndarray) -> np.ndarray:
+    def forward(self, states: torch.Tensor) -> torch.Tensor:
         """
         Process states and return zone indices for each agent.
 
         Args:
-            states: numpy array of shape (batch_size, ...) representing environment states
+            states: tensor of shape (batch_size, ...) representing environment states
 
         Returns:
-            group_indices: numpy array of shape (batch_size, n_agents) with dtype
-                          determined by self.dtype (default int16),
+            group_indices: tensor of shape (batch_size, n_agents)
                           each element is the zone/group ID for that agent
         """
         raise NotImplementedError

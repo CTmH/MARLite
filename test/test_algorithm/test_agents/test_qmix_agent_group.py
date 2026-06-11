@@ -28,12 +28,18 @@ agent_group:
     model1:
       feature_extractor:
         model_type: "Identity"
-      model:
+      encoder:
         model_type: "RNN"
         input_shape: 18
-        rnn_hidden_dim: 128
+        rnn_hidden_dim: 16
         rnn_layers: 1
-        output_shape: 5
+        output_shape: 16
+      decoder:
+        model_type: "Custom"
+        layers:
+        - type: Linear
+          in_features: 16
+          out_features: 5
   optimizer:
     type: "Adam"
     lr: 0.0005
@@ -89,6 +95,24 @@ agent_group:
             q_values.shape, (bs, len(self.env.agents), self.action_space_shape)
         )
 
+    def test_dead_agents_q_are_zero(self):
+        bs = 3
+        obs = [self.observations[ag] for ag in self.agent_group.agent_model_dict.keys()]
+        obs = np.stack(obs)
+        obs = np.stack([obs for _ in range(bs)])
+        obs = torch.Tensor(obs)
+        states = np.stack([self.env.state() for _ in range(bs)])
+        traj_padding_mask = torch.zeros((bs, self.seq_length))
+        alive_mask = torch.ones((bs, len(self.env.agents)))
+        alive_mask[:, -1] = 0  # last agent is dead
+
+        ret = self.agent_group.forward(
+            observations=obs, traj_padding_mask=traj_padding_mask, alive_mask=alive_mask
+        )
+        q_values = ret["q_val"]
+        dead_q = q_values[:, -1, :]
+        self.assertTrue(torch.all(dead_q == 0), f"Dead agent Q-values should be zero, got {dead_q}")
+
     def test_act(self):
         # Test act method with epsilon = 0 (greedy policy)
         traj_padding_mask = np.ones(self.seq_length)
@@ -130,18 +154,16 @@ agent_group:
 
     def test_eval(self):
         self.agent_group.eval()
-        # Check if the agent group is in evaluation mode
         for (model_name, model), (_, fe) in zip(
-            self.agent_group.models.items(), self.agent_group.feature_extractors.items()
+            self.agent_group.encoders.items(), self.agent_group.feature_extractors.items()
         ):
             self.assertFalse(model.training)
             self.assertFalse(fe.training)
 
     def test_train(self):
         self.agent_group.train()
-        # Check if the agent group is in training mode
         for (model_name, model), (_, fe) in zip(
-            self.agent_group.models.items(), self.agent_group.feature_extractors.items()
+            self.agent_group.encoders.items(), self.agent_group.feature_extractors.items()
         ):
             self.assertTrue(model.training)
             self.assertTrue(fe.training)

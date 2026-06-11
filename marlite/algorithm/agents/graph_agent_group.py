@@ -170,17 +170,13 @@ class GraphAgentGroup(AgentGroup):
             local_obs_selected = local_obs_selected.reshape(
                 bs, n_agents, -1
             )  # (B, N, F)
-            local_obs_selected = local_obs_selected.permute(1, 0, 2)  # (N, B, F)
-            msg_selected = msg_selected.permute(1, 0, 2)  # (N, B, F)
 
-            for i, m, lo in zip(idx, msg_selected, local_obs_selected):
-                msg[i] = m
-                local_obs[i] = lo
+            for j, agent_idx in enumerate(idx):
+                msg[agent_idx] = msg_selected[:, j, :]  # (B, F)
+                local_obs[agent_idx] = local_obs_selected[:, j, :]  # (B, F)
 
-        msg = torch.stack(msg).to(self.device)  # (N, B, F)
-        msg = msg.permute(1, 0, 2)  # (B, N, F)
-        local_obs = torch.stack(local_obs).to(self.device)  # (N, B, F)
-        local_obs = local_obs.permute(1, 0, 2)  # (B, N, F)
+        msg = torch.stack(msg, dim=1).to(self.device)  # (B, N, F)
+        local_obs = torch.stack(local_obs, dim=1).to(self.device)  # (B, N, F)
 
         return msg, local_obs
 
@@ -244,13 +240,11 @@ class GraphAgentGroup(AgentGroup):
             local_obs_selected = local_obs_selected.reshape(
                 bs, n_agents, -1
             )  # (B, N, F)
-            local_obs_selected = local_obs_selected.permute(1, 0, 2)  # (N, B, F)
 
-            for i, m in zip(idx, local_obs_selected):
-                local_obs[i] = m
+            for j, agent_idx in enumerate(idx):
+                local_obs[agent_idx] = local_obs_selected[:, j, :]  # (B, F)
 
-        local_obs = torch.stack(local_obs).to(self.device)  # (N, B, F)
-        local_obs = local_obs.permute(1, 0, 2)  # (B, N, F)
+        local_obs = torch.stack(local_obs, dim=1).to(self.device)  # (B, N, F)
         msg = local_obs
 
         return msg, local_obs
@@ -268,20 +262,17 @@ class GraphAgentGroup(AgentGroup):
             h = h.reshape(bs * n_agents, hidden_size)  # (B*N, Hidden Size)
             q_selected = dec(h)
             q_selected = q_selected.reshape(bs, n_agents, -1)  # (B, N, Action)
-            q_selected = q_selected.permute(1, 0, 2)  # (N, B, Action)
 
-            for i, m in zip(idx, q_selected):
-                q_val[i] = m
+            for j, agent_idx in enumerate(idx):
+                q_val[agent_idx] = q_selected[:, j, :]  # (B, Action)
 
-        q_val = torch.stack(q_val).to(self.device)  # (N, B, F)
-        q_val = q_val.permute(1, 0, 2)  # (B, N, F)
-
+        q_val = torch.stack(q_val, dim=1).to(self.device)  # (B, N, Action)
         return q_val
 
     def forward(
         self,
         observations: torch.Tensor,
-        states: np.ndarray,
+        states: torch.Tensor,
         traj_padding_mask: torch.Tensor,
         alive_mask: torch.Tensor,
         edge_indices: List[np.ndarray] | None = None,
@@ -328,8 +319,9 @@ class GraphAgentGroup(AgentGroup):
         alive_mask = alive_mask.unsqueeze(0).to(self.device)
 
         with torch.no_grad():
+            states_tensor = torch.from_numpy(state).float().unsqueeze(0).to(device=self.device)
             ret = self(
-                obs, np.expand_dims(state, axis=0), padding_mask, alive_mask
+                obs, states_tensor, padding_mask, alive_mask
             )
             q_values = ret["q_val"]  # (1, num_agents, num_actions)
             q_values = q_values.detach().cpu().numpy().squeeze()

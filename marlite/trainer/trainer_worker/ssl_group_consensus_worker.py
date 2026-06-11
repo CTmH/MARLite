@@ -8,7 +8,7 @@ from marlite.algorithm.agents import AgentGroupConfig
 from marlite.algorithm.critic import CriticConfig
 from marlite.algorithm.model import ModelConfig
 from marlite.util.optimizer_config import OptimizerConfig
-from marlite.util.loss_func import PITLoss
+from marlite.util.loss_func import PITLoss, ReconstructionLoss
 from marlite.trainer.trainer_worker.offpolicy_worker import OffPolicyWorker
 
 
@@ -28,21 +28,21 @@ class SSLGroupConsensusWorker(OffPolicyWorker):
         critic_config: CriticConfig,
         critic_optimizer_config: OptimizerConfig,
         agent_optimizer_config: OptimizerConfig,
-        gamma: float = 0.9,
-        max_grad_norm: float = 5.0,
-        ssl_model_config: ModelConfig = None,
-        ssl_optimizer_config: OptimizerConfig = None,
-        reconstruction_loss=None,
-        data_constructor=None,
-        kl_divergence_weight: float = 0.005,
-        self_supervised_learning_loss_weight: float = 1.0,
-        loss_combination_method: str = "weighted_sum",
-        pit_loss_alpha: float = 0.9,
-        warmup_epochs: int = 0,
-        recon_mode: str = "per_agent",
-        kl_on_group: bool = False,
-        kl_on_agent: bool = True,
-        consensus_mode: str = "vae",
+        ssl_model_config: ModelConfig,
+        ssl_optimizer_config: OptimizerConfig,
+        reconstruction_loss,
+        data_constructor,
+        gamma: float,
+        max_grad_norm: float,
+        kl_divergence_weight: float,
+        self_supervised_learning_loss_weight: float,
+        loss_combination_method: str,
+        pit_loss_alpha: float,
+        warmup_epochs: int,
+        recon_mode: str,
+        kl_on_group: bool,
+        kl_on_agent: bool,
+        consensus_mode: str,
         **kwargs,
     ):
         if recon_mode not in ("per_agent", "per_group"):
@@ -84,6 +84,11 @@ class SSLGroupConsensusWorker(OffPolicyWorker):
 
         self.ssl_model = ssl_model_config.get_model()
         self.reconstruction_loss = reconstruction_loss
+        if not isinstance(self.reconstruction_loss, ReconstructionLoss):
+            raise TypeError(
+                f"reconstruction_loss must be a ReconstructionLoss subclass, "
+                f"got {type(self.reconstruction_loss).__name__}"
+            )
         self.ssl_optimizer = ssl_optimizer_config.get_optimizer(
             self.ssl_model.parameters()
         )
@@ -216,8 +221,8 @@ class SSLGroupConsensusWorker(OffPolicyWorker):
             [next_timestep_padding_mask] * n_agents, dim=1
         ).to(self.device)
 
-        states_last_np = states[:, -1].detach().cpu().numpy()
-        group_indices = batch["group_indices"][:, -1, :].numpy()
+        states_last = states[:, -1]
+        group_indices = torch.from_numpy(batch["group_indices"][:, -1, :].numpy())
 
         # === RL Forward Pass (Agent + standard QMixer) ===
         self.eval_agent_group.reset().train()
@@ -225,7 +230,7 @@ class SSLGroupConsensusWorker(OffPolicyWorker):
 
         ret = self.eval_agent_group(
             observations_t,
-            states_last_np,
+            states_last,
             timestep_padding_mask,
             alive_mask[:, -1, :],
             group_indices,
@@ -255,14 +260,14 @@ class SSLGroupConsensusWorker(OffPolicyWorker):
             next_observations_t = torch.transpose(next_observations, 1, 2).to(
                 self.device
             )
-            next_states_last_np = next_states[:, -1].detach().cpu().numpy()
-            next_group_indices = batch["next_group_indices"][:, -1, :].numpy()
+            next_states_last = next_states[:, -1]
+            next_group_indices = torch.from_numpy(batch["next_group_indices"][:, -1, :].numpy())
 
             # -- Double Q: eval agent group selects best actions -----------
             self.eval_agent_group.eval()
             ret_next_eval = self.eval_agent_group(
                 next_observations_t,
-                next_states_last_np,
+                next_states_last,
                 next_timestep_padding_mask,
                 next_alive_mask[:, -1, :],
                 next_group_indices,
@@ -279,7 +284,7 @@ class SSLGroupConsensusWorker(OffPolicyWorker):
             self.target_agent_group.reset().eval()
             ret_next_target = self.target_agent_group(
                 next_observations_t,
-                next_states_last_np,
+                next_states_last,
                 next_timestep_padding_mask,
                 next_alive_mask[:, -1, :],
                 next_group_indices,
@@ -431,12 +436,7 @@ class SSLGroupConsensusWorker(OffPolicyWorker):
         return self._compute_ssl_loss(pred_g, targets, construct_mask)
 
     def _compute_ssl_loss(self, pred_set, target_set, mask=None):
-        if hasattr(self.reconstruction_loss, "reconstruction_loss"):
-            return self.reconstruction_loss.reconstruction_loss(
-                pred_set, target_set, mask
-            )
-        else:
-            return self.reconstruction_loss(pred_set, target_set)
+        return self.reconstruction_loss(pred_set, target_set, mask)
 
     def _combine_rl_ssl_loss(self, critic_loss, ssl_loss):
         if self.loss_combination_method == "pit_loss":

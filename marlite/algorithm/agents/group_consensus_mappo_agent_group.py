@@ -33,10 +33,10 @@ class GroupConsensusMAPPOAgentGroup(GroupConsensusAgentGroup):
     def forward(
         self,
         observations: torch.Tensor,
-        states: np.ndarray,
+        states: torch.Tensor,
         traj_padding_mask: torch.Tensor,
         alive_mask: torch.Tensor,
-        group_indices: Optional[np.ndarray] = None,
+        group_indices: Optional[torch.Tensor] = None,
     ) -> Dict[str, Any]:
         result = super().forward(
             observations, states, traj_padding_mask, alive_mask, group_indices

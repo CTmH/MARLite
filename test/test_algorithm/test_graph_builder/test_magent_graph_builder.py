@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 import unittest
 from magent2.environments import adversarial_pursuit_v4
 from marlite.algorithm.graph_builder import GraphBuilderConfig
@@ -27,7 +28,7 @@ class TestMAgentGraphBuilder(unittest.TestCase):
 
         # Call get_graph_builder method
         graph_builder = builder_config.get_graph_builder()
-        adj_matrix, edge_index = graph_builder(states)
+        adj_matrix, edge_index = graph_builder(torch.from_numpy(states).float())
         self.assertEqual(adj_matrix.shape, np.zeros((bs, n_predators, n_predators)).shape)
         self.assertEqual(len(edge_index), bs)
 
@@ -182,7 +183,7 @@ class TestMAgentVecStateGraphBuilder(unittest.TestCase):
         # Test with a batch containing one state
         batch_states = np.array([self.sample_state])
 
-        adj_matrices, edge_indices_list = self.graph_builder.forward(batch_states)
+        adj_matrices, edge_indices_list = self.graph_builder.forward(torch.from_numpy(batch_states).float())
 
         # Should return one adjacency matrix and one edge index list
         self.assertEqual(len(adj_matrices), 1)
@@ -205,7 +206,7 @@ class TestMAgentVecStateGraphBuilder(unittest.TestCase):
             self.sample_state
         ])
 
-        adj_matrices, edge_indices_list = self.graph_builder.forward(batch_states)
+        adj_matrices, edge_indices_list = self.graph_builder.forward(torch.from_numpy(batch_states).float())
 
         # Should return two adjacency matrices and two edge index lists
         self.assertEqual(len(adj_matrices), 2)

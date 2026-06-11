@@ -42,7 +42,7 @@ class ObsGNNCommAgentGroup(GraphAgentGroup):
     def forward(
         self,
         observations: torch.Tensor,
-        states: np.ndarray,
+        states: torch.Tensor,
         traj_padding_mask: torch.Tensor,
         alive_mask: torch.Tensor,
         edge_indices: List[np.ndarray] | None = None,
@@ -60,6 +60,7 @@ class ObsGNNCommAgentGroup(GraphAgentGroup):
         )  # (B, N, Hidden Size + F_local_obs)
 
         q_val = self._process_decoders(hidden_states)
+        q_val = q_val * alive_mask.unsqueeze(-1)
 
         return {
             "q_val": q_val,
@@ -101,12 +102,12 @@ class SeqGNNCommAgentGroup(GraphAgentGroup):
     def forward(
         self,
         observations: Dict[str, np.ndarray],
-        states: np.ndarray,
+        states: torch.Tensor,
         traj_padding_mask: torch.Tensor,
         alive_mask: torch.Tensor,
         edge_indices: List[np.ndarray] | None = None,
     ) -> Dict[str, Any]:
-        msg, local_obs = self._process_sequences(observations, traj_padding_mask)
+        msg, local_obs = self._process_observations(observations, traj_padding_mask)
 
         # Build Graph
         if edge_indices is None:  # If edge_indices are not provided
@@ -119,6 +120,7 @@ class SeqGNNCommAgentGroup(GraphAgentGroup):
         )  # (B, N, Hidden Size + F)
 
         q_val = self._process_decoders(hidden_states)
+        q_val = q_val * alive_mask.unsqueeze(-1)
 
         return {
             "q_val": q_val,
@@ -170,7 +172,7 @@ class ProbObsGNNCommAgentGroup(ObsGNNCommAgentGroup):
     def forward(
         self,
         observations: Dict[str, np.ndarray],
-        states: np.ndarray,
+        states: torch.Tensor,
         traj_padding_mask: torch.Tensor,
         alive_mask: torch.Tensor,
         edge_indices: List[np.ndarray] | None = None,
@@ -190,6 +192,7 @@ class ProbObsGNNCommAgentGroup(ObsGNNCommAgentGroup):
         )  # (B, N, Hidden Size + F_local_obs)
 
         q_val = self._process_decoders(hidden_states)
+        q_val = q_val * alive_mask.unsqueeze(-1)
 
         return {
             "q_val": q_val,
@@ -244,7 +247,7 @@ class ProbSeqGNNCommAgentGroup(SeqGNNCommAgentGroup):
     def forward(
         self,
         observations: Dict[str, np.ndarray],
-        states: np.ndarray,
+        states: torch.Tensor,
         traj_padding_mask: torch.Tensor,
         alive_mask: torch.Tensor,
         edge_indices: List[np.ndarray] | None = None,
@@ -264,6 +267,7 @@ class ProbSeqGNNCommAgentGroup(SeqGNNCommAgentGroup):
         )  # (B, N, Hidden Size + F_local_obs)
 
         q_val = self._process_decoders(hidden_states)
+        q_val = q_val * alive_mask.unsqueeze(-1)
 
         return {
             "q_val": q_val,
@@ -330,8 +334,7 @@ class DualPathBasedGNNCommAgentGroup(GraphAgentGroup):
             last_obs = obs[:, :, -1, :]
             last_obs = last_obs.reshape(bs * n_agents, *obs_shape).to(self.device)
             msg_selected = msg_fe(last_obs)  # (B*N, F)
-            msg_selected = msg_selected.reshape(bs, n_agents, -1)
-            msg_selected = msg_selected.permute(1, 0, 2)  # (N, B, F)
+            msg_selected = msg_selected.reshape(bs, n_agents, -1)  # (B, N, F)
 
             # Use class name checking instead of isinstance
             model_class_name = self.model_class_names[model_name]
@@ -379,16 +382,13 @@ class DualPathBasedGNNCommAgentGroup(GraphAgentGroup):
             local_obs_selected = local_obs_selected.reshape(
                 bs, n_agents, -1
             )  # (B, N, F)
-            local_obs_selected = local_obs_selected.permute(1, 0, 2)  # (N, B, F)
 
-            for i, m, lo in zip(idx, msg_selected, local_obs_selected):
-                msg[i] = m
-                local_obs[i] = lo
+            for j, agent_idx in enumerate(idx):
+                msg[agent_idx] = msg_selected[:, j, :]  # (B, F)
+                local_obs[agent_idx] = local_obs_selected[:, j, :]  # (B, F)
 
-        msg = torch.stack(msg).to(self.device)  # (N, B, F)
-        msg = msg.permute(1, 0, 2)  # (B, N, F)
-        local_obs = torch.stack(local_obs).to(self.device)  # (N, B, F)
-        local_obs = local_obs.permute(1, 0, 2)  # (B, N, F)
+        msg = torch.stack(msg, dim=1).to(self.device)  # (B, N, F)
+        local_obs = torch.stack(local_obs, dim=1).to(self.device)  # (B, N, F)
 
         return msg, local_obs
 
@@ -441,7 +441,7 @@ class DualPathObsGNNCommAgentGroup(DualPathBasedGNNCommAgentGroup):
     def forward(
         self,
         observations: Dict[str, np.ndarray],
-        states: np.ndarray,
+        states: torch.Tensor,
         traj_padding_mask: torch.Tensor,
         alive_mask: torch.Tensor,
         edge_indices: List[np.ndarray] | None = None,
@@ -459,6 +459,7 @@ class DualPathObsGNNCommAgentGroup(DualPathBasedGNNCommAgentGroup):
         )  # (B, N, Hidden Size + F_local_obs)
 
         q_val = self._process_decoders(hidden_states)
+        q_val = q_val * alive_mask.unsqueeze(-1)
 
         return {
             "q_val": q_val,
@@ -513,7 +514,7 @@ class DualPathProbObsGNNCommAgentGroup(DualPathObsGNNCommAgentGroup):
     def forward(
         self,
         observations: Dict[str, np.ndarray],
-        states: np.ndarray,
+        states: torch.Tensor,
         traj_padding_mask: torch.Tensor,
         alive_mask: torch.Tensor,
         edge_indices: List[np.ndarray] | None = None,
@@ -538,6 +539,7 @@ class DualPathProbObsGNNCommAgentGroup(DualPathObsGNNCommAgentGroup):
             )  # (B, N, Hidden Size + F_local_obs), gradient truncated
 
         q_val = self._process_decoders(hidden_states)
+        q_val = q_val * alive_mask.unsqueeze(-1)
 
         return {
             "q_val": q_val,

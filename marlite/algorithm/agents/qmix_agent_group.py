@@ -121,13 +121,11 @@ class QMIXAgentGroup(AgentGroup):
             q_selected = dec(enc_out)
 
             q_selected = q_selected.reshape(bs, n_agents, -1)  # (B, N, Action Space)
-            q_selected = q_selected.permute(1, 0, 2)  # (N, B, Action Space)
 
-            for i, q in zip(idx, q_selected):
-                q_val[i] = q
+            for j, agent_idx in enumerate(idx):
+                q_val[agent_idx] = q_selected[:, j, :]  # (B, Action Space)
 
-        q_val = torch.stack(q_val).to(self.device)  # (N, B, Action Space)
-        q_val = q_val.permute(1, 0, 2)  # (B, N, Action Space)
+        q_val = torch.stack(q_val, dim=1).to(self.device)  # (B, N, Action Space)
         q_val = q_val * alive_mask.unsqueeze(-1)
 
         return {"q_val": q_val}

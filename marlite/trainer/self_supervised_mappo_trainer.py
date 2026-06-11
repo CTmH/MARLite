@@ -110,6 +110,11 @@ class SelfSupervisedMAPPOTrainer(OnPolicyTrainer):
         self.ssl_lr_scheduler_conf = ssl_lr_scheduler_conf
         self.data_constructor_config = data_constructor_config
         self.reconstruction_loss = reconstruction_loss
+        if not isinstance(self.reconstruction_loss, ReconstructionLoss):
+            raise TypeError(
+                f"reconstruction_loss must be a ReconstructionLoss subclass, "
+                f"got {type(self.reconstruction_loss).__name__}"
+            )
         self.self_supervised_learning_loss_weight = (
             self_supervised_learning_loss_weight
         )
@@ -173,9 +178,7 @@ class SelfSupervisedMAPPOTrainer(OnPolicyTrainer):
 
     def _compute_ssl_loss(self, pred_set, target_set, mask=None):
         """Compute reconstruction loss, respecting ``ReconstructionLoss`` API."""
-        if isinstance(self.reconstruction_loss, ReconstructionLoss):
-            return self.reconstruction_loss(pred_set, target_set, mask)
-        return self.reconstruction_loss(pred_set, target_set)
+        return self.reconstruction_loss(pred_set, target_set, mask)
 
     def _combine_rl_ssl_loss(self, rl_loss, ssl_loss):
         """Combine RL and SSL losses via weighted sum or PITLoss."""

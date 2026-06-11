@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 import unittest
 from marlite.algorithm.graph_builder.partial_graph_builder import PartialGraphMAgentBuilder, PartialGraphVectorStateBuilder
 from marlite.algorithm.graph_builder.graph_util import extract_agent_positions_batch, build_partial_graph
@@ -65,7 +66,7 @@ class TestPartialGraphMAgentBuilder(unittest.TestCase):
                     states[b, i, j, self.binary_agent_id_dim[k]] = bit
 
         # Process the states
-        adj_matrix, edge_index = self.builder(states)
+        adj_matrix, edge_index = self.builder(torch.from_numpy(states).float())
 
         # Check output shapes
         expected_adj_shape = (batch_size, len(self.valid_node_list), len(self.valid_node_list))
@@ -87,7 +88,7 @@ class TestPartialGraphMAgentBuilder(unittest.TestCase):
         states = np.zeros((batch_size, height, width, channels), dtype=np.float16)
 
         # Process the states
-        adj_matrix, edge_index = self.builder(states)
+        adj_matrix, edge_index = self.builder(torch.from_numpy(states).float())
 
         # Check output shapes
         # For empty graphs, we should have:
@@ -132,24 +133,24 @@ class TestPartialGraphMAgentBuilder(unittest.TestCase):
                     states[b, i, j, self.binary_agent_id_dim[k]] = bit
 
         # First call - should compute new graph
-        adj_matrix_1, edge_index_1 = self.builder(states)
+        adj_matrix_1, edge_index_1 = self.builder(torch.from_numpy(states).float())
 
         # Subsequent calls within update interval - should return cached results
         for i in range(self.builder.update_interval - 1):
-            adj_matrix_2, edge_index_2 = self.builder(np.zeros_like(states))
+            adj_matrix_2, edge_index_2 = self.builder(torch.from_numpy(np.zeros_like(states)).float())
 
             # Should be equal to first result (cached)
-            np.testing.assert_array_equal(adj_matrix_1, adj_matrix_2)
+            np.testing.assert_array_equal(adj_matrix_1.cpu().numpy(), adj_matrix_2.cpu().numpy())
             for j in range(len(edge_index_1)):
                 np.testing.assert_array_equal(edge_index_1[j], edge_index_2[j])
 
         # After update interval, should compute new graph
-        adj_matrix_3, edge_index_3 = self.builder(np.zeros_like(states))
+        adj_matrix_3, edge_index_3 = self.builder(torch.from_numpy(np.zeros_like(states)).float())
 
         # This should be different from cached result (empty vs previous)
         # Empty graph has shape (0,0) while previous had some nodes
-        if adj_matrix_1.size > 0:  # If first graph wasn't empty
-            self.assertFalse(np.array_equal(adj_matrix_3, adj_matrix_1))
+        if adj_matrix_1.numel() > 0:  # If first graph wasn't empty
+            self.assertFalse(np.array_equal(adj_matrix_3.cpu().numpy(), adj_matrix_1.cpu().numpy()))
 
     def test_n_workers_behavior(self):
         """Test that n_workers=1 uses sequential processing."""
@@ -179,7 +180,7 @@ class TestPartialGraphMAgentBuilder(unittest.TestCase):
             states[b, b*10, b*10, self.binary_agent_id_dim[0]] = binary_id[0]
 
         # Process states
-        adj_matrix, edge_index = builder_seq.forward(states)
+        adj_matrix, edge_index = builder_seq.forward(torch.from_numpy(states).float())
 
         # Check results
         self.assertEqual(len(adj_matrix), batch_size)
@@ -349,7 +350,7 @@ class TestPartialGraphVectorStateBuilder(unittest.TestCase):
                 states[b, pos_idx, self.coord_dim[1]] = coords[1]  # x coordinate
 
         # Process the states
-        adj_matrix, edge_index = self.builder(states)
+        adj_matrix, edge_index = self.builder(torch.from_numpy(states).float())
 
         # Check output shapes
         expected_adj_shape = (batch_size, len(self.valid_node_list), len(self.valid_node_list))
@@ -371,7 +372,7 @@ class TestPartialGraphVectorStateBuilder(unittest.TestCase):
         states = np.zeros((batch_size, num_agents, feature_dim), dtype=np.float32)
 
         # Process the states
-        adj_matrix, edge_index = self.builder(states)
+        adj_matrix, edge_index = self.builder(torch.from_numpy(states).float())
 
         # Check output shapes
         # For empty graphs, we should have:
@@ -415,24 +416,24 @@ class TestPartialGraphVectorStateBuilder(unittest.TestCase):
                 states[b, pos_idx, self.coord_dim[1]] = coords[1]  # x coordinate
 
         # First call - should compute new graph
-        adj_matrix_1, edge_index_1 = self.builder(states)
+        adj_matrix_1, edge_index_1 = self.builder(torch.from_numpy(states).float())
 
         # Subsequent calls within update interval - should return cached results
         for i in range(self.builder.update_interval - 1):
-            adj_matrix_2, edge_index_2 = self.builder(np.zeros_like(states))
+            adj_matrix_2, edge_index_2 = self.builder(torch.from_numpy(np.zeros_like(states)).float())
 
             # Should be equal to first result (cached)
-            np.testing.assert_array_equal(adj_matrix_1, adj_matrix_2)
+            np.testing.assert_array_equal(adj_matrix_1.cpu().numpy(), adj_matrix_2.cpu().numpy())
             for j in range(len(edge_index_1)):
                 np.testing.assert_array_equal(edge_index_1[j], edge_index_2[j])
 
         # After update interval, should compute new graph
-        adj_matrix_3, edge_index_3 = self.builder(np.zeros_like(states))
+        adj_matrix_3, edge_index_3 = self.builder(torch.from_numpy(np.zeros_like(states)).float())
 
         # This should be different from cached result (empty vs previous)
         # Empty graph has shape (0,0) while previous had some nodes
-        if adj_matrix_1.size > 0:  # If first graph wasn't empty
-            self.assertFalse(np.array_equal(adj_matrix_3, adj_matrix_1))
+        if adj_matrix_1.numel() > 0:  # If first graph wasn't empty
+            self.assertFalse(np.array_equal(adj_matrix_3.cpu().numpy(), adj_matrix_1.cpu().numpy()))
 
 
 if __name__ == '__main__':

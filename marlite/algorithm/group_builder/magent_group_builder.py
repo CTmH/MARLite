@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 from typing import Union, List, Optional, Tuple
 from concurrent.futures import ProcessPoolExecutor
 from scipy.sparse.csgraph import connected_components
@@ -22,7 +23,7 @@ class MAgentLabelPropagationGroupBuilder(GroupBuilder):
         n_groups: Optional[int] = None,
         update_interval: int = 1,
         channel_first: bool = False,
-        dtype=np.int16,
+        dtype: str = 'int16',
     ):
         super().__init__(dtype=dtype)
         self.binary_agent_id_dim = binary_agent_id_dim
@@ -150,7 +151,8 @@ class MAgentLabelPropagationGroupBuilder(GroupBuilder):
 
         return full_labels
 
-    def forward(self, states: ndarray) -> ndarray:
+    def forward(self, states: torch.Tensor) -> torch.Tensor:
+        states = states.cpu().numpy()
         if self.channel_first:
             states = np.transpose(states, (0, 2, 3, 1))
         bs = states.shape[0]
@@ -161,7 +163,7 @@ class MAgentLabelPropagationGroupBuilder(GroupBuilder):
                 self.step_counter % self.update_interval != 0
                 and self.cached_labels is not None
             ):
-                return deepcopy(self.cached_labels).astype(self.dtype)
+                return torch.from_numpy(deepcopy(self.cached_labels).astype(self.dtype))
 
         results = []
         for b in range(bs):
@@ -181,7 +183,7 @@ class MAgentLabelPropagationGroupBuilder(GroupBuilder):
         if not self.training:
             self.cached_labels = group_indices
 
-        return group_indices.astype(self.dtype)
+        return torch.from_numpy(group_indices.astype(self.dtype))
 
     def reset(self):
         self.step_counter = 0
@@ -260,7 +262,8 @@ class MAgentVecLPGroupBuilder(GroupBuilder):
         full_labels[valid_local_ids] = comp_labels
         return full_labels
 
-    def forward(self, states: ndarray) -> ndarray:
+    def forward(self, states: torch.Tensor) -> torch.Tensor:
+        states = states.cpu().numpy()
         bs = states.shape[0]
 
         if not self.training:
@@ -283,7 +286,7 @@ class MAgentVecLPGroupBuilder(GroupBuilder):
                 cand_mask = np.isin(teams, self.selected_teams)         # (bs, N_all) bool
                 cand_hps  = hps[cand_mask].reshape(bs, -1)              # hps[cand_mask]: flat (bs*n_cand,) → reshape → (bs, n_cand)
                 result[cand_hps <= 0] = -1                              # dead → -1, alive unchanged
-                return result
+                return torch.from_numpy(result)
             self.cached_labels = None
 
         n_workers = min(bs, self.n_workers)
@@ -323,7 +326,7 @@ class MAgentVecLPGroupBuilder(GroupBuilder):
         if not self.training:
             self.cached_labels = labels
 
-        return labels.astype(self.dtype)
+        return torch.from_numpy(labels.astype(self.dtype))
 
     def reset(self):
         self.step_counter = 0
@@ -342,7 +345,7 @@ class MagentKMeansGroupBuilder(GroupBuilder):
         valid_node_list: Union[List[int], None] = None,
         update_interval: int = 1,
         channel_first: bool = False,
-        dtype=np.int16,
+        dtype: str = 'int16',
     ):
         super().__init__(dtype=dtype)
         self.binary_agent_id_dim = binary_agent_id_dim
@@ -433,7 +436,8 @@ class MagentKMeansGroupBuilder(GroupBuilder):
 
         return full_labels
 
-    def forward(self, states: ndarray) -> ndarray:
+    def forward(self, states: torch.Tensor) -> torch.Tensor:
+        states = states.cpu().numpy()
         if self.channel_first:
             states = np.transpose(states, (0, 2, 3, 1))
         bs = states.shape[0]
@@ -444,7 +448,7 @@ class MagentKMeansGroupBuilder(GroupBuilder):
                 self.step_counter % self.update_interval != 0
                 and self.cached_labels is not None
             ):
-                return deepcopy(self.cached_labels).astype(self.dtype)
+                return torch.from_numpy(deepcopy(self.cached_labels).astype(self.dtype))
 
         rng = np.random.default_rng()
 
@@ -466,7 +470,7 @@ class MagentKMeansGroupBuilder(GroupBuilder):
         if not self.training:
             self.cached_labels = group_indices
 
-        return group_indices.astype(self.dtype)
+        return torch.from_numpy(group_indices.astype(self.dtype))
 
     def reset(self):
         self.step_counter = 0
@@ -485,7 +489,7 @@ class MagentVecKMeansGroupBuilder(GroupBuilder):
         min_group_size: int = 1,
         update_interval: int = 1,
         n_workers: int = 0,
-        dtype=np.int16,
+        dtype: str = 'int16',
     ):
         super().__init__(dtype=dtype)
         self.coord_dims = coord_dims
@@ -540,7 +544,8 @@ class MagentVecKMeansGroupBuilder(GroupBuilder):
         full_labels[valid_local_ids] = cluster_labels
         return full_labels
 
-    def forward(self, states: ndarray) -> ndarray:
+    def forward(self, states: torch.Tensor) -> torch.Tensor:
+        states = states.cpu().numpy()
         bs = states.shape[0]
 
         if not self.training:
@@ -563,7 +568,7 @@ class MagentVecKMeansGroupBuilder(GroupBuilder):
                 cand_mask = np.isin(teams, self.selected_teams)         # (bs, N_all) bool
                 cand_hps  = hps[cand_mask].reshape(bs, -1)              # hps[cand_mask]: flat (bs*n_cand,) → reshape → (bs, n_cand)
                 result[cand_hps <= 0] = -1                              # dead → -1, alive unchanged
-                return result
+                return torch.from_numpy(result)
             self.cached_labels = None
 
         rng = np.random.default_rng()
@@ -605,7 +610,7 @@ class MagentVecKMeansGroupBuilder(GroupBuilder):
         if not self.training:
             self.cached_labels = labels
 
-        return labels.astype(self.dtype)
+        return torch.from_numpy(labels.astype(self.dtype))
 
     def reset(self):
         self.step_counter = 0

@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 import networkx as nx
 from typing import Union, Tuple, List
 from numpy import ndarray
@@ -196,7 +197,7 @@ class PartialGraphMAgentBuilder(GraphBuilder):
             self.cached_adj_matrix = batch_adj_matrix
             self.cached_edge_indices = batch_edge_indices
 
-        return batch_adj_matrix, batch_edge_indices
+        return torch.from_numpy(batch_adj_matrix), batch_edge_indices
 
     def reset(self):
         self.step_counter = 0
@@ -235,7 +236,8 @@ class PartialGraphMAgentBuilder(GraphBuilder):
         self.cached_adj_matrix = None
         self.cached_edge_indices = None
 
-    def forward(self, states: ndarray) -> Tuple[ndarray, List[ndarray]]:
+    def forward(self, states: torch.Tensor) -> Tuple[torch.Tensor, List[np.ndarray]]:
+        states = states.cpu().numpy()
         if self.channel_first:
             states = np.transpose(states, (0, 2, 3, 1))
 
@@ -244,7 +246,7 @@ class PartialGraphMAgentBuilder(GraphBuilder):
                 and self.cached_adj_matrix is not None
                 and self.cached_edge_indices is not None):
                 self.step_counter += 1
-                return deepcopy(self.cached_adj_matrix), deepcopy(self.cached_edge_indices)
+                return torch.from_numpy(deepcopy(self.cached_adj_matrix)), deepcopy(self.cached_edge_indices)
 
         batched_coords_with_id = extract_agent_positions_batch(states, self.binary_agent_id_dim, self.agent_presence_dim)
 
@@ -271,7 +273,7 @@ class PartialGraphMAgentBuilder(GraphBuilder):
             self.cached_edge_indices = batch_edge_indices
 
         self.step_counter += 1
-        return batch_adj_matrix, batch_edge_indices
+        return torch.from_numpy(batch_adj_matrix), batch_edge_indices
 
     def _process_single_graph(self, coords_with_id: np.ndarray):
         """Process a single batch item for PartialGraphVectorBuilder"""
@@ -323,14 +325,15 @@ class PartialGraphVectorStateBuilder(GraphBuilder):
         self.cached_adj_matrix = None
         self.cached_edge_indices = None
 
-    def forward(self, states: ndarray) -> Tuple[ndarray, List[ndarray]]:
+    def forward(self, states: torch.Tensor) -> Tuple[torch.Tensor, List[np.ndarray]]:
+        states = states.cpu().numpy()
 
         if not self.training:
             if (self.step_counter % self.update_interval != 0
                 and self.cached_adj_matrix is not None
                 and self.cached_edge_indices is not None):
                 self.step_counter += 1
-                return deepcopy(self.cached_adj_matrix), deepcopy(self.cached_edge_indices)
+                return torch.from_numpy(deepcopy(self.cached_adj_matrix)), deepcopy(self.cached_edge_indices)
 
         batched_coords_with_id = []
         bs = states.shape[0]
@@ -362,7 +365,7 @@ class PartialGraphVectorStateBuilder(GraphBuilder):
             self.cached_edge_indices = batch_edge_indices
 
         self.step_counter += 1
-        return batch_adj_matrix, batch_edge_indices
+        return torch.from_numpy(batch_adj_matrix), batch_edge_indices
 
     def _process_single_graph(self, coords_with_id: np.ndarray):
         """Process a single batch item for PartialGraphVectorBuilder"""

@@ -27,7 +27,7 @@ class G2ANetMAPPOAgentGroup(G2ANetAgentGroup):
     def forward(
         self,
         observations: torch.Tensor,
-        states: np.ndarray,
+        states: torch.Tensor,
         traj_padding_mask: torch.Tensor,
         alive_mask: torch.Tensor,
         edge_indices: List[np.ndarray] | None = None,

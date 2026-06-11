@@ -79,16 +79,10 @@ agent_group:
           in_features: 32
           out_features: 13
   graph_builder:
-    type: "PartialMAgent"
-    binary_agent_id_dim: [5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
-    agent_presence_dim: [1, 3]
-    comm_distance: 20
-    distance_metric: "cityblock"
-    n_workers: 20
-    n_subgraphs: 5
-    valid_node_list: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24]
-    target_node_list: [36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71]
-    update_interval: 5
+    type: "Fixed"
+    edge_indices: []
+    num_nodes: 25
+    add_self_loop: true
   graph_model:
     model_type: "GAT"
     input_dim: 64

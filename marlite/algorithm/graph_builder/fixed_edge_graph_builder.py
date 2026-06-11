@@ -1,6 +1,6 @@
 import numpy as np
+import torch
 from typing import Tuple, List, Union
-from numpy import ndarray
 from marlite.algorithm.graph_builder.graph_builder import GraphBuilder
 
 
@@ -84,16 +84,16 @@ class FixedEdgeGraphBuilder(GraphBuilder):
         if self.add_self_loop:
             np.fill_diagonal(self.adj_matrix, 1)
     
-    def forward(self, states: np.ndarray) -> Tuple[ndarray, List[ndarray]]:
+    def forward(self, states: torch.Tensor) -> Tuple[torch.Tensor, List[np.ndarray]]:
         """
         Generate batch adjacency matrix and edge indices based on fixed edge_indices.
         
         Args:
-            states (np.ndarray): Input states with shape (batch_size, ...).
+            states (torch.Tensor): Input states with shape (batch_size, ...).
                 The content of states is ignored, only batch_size is used.
         
         Returns:
-            Tuple[ndarray, List[ndarray]]: 
+            Tuple[torch.Tensor, List[np.ndarray]]: 
                 - batch_adj_matrix: Shape (batch_size, num_nodes, num_nodes)
                 - batch_edge_indices: List of edge indices arrays for each batch
         """
@@ -113,7 +113,7 @@ class FixedEdgeGraphBuilder(GraphBuilder):
                 # If no edges, return empty array
                 batch_edge_indices.append(np.zeros((2, 0), dtype=np.int64))
         
-        return batch_adj_matrix, batch_edge_indices
+        return torch.from_numpy(batch_adj_matrix), batch_edge_indices
     
     def reset(self):
         """Reset the builder (no-op for fixed edge builder)."""

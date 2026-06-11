@@ -216,7 +216,7 @@ class GroupConsensusAgentGroup(AgentGroup):
         bs, n_agents, f_z = agent_mu.shape
         G = int(group_indices.max()) + 1
 
-        gids = torch.as_tensor(group_indices, dtype=torch.long, device=self.device)
+        gids = group_indices.to(dtype=torch.long, device=self.device)
         dead = gids < 0
         gids_safe = gids.clamp(min=0)
 
@@ -249,7 +249,7 @@ class GroupConsensusAgentGroup(AgentGroup):
         bs, n_agents, f_z = agent_mu.shape
         G = int(group_indices.max()) + 1
 
-        gids = torch.as_tensor(group_indices, dtype=torch.long, device=self.device)
+        gids = group_indices.to(dtype=torch.long, device=self.device)
         dead = gids < 0
         gids_safe = gids.clamp(min=0)
 
@@ -289,7 +289,7 @@ class GroupConsensusAgentGroup(AgentGroup):
         bs, n_agents, f_z = agent_vectors.shape
         G = int(group_indices.max()) + 1
 
-        gids = torch.as_tensor(group_indices, dtype=torch.long, device=self.device)
+        gids = group_indices.to(dtype=torch.long, device=self.device)
         dead = gids < 0
         gids_safe = gids.clamp(min=0)
 
@@ -346,10 +346,10 @@ class GroupConsensusAgentGroup(AgentGroup):
     def forward(
         self,
         observations: torch.Tensor,
-        states: np.ndarray,
+        states: torch.Tensor,
         traj_padding_mask: torch.Tensor,
         alive_mask: torch.Tensor,
-        group_indices: Optional[np.ndarray] = None,
+        group_indices: Optional[torch.Tensor] = None,
     ) -> Dict[str, Any]:
         agent_latent, local_obs = self._process_observations(
             observations, traj_padding_mask
@@ -357,6 +357,8 @@ class GroupConsensusAgentGroup(AgentGroup):
 
         if group_indices is None:
             group_indices = self.group_builder(states)
+            group_indices = group_indices.to(device=alive_mask.device)
+            group_indices[~alive_mask] = -1
 
         if self.consensus_mode == "ae":
             agent_mu = agent_latent
@@ -387,6 +389,7 @@ class GroupConsensusAgentGroup(AgentGroup):
         combined_features = torch.cat((local_obs, consensus_for_rl), dim=-1)
 
         q_val = self._process_decoders(combined_features)
+        q_val = q_val * alive_mask.unsqueeze(-1)
 
         return {
             "q_val": q_val,
@@ -423,8 +426,9 @@ class GroupConsensusAgentGroup(AgentGroup):
         alive_mask = alive_mask.unsqueeze(0).to(self.device)
 
         with torch.no_grad():
+            states_tensor = torch.from_numpy(state).float().unsqueeze(0).to(device=self.device)
             ret = self(
-                obs, np.expand_dims(state, axis=0), padding_mask, alive_mask
+                obs, states_tensor, padding_mask, alive_mask
             )
             q_values = ret["q_val"]
             q_values = q_values.detach().cpu().numpy().squeeze()

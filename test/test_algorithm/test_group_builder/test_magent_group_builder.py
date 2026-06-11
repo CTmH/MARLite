@@ -1,5 +1,6 @@
 import unittest
 import numpy as np
+import torch
 from marlite.algorithm.group_builder.magent_group_builder import (
     MAgentLabelPropagationGroupBuilder,
     MAgentVecLPGroupBuilder,
@@ -49,7 +50,7 @@ class TestMAgentLabelPropagationGroupBuilder(unittest.TestCase):
         """All agents within communication range → single group."""
         state = self._build_state([(5, 5, 0), (6, 6, 1), (4, 7, 2), (7, 4, 3)])
         builder = self._make_builder(comm_distance=5, n_agents=4)
-        result = builder(np.expand_dims(state, 0))
+        result = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         self.assertEqual(result.shape, (1, 4))
         np.testing.assert_array_equal(result[0], [0, 0, 0, 0])
 
@@ -57,7 +58,7 @@ class TestMAgentLabelPropagationGroupBuilder(unittest.TestCase):
         """Two clusters far apart → two groups."""
         state = self._build_state([(2, 2, 0), (3, 3, 1), (15, 15, 2), (16, 16, 3)])
         builder = self._make_builder(comm_distance=3, n_agents=4)
-        result = builder(np.expand_dims(state, 0))
+        result = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         self.assertEqual(result.shape, (1, 4))
         self.assertEqual(result[0, 0], result[0, 1])
         self.assertEqual(result[0, 2], result[0, 3])
@@ -70,7 +71,7 @@ class TestMAgentLabelPropagationGroupBuilder(unittest.TestCase):
         # Only agents 0, 1, 3 are present; agent 2 is dead
         state = self._build_state([(3, 3, 0), (4, 4, 1), (10, 10, 3)])
         builder = self._make_builder(comm_distance=5, n_agents=4)
-        result = builder(np.expand_dims(state, 0))
+        result = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         # agent 2 should be -1
         self.assertEqual(result[0, 2], -1)
         # alive agents should be in a group
@@ -82,14 +83,14 @@ class TestMAgentLabelPropagationGroupBuilder(unittest.TestCase):
         """Empty state → all agents get -1."""
         state = self._build_state([])
         builder = self._make_builder(n_agents=4)
-        result = builder(np.expand_dims(state, 0))
+        result = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         np.testing.assert_array_equal(result[0], [-1, -1, -1, -1])
 
     def test_single_survivor(self):
         """Only one agent alive → single-agent group, others -1."""
         state = self._build_state([(5, 5, 0)])
         builder = self._make_builder(comm_distance=5, n_agents=4)
-        result = builder(np.expand_dims(state, 0))
+        result = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         self.assertEqual(result[0, 0], 0)
         self.assertEqual(result[0, 1], -1)
         self.assertEqual(result[0, 2], -1)
@@ -101,7 +102,7 @@ class TestMAgentLabelPropagationGroupBuilder(unittest.TestCase):
         """Two actual groups, n_groups=3 → no merge needed."""
         state = self._build_state([(2, 2, 0), (3, 3, 1), (15, 15, 2), (16, 16, 3)])
         builder = self._make_builder(comm_distance=3, n_agents=4, n_groups=3)
-        result = builder(np.expand_dims(state, 0))
+        result = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         self.assertIn(result[0, 0], [0, 1])
         self.assertIn(result[0, 2], [0, 1])
         self.assertNotEqual(result[0, 0], result[0, 2])
@@ -111,8 +112,8 @@ class TestMAgentLabelPropagationGroupBuilder(unittest.TestCase):
         # 4 agents far apart → 4 groups of size 1
         state = self._build_state([(1, 1, 0), (3, 1, 1), (1, 3, 2), (3, 3, 3)])
         builder = self._make_builder(comm_distance=1, n_agents=4, n_groups=2)
-        result = builder(np.expand_dims(state, 0))
-        unique_groups = set(r for r in result[0] if r >= 0)
+        result = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
+        unique_groups = set(r.item() for r in result[0] if r >= 0)
         self.assertLessEqual(len(unique_groups), 2,
             f"Expected ≤2 groups after merge, got {unique_groups}")
 
@@ -120,11 +121,9 @@ class TestMAgentLabelPropagationGroupBuilder(unittest.TestCase):
         """Four isolated agents, n_groups=1 → all merged into group 0."""
         state = self._build_state([(2, 2, 0), (6, 2, 1), (10, 2, 2), (14, 2, 3)])
         builder = self._make_builder(comm_distance=1, n_agents=4, n_groups=1)
-        result = builder(np.expand_dims(state, 0))
+        result = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         alive = result[0] >= 0
-        np.testing.assert_array_equal(
-            result[0][alive], np.zeros(alive.sum(), dtype=result.dtype)
-        )
+        self.assertTrue(torch.all(result[0][alive] == 0))
 
     def test_merge_consecutive_labels(self):
         """After merge, group labels must be consecutive from 0."""
@@ -134,9 +133,9 @@ class TestMAgentLabelPropagationGroupBuilder(unittest.TestCase):
             (9, 1, 3), (9, 5, 4), (9, 9, 5),
         ])
         builder = self._make_builder(comm_distance=1, n_agents=6, n_groups=3)
-        result = builder(np.expand_dims(state, 0))
+        result = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         alive = result[0] >= 0
-        unique = sorted(set(result[0][alive]))
+        unique = sorted(set(int(r) for r in result[0][alive]))
         self.assertEqual(unique, list(range(len(unique))),
             f"Labels should be consecutive from 0, got {unique}")
 
@@ -147,7 +146,7 @@ class TestMAgentLabelPropagationGroupBuilder(unittest.TestCase):
         # n_groups=2 → should merge a+b into one, c stays as second group
         state = self._build_state([(5, 5, 0), (5, 7, 1), (5, 15, 2)])
         builder = self._make_builder(comm_distance=1, n_agents=3, n_groups=2)
-        result = builder(np.expand_dims(state, 0))
+        result = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         # Agents 0 and 1 are closest → same group
         self.assertEqual(result[0, 0], result[0, 1],
             "Agents 0 and 1 are closest, should be merged into same group")
@@ -159,7 +158,7 @@ class TestMAgentLabelPropagationGroupBuilder(unittest.TestCase):
         state = self._build_state([(2, 2, 0), (6, 2, 1), (14, 2, 3)])
         # Agent 2 dead, 3 survivors far apart → 3 groups, merge to 1
         builder = self._make_builder(comm_distance=1, n_agents=4, n_groups=1)
-        result = builder(np.expand_dims(state, 0))
+        result = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         self.assertEqual(result[0, 2], -1, "Agent 2 should be dead (-1)")
         # Agents 0, 1, 3 all merged into group 0
         self.assertEqual(result[0, 0], 0)
@@ -170,9 +169,9 @@ class TestMAgentLabelPropagationGroupBuilder(unittest.TestCase):
         """n_groups=None preserves original connected_components output."""
         state = self._build_state([(1, 1, 0), (1, 5, 1), (1, 9, 2)])
         builder = self._make_builder(comm_distance=1, n_agents=3, n_groups=None)
-        result = builder(np.expand_dims(state, 0))
+        result = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         alive = result[0] >= 0
-        unique = sorted(set(result[0][alive]))
+        unique = sorted(result[0][alive].unique().tolist())
         self.assertEqual(len(unique), 3,
             "Without n_groups, each isolated agent should be its own group")
 
@@ -184,7 +183,7 @@ class TestMAgentLabelPropagationGroupBuilder(unittest.TestCase):
         state_b = self._build_state([(2, 2, 0), (15, 15, 1)])  # two groups
         states = np.stack([state_a, state_b], axis=0)
         builder = self._make_builder(comm_distance=3, n_agents=2)
-        result = builder(states)
+        result = builder(torch.from_numpy(states).float())
         self.assertEqual(result.shape, (2, 2))
         self.assertEqual(result[0, 0], result[0, 1], "Batch 0: single group")
         self.assertNotEqual(result[1, 0], result[1, 1], "Batch 1: two groups")
@@ -195,7 +194,7 @@ class TestMAgentLabelPropagationGroupBuilder(unittest.TestCase):
         """n_groups == n_components → no merge, preserve labels."""
         state = self._build_state([(2, 2, 0), (15, 15, 1)])
         builder = self._make_builder(comm_distance=3, n_agents=2, n_groups=2)
-        result = builder(np.expand_dims(state, 0))
+        result = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         self.assertNotEqual(result[0, 0], result[0, 1])
 
     def test_merge_preserves_dead_labels(self):
@@ -203,9 +202,9 @@ class TestMAgentLabelPropagationGroupBuilder(unittest.TestCase):
         state = self._build_state([(1, 1, 0), (1, 5, 1), (1, 9, 2), (9, 9, 3)])
         # agents 0,1,2,3 grouped; merge to 2
         builder = self._make_builder(comm_distance=1, n_agents=4, n_groups=2)
-        result = builder(np.expand_dims(state, 0))
+        result = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         # All are alive, no -1
-        self.assertTrue(np.all(result[0] >= 0))
+        self.assertTrue(torch.all(result[0] >= 0))
 
     def test_reset_method(self):
         """reset() returns self (required by GroupBuilder interface)."""
@@ -288,7 +287,7 @@ class TestMAgentVecLPGroupBuilder(unittest.TestCase):
     def test_all_agents_close_single_group(self):
         state = self._build_state([(0, 1, 5, 5), (1, 1, 6, 6), (2, 1, 4, 7)])
         builder = self._make_builder(comm_distance=5)
-        result = builder(np.expand_dims(state, 0))
+        result = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         self.assertEqual(result[0, 0], result[0, 1])
         self.assertEqual(result[0, 0], result[0, 2])
 
@@ -297,7 +296,7 @@ class TestMAgentVecLPGroupBuilder(unittest.TestCase):
             [(0, 1, 2, 2), (1, 1, 3, 3), (2, 1, 15, 15), (3, 1, 16, 16)]
         )
         builder = self._make_builder(comm_distance=3)
-        result = builder(np.expand_dims(state, 0))
+        result = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         self.assertEqual(result[0, 0], result[0, 1])
         self.assertEqual(result[0, 2], result[0, 3])
         self.assertNotEqual(result[0, 0], result[0, 2])
@@ -307,7 +306,7 @@ class TestMAgentVecLPGroupBuilder(unittest.TestCase):
     def test_dead_agent_gets_minus_one(self):
         state = self._build_state([(0, 1, 3, 3), (1, 1, 4, 4), (3, 1, 10, 10)])
         builder = self._make_builder(comm_distance=5)
-        result = builder(np.expand_dims(state, 0))
+        result = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         self.assertEqual(result[0, 2], -1)
         self.assertGreaterEqual(result[0, 0], 0)
         self.assertGreaterEqual(result[0, 1], 0)
@@ -317,14 +316,14 @@ class TestMAgentVecLPGroupBuilder(unittest.TestCase):
         state = np.zeros((self.N_AGENTS, self.F_DIM), dtype=np.float32)
         state[:, self.TEAM_DIM] = 1
         builder = self._make_builder()
-        result = builder(np.expand_dims(state, 0))
+        result = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         self.assertEqual(result.shape[1], self.N_AGENTS)
         np.testing.assert_array_equal(result[0], np.full(self.N_AGENTS, -1, dtype=np.int8))
 
     def test_single_survivor(self):
         state = self._build_state([(0, 1, 5, 5)])
         builder = self._make_builder(comm_distance=5)
-        result = builder(np.expand_dims(state, 0))
+        result = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         self.assertEqual(result[0, 0], 0)
         for i in range(1, self.N_AGENTS):
             self.assertEqual(result[0, i], -1)
@@ -336,7 +335,7 @@ class TestMAgentVecLPGroupBuilder(unittest.TestCase):
             [(0, 1, 2, 2), (1, 1, 3, 3), (2, 2, 5, 5), (3, 2, 6, 6)]
         )
         builder = self._make_builder(comm_distance=5, selected_teams=[1])
-        result = builder(np.expand_dims(state, 0))
+        result = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         self.assertEqual(result[0, 0], result[0, 1])  # team 1 agents grouped
         self.assertEqual(result[0, 2], -1)  # team 2 excluded
         self.assertEqual(result[0, 3], -1)
@@ -347,7 +346,7 @@ class TestMAgentVecLPGroupBuilder(unittest.TestCase):
         )
         state[2, self.HP_DIM] = 0  # agent 2 dead, hp=0
         builder = self._make_builder(comm_distance=5, selected_teams=[1])
-        result = builder(np.expand_dims(state, 0))
+        result = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         self.assertGreaterEqual(result[0, 0], 0)
         self.assertEqual(result[0, 1], -1)  # wrong team
         self.assertEqual(result[0, 2], -1)  # dead
@@ -359,7 +358,7 @@ class TestMAgentVecLPGroupBuilder(unittest.TestCase):
             [(0, 1, 2, 2), (1, 1, 3, 3), (2, 1, 15, 15), (3, 1, 16, 16)]
         )
         builder = self._make_builder(comm_distance=3, n_groups=3)
-        result = builder(np.expand_dims(state, 0))
+        result = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         self.assertIn(result[0, 0], [0, 1])
         self.assertIn(result[0, 2], [0, 1])
         self.assertNotEqual(result[0, 0], result[0, 2])
@@ -369,8 +368,8 @@ class TestMAgentVecLPGroupBuilder(unittest.TestCase):
             [(0, 1, 1, 1), (1, 1, 3, 1), (2, 1, 1, 3), (3, 1, 3, 3)]
         )
         builder = self._make_builder(comm_distance=1, n_groups=2)
-        result = builder(np.expand_dims(state, 0))
-        unique_groups = set(r for r in result[0] if r >= 0)
+        result = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
+        unique_groups = set(r.item() for r in result[0] if r >= 0)
         self.assertLessEqual(len(unique_groups), 2)
 
     def test_merge_to_single_group(self):
@@ -378,18 +377,16 @@ class TestMAgentVecLPGroupBuilder(unittest.TestCase):
             [(0, 1, 2, 2), (1, 1, 6, 2), (2, 1, 10, 2), (3, 1, 14, 2)]
         )
         builder = self._make_builder(comm_distance=1, n_groups=1)
-        result = builder(np.expand_dims(state, 0))
+        result = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         alive = result[0] >= 0
-        np.testing.assert_array_equal(
-            result[0][alive], np.zeros(alive.sum(), dtype=result.dtype)
-        )
+        self.assertTrue(torch.all(result[0][alive] == 0))
 
     def test_merge_with_dead_agents(self):
         state = self._build_state(
             [(0, 1, 2, 2), (1, 1, 6, 2), (3, 1, 14, 2)]
         )
         builder = self._make_builder(comm_distance=1, n_groups=1)
-        result = builder(np.expand_dims(state, 0))
+        result = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         self.assertEqual(result[0, 2], -1)
         self.assertEqual(result[0, 0], 0)
         self.assertEqual(result[0, 1], 0)
@@ -402,7 +399,7 @@ class TestMAgentVecLPGroupBuilder(unittest.TestCase):
         state_b = self._build_state([(0, 1, 2, 2), (1, 1, 15, 15)])
         states = np.stack([state_a, state_b], axis=0)
         builder = self._make_builder(comm_distance=3)
-        result = builder(states)
+        result = builder(torch.from_numpy(states).float())
         self.assertEqual(result.shape, (2, self.N_AGENTS))
         self.assertEqual(result[0, 0], result[0, 1])
         self.assertNotEqual(result[1, 0], result[1, 1])
@@ -413,16 +410,16 @@ class TestMAgentVecLPGroupBuilder(unittest.TestCase):
         state = self._build_state([(0, 1, 5, 5), (1, 1, 6, 6)])
         builder = self._make_builder(comm_distance=5, n_groups=None)
         builder.training = False
-        result1 = builder(np.expand_dims(state, 0))
-        result2 = builder(np.expand_dims(state, 0))
+        result1 = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
+        result2 = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         np.testing.assert_array_equal(result1, result2)
 
     def test_no_cache_in_training(self):
         state = self._build_state([(0, 1, 5, 5), (1, 1, 6, 6)])
         builder = self._make_builder(comm_distance=5, n_groups=None)
         builder.training = True
-        result1 = builder(np.expand_dims(state, 0))
-        result2 = builder(np.expand_dims(state, 0))
+        result1 = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
+        result2 = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         np.testing.assert_array_equal(result1, result2)
 
     def test_reset_method(self):
@@ -456,22 +453,22 @@ class TestMagentKMeansGroupBuilder(unittest.TestCase):
     def test_all_agents_close_single_group(self):
         state = self._build_state([(5, 5, 0), (6, 6, 1), (4, 7, 2), (7, 4, 3)])
         builder = self._make_builder()
-        result = builder(np.expand_dims(state, 0))
+        result = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         self.assertEqual(result.shape, (1, 4))
-        self.assertTrue(np.all(result[0] >= 0))
+        self.assertTrue(torch.all(result[0] >= 0))
 
     def test_agents_far_apart_multiple_groups(self):
         state = self._build_state([(2, 2, 0), (3, 3, 1), (15, 15, 2), (16, 16, 3)])
         builder = self._make_builder(n_groups=4, min_group_size=1)
-        result = builder(np.expand_dims(state, 0))
+        result = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         alive = result[0] >= 0
-        unique = set(result[0][alive])
+        unique = set(result[0][alive].tolist())
         self.assertGreater(len(unique), 1)
 
     def test_dead_agent_gets_minus_one(self):
         state = self._build_state([(3, 3, 0), (4, 4, 1), (10, 10, 3)])
         builder = self._make_builder(n_agents=4)
-        result = builder(np.expand_dims(state, 0))
+        result = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         self.assertEqual(result[0, 2], -1)
         self.assertGreaterEqual(result[0, 0], 0)
         self.assertGreaterEqual(result[0, 1], 0)
@@ -480,13 +477,13 @@ class TestMagentKMeansGroupBuilder(unittest.TestCase):
     def test_all_dead_all_minus_one(self):
         state = self._build_state([])
         builder = self._make_builder(n_agents=4)
-        result = builder(np.expand_dims(state, 0))
+        result = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         np.testing.assert_array_equal(result[0], [-1, -1, -1, -1])
 
     def test_single_survivor_single_group(self):
         state = self._build_state([(5, 5, 0)])
         builder = self._make_builder(n_agents=4)
-        result = builder(np.expand_dims(state, 0))
+        result = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         self.assertEqual(result[0, 0], 0)
         self.assertEqual(result[0, 1], -1)
         self.assertEqual(result[0, 2], -1)
@@ -495,9 +492,9 @@ class TestMagentKMeansGroupBuilder(unittest.TestCase):
     def test_min_group_size_reduces_clusters(self):
         state = self._build_state([(2, 2, 0), (3, 3, 1), (15, 15, 2), (16, 16, 3)])
         builder = self._make_builder(n_groups=4, min_group_size=3)
-        result = builder(np.expand_dims(state, 0))
+        result = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         alive = result[0] >= 0
-        unique = set(result[0][alive])
+        unique = set(result[0][alive].tolist())
         self.assertLessEqual(len(unique), 1)
 
     def test_min_group_size_six_agents(self):
@@ -506,9 +503,9 @@ class TestMagentKMeansGroupBuilder(unittest.TestCase):
             (9, 1, 3), (9, 5, 4), (9, 9, 5),
         ])
         builder = self._make_builder(n_agents=6, n_groups=4, min_group_size=2)
-        result = builder(np.expand_dims(state, 0))
+        result = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         alive = result[0] >= 0
-        unique = set(result[0][alive])
+        unique = set(result[0][alive].tolist())
         self.assertLessEqual(len(unique), 3)
 
     def test_group_labels_are_consecutive(self):
@@ -516,23 +513,23 @@ class TestMagentKMeansGroupBuilder(unittest.TestCase):
             (2, 2, 0), (3, 3, 1), (10, 10, 2), (11, 11, 3), (14, 14, 4)
         ])
         builder = self._make_builder(n_agents=5, n_groups=3, min_group_size=1)
-        result = builder(np.expand_dims(state, 0))
+        result = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         alive = result[0] >= 0
-        unique = sorted(set(result[0][alive]))
+        unique = sorted(result[0][alive].unique().tolist())
         self.assertEqual(unique, list(range(len(unique))))
 
     def test_no_alive_agents(self):
         state = self._build_state([])
         builder = self._make_builder(n_agents=4)
-        result = builder(np.expand_dims(state, 0))
-        self.assertTrue(np.all(result[0] == -1))
+        result = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
+        self.assertTrue(torch.all(result[0] == -1))
 
     def test_batch_independence(self):
         state_a = self._build_state([(2, 2, 0), (3, 3, 1)])
         state_b = self._build_state([(2, 2, 0), (15, 15, 1)])
         states = np.stack([state_a, state_b], axis=0)
         builder = self._make_builder(n_agents=2, n_groups=2, min_group_size=1)
-        result = builder(states)
+        result = builder(torch.from_numpy(states).float())
         self.assertEqual(result.shape, (2, 2))
 
     def test_reset_method(self):
@@ -570,7 +567,7 @@ class TestMagentVecKMeansGroupBuilder(unittest.TestCase):
     def test_all_agents_close_single_group(self):
         state = self._build_state([(0, 1, 5, 5), (1, 1, 6, 6), (2, 1, 4, 7)])
         builder = self._make_builder()
-        result = builder(np.expand_dims(state, 0))
+        result = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         self.assertTrue(result[0, 0] >= 0)
         self.assertTrue(result[0, 1] >= 0)
         self.assertTrue(result[0, 2] >= 0)
@@ -580,15 +577,15 @@ class TestMagentVecKMeansGroupBuilder(unittest.TestCase):
             (0, 1, 2, 2), (1, 1, 3, 3), (2, 1, 15, 15), (3, 1, 16, 16)
         ])
         builder = self._make_builder(n_groups=4, min_group_size=1)
-        result = builder(np.expand_dims(state, 0))
+        result = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         alive = result[0] >= 0
-        unique = set(result[0][alive])
+        unique = set(result[0][alive].tolist())
         self.assertGreater(len(unique), 1)
 
     def test_dead_agent_gets_minus_one(self):
         state = self._build_state([(0, 1, 3, 3), (1, 1, 4, 4), (3, 1, 10, 10)])
         builder = self._make_builder()
-        result = builder(np.expand_dims(state, 0))
+        result = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         self.assertEqual(result[0, 2], -1)
         self.assertGreaterEqual(result[0, 0], 0)
         self.assertGreaterEqual(result[0, 1], 0)
@@ -598,14 +595,14 @@ class TestMagentVecKMeansGroupBuilder(unittest.TestCase):
         state = np.zeros((self.N_AGENTS, self.F_DIM), dtype=np.float32)
         state[:, self.TEAM_DIM] = 1
         builder = self._make_builder()
-        result = builder(np.expand_dims(state, 0))
+        result = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         self.assertEqual(result.shape[1], self.N_AGENTS)
         np.testing.assert_array_equal(result[0], np.full(self.N_AGENTS, -1, dtype=np.int8))
 
     def test_single_survivor_single_group(self):
         state = self._build_state([(0, 1, 5, 5)])
         builder = self._make_builder()
-        result = builder(np.expand_dims(state, 0))
+        result = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         self.assertEqual(result[0, 0], 0)
         for i in range(1, self.N_AGENTS):
             self.assertEqual(result[0, i], -1)
@@ -615,9 +612,9 @@ class TestMagentVecKMeansGroupBuilder(unittest.TestCase):
             (0, 1, 2, 2), (1, 1, 3, 3), (2, 1, 15, 15), (3, 1, 16, 16)
         ])
         builder = self._make_builder(n_groups=4, min_group_size=3)
-        result = builder(np.expand_dims(state, 0))
+        result = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         alive = result[0] >= 0
-        unique = set(result[0][alive])
+        unique = set(result[0][alive].tolist())
         self.assertLessEqual(len(unique), 1)
 
     def test_only_selected_team_gets_groups(self):
@@ -625,7 +622,7 @@ class TestMagentVecKMeansGroupBuilder(unittest.TestCase):
             (0, 1, 2, 2), (1, 1, 3, 3), (2, 2, 5, 5), (3, 2, 6, 6)
         ])
         builder = self._make_builder(n_groups=4, selected_teams=[1])
-        result = builder(np.expand_dims(state, 0))
+        result = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         self.assertGreaterEqual(result[0, 0], 0)
         self.assertGreaterEqual(result[0, 1], 0)
         self.assertEqual(result[0, 2], -1)
@@ -635,7 +632,7 @@ class TestMagentVecKMeansGroupBuilder(unittest.TestCase):
         state = self._build_state([(0, 1, 2, 2), (1, 2, 3, 3), (2, 1, 5, 5)])
         state[2, self.HP_DIM] = 0
         builder = self._make_builder(selected_teams=[1])
-        result = builder(np.expand_dims(state, 0))
+        result = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         self.assertGreaterEqual(result[0, 0], 0)
         self.assertEqual(result[0, 1], -1)
         self.assertEqual(result[0, 2], -1)
@@ -646,9 +643,9 @@ class TestMagentVecKMeansGroupBuilder(unittest.TestCase):
             (3, 1, 11, 11), (4, 1, 14, 14)
         ])
         builder = self._make_builder(n_groups=3, min_group_size=1)
-        result = builder(np.expand_dims(state, 0))
+        result = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         alive = result[0] >= 0
-        unique = sorted(set(result[0][alive]))
+        unique = sorted(result[0][alive].unique().tolist())
         self.assertEqual(unique, list(range(len(unique))))
 
     def test_batch_independence(self):
@@ -656,23 +653,23 @@ class TestMagentVecKMeansGroupBuilder(unittest.TestCase):
         state_b = self._build_state([(0, 1, 2, 2), (1, 1, 15, 15)])
         states = np.stack([state_a, state_b], axis=0)
         builder = self._make_builder(n_groups=2)
-        result = builder(states)
+        result = builder(torch.from_numpy(states).float())
         self.assertEqual(result.shape, (2, self.N_AGENTS))
 
     def test_caching_in_eval_mode(self):
         state = self._build_state([(0, 1, 5, 5), (1, 1, 6, 6)])
         builder = self._make_builder()
         builder.training = False
-        result1 = builder(np.expand_dims(state, 0))
-        result2 = builder(np.expand_dims(state, 0))
+        result1 = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
+        result2 = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         np.testing.assert_array_equal(result1, result2)
 
     def test_no_cache_in_training(self):
         state = self._build_state([(0, 1, 5, 5), (1, 1, 6, 6)])
         builder = self._make_builder()
         builder.training = True
-        result1 = builder(np.expand_dims(state, 0))
-        result2 = builder(np.expand_dims(state, 0))
+        result1 = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
+        result2 = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         np.testing.assert_array_equal(result1, result2)
 
     def test_reset_method(self):

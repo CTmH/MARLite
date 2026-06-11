@@ -1,5 +1,5 @@
 from typing import Tuple, List, Union
-from numpy import ndarray
+import torch
 import numpy as np
 from marlite.algorithm.graph_builder.graph_builder import GraphBuilder
 
@@ -17,7 +17,7 @@ class RandomGroupGraphBuilder(GraphBuilder):
         self.add_self_loop = add_self_loop
         self.num_groups = num_groups
 
-    def forward(self, states: np.ndarray) -> Tuple[ndarray, List[ndarray]]:
+    def forward(self, states: torch.Tensor) -> Tuple[torch.Tensor, List[np.ndarray]]:
         bs = states.shape[0]
         num_nodes = len(self.valid_node_list)
         groups = np.random.randint(0, self.num_groups, size=len(self.valid_node_list))
@@ -35,7 +35,7 @@ class RandomGroupGraphBuilder(GraphBuilder):
 
         batch_edge_indices = np.repeat(edge_indices[np.newaxis], bs, axis=0)
 
-        return batch_adj_matrix, batch_edge_indices
+        return torch.from_numpy(batch_adj_matrix), batch_edge_indices
 
     def reset(self):
         return self

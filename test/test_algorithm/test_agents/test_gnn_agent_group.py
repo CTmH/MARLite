@@ -202,6 +202,7 @@ env_config:
         obs = np.stack([obs for _ in range(bs)])
         obs = torch.Tensor(obs)
         states = np.stack([self.env.state() for _ in range(bs)])
+        states = torch.from_numpy(states).float()
         traj_padding_mask = torch.zeros((bs, self.seq_length))
         alive_mask = torch.ones((bs, len(self.env.agents)))
 
@@ -389,6 +390,7 @@ agent_group:
         obs = np.stack([obs for _ in range(bs)])
         obs = torch.Tensor(obs)
         states = np.random.randn(bs, self.obs_shape)  # Random state for testing
+        states = torch.from_numpy(states).float()
         traj_padding_mask = torch.zeros((bs, self.seq_length))
         alive_mask = torch.ones((bs, len(self.agent_names)))
 
@@ -586,6 +588,7 @@ agent_group:
         obs = np.stack([obs for _ in range(bs)])
         obs = torch.Tensor(obs)
         states = np.random.randn(bs, self.obs_shape)  # Random state for testing
+        states = torch.from_numpy(states).float()
         traj_padding_mask = torch.zeros((bs, self.seq_length))
         alive_mask = torch.ones((bs, len(self.agent_names)))
 
@@ -783,6 +786,7 @@ agent_group:
         obs = np.stack([obs for _ in range(bs)])
         obs = torch.Tensor(obs)
         states = np.random.randn(bs, self.obs_shape)  # Random state for testing
+        states = torch.from_numpy(states).float()
         traj_padding_mask = torch.zeros((bs, self.seq_length))
         alive_mask = torch.ones((bs, len(self.agent_names)))
 

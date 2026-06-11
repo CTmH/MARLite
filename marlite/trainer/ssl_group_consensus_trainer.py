@@ -418,13 +418,13 @@ class SSLGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
         #   (B, T) → (B, N, T)
 
         # ── Extract state for agent forward ─────────────────────────────────
-        states_last_np = states[:, -1].detach().cpu().numpy()
-        #   (B, T, H,W,C) → (B, H,W,C)  numpy
+        states_last = states[:, -1]
+        #   (B, T, H,W,C) → (B, H,W,C)  tensor
 
         # ── Pre-compute group_indices from batch ───────────────────────────
         # Stored during rollout, avoids recomputation via group_builder.
-        group_indices = batch["group_indices"][:, -1, :].numpy()
-        #   (B, T, N) → (B, N)  numpy, group ID per agent, -1 = dead
+        group_indices = torch.from_numpy(batch["group_indices"][:, -1, :].numpy())
+        #   (B, T, N) → (B, N)  tensor, group ID per agent, -1 = dead
 
         # ═══════════════════════════════════════════════════════════════════
         #  PART 1 : RL Forward Pass  (Agent + standard QMixer)
@@ -437,10 +437,10 @@ class SSLGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
         # __call__ (not .forward) triggers hooks — essential for DDP / torch.compile
         ret = self.eval_agent_group(
             observations_t,              # (B, N, T, obs_dim)
-            states_last_np,              # (B, H,W,C) numpy — passed through
+            states_last,              # (B, H,W,C) tensor
             timestep_padding_mask,       # (B, N, T)
             alive_mask[:, -1, :],        # (B, T, N) → (B, N)
-            group_indices,               # (B, N) numpy — pre-computed
+            group_indices,               # (B, N) tensor — pre-computed
         )
         # agent forward internals:
         #   ge_fe(o) → μ,logσ²    → agent_mu, agent_log_var   (B,N,L),(B,N,L)
@@ -488,17 +488,17 @@ class SSLGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
             )
             #   (B, T, N, obs_dim) → (B, N, T, obs_dim)
 
-            next_states_last_np = next_states[:, -1].detach().cpu().numpy()
-            #   (B, T, H,W,C) → (B, H,W,C) numpy
+            next_states_last = next_states[:, -1]
+            #   (B, T, H,W,C) → (B, H,W,C) tensor
 
-            next_group_indices = batch["next_group_indices"][:, -1, :].numpy()
-            #   (B, T, N) → (B, N)  numpy
+            next_group_indices = torch.from_numpy(batch["next_group_indices"][:, -1, :].numpy())
+            #   (B, T, N) → (B, N)  tensor
 
             # -- Double Q: eval agent group selects best actions -----------
             self.eval_agent_group.eval()
             ret_next_eval = self.eval_agent_group(
                 next_observations_t,
-                next_states_last_np,
+                next_states_last,
                 next_timestep_padding_mask,
                 next_alive_mask[:, -1, :],
                 next_group_indices,
@@ -515,7 +515,7 @@ class SSLGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
             self.target_agent_group.reset().eval()
             ret_next_target = self.target_agent_group(
                 next_observations_t,
-                next_states_last_np,
+                next_states_last,
                 next_timestep_padding_mask,
                 next_alive_mask[:, -1, :],
                 next_group_indices,

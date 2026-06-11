@@ -332,7 +332,7 @@ class SSLGroupConsensusMAPPOTrainer(SelfSupervisedMAPPOTrainer):
                     returns = delta + v_last
 
                     # ── Agent forward: action_logits + consensus ──
-                    states_last_np = states_dev[:, -1].detach().cpu().numpy()
+                    states_last = states_dev[:, -1]
                     timestep_padding_mask_expanded = torch.stack(
                         [timestep_padding_mask] * n_agents, dim=1
                     ).to(device)
@@ -340,7 +340,7 @@ class SSLGroupConsensusMAPPOTrainer(SelfSupervisedMAPPOTrainer):
 
                     self.eval_agent_group.reset().train()
                     ret_agent = self.eval_agent_group(
-                        observations_transposed, states_last_np,
+                        observations_transposed, states_last,
                         timestep_padding_mask_expanded, alive_mask_d[:, -1, :],
                         group_indices_np,
                     )

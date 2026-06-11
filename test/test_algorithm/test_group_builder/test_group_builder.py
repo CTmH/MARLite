@@ -1,5 +1,6 @@
 import unittest
 import numpy as np
+import torch
 
 from marlite.algorithm.group_builder import GroupBuilderConfig
 
@@ -17,22 +18,21 @@ class TestFixedGroupBuilder(unittest.TestCase):
         builder = builder_config.get_group_builder()
 
         bs = 5
-        states = np.random.randn(bs, 10, 10, 5)
+        states = torch.from_numpy(np.random.randn(bs, 10, 10, 5)).float()
         group_indices = builder(states)
 
         self.assertEqual(group_indices.shape, (bs, len(self.group_ids)))
-        self.assertEqual(group_indices.dtype, np.int16)
+        self.assertEqual(group_indices.dtype, torch.int16)
 
         for b in range(bs):
-            np.testing.assert_array_equal(
-                group_indices[b], np.array(self.group_ids, dtype=np.int16)
-            )
+            expected = torch.tensor(self.group_ids, dtype=torch.int16)
+            self.assertTrue(torch.equal(group_indices[b], expected))
 
     def test_reset(self):
         builder_config = GroupBuilderConfig(**self.config)
         builder = builder_config.get_group_builder()
         builder.reset()
-        states = np.random.randn(2, 10, 10, 5)
+        states = torch.from_numpy(np.random.randn(2, 10, 10, 5)).float()
         group_indices = builder(states)
         self.assertEqual(group_indices.shape, (2, len(self.group_ids)))
 

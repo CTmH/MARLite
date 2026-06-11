@@ -1,6 +1,6 @@
 import numpy as np
+import torch
 from typing import Tuple, List, Union
-from numpy import ndarray
 from marlite.algorithm.graph_builder.graph_builder import GraphBuilder
 
 class FullConnGraphBuilder(GraphBuilder):
@@ -13,7 +13,7 @@ class FullConnGraphBuilder(GraphBuilder):
         self.valid_node_list = valid_node_list
         self.add_self_loop = add_self_loop
 
-    def forward(self, states: np.ndarray) -> Tuple[ndarray, List[ndarray]]:
+    def forward(self, states: torch.Tensor) -> Tuple[torch.Tensor, List[np.ndarray]]:
         bs = states.shape[0]
         num_nodes = len(self.valid_node_list)
         edge_indices = [[i, j] for i in range(num_nodes) for j in range(num_nodes) if i != j]
@@ -25,7 +25,7 @@ class FullConnGraphBuilder(GraphBuilder):
 
         edge_indices = np.array(edge_indices, dtype=np.int64).T
         batch_edge_indices = np.repeat(edge_indices[np.newaxis], bs, axis=0)
-        return batch_adj_matrix, batch_edge_indices
+        return torch.from_numpy(batch_adj_matrix), batch_edge_indices
 
     def reset(self):
         return self

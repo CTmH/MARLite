@@ -139,17 +139,13 @@ class MsgAggrAgentGroup(AgentGroup):
                 encoded_selected = enc(obs_vectorized)  # (B*N, F) -> (B*N, F)
 
             encoded_selected = encoded_selected.reshape(bs, n_agents, -1)  # (B, N, F)
-            encoded_selected = encoded_selected.permute(1, 0, 2)  # (N, B, F)
-            msg_selected = msg_selected.permute(1, 0, 2)  # (N, B, F)
 
-            for i, m, c in zip(idx, msg_selected, encoded_selected):
-                msg[i] = m
-                encoded[i] = c
+            for j, agent_idx in enumerate(idx):
+                msg[agent_idx] = msg_selected[:, j, :]  # (B, F)
+                encoded[agent_idx] = encoded_selected[:, j, :]  # (B, F)
 
-        msg = torch.stack(msg).to(self.device)  # (N, B, F)
-        msg = msg.permute(1, 0, 2)  # (B, N, F)
-        encoded = torch.stack(encoded).to(self.device)  # (N, B, F)
-        encoded = encoded.permute(1, 0, 2)  # (B, N, F)
+        msg = torch.stack(msg, dim=1).to(self.device)  # (B, N, F)
+        encoded = torch.stack(encoded, dim=1).to(self.device)  # (B, N, F)
 
         return msg, encoded
 
@@ -210,13 +206,11 @@ class MsgAggrAgentGroup(AgentGroup):
                 encoded_selected = enc(obs_vectorized)  # (B*N, F) -> (B*N, F)
 
             encoded_selected = encoded_selected.reshape(bs, n_agents, -1)  # (B, N, F)
-            encoded_selected = encoded_selected.permute(1, 0, 2)  # (N, B, F)
 
-            for i, m in zip(idx, encoded_selected):
-                encoded[i] = m
+            for j, agent_idx in enumerate(idx):
+                encoded[agent_idx] = encoded_selected[:, j, :]  # (B, F)
 
-        encoded = torch.stack(encoded).to(self.device)  # (N, B, F)
-        encoded = encoded.permute(1, 0, 2)  # (B, N, F)
+        encoded = torch.stack(encoded, dim=1).to(self.device)  # (B, N, F)
 
         return encoded, encoded
 
@@ -341,13 +335,11 @@ class MsgAggrAgentGroup(AgentGroup):
             h = h.reshape(bs * n_agents, hidden_size)  # (B*N, Hidden Size)
             q_selected = dec(h)
             q_selected = q_selected.reshape(bs, n_agents, -1)  # (B, N, Action)
-            q_selected = q_selected.permute(1, 0, 2)  # (N, B, Action)
 
-            for i, m in zip(idx, q_selected):
-                q_val[i] = m
+            for j, agent_idx in enumerate(idx):
+                q_val[agent_idx] = q_selected[:, j, :]  # (B, Action)
 
-        q_val = torch.stack(q_val).to(self.device)  # (N, B, F)
-        q_val = q_val.permute(1, 0, 2)  # (B, N, F)
+        q_val = torch.stack(q_val, dim=1).to(self.device)  # (B, N, Action)
 
         return q_val
 
@@ -405,8 +397,7 @@ class DualPathBasedMsgAggrAgentGroup(MsgAggrAgentGroup):
             last_obs = obs[:, :, -1, :]
             last_obs = last_obs.reshape(bs * n_agents, *obs_shape).to(self.device)
             msg_selected = msg_fe(last_obs)  # (B*N, F)
-            msg_selected = msg_selected.reshape(bs, n_agents, -1)
-            msg_selected = msg_selected.permute(1, 0, 2)  # (N, B, F)
+            msg_selected = msg_selected.reshape(bs, n_agents, -1)  # (B, N, F)
 
             # Use class name checking instead of isinstance
             model_class_name = self.model_class_names[model_name]
@@ -454,16 +445,13 @@ class DualPathBasedMsgAggrAgentGroup(MsgAggrAgentGroup):
             local_obs_selected = local_obs_selected.reshape(
                 bs, n_agents, -1
             )  # (B, N, F)
-            local_obs_selected = local_obs_selected.permute(1, 0, 2)  # (N, B, F)
 
-            for i, m, lo in zip(idx, msg_selected, local_obs_selected):
-                msg[i] = m
-                local_obs[i] = lo
+            for j, agent_idx in enumerate(idx):
+                msg[agent_idx] = msg_selected[:, j, :]  # (B, F)
+                local_obs[agent_idx] = local_obs_selected[:, j, :]  # (B, F)
 
-        msg = torch.stack(msg).to(self.device)  # (N, B, F)
-        msg = msg.permute(1, 0, 2)  # (B, N, F)
-        local_obs = torch.stack(local_obs).to(self.device)  # (N, B, F)
-        local_obs = local_obs.permute(1, 0, 2)  # (B, N, F)
+        msg = torch.stack(msg, dim=1).to(self.device)  # (B, N, F)
+        local_obs = torch.stack(local_obs, dim=1).to(self.device)  # (B, N, F)
 
         return msg, local_obs
 
@@ -498,6 +486,7 @@ class ObsMsgAggrAgentGroup(MsgAggrAgentGroup):
 
         # Process decoders
         q_val = self._process_decoders(hidden_states)
+        q_val = q_val * alive_mask.unsqueeze(-1)
 
         return {"q_val": q_val, "aggregated_msg": aggregated_msg}
 
@@ -529,6 +518,7 @@ class SeqMsgAggrAgentGroup(MsgAggrAgentGroup):
 
         # Process decoders
         q_val = self._process_decoders(hidden_states)
+        q_val = q_val * alive_mask.unsqueeze(-1)
 
         return {"q_val": q_val, "aggregated_msg": aggregated_msg}
 
@@ -581,6 +571,7 @@ class ProbObsMsgAggrAgentGroup(MsgAggrAgentGroup):
 
         # Process decoders
         q_val = self._process_decoders(hidden_states)
+        q_val = q_val * alive_mask.unsqueeze(-1)
 
         return {
             "q_val": q_val,
@@ -639,6 +630,7 @@ class ProbSeqMsgAggrAgentGroup(MsgAggrAgentGroup):
 
         # Process decoders
         q_val = self._process_decoders(hidden_states)
+        q_val = q_val * alive_mask.unsqueeze(-1)
 
         return {
             "q_val": q_val,
@@ -698,6 +690,7 @@ class DualPathObsMsgAggrAgentGroup(DualPathBasedMsgAggrAgentGroup):
 
         # Process decoders
         q_val = self._process_decoders(hidden_states)
+        q_val = q_val * alive_mask.unsqueeze(-1)
 
         return {"q_val": q_val, "aggregated_msg": aggregated_msg}
 
@@ -778,6 +771,7 @@ class DualPathProbObsMsgAggrAgentGroup(DualPathObsMsgAggrAgentGroup):
 
         # Process decoders
         q_val = self._process_decoders(hidden_states)
+        q_val = q_val * alive_mask.unsqueeze(-1)
 
         return {
             "q_val": q_val,

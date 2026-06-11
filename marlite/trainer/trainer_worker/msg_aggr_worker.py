@@ -376,6 +376,14 @@ class ProbMsgAggrWorker(MsgAggrWorker):
 
         # Use target model for stability (Double Q-learning)
         with torch.no_grad():
+            # Get critic's distribution for current state (for KL)
+            self.target_critic.eval()
+            ret_critic = self.target_critic(
+                q_val, states, alive_mask, timestep_padding_mask[:, 0, :]
+            )
+            critic_mu = ret_critic["mu"]
+            critic_std = ret_critic["std"]
+
             # Double Q: eval agent group selects best actions
             self.eval_agent_group.eval()
             next_observations = torch.transpose(next_observations, 1, 2).to(self.device)

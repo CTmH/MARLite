@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 import networkx as nx
 import unittest
 from magent2.environments import adversarial_pursuit_v4
@@ -25,9 +26,9 @@ class TestRandomGroupGraphBuilder(unittest.TestCase):
 
         # Call get_graph_builder method
         graph_builder = builder_config.get_graph_builder()
-        adj_matrix, edge_indices = graph_builder(states)
+        adj_matrix, edge_indices = graph_builder(torch.from_numpy(states).float())
         self.assertEqual(adj_matrix.shape, (bs, num_nodes, num_nodes))
         self.assertEqual(len(edge_indices), bs)
-        G = nx.from_numpy_array(adj_matrix[0])
+        G = nx.from_numpy_array(adj_matrix[0].cpu().numpy())
         num_components = nx.number_connected_components(G)
         self.assertGreaterEqual(num_components, group_num)

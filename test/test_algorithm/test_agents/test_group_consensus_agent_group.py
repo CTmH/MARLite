@@ -59,13 +59,13 @@ agent_group:
         model_type: "Custom"
         layers:
         - type: Linear
-          in_features: 40
+          in_features: 32
           out_features: 128
       decoder:
         model_type: "Custom"
         layers:
         - type: Linear
-          in_features: 128
+          in_features: 136
           out_features: 5
   group_builder:
     type: "Fixed"
@@ -83,8 +83,54 @@ agent_group:
     def test_agent_group_type(self):
         self.assertIsInstance(self.agent_group, GroupConsensusAgentGroup)
 
+    def test_dead_agents_q_are_zero(self):
+        bs = 2
+        n_agents = 3
+        obs_dim = 18
+        seq_len = 5
+        obs = torch.randn(bs, n_agents, seq_len, obs_dim)
+        states = np.random.randn(bs, 1, 1)
+        traj_padding_mask = torch.zeros(bs, seq_len)
+        alive_mask = torch.ones(bs, n_agents, dtype=torch.bool)
+        alive_mask[:, -1] = 0  # last agent is dead
 
-class TestGroupConsensusAgentGroupConfig(unittest.TestCase):
+        states_tensor = torch.from_numpy(states).float()
+        ret = self.agent_group.forward(
+            observations=obs, states=states_tensor, traj_padding_mask=traj_padding_mask,
+            alive_mask=alive_mask,
+        )
+        q_val = ret["q_val"]
+        dead_q = q_val[:, -1, :]
+        self.assertTrue(torch.all(dead_q == 0), f"Dead agent Q-values should be zero, got {dead_q}")
+
+    def test_dead_agents_group_indices_are_minus_one(self):
+        bs = 2
+        n_agents = 3
+        obs_dim = 18
+        seq_len = 5
+        obs = torch.randn(bs, n_agents, seq_len, obs_dim)
+        states = np.random.randn(bs, 1, 1)
+        traj_padding_mask = torch.zeros(bs, seq_len)
+        alive_mask = torch.ones(bs, n_agents, dtype=torch.bool)
+        alive_mask[:, 0] = 0  # first agent is dead
+
+        states_tensor = torch.from_numpy(states).float()
+        ret = self.agent_group.forward(
+            observations=obs, states=states_tensor, traj_padding_mask=traj_padding_mask,
+            alive_mask=alive_mask,
+        )
+        group_indices = ret["group_indices"]
+        self.assertEqual(group_indices.shape, (bs, n_agents))
+        dead_gids = group_indices[:, 0]
+        self.assertTrue(
+            torch.all(dead_gids == -1),
+            f"Dead agent group_indices should be -1, got {dead_gids}",
+        )
+        alive_gids = group_indices[:, 1:]
+        self.assertTrue(
+            torch.all(alive_gids >= 0),
+            f"Alive agent group_indices should be >= 0, got {alive_gids}",
+        )
     def test_group_consensus_registration(self):
         from marlite.algorithm.agents.agent_group_config import registered_agent_groups
         self.assertIn("GroupConsensusQMIX", registered_agent_groups)
@@ -128,6 +174,7 @@ class TestAEMerge(unittest.TestCase):
             [0, 0, 0, 1, 1, 1],
             [2, 1, 0, 0, 1, 2],
         ], dtype=np.int16)
+        group_indices = torch.from_numpy(group_indices)
 
         ref_mean, ref_lv = _merge_group_mean_reference(
             agent_vectors, group_indices, self.fake_self.device
@@ -147,6 +194,7 @@ class TestAEMerge(unittest.TestCase):
             [0, 0, 0, -1, -1, -1],
             [-1, -1, -1, -1, -1, -1],
         ], dtype=np.int16)
+        group_indices = torch.from_numpy(group_indices)
 
         ref_mean, ref_lv = _merge_group_mean_reference(
             agent_vectors, group_indices, self.fake_self.device
@@ -164,6 +212,7 @@ class TestAEMerge(unittest.TestCase):
             [0, 0, 1, 1, 2, 2],
             [0, 0, 0, 1, 1, 1],
         ], dtype=np.int16)
+        group_indices = torch.from_numpy(group_indices)
 
         new_mean, new_lv = GroupConsensusAgentGroup._merge_group_mean(
             self.fake_self, agent_vectors, group_indices
@@ -179,6 +228,7 @@ class TestAEMerge(unittest.TestCase):
             1, self.n_agents, self.f_z, requires_grad=True
         )
         group_indices = np.array([[0, 0, 1, 1, 2, 2]], dtype=np.int16)
+        group_indices = torch.from_numpy(group_indices)
 
         new_mean, new_lv = GroupConsensusAgentGroup._merge_group_mean(
             self.fake_self, agent_vectors, group_indices
@@ -192,6 +242,7 @@ class TestAEMerge(unittest.TestCase):
 
     def test_ae_mean_identical_agents(self):
         group_indices = np.array([[0, 0, 1, 1, 2, 2]], dtype=np.int16)
+        group_indices = torch.from_numpy(group_indices)
         agent_vectors = torch.ones(1, self.n_agents, self.f_z) * 5.0
 
         new_mean, new_lv = GroupConsensusAgentGroup._merge_group_mean(
@@ -216,6 +267,7 @@ class TestConsensusModeDispatch(unittest.TestCase):
             [0, 0, 0, 1, 1, 1],
             [2, 1, 0, 0, 1, 2],
         ], dtype=np.int16)
+        group_indices = torch.from_numpy(group_indices)
 
         ae_mean, ae_lv = GroupConsensusAgentGroup._merge_group_mean(
             self.fake, agent_vectors, group_indices
@@ -241,6 +293,7 @@ class TestConsensusModeDispatch(unittest.TestCase):
             [0, 0, 0, 1, 1, 1],
             [2, 1, 0, 0, 1, 2],
         ], dtype=np.int16)
+        group_indices = torch.from_numpy(group_indices)
 
         fake_sm = FakeAgentGroup()
         fake_sm.merge_mode = "sample_mean"
@@ -267,6 +320,7 @@ class TestConsensusModeDispatch(unittest.TestCase):
             [0, 0, 0, 1, 1, 1],
             [2, 1, 0, 0, 1, 2],
         ], dtype=np.int16)
+        group_indices = torch.from_numpy(group_indices)
 
         fake_bs = FakeAgentGroup()
         fake_bs.merge_mode = "bayesian"
@@ -310,6 +364,7 @@ class TestBayesianMerge(unittest.TestCase):
             [0, 0, 0, 1, 1, 1],
             [2, 1, 0, 0, 1, 2],
         ], dtype=np.int16)
+        group_indices = torch.from_numpy(group_indices)
         self._run_comparison(group_indices)
 
     def test_bayesian_with_dead_agents(self):
@@ -319,6 +374,7 @@ class TestBayesianMerge(unittest.TestCase):
             [0, 0, 0, -1, -1, -1],
             [-1, -1, -1, -1, -1, -1],
         ], dtype=np.int16)
+        group_indices = torch.from_numpy(group_indices)
         self._run_comparison(group_indices)
 
     def test_bayesian_single_group(self):
@@ -328,6 +384,7 @@ class TestBayesianMerge(unittest.TestCase):
             [0, 0, 0, 0, 0, 0],
             [0, 0, 0, 0, 0, 0],
         ], dtype=np.int16)
+        group_indices = torch.from_numpy(group_indices)
         self._run_comparison(group_indices)
 
     def test_bayesian_each_agent_own_group(self):
@@ -337,12 +394,14 @@ class TestBayesianMerge(unittest.TestCase):
             [0, 1, 2, 3, 4, 5],
             [2, 3, 0, 1, 5, 4],
         ], dtype=np.int16)
+        group_indices = torch.from_numpy(group_indices)
         self._run_comparison(group_indices)
 
     def test_bayesian_identical_agents(self):
         group_indices = np.array([
             [0, 0, 1, 1, 2, 2],
         ], dtype=np.int16)
+        group_indices = torch.from_numpy(group_indices)
         agent_mu = torch.ones(1, self.n_agents, self.f_z) * 3.0
         agent_log_var = torch.ones(1, self.n_agents, self.f_z) * -1.0
 
@@ -359,6 +418,7 @@ class TestBayesianMerge(unittest.TestCase):
 
     def test_bayesian_low_variance_has_more_weight(self):
         group_indices = np.array([[0, 0]], dtype=np.int16)
+        group_indices = torch.from_numpy(group_indices)
         agent_mu = torch.tensor([[[1.0, 2.0, 3.0], [8.0, 9.0, 10.0]]])
         agent_log_var = torch.tensor([[[-2.0, -2.0, -2.0], [2.0, 2.0, 2.0]]])
 
@@ -376,6 +436,7 @@ class TestBayesianMerge(unittest.TestCase):
             [0, 0, 1, 1, 2, 2],
             [0, 0, 0, 1, 1, 1],
         ], dtype=np.int16)
+        group_indices = torch.from_numpy(group_indices)
         agent_mu = torch.randn(2, self.n_agents, self.f_z)
         agent_log_var = torch.randn(2, self.n_agents, self.f_z) - 1.0
 
@@ -392,6 +453,7 @@ class TestBayesianMerge(unittest.TestCase):
         group_indices = np.array([
             [0, 0, 1, 1, 2, 2],
         ], dtype=np.int16)
+        group_indices = torch.from_numpy(group_indices)
         agent_mu = torch.randn(1, self.n_agents, self.f_z, requires_grad=True)
         agent_log_var = torch.randn(1, self.n_agents, self.f_z, requires_grad=True)
 
@@ -413,6 +475,7 @@ class TestBayesianMerge(unittest.TestCase):
         agent_mu = torch.randn(bs, n_agents, f_z)
         agent_log_var = torch.randn(bs, n_agents, f_z) - 1.0
         group_indices = np.random.randint(0, 6, size=(bs, n_agents)).astype(np.int16)
+        group_indices = torch.from_numpy(group_indices)
         group_indices[group_indices == 5] = -1
 
         ref_mu, ref_lv = _merge_bayesian_reference(
@@ -441,6 +504,7 @@ class TestMergeModeDispatch(unittest.TestCase):
             [0, 0, 0, 1, 1, 1],
             [2, 1, 0, 0, 1, 2],
         ], dtype=np.int16)
+        group_indices = torch.from_numpy(group_indices)
 
         result_mu, result_lv = GroupConsensusAgentGroup._merge_group_distributions(
             self.fake, agent_mu, agent_log_var, group_indices
@@ -462,6 +526,7 @@ class TestMergeModeDispatch(unittest.TestCase):
             [0, 0, 0, 1, 1, 1],
             [2, 1, 0, 0, 1, 2],
         ], dtype=np.int16)
+        group_indices = torch.from_numpy(group_indices)
 
         result_mu, result_lv = GroupConsensusAgentGroup._merge_group_distributions(
             self.fake, agent_mu, agent_log_var, group_indices
@@ -482,6 +547,7 @@ class TestMergeModeDispatch(unittest.TestCase):
             [0, 0, 0, 1, 1, 1],
             [2, 1, 0, 0, 1, 2],
         ], dtype=np.int16)
+        group_indices = torch.from_numpy(group_indices)
 
         fake_sm = FakeAgentGroup()
         fake_sm.merge_mode = "sample_mean"
@@ -514,6 +580,7 @@ class TestScatterRoundtrip(unittest.TestCase):
             [2, 1, 0, 0, 1, 2],
             [0, 0, 0, 0, 0, 0],
         ], dtype=np.int16)
+        group_indices = torch.from_numpy(group_indices)
 
         group_mu, group_log_var = GroupConsensusAgentGroup._merge_group_distributions(
             fake, agent_mu, agent_log_var, group_indices
@@ -538,6 +605,7 @@ class TestScatterRoundtrip(unittest.TestCase):
             [2, 1, 0, 0, 1, 2],
             [0, 0, 0, 0, 0, 0],
         ], dtype=np.int16)
+        group_indices = torch.from_numpy(group_indices)
 
         group_mu, group_log_var = GroupConsensusAgentGroup._merge_group_distributions(
             fake, agent_mu, agent_log_var, group_indices

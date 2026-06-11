@@ -167,11 +167,11 @@ class GroupConsensusWorker(OffPolicyWorker):
         observations_t = torch.transpose(observations, 1, 2).to(self.device)
         states_t = states.to(self.device)
 
-        states_np = states_t[:, -1].detach().cpu().numpy()
+        states_last = states_t[:, -1]
 
         ret = self.eval_agent_group(
             observations_t,
-            states_np,
+            states_last,
             timestep_padding_mask,
             alive_mask[:, -1, :],
         )
@@ -204,11 +204,11 @@ class GroupConsensusWorker(OffPolicyWorker):
                 self.device
             )
             next_states_t = next_states.to(self.device)
-            next_states_np = next_states_t[:, -1].detach().cpu().numpy()
+            next_states_last = next_states_t[:, -1]
 
             ret_next_eval = self.eval_agent_group(
                 next_observations_t,
-                next_states_np,
+                next_states_last,
                 next_timestep_padding_mask,
                 next_alive_mask[:, -1, :],
             )
@@ -224,7 +224,7 @@ class GroupConsensusWorker(OffPolicyWorker):
             self.target_agent_group.reset().eval()
             ret_next_target = self.target_agent_group(
                 next_observations_t,
-                next_states_np,
+                next_states_last,
                 next_timestep_padding_mask,
                 next_alive_mask[:, -1, :],
             )
@@ -255,11 +255,9 @@ class GroupConsensusWorker(OffPolicyWorker):
         elif self.consensus_mode == "ae":
             kl_divergence = torch.tensor(0.0, device=self.device)
         else:
-            kl_divergence = -0.5 * torch.sum(
-                1 + agent_log_var - agent_mu.pow(2) - torch.exp(agent_log_var),
-                dim=-1,
-            )
-            kl_divergence = torch.mean(kl_divergence)
+            mask = alive_mask[:, -1, :].unsqueeze(-1).expand_as(agent_mu)
+            kl_per_dim = 1 + agent_log_var - agent_mu.pow(2) - torch.exp(agent_log_var)
+            kl_divergence = -0.5 * (kl_per_dim * mask).sum() / mask.sum().clamp(min=1)
 
         critic_loss = td_error + self.kl_divergence_weight * kl_divergence
 

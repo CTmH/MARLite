@@ -18,7 +18,7 @@ from marlite.algorithm.agents import AgentGroupConfig
 from marlite.algorithm.critic import CriticConfig
 from marlite.algorithm.model import ModelConfig
 from marlite.util.optimizer_config import OptimizerConfig
-from marlite.util.loss_func import PITLoss
+from marlite.util.loss_func import PITLoss, ReconstructionLoss
 from marlite.trainer.trainer_worker.offpolicy_worker import OffPolicyWorker
 
 
@@ -52,17 +52,17 @@ class VAEGraphQMIXWorker(OffPolicyWorker):
         critic_config: CriticConfig,
         critic_optimizer_config: OptimizerConfig,
         agent_optimizer_config: OptimizerConfig,
-        gamma: float = 0.9,
-        max_grad_norm: float = 5.0,
-        ssl_model_config: ModelConfig = None,
-        ssl_optimizer_config: OptimizerConfig = None,
-        reconstruction_loss=None,
-        kl_divergence_weight: float = 1.0,
-        self_supervised_learning_loss_weight: float = 1.0,
-        loss_combination_method: str = "weighted_sum",
-        pit_loss_alpha: float = 0.9,
-        data_constructor=None,
-        warmup_epochs: int = 0,
+        ssl_model_config: ModelConfig,
+        ssl_optimizer_config: OptimizerConfig,
+        reconstruction_loss,
+        data_constructor,
+        gamma: float,
+        max_grad_norm: float,
+        kl_divergence_weight: float,
+        self_supervised_learning_loss_weight: float,
+        loss_combination_method: str,
+        pit_loss_alpha: float,
+        warmup_epochs: int,
         **kwargs,
     ):
         """
@@ -116,28 +116,26 @@ class VAEGraphQMIXWorker(OffPolicyWorker):
             self.eval_agent_group.parameters()
         )
 
-        # Initialize SSL components (optional)
-        self.ssl_model = None
-        self.ssl_optimizer = None
-        self.reconstruction_loss = None
+        # Initialize SSL components
+        self.ssl_model = ssl_model_config.get_model()
+        self.reconstruction_loss = reconstruction_loss
+        if not isinstance(self.reconstruction_loss, ReconstructionLoss):
+            raise TypeError(
+                f"reconstruction_loss must be a ReconstructionLoss subclass, "
+                f"got {type(self.reconstruction_loss).__name__}"
+            )
+        self.ssl_optimizer = ssl_optimizer_config.get_optimizer(
+            self.ssl_model.parameters()
+        )
+        self.pit_loss = PITLoss(
+            num_tasks=2,
+            alpha=self.pit_loss_alpha,
+            reduction="mean",
+        )
         self.kl_divergence_weight = kl_divergence_weight
         self.self_supervised_learning_loss_weight = self_supervised_learning_loss_weight
         self.data_constructor = data_constructor
         self.warmup_epochs = warmup_epochs
-
-        if ssl_model_config is not None:
-            self.ssl_model = ssl_model_config.get_model()
-            self.reconstruction_loss = reconstruction_loss
-            self.kl_divergence_weight = kl_divergence_weight
-            self.ssl_optimizer = ssl_optimizer_config.get_optimizer(
-                self.ssl_model.parameters()
-            )
-            # Initialize PITLoss for combining RL and SSL losses
-            self.pit_loss = PITLoss(
-                num_tasks=2,
-                alpha=self.pit_loss_alpha,
-                reduction="mean",
-            )
 
     def move_to_device(self, device: str):
         """
@@ -154,8 +152,7 @@ class VAEGraphQMIXWorker(OffPolicyWorker):
             self.eval_critic.to(device)
         if self.target_critic is not None:
             self.target_critic.to(device)
-        if self.ssl_model is not None:
-            self.ssl_model.to(device)
+        self.ssl_model.to(device)
         self.device = device
 
     def reduce_gradients(self):
@@ -180,11 +177,10 @@ class VAEGraphQMIXWorker(OffPolicyWorker):
                 param.grad.data /= self.world_size
 
         # SSL model gradients
-        if self.ssl_model is not None:
-            for param in self.ssl_model.parameters():
-                if param.grad is not None:
-                    dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
-                    param.grad.data /= self.world_size
+        for param in self.ssl_model.parameters():
+            if param.grad is not None:
+                dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
+                param.grad.data /= self.world_size
 
     def get_params_for_main(self) -> Dict[str, Any]:
         """
@@ -209,10 +205,9 @@ class VAEGraphQMIXWorker(OffPolicyWorker):
                 k: v.clone().cpu() for k, v in self.target_critic.state_dict().items()
             },
         }
-        if self.ssl_model is not None:
-            params["ssl_model"] = {
-                k: v.clone().cpu() for k, v in self.ssl_model.state_dict().items()
-            }
+        params["ssl_model"] = {
+            k: v.clone().cpu() for k, v in self.ssl_model.state_dict().items()
+        }
         return params
 
     def sync_params_from_main(self, params):
@@ -246,7 +241,7 @@ class VAEGraphQMIXWorker(OffPolicyWorker):
             self.target_critic.load_state_dict(
                 {k: v.clone() for k, v in params["target_critic"].items()}
             )
-        if "ssl_model" in params and self.ssl_model is not None:
+        if "ssl_model" in params:
             self.ssl_model.load_state_dict(
                 {k: v.clone() for k, v in params["ssl_model"].items()}
             )
@@ -427,8 +422,8 @@ class VAEGraphQMIXWorker(OffPolicyWorker):
         # Compute critic loss (TD error)
         critic_loss = torch.nn.functional.mse_loss(q_tot, y_tot.detach())
 
-        # === Compute VAE Loss (if SSL enabled and not in warmup) ===
-        if self.ssl_model is not None and not is_warmup:
+        # === Compute VAE Loss (if not in warmup) ===
+        if not is_warmup:
             # VAE decoder forward pass
             # estimates: (B, N, T, E), formatted: (B, T, N, E)
             formatted_device = formatted.to(self.device)
@@ -445,10 +440,11 @@ class VAEGraphQMIXWorker(OffPolicyWorker):
 
             # Compute KL divergence loss
             # KL(q(z|x) || p(z)) = -0.5 * sum(1 + log_var - mu^2 - exp(log_var))
-            kl_divergence = -0.5 * torch.sum(
-                1 + log_var - mu.pow(2) - torch.exp(log_var), dim=-1
-            )
-            kl_divergence = torch.mean(kl_divergence)
+            # mu/log_var: (B, N, T, E), alive_mask: (B, T+1, N)
+            kl_per_dim = 1 + log_var - mu.pow(2) - torch.exp(log_var)
+            kl_per_agent_t = -0.5 * kl_per_dim.sum(dim=-1)  # (B, N, T)
+            mask = alive_mask[:, :mu.shape[2], :].transpose(1, 2)  # (B, N, T)
+            kl_divergence = (kl_per_agent_t * mask).sum() / mask.sum().clamp(min=1)
 
             vae_loss = reconstruction_loss + self.kl_divergence_weight * kl_divergence
             combined_loss = self._combine_rl_ssl_loss(critic_loss, vae_loss)
@@ -459,8 +455,7 @@ class VAEGraphQMIXWorker(OffPolicyWorker):
         # === Backward Pass ===
         self.critic_optimizer.zero_grad()
         self.agent_optimizer.zero_grad()
-        if self.ssl_optimizer is not None:
-            self.ssl_optimizer.zero_grad()
+        self.ssl_optimizer.zero_grad()
 
         combined_loss.backward()
 
@@ -470,31 +465,26 @@ class VAEGraphQMIXWorker(OffPolicyWorker):
         # Clip gradients
         torch.nn.utils.clip_grad_norm_(self.eval_critic.parameters(), max_norm=self.max_grad_norm)
         torch.nn.utils.clip_grad_norm_(self.eval_agent_group.parameters(), max_norm=self.max_grad_norm)
-        if self.ssl_model is not None and not is_warmup:
+        if not is_warmup:
             torch.nn.utils.clip_grad_norm_(self.ssl_model.parameters(), max_norm=self.max_grad_norm)
 
         # Optimizer steps
         self.critic_optimizer.step()
         self.agent_optimizer.step()
-        if self.ssl_optimizer is not None and not is_warmup:
+        if not is_warmup:
             self.ssl_optimizer.step()
 
         # Return losses
-        # When SSL is enabled, return tuple (combined_loss, critic_loss, vae_loss)
-        # When SSL is disabled, return single critic_loss for backward compatibility
-        if self.ssl_model is not None:
-            vae_loss_value = (
-                vae_loss.detach().cpu().item()
-                if isinstance(vae_loss, torch.Tensor)
-                else vae_loss
-            )
-            return (
-                combined_loss.detach().cpu().item(),
-                critic_loss.detach().cpu().item(),
-                vae_loss_value,
-            )
-        else:
-            return critic_loss.detach().cpu().item()
+        vae_loss_value = (
+            vae_loss.detach().cpu().item()
+            if isinstance(vae_loss, torch.Tensor)
+            else vae_loss
+        )
+        return (
+            combined_loss.detach().cpu().item(),
+            critic_loss.detach().cpu().item(),
+            vae_loss_value,
+        )
 
     def _compute_ssl_loss(self, pred_set, target_set, mask=None):
         """
@@ -508,12 +498,7 @@ class VAEGraphQMIXWorker(OffPolicyWorker):
         Returns:
             loss: Computed loss value
         """
-        if hasattr(self.reconstruction_loss, "reconstruction_loss"):
-            return self.reconstruction_loss.reconstruction_loss(
-                pred_set, target_set, mask
-            )
-        else:
-            return self.reconstruction_loss(pred_set, target_set)
+        return self.reconstruction_loss(pred_set, target_set, mask)
 
     def _combine_rl_ssl_loss(self, critic_loss, vae_loss):
         """
@@ -579,11 +564,8 @@ class VAEGraphQMIXWorker(OffPolicyWorker):
             batch = data_queue.get()
             result = self.train_step(batch)
             del batch
-            if self.ssl_model is not None:
-                combined, critic, vae = result
-                loss_queue.put((combined, critic, vae))
-            else:
-                loss_queue.put(result)
+            combined, critic, vae = result
+            loss_queue.put((combined, critic, vae))
 
         elif cmd == "MOVE_TO_GPU":
             self.move_to_device(self.assigned_device)
@@ -604,7 +586,7 @@ class VAEGraphQMIXWorker(OffPolicyWorker):
             if "agent_lr" in lr_data:
                 for param_group in self.agent_optimizer.param_groups:
                     param_group["lr"] = lr_data["agent_lr"]
-            if "ssl_lr" in lr_data and self.ssl_optimizer is not None:
+            if "ssl_lr" in lr_data:
                 for param_group in self.ssl_optimizer.param_groups:
                     param_group["lr"] = lr_data["ssl_lr"]
             if ack_queue:

@@ -59,7 +59,7 @@ class GroupConsensusMixer(Mixer):
                 bs, self.num_agents * self.group_latent_dim, device=device
             )
             for b in range(bs):
-                unique_groups = np.unique(group_indices[b])
+                unique_groups = torch.unique(group_indices[b].cpu())
                 unique_groups = unique_groups[unique_groups >= 0]
                 offset = 0
                 for z in unique_groups:
