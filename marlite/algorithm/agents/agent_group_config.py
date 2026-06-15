@@ -2,6 +2,7 @@ from copy import deepcopy
 from typing import Dict, Any, Type
 from marlite.algorithm.agents.agent_group import AgentGroup
 from marlite.algorithm.agents.qmix_agent_group import QMIXAgentGroup
+from marlite.algorithm.agents.qtran_agent_group import QTRANAgentGroup
 from marlite.algorithm.agents.gnn_agent_group import GNNAgentGroup
 from marlite.algorithm.agents.random_agent_group import RandomAgentGroup
 from marlite.algorithm.agents.magent_agent_group import (
@@ -53,6 +54,21 @@ def create_qmix_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
         encoder_configs[model_id] = ModelConfig(**conf["encoder"])
         decoder_configs[model_id] = ModelConfig(**conf["decoder"])
     return QMIXAgentGroup(
+        agents, encoder_configs, decoder_configs, feature_extractor_configs, **agent_group_config
+    )
+
+
+def create_qtran_agent_group(agent_group_config: Dict[str, Any]) -> AgentGroup:
+    agents = agent_group_config.pop("agent_list")
+    text_model_configs = agent_group_config.pop("models")
+    encoder_configs = {}
+    decoder_configs = {}
+    feature_extractor_configs = {}
+    for model_id, conf in text_model_configs.items():
+        feature_extractor_configs[model_id] = ModelConfig(**conf["feature_extractor"])
+        encoder_configs[model_id] = ModelConfig(**conf["encoder"])
+        decoder_configs[model_id] = ModelConfig(**conf["decoder"])
+    return QTRANAgentGroup(
         agents, encoder_configs, decoder_configs, feature_extractor_configs, **agent_group_config
     )
 
@@ -364,6 +380,7 @@ def _create_group_consensus_agent_group(
 
 registered_agent_groups = {
     "QMIX": create_qmix_agent_group,
+    "QTRAN": create_qtran_agent_group,
     "MAPPO": create_mappo_agent_group,
     "MsgAggr": create_obs_msg_aggr_agent_group,
     "ObsMsgAggr": create_obs_msg_aggr_agent_group,

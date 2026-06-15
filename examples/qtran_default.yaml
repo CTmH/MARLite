@@ -1,0 +1,137 @@
+agent_group:
+  type: "QTRAN"
+  agent_list:
+    agent_0: m1
+    agent_1: m1
+    agent_2: m1
+  models:
+    m1:
+      feature_extractor:
+        model_type: "Identity"
+      encoder:
+        model_type: "RNN"
+        input_shape: 18
+        rnn_hidden_dim: 32
+        rnn_layers: 1
+        output_shape: 32
+      decoder:
+        model_type: "Custom"
+        layers:
+        - type: "Linear"
+          in_features: 32
+          out_features: 5
+  optimizer:
+    type: "Adam"
+    lr: 0.0005
+    weight_decay: 0.0001
+
+environment:
+  module_name: "mpe2"
+  env_name: "simple_spread_v3"
+
+critic:
+  type: "Qtransform"
+  action_dim: 5
+  base_model:
+    model_type: "Custom"
+    layers:
+    - type: "Linear"
+      in_features: 32
+      out_features: 32
+    - type: "ReLU"
+    - type: "Linear"
+      in_features: 32
+      out_features: 5
+  phi_net:
+    model_type: "Custom"
+    layers:
+    - type: "Linear"
+      in_features: 37
+      out_features: 64
+    - type: "ReLU"
+    - type: "Linear"
+      in_features: 64
+      out_features: 32
+  psi_net:
+    model_type: "Custom"
+    layers:
+    - type: "Linear"
+      in_features: 32
+      out_features: 32
+    - type: "ReLU"
+    - type: "Linear"
+      in_features: 32
+      out_features: 32
+  optimizer:
+    type: "Adam"
+    lr: 0.0005
+    weight_decay: 0.0001
+
+v_net:
+  type: "StateValue"
+  base_model:
+    model_type: "Custom"
+    layers:
+    - type: "Linear"
+      in_features: 54
+      out_features: 64
+    - type: "ReLU"
+    - type: "Linear"
+      in_features: 64
+      out_features: 1
+  feature_extractor:
+    model_type: "Custom"
+    layers:
+    - type: "Linear"
+      in_features: 54
+      out_features: 32
+    - type: "ReLU"
+  optimizer:
+    type: "Adam"
+    lr: 0.001
+
+rollout:
+  manager_type: "multi-process"
+  worker_type: "multi-process"
+  n_workers: 1
+  n_episodes: 1
+  n_eval_episodes: 1
+  traj_len: 5
+  episode_limit: 20
+  device: "cpu"
+
+replay_buffer:
+  type: "Normal"
+  capacity: 5
+  traj_len: 5
+
+analyzer:
+  type: "default"
+
+trainer:
+  type: "QTRAN"
+  gamma: 0.95
+  eval_epsilon: 0.01
+  lambda_opt: 1.0
+  lambda_nopt: 1.0
+  workdir: "./results/qtran_default"
+  train_device: "cpu"
+
+  epsilon_scheduler:
+    type: "logarithmic"
+    start_value: 1.0
+    end_value: 0.05
+    decay_steps: 10
+
+  sample_ratio_scheduler:
+    type: "linear"
+    start_value: 16
+    end_value: 16
+    decay_steps: 10
+
+  train_args:
+    epochs: 1
+    target_first_metric: 100
+    rollback_interval: 1
+    batch_size: 8
+    learning_times_per_epoch: 1

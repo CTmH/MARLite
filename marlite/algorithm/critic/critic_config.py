@@ -10,6 +10,7 @@ from marlite.algorithm.critic.prob_seq_qmix_mixer import ProbSeqQMixer
 from marlite.algorithm.critic.group_consensus_mixer import GroupConsensusMixer
 from marlite.algorithm.critic.mappo_critic import MAPPOCritic
 from marlite.algorithm.critic.seq_mappo_critic import SeqMAPPOCritic
+from marlite.algorithm.critic.qtransform import Qtransform
 from marlite.algorithm.model import ModelConfig
 
 
@@ -82,6 +83,15 @@ def create_seq_mappo_critic(critic_config: Dict[str, Any]) -> SeqMAPPOCritic:
     return SeqMAPPOCritic(model_config, fe_config, seq_model_config)
 
 
+def create_qtransform(critic_config: Dict[str, Any]) -> Qtransform:
+    """Create a Qtransform critic instance from config (QTRAN-alt)."""
+    phi_net_config = ModelConfig(**critic_config["phi_net"])
+    psi_net_config = ModelConfig(**critic_config["psi_net"])
+    base_model_config = ModelConfig(**critic_config["base_model"])
+    action_dim = critic_config["action_dim"]
+    return Qtransform(phi_net_config, psi_net_config, base_model_config, action_dim)
+
+
 # Registry mapping critic type names to creator functions
 registered_critic_creators: Dict[str, Callable[[Dict[str, Any]], Module]] = {
     "QMixer": create_qmixer,
@@ -91,6 +101,7 @@ registered_critic_creators: Dict[str, Callable[[Dict[str, Any]], Module]] = {
     "GroupConsensusMixer": create_group_consensus_mixer,
     "MAPPOCritic": create_mappo_critic,
     "SeqMAPPOCritic": create_seq_mappo_critic,
+    "Qtransform": create_qtransform,
 }
 
 

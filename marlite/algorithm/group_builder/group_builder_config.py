@@ -6,6 +6,10 @@ from marlite.algorithm.group_builder.magent_group_builder import (
     MagentKMeansGroupBuilder,
     MagentVecKMeansGroupBuilder,
 )
+from marlite.algorithm.group_builder.partial_group_builder import (
+    PartialGroupMAgentBuilder,
+    PartialGroupVectorStateBuilder,
+)
 from marlite.algorithm.group_builder.fixed_group_builder import FixedGroupBuilder
 
 registered_group_builders = {
@@ -13,6 +17,8 @@ registered_group_builders = {
     "MAgentVecLP": MAgentVecLPGroupBuilder,
     "MagentKMeans": MagentKMeansGroupBuilder,
     "MagentVecKMeans": MagentVecKMeansGroupBuilder,
+    "PartialMAgent": PartialGroupMAgentBuilder,
+    "PartialVectorState": PartialGroupVectorStateBuilder,
     "Fixed": FixedGroupBuilder,
 }
 

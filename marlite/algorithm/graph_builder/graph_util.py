@@ -237,3 +237,134 @@ def build_partial_graph(
         adj_matrix[edge_index[1], edge_index[0]] = adj_matrix_full[edge_index[1], edge_index[0]]
 
     return adj_matrix, edge_index
+
+def build_partial_groups(
+    coords_with_id: np.ndarray,
+    comm_distance: int,
+    distance_metric: str,
+    n_groups: int,
+    valid_node_list: List[int],
+    target_node_list: List[int],
+) -> np.ndarray:
+    """
+    Build group labels based on community (subgraph) detection.
+
+    Mirrors the subgraph partition produced by ``build_partial_graph``: the
+    full communication graph is built from ``valid_node_list + target_node_list``
+    and then partitioned into communities via ``greedy_modularity_communities``.
+    Each community's node set is treated as a single communication group, and
+    the returned label for a valid node is the index of its community.
+
+    Only ``valid_node_list`` agents receive output labels. Agents that are not
+    present in the state, or that are excluded from any community, are labeled
+    ``-1``. The returned labels are always a consecutive prefix
+    ``0, 1, ..., n_actual-1`` of the non-negative integers, where
+    ``n_actual`` is the number of *non-empty* communities. Communities that
+    contain only target nodes are skipped, so when the actual number of
+    non-empty communities is fewer than ``n_groups`` the labels are still
+    ``0, 1, 2, ...`` (smaller group numbers first).
+
+    Isolated agents (no other agent within ``comm_distance``) are each placed
+    in their own community, so they receive distinct labels.
+
+    Args:
+        coords_with_id: Array of agent positions with shape (n_agents, 3),
+                        each row is [agent_id, y_coord, x_coord].
+        comm_distance: Communication distance threshold.
+        distance_metric: Distance metric for calculating distances between agents.
+        n_groups: Target number of groups/communities for greedy modularity detection.
+        valid_node_list: List of valid node IDs to include in the output labels.
+        target_node_list: List of target node IDs to include in the community detection
+                         but not in the output group labels.
+
+    Returns:
+        group_labels: Array of shape (len(valid_node_list),) with community IDs.
+                      ``-1`` indicates the agent is not present or has no group assignment.
+    """
+    n_valid = len(valid_node_list)
+    full_labels = np.full(n_valid, -1, dtype=np.int64)
+
+    # Build full communication graph (valid + target nodes)
+    adj_matrix_full, edge_index_full = build_communication_graph(
+        coords_with_id=coords_with_id,
+        comm_distance=comm_distance,
+        distance_metric=distance_metric,
+        valid_node_list=valid_node_list + target_node_list
+    )
+
+    valid_node_set = set(valid_node_list)
+    valid_node_to_idx = {node_id: idx for idx, node_id in enumerate(valid_node_list)}
+
+    if n_groups <= 1:
+        return full_labels
+
+    # Build networkx graph. We always seed it with the present nodes so that
+    # isolated agents are still partitioned (each becomes its own community).
+    all_node_set = set(valid_node_list) | set(target_node_list)
+    present_nodes = {n for n in all_node_set if n in valid_node_set or
+                     n in set(target_node_list)}
+    # Use the adj matrix to determine which nodes are actually present:
+    # a node is present if any of its rows/cols in the full adj matrix has
+    # an entry, OR if it appears in coords_with_id.
+    present_in_state = set(coords_with_id[:, 0].astype(int).tolist()) if len(coords_with_id) > 0 else set()
+    present_nodes = present_in_state & all_node_set
+
+    if not present_nodes:
+        return full_labels
+
+    G = nx.Graph()
+    G.add_nodes_from(present_nodes)
+
+    for u, v in edge_index_full.T.astype(int):
+        if u in present_nodes and v in present_nodes:
+            dist = adj_matrix_full[u, v]
+            if dist > 0:
+                G.add_edge(u, v, weight=1.0 / dist)  # shorter distance → higher weight
+
+    # Clamp best_n to the number of nodes in the graph (networkx constraint).
+    best_n = min(n_groups, G.number_of_nodes())
+    if best_n <= 1:
+        # Cannot form more than one group; assign each present valid node to
+        # its own community so the result is still well-defined.
+        for node in present_nodes:
+            if node in valid_node_set:
+                # Will be remapped below to consecutive labels
+                full_labels[valid_node_to_idx[node]] = node  # temporary unique id
+        # Remap to consecutive 0, 1, 2, ...
+        used = sorted({int(v) for v in full_labels if v >= 0})
+        remap = {old: new for new, old in enumerate(used)}
+        for i in range(len(full_labels)):
+            if full_labels[i] >= 0:
+                full_labels[i] = remap[int(full_labels[i])]
+        return full_labels
+
+    # Run greedy modularity community detection
+    communities = list(greedy_modularity_communities(
+        G=G,
+        best_n=best_n,
+        weight='weight'
+    ))
+
+    # Assign labels 0, 1, 2, ... in the order communities are returned.
+    for comm_id, comm in enumerate(communities):
+        for node in comm:
+            if node in valid_node_set:
+                full_labels[valid_node_to_idx[node]] = comm_id
+
+    # Remap labels to be consecutive from 0, skipping communities that have
+    # no valid node (they only contain target nodes). This guarantees that
+    # the returned label set is always {0, 1, ..., n_actual-1} where
+    # n_actual is the number of *non-empty* communities — the
+    # "smaller group numbers first" rule.
+    used_comm_ids = []
+    seen = set()
+    for label in full_labels:
+        if label >= 0 and int(label) not in seen:
+            used_comm_ids.append(int(label))
+            seen.add(int(label))
+    remap = {old: new for new, old in enumerate(used_comm_ids)}
+    for i in range(len(full_labels)):
+        if full_labels[i] >= 0:
+            full_labels[i] = remap[int(full_labels[i])]
+
+    return full_labels

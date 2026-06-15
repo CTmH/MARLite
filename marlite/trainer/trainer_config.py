@@ -2,6 +2,7 @@ from copy import deepcopy
 from typing import Dict, Type
 from marlite.trainer.trainer import Trainer  # abstract base; keep for type hints
 from marlite.trainer.qmix_trainer import QMIXTrainer
+from marlite.trainer.qtran_trainer import QTRANTrainer
 from marlite.trainer.graph_qmix_trainer import GraphQMIXTrainer
 from marlite.trainer.msg_aggr_qmix_trainer import MsgAggrQMIXTrainer, ProbMsgAggrQMIXTrainer
 from marlite.trainer.self_supervised_qmix_trainer import SelfSupervisedQMIXTrainer
@@ -15,6 +16,7 @@ from marlite.config_processor import REGISTERED_PROCESSORS
 
 REGISTERED_TRAINERS: Dict[str, Type[Trainer]] = {
     'QMIX': QMIXTrainer,
+    'QTRAN': QTRANTrainer,
     'GraphQMIX': GraphQMIXTrainer,
     'MsgAggr': MsgAggrQMIXTrainer,
     'ProbMsgAggr': ProbMsgAggrQMIXTrainer,
