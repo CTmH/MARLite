@@ -14,9 +14,11 @@ class QTRANAgentGroup(AgentGroup):
         encoder_configs: Dict[str, ModelConfig],
         decoder_configs: Dict[str, ModelConfig],
         feature_extractors_configs: Dict[str, ModelConfig],
+        deterministic_eval: bool = True,
     ) -> None:
         super().__init__()
         self.agent_model_dict = agent_model_dict
+        self.deterministic_eval = deterministic_eval
 
         self.encoders = nn.ModuleDict()
         for model_name, config in encoder_configs.items():

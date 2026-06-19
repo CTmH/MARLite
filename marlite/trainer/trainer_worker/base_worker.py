@@ -76,6 +76,19 @@ class BaseWorker:
         _load_opt(self, "target_critic", params)
         _load_opt(self, "ssl_model", params)
 
+        if "reward_aggr_mode" in params:
+            self.reward_aggr_mode = params["reward_aggr_mode"]
+
+    def _aggregate_rewards(self, rewards: torch.Tensor, dim: int = -1) -> torch.Tensor:
+        """Aggregate per-agent rewards; see ``Trainer._aggregate_rewards``."""
+        mode = getattr(self, "reward_aggr_mode", "sum")
+        if mode == "sum":
+            return rewards.sum(dim=dim)
+        elif mode == "mean":
+            return rewards.mean(dim=dim)
+        else:
+            raise ValueError(f"Unknown reward_aggr_mode '{mode}'")
+
     def move_to_device(self, device: str):
         if self.eval_agent_group is not None:
             self.eval_agent_group.to(device)

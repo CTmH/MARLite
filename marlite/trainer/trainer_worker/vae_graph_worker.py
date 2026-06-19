@@ -318,10 +318,8 @@ class VAEGraphQMIXWorker(OffPolicyWorker):
             use_action_mask = False
 
         # Process rewards and terminations
-        rewards = rewards[:, -1]  # (B, T, N) -> (B, N)
-        rewards = rewards.sum(dim=1).to(self.device)  # (B, N) -> (B)
-        terminations = terminations[:, -1]  # (B, T, N) -> (B, N)
-        terminations = terminations.prod(dim=1).to(self.device)  # (B, N) -> (B)
+        r_last = self._aggregate_rewards(rewards[:, -1]).to(self.device)  # (B, N) -> (B)
+        termination_last = terminations[:, -1].prod(dim=-1).to(self.device)  # (B, N) -> (B)
 
         # Process padding masks - expand to (B, N, T)
         timestep_padding_mask = torch.stack(
@@ -417,7 +415,7 @@ class VAEGraphQMIXWorker(OffPolicyWorker):
             # q_tot_next: (B,)
 
         # Compute TD target: y_tot = r + gamma * (1 - terminations) * q_tot_next
-        y_tot = rewards + (1 - terminations) * self.gamma * q_tot_next
+        y_tot = r_last + (1 - termination_last) * self.gamma * q_tot_next
 
         # Compute critic loss (TD error)
         critic_loss = torch.nn.functional.mse_loss(q_tot, y_tot.detach())

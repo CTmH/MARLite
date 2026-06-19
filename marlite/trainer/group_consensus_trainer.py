@@ -102,10 +102,8 @@ class GroupConsensusTrainer(OffPolicyTrainer):
                     else:
                         use_action_mask = False
 
-                    rewards = rewards[:, -1]
-                    rewards = rewards.sum(dim=1).to(self.train_device)
-                    terminations = terminations[:, -1]
-                    terminations = terminations.prod(dim=1).to(self.train_device)
+                    r_last = self._aggregate_rewards(rewards[:, -1]).to(self.train_device)
+                    termination_last = terminations[:, -1].prod(dim=1).to(self.train_device)
 
                     timestep_padding_mask = torch.stack(
                         [timestep_padding_mask] * n_agents, dim=1
@@ -204,7 +202,7 @@ class GroupConsensusTrainer(OffPolicyTrainer):
                         )
                         q_tot_next = ret_next_critic["q_tot"]
 
-                    y_tot = rewards + (1 - terminations) * self.gamma * q_tot_next
+                    y_tot = r_last + (1 - termination_last) * self.gamma * q_tot_next
                     td_error = torch.nn.functional.mse_loss(q_tot, y_tot.detach())
 
                     # KL divergence: KL(N(μ,σ²) || N(0,1))

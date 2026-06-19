@@ -127,6 +127,7 @@ class SSLGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
             "target_agent_group": get_state_dict(self.target_agent_group),
             "eval_critic": get_state_dict(self.eval_critic),
             "target_critic": get_state_dict(self.target_critic),
+            "reward_aggr_mode": self.reward_aggr_mode,
         }
         if self.ssl_model is not None:
             trainable_params["ssl_model"] = get_state_dict(self.ssl_model)
@@ -402,10 +403,8 @@ class SSLGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
             use_action_mask = False
 
         # ── Rewards & terminations ───────────────────────────────────────
-        rewards = rewards[:, -1]               # (B, T, N) → (B, N)
-        rewards = rewards.sum(dim=1).to(self.train_device)  # (B, N) → (B,)
-        terminations = terminations[:, -1]      # (B, T, N) → (B, N)
-        terminations = terminations.prod(dim=1).to(self.train_device)  # (B, N) → (B,)
+        r_last = self._aggregate_rewards(rewards[:, -1]).to(self.train_device)  # (B, N) → (B,)
+        termination_last = terminations[:, -1].prod(dim=1).to(self.train_device)  # (B, N) → (B,)
 
         # ── Expand padding masks to (B, N, T) ────────────────────────────
         timestep_padding_mask = torch.stack(
@@ -535,7 +534,7 @@ class SSLGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
             q_tot_next = ret_next_critic["q_tot"]        # (B,)
 
         # TD target: y = r + γ·(1 - done)·Q_target(s', argmax_{a'} Q_eval(s', a'))
-        y_tot = rewards + (1 - terminations) * self.gamma * q_tot_next
+        y_tot = r_last + (1 - termination_last) * self.gamma * q_tot_next
         #   (B,) + (B,) · scalar · (B,) → (B,)
 
         critic_loss = torch.nn.functional.mse_loss(q_tot, y_tot.detach())

@@ -153,22 +153,28 @@ trainer:
             for param in self.trainer.target_critic.parameters():
                 torch.nn.init.zeros_(param)
 
-            for (_, fe), (_, model) in zip(
+            for (_, fe), (_, enc), (_, dec) in zip(
                 self.trainer.eval_agent_group.feature_extractors.items(),
-                self.trainer.eval_agent_group.models.items(),
+                self.trainer.eval_agent_group.encoders.items(),
+                self.trainer.eval_agent_group.decoders.items(),
             ):
                 for param in fe.parameters():
                     torch.nn.init.ones_(param)
-                for param in model.parameters():
+                for param in enc.parameters():
+                    torch.nn.init.ones_(param)
+                for param in dec.parameters():
                     torch.nn.init.ones_(param)
 
-            for (_, fe), (_, model) in zip(
+            for (_, fe), (_, enc), (_, dec) in zip(
                 self.trainer.target_agent_group.feature_extractors.items(),
-                self.trainer.target_agent_group.models.items(),
+                self.trainer.target_agent_group.encoders.items(),
+                self.trainer.target_agent_group.decoders.items(),
             ):
                 for param in fe.parameters():
                     torch.nn.init.zeros_(param)
-                for param in model.parameters():
+                for param in enc.parameters():
+                    torch.nn.init.zeros_(param)
+                for param in dec.parameters():
                     torch.nn.init.zeros_(param)
 
             original_target_critic_params = deepcopy(
@@ -233,13 +239,16 @@ trainer:
                     )
                 )
 
-            for (_, fe), (_, model) in zip(
+            for (_, fe), (_, enc), (_, dec) in zip(
                 self.trainer.eval_agent_group.feature_extractors.items(),
-                self.trainer.eval_agent_group.models.items(),
+                self.trainer.eval_agent_group.encoders.items(),
+                self.trainer.eval_agent_group.decoders.items(),
             ):
                 for param in fe.parameters():
                     torch.nn.init.normal_(param)
-                for param in model.parameters():
+                for param in enc.parameters():
+                    torch.nn.init.normal_(param)
+                for param in dec.parameters():
                     torch.nn.init.normal_(param)
 
             new_target_agent_group_params = deepcopy(

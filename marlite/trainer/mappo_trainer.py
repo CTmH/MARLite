@@ -209,7 +209,7 @@ class MAPPOTrainer(OnPolicyTrainer):
                     states_dev = states.to(device)
                     next_states_dev = next_states.to(device)
 
-                    rewards_sum = rewards.sum(dim=2).to(device)
+                    rewards_sum = self._aggregate_rewards(rewards).to(device)
                     terminations_any = terminations.any(dim=2).to(
                         dtype=torch.float32, device=device
                     )
@@ -232,11 +232,11 @@ class MAPPOTrainer(OnPolicyTrainer):
                     )["v"][:, 0]  # (B,)
 
                 # ---- Single-step TD residual as advantage (GAE with one timestep) ----
-                r_last = rewards.sum(dim=2)[:, -1].to(device)  # (B,)
-                done_last = terminations.any(dim=2)[:, -1].to(
+                r_last = self._aggregate_rewards(rewards[:, -1]).to(device)  # (B,)
+                termination_last = terminations[:, -1].prod(dim=-1).to(
                     dtype=torch.float32, device=device
                 )
-                delta = r_last + self.gamma * v_next * (1.0 - done_last) - v_last
+                delta = r_last + self.gamma * v_next * (1.0 - termination_last) - v_last
                 advantages_last = delta  # (B,)
                 returns = delta + v_last  # (B,) — TD target for the critic
 

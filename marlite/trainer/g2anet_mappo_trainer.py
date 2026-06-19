@@ -124,6 +124,7 @@ class GraphMAPPOTrainer(OnPolicyTrainer):
         trainable_params = {
             "eval_agent_group": get_state_dict(self.eval_agent_group),
             "eval_critic": get_state_dict(self.eval_critic),
+            "reward_aggr_mode": self.reward_aggr_mode,
         }
         self.worker_group.broadcast_params(trainable_params)
         critic_lr = self.critic_optimizer.param_groups[0]["lr"]
@@ -215,12 +216,12 @@ class GraphMAPPOTrainer(OnPolicyTrainer):
                             next_timestep_padding_mask[:, -1:],
                         )["v"][:, 0]
 
-                    r_last = rewards.sum(dim=2)[:, -1].to(device)
-                    done_last = terminations.any(dim=2)[:, -1].to(
+                    r_last = self._aggregate_rewards(rewards[:, -1]).to(device)
+                    termination_last = terminations[:, -1].prod(dim=-1).to(
                         dtype=torch.float32, device=device
                     )
                     delta = (
-                        r_last + self.gamma * v_next * (1.0 - done_last) - v_last
+                        r_last + self.gamma * v_next * (1.0 - termination_last) - v_last
                     )
                     advantages_last = delta
                     returns = delta + v_last

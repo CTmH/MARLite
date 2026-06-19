@@ -27,6 +27,8 @@ from marlite.algorithm.model.qmix_critic_model import QMixModel
 from marlite.algorithm.model.graphmix_critic_model import GraphMixModel
 from marlite.algorithm.model.hypernet import HyperNetwork
 from marlite.algorithm.model.decoder import NearestDecoder
+from marlite.algorithm.model.qplex_transformation import QplexTransformation
+from marlite.algorithm.model.qplex_joint_attention import QplexJointAttention
 
 
 registered_models = {
@@ -55,6 +57,8 @@ registered_models = {
     "GraphMixModel": GraphMixModel,
     "HyperNetwork": HyperNetwork,
     "NearestDecoder": NearestDecoder,
+    "QplexTransformation": QplexTransformation,
+    "QplexJointAttention": QplexJointAttention,
 }
 
 

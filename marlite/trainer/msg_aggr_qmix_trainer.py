@@ -106,9 +106,9 @@ class MsgAggrQMIXTrainer(OffPolicyTrainer):
                     bs = states.shape[0]
                     n_agents = rewards.shape[2]
 
-                    terminations = terminations[:, -1]
+                    done_flags = terminations[:, -1]
                     truncations = truncations[:, -1]
-                    next_alive_mask = ~(terminations | truncations)
+                    next_alive_mask = ~(done_flags | truncations)
                     next_alive_mask = next_alive_mask.unsqueeze(dim=1)
                     next_alive_mask = torch.cat(
                         [alive_mask[:, 1:, :], next_alive_mask], dim=1
@@ -125,9 +125,8 @@ class MsgAggrQMIXTrainer(OffPolicyTrainer):
                     else:
                         use_action_mask = False
 
-                    rewards = rewards[:, -1]
-                    rewards = rewards.sum(dim=1).to(self.train_device)
-                    terminations = terminations.prod(dim=1).to(self.train_device)
+                    r_last = self._aggregate_rewards(rewards[:, -1]).to(self.train_device)
+                    termination_last = done_flags.prod(dim=1).to(self.train_device)
 
                     timestep_padding_mask = torch.stack(
                         [timestep_padding_mask] * n_agents, dim=1
@@ -202,7 +201,7 @@ class MsgAggrQMIXTrainer(OffPolicyTrainer):
                         )
                         q_tot_next = ret_next["q_tot"]
 
-                    y_tot = rewards + (1 - terminations) * self.gamma * q_tot_next
+                    y_tot = r_last + (1 - termination_last) * self.gamma * q_tot_next
                     td_error = torch.nn.functional.mse_loss(q_tot, y_tot.detach())
 
                     if self.current_epoch >= self.warmup_epochs:
@@ -370,10 +369,8 @@ class ProbMsgAggrQMIXTrainer(OffPolicyTrainer):
                     else:
                         use_action_mask = False
 
-                    rewards = rewards[:, -1]
-                    rewards = rewards.sum(dim=1).to(self.train_device)
-                    terminations = terminations[:, -1]
-                    terminations = terminations.prod(dim=1).to(self.train_device)
+                    r_last = self._aggregate_rewards(rewards[:, -1]).to(self.train_device)
+                    termination_last = terminations[:, -1].prod(dim=1).to(self.train_device)
 
                     timestep_padding_mask = torch.stack(
                         [timestep_padding_mask] * n_agents, dim=1
@@ -450,7 +447,7 @@ class ProbMsgAggrQMIXTrainer(OffPolicyTrainer):
                         )
                         q_tot_next = ret_next["q_tot"]
 
-                    y_tot = rewards + (1 - terminations) * self.gamma * q_tot_next
+                    y_tot = r_last + (1 - termination_last) * self.gamma * q_tot_next
                     td_error = torch.nn.functional.mse_loss(q_tot, y_tot.detach())
                     ag_distribution = Normal(ag_mu, ag_std)
                     critic_distribution = Normal(

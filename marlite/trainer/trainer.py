@@ -68,6 +68,7 @@ class Trainer:
         compile_models: bool = False,
         sample_mode: str = "ratio",
         max_grad_norm: float = 5.0,
+        reward_aggr_mode: str = "sum",
     ):
         self.env_config = env_config
         self.critic_config = critic_config
@@ -78,6 +79,7 @@ class Trainer:
         self.eval_metric_list = eval_metric_list
         self.sample_mode = sample_mode
         self.max_grad_norm = max_grad_norm
+        self.reward_aggr_mode = reward_aggr_mode
 
         if self.sample_mode not in ["ratio", "direct"]:
             raise ValueError(
@@ -176,6 +178,7 @@ class Trainer:
         trainable_params = {
             "eval_agent_group": get_state_dict(self.eval_agent_group),
             "eval_critic": get_state_dict(self.eval_critic),
+            "reward_aggr_mode": self.reward_aggr_mode,
         }
         self._add_target_params_for_sync(trainable_params)
         self.worker_group.broadcast_params(trainable_params)
@@ -267,6 +270,27 @@ class Trainer:
         logging.info(
             f"Intermediate results saved for epoch {epoch}. Results saved to {yaml_path}"
         )
+
+    def _aggregate_rewards(self, rewards: torch.Tensor, dim: int = -1) -> torch.Tensor:
+        """Aggregate per-agent rewards along the agent dimension.
+
+        At rollout time, dead / missing agents get reward zero-padded via
+        ``ensure_all_agents_present`` in ``env_util.py``, so the batch tensor
+        always has shape ``(..., n_agents)`` with zeros for dead agents.
+
+        Modes:
+            ``"sum"`` (default):  sum across all agents (dead agents contribute 0).
+            ``"mean"``:           divide by ``n_agents`` (including dead ones).
+        """
+        if self.reward_aggr_mode == "sum":
+            return rewards.sum(dim=dim)
+        elif self.reward_aggr_mode == "mean":
+            return rewards.mean(dim=dim)
+        else:
+            raise ValueError(
+                f"Unknown reward_aggr_mode '{self.reward_aggr_mode}'. "
+                "Expected 'sum' or 'mean'."
+            )
 
     def __del__(self):
         if hasattr(self, "worker_group") and self.worker_group is not None:

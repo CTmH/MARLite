@@ -1,0 +1,246 @@
+agent_group:
+  type: "QMIX"
+  agent_list:
+    agent_0: m1
+    agent_1: m1
+    agent_2: m1
+  models:
+    m1:
+      feature_extractor:
+        model_type: "Identity"
+      encoder:
+        model_type: "RNN"
+        input_shape: 18
+        rnn_hidden_dim: 64
+        rnn_layers: 1
+        output_shape: 64
+      decoder:
+        model_type: "Custom"
+        layers:
+        - type: "Linear"
+          in_features: 64
+          out_features: 6
+  optimizer:
+    type: "Adam"
+    lr: 0.0005
+    weight_decay: 0.0001
+
+environment:
+  module_name: "mpe2"
+  env_name: "simple_spread_v3"
+
+critic:
+  type: "QPLEXMixer"
+  action_dim: 6
+  n_agents: 3
+  weighted_head: true
+  is_minus_one: true
+  feature_extractor:
+    model_type: "Identity"
+  value_stream_w_final:
+    model_type: "Custom"
+    layers:
+    - type: "Linear"
+      in_features: 54
+      out_features: 64
+    - type: "ReLU"
+    - type: "Linear"
+      in_features: 64
+      out_features: 3
+  value_stream_v:
+    model_type: "Custom"
+    layers:
+    - type: "Linear"
+      in_features: 54
+      out_features: 64
+    - type: "ReLU"
+    - type: "Linear"
+      in_features: 64
+      out_features: 3
+  transformation:
+    model_type: "QplexTransformation"
+    state_dim: 54
+    n_agents: 3
+    n_head: 4
+    embed_dim: 32
+    attend_reg_coef: 0.001
+    selector_configs:
+    - model_type: "Custom"
+      layers:
+      - type: "Linear"
+        in_features: 54
+        out_features: 32
+    - model_type: "Custom"
+      layers:
+      - type: "Linear"
+        in_features: 54
+        out_features: 32
+    - model_type: "Custom"
+      layers:
+      - type: "Linear"
+        in_features: 54
+        out_features: 32
+    - model_type: "Custom"
+      layers:
+      - type: "Linear"
+        in_features: 54
+        out_features: 32
+    key_configs:
+    - model_type: "Custom"
+      layers:
+      - type: "Linear"
+        in_features: 54
+        out_features: 96
+    - model_type: "Custom"
+      layers:
+      - type: "Linear"
+        in_features: 54
+        out_features: 96
+    - model_type: "Custom"
+      layers:
+      - type: "Linear"
+        in_features: 54
+        out_features: 96
+    - model_type: "Custom"
+      layers:
+      - type: "Linear"
+        in_features: 54
+        out_features: 96
+    head_weight_config:
+      model_type: "Custom"
+      layers:
+      - type: "Linear"
+        in_features: 54
+        out_features: 64
+      - type: "ReLU"
+      - type: "Linear"
+        in_features: 64
+        out_features: 4
+    v_config:
+      model_type: "Custom"
+      layers:
+      - type: "Linear"
+        in_features: 54
+        out_features: 32
+      - type: "ReLU"
+      - type: "Linear"
+        in_features: 32
+        out_features: 1
+  joint_attention:
+    model_type: "QplexJointAttention"
+    state_dim: 54
+    action_dim: 6
+    n_agents: 3
+    n_head: 4
+    key_configs:
+    - model_type: "Custom"
+      layers:
+      - type: "Linear"
+        in_features: 54
+        out_features: 1
+    - model_type: "Custom"
+      layers:
+      - type: "Linear"
+        in_features: 54
+        out_features: 1
+    - model_type: "Custom"
+      layers:
+      - type: "Linear"
+        in_features: 54
+        out_features: 1
+    - model_type: "Custom"
+      layers:
+      - type: "Linear"
+        in_features: 54
+        out_features: 1
+    agent_extractor_configs:
+    - model_type: "Custom"
+      layers:
+      - type: "Linear"
+        in_features: 54
+        out_features: 3
+    - model_type: "Custom"
+      layers:
+      - type: "Linear"
+        in_features: 54
+        out_features: 3
+    - model_type: "Custom"
+      layers:
+      - type: "Linear"
+        in_features: 54
+        out_features: 3
+    - model_type: "Custom"
+      layers:
+      - type: "Linear"
+        in_features: 54
+        out_features: 3
+    action_extractor_configs:
+    - model_type: "Custom"
+      layers:
+      - type: "Linear"
+        in_features: 72
+        out_features: 3
+    - model_type: "Custom"
+      layers:
+      - type: "Linear"
+        in_features: 72
+        out_features: 3
+    - model_type: "Custom"
+      layers:
+      - type: "Linear"
+        in_features: 72
+        out_features: 3
+    - model_type: "Custom"
+      layers:
+      - type: "Linear"
+        in_features: 72
+        out_features: 3
+  optimizer:
+    type: "RMSprop"
+    lr: 0.0005
+    alpha: 0.99
+    eps: 0.00001
+
+rollout:
+  manager_type: "multi-process"
+  worker_type: "multi-process"
+  n_workers: 1
+  n_episodes: 1
+  n_eval_episodes: 1
+  traj_len: 7
+  episode_limit: 20
+  device: "cpu"
+
+replay_buffer:
+  type: "Normal"
+  capacity: 5
+  traj_len: 7
+
+analyzer:
+  type: "default"
+
+trainer:
+  type: "QPLEX"
+  gamma: 0.95
+  eval_epsilon: 0.01
+  workdir: "./results/qplex_default"
+  train_device: "cpu"
+
+  epsilon_scheduler:
+    type: "logarithmic"
+    start_value: 1.0
+    end_value: 0.05
+    decay_steps: 10
+
+  sample_ratio_scheduler:
+    type: "linear"
+    start_value: 16
+    end_value: 16
+    decay_steps: 10
+
+  train_args:
+    epochs: 1
+    target_first_metric: 100
+    rollback_interval: 1
+    batch_size: 8
+    learning_times_per_epoch: 1

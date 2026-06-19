@@ -207,6 +207,7 @@ class SelfSupervisedMAPPOTrainer(OnPolicyTrainer):
             "eval_agent_group": get_state_dict(self.eval_agent_group),
             "eval_critic": get_state_dict(self.eval_critic),
             "ssl_model": get_state_dict(self.ssl_model),
+            "reward_aggr_mode": self.reward_aggr_mode,
         }
         self.worker_group.broadcast_params(trainable_params)
         critic_lr = self.critic_optimizer.param_groups[0]["lr"]

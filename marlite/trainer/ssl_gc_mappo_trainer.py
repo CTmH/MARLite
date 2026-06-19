@@ -323,11 +323,11 @@ class SSLGroupConsensusMAPPOTrainer(SelfSupervisedMAPPOTrainer):
                         )["v"][:, 0]
 
                     # ── Single-step TD residual as advantage ──
-                    r_last = rewards.sum(dim=2)[:, -1].to(device)
-                    done_last = terminations.any(dim=2)[:, -1].to(
+                    r_last = self._aggregate_rewards(rewards[:, -1]).to(device)
+                    termination_last = terminations[:, -1].prod(dim=-1).to(
                         dtype=torch.float32, device=device
                     )
-                    delta = r_last + self.gamma * v_next * (1.0 - done_last) - v_last
+                    delta = r_last + self.gamma * v_next * (1.0 - termination_last) - v_last
                     advantages_last = delta
                     returns = delta + v_last
 

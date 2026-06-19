@@ -113,10 +113,8 @@ class QTRANTrainer(OffPolicyTrainer):
                     else:
                         use_action_mask = False
 
-                    rewards = rewards[:, -1]
-                    rewards = rewards.sum(dim=1).to(self.train_device)
-                    terminations = terminations[:, -1]
-                    terminations = terminations.prod(dim=1).to(self.train_device)
+                    r_last = self._aggregate_rewards(rewards[:, -1]).to(self.train_device)
+                    termination_last = terminations[:, -1].prod(dim=1).to(self.train_device)
 
                     timestep_padding_mask = torch.stack(
                         [timestep_padding_mask] * n_agents, dim=1
@@ -190,7 +188,7 @@ class QTRANTrainer(OffPolicyTrainer):
                             .mean(dim=1)
                         )
 
-                    y = rewards + (1 - terminations) * self.gamma * q_jt_next_at_best
+                    y = r_last + (1 - termination_last) * self.gamma * q_jt_next_at_best
                     td_loss = F.mse_loss(q_jt_scalar, y.detach())
 
                     qmax_idx = q_val.argmax(dim=-1)
@@ -198,8 +196,9 @@ class QTRANTrainer(OffPolicyTrainer):
                     q_jt_at_qmax = Q_jt_per_action.gather(
                         -1, qmax_idx.unsqueeze(-1)
                     ).squeeze(-1)
+                    is_optimal = (actions_last == qmax_idx).all(dim=1).float()
                     diff_opt = qmax.sum(1) - q_jt_at_qmax.detach().sum(1) + v_jt.squeeze(-1)
-                    L_opt = diff_opt.square().mean()
+                    L_opt = (is_optimal * diff_opt.square()).mean()
 
                     q_actual_i = q_val.gather(
                         -1, actions_last.unsqueeze(-1)
@@ -208,7 +207,7 @@ class QTRANTrainer(OffPolicyTrainer):
                     Q_prime_cf = q_val + counter_sum
                     D = Q_prime_cf - Q_jt_per_action.detach() + v_jt.unsqueeze(-1)
                     D_min = D.min(dim=-1).values
-                    L_nopt = D_min.square().mean()
+                    L_nopt = (is_optimal.unsqueeze(-1) * D_min.square()).mean()
 
                     total_loss_batch = (
                         td_loss
