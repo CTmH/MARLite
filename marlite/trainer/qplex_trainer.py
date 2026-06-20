@@ -262,6 +262,10 @@ class QPLEXTrainer(OffPolicyTrainer):
                     total_loss += total_batch_loss.detach().cpu().item()
                     total_batches += 1
 
+                    # Per-batch target update (hard / ema / polyak)
+                    self._total_batches_processed += 1
+                    self._update_target_after_batch()
+
                     pbar.update(actions.shape[0])
 
         # Move back to CPU to free GPU memory.

@@ -218,4 +218,7 @@ class QPLEXWorker(OffPolicyWorker):
         self.critic_optimizer.step()
         self.agent_optimizer.step()
 
+        # Per-batch target update (hard / ema / polyak)
+        self._update_target_after_batch()
+
         return total_loss.detach().cpu().item()

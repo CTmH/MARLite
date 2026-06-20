@@ -472,6 +472,9 @@ class VAEGraphQMIXWorker(OffPolicyWorker):
         if not is_warmup:
             self.ssl_optimizer.step()
 
+        # Per-batch target update (hard / ema / polyak)
+        self._update_target_after_batch()
+
         # Return losses
         vae_loss_value = (
             vae_loss.detach().cpu().item()

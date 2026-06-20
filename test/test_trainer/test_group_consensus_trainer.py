@@ -157,7 +157,7 @@ trainer:
             )
             trainer.collect_experience(0.9)
             trainer.learn(sample_size=32, batch_size=8, times=1)
-            trainer.update_target_model_params()
+            trainer._update_target_after_batch()
             critic_params = trainer.target_critic.state_dict()
             agent_group_params = trainer.target_agent_group.state_dict()
 
@@ -199,7 +199,7 @@ trainer:
             origin_critic_params = deepcopy(trainer.target_critic.state_dict())
             trainer.collect_experience(0.9)
             trainer.learn(sample_size=32, batch_size=8, times=1)
-            trainer.update_target_model_params()
+            trainer._update_target_after_batch()
             critic_params = trainer.target_critic.state_dict()
 
             for w1, w2 in zip(critic_params.values(), origin_critic_params.values()):

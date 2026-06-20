@@ -28,4 +28,5 @@ class QTRANConfigProcessor(ConfigProcessor):
         trainer_kwargs["v_lr_scheduler_conf"] = v_lr
         trainer_kwargs["lambda_opt"] = config["trainer"].get("lambda_opt", 1.0)
         trainer_kwargs["lambda_nopt"] = config["trainer"].get("lambda_nopt", 1.0)
+        trainer_kwargs["is_optimal_mask_mode"] = config["trainer"].get("is_optimal_mask_mode", True)
         return trainer_kwargs, train_args, checkpoint

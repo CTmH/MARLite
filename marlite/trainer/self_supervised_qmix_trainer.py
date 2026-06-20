@@ -216,26 +216,11 @@ class SelfSupervisedQMIXTrainer(OffPolicyTrainer):
         )
         return self
 
-    def update_target_model_params(self):
-        """Update target models per ``target_update_mode`` (agent + critic only).
-
-        The SSL model is not used for TD-computation, so no target copy is
-        maintained for it.
-        """
-        if self.target_update_mode == "hard":
-            load_state_dict_into(self.target_agent_group, get_state_dict(self.eval_agent_group))
-            load_state_dict_into(self.target_critic, get_state_dict(self.eval_critic))
-        else:
-            self._ema_update(self.target_agent_group, self.eval_agent_group, self.target_update_tau)
-            self._ema_update(self.target_critic, self.eval_critic, self.target_update_tau)
-        return self
-
     def train(
         self,
         epochs,
         target_first_metric,
         rollback_interval=1,
-        update_target_interval=1,
         batch_size=64,
         learning_times_per_epoch=1,
     ):
@@ -275,10 +260,7 @@ class SelfSupervisedQMIXTrainer(OffPolicyTrainer):
 
             # Sync eval params from workers before evaluation
             self._sync_eval_params_from_workers()
-
-            # EMA mode: soft-update target after each learning epoch.
-            if self.target_update_mode == "ema":
-                self.update_target_model_params()
+            self._sync_target_params_from_workers()
 
             # Save checkpoint
             checkpoint_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -383,13 +365,6 @@ class SelfSupervisedQMIXTrainer(OffPolicyTrainer):
                 load_state_dict_into(self.target_critic, get_state_dict(self.eval_critic))
                 logging.info(
                     f"Epoch {epoch}: Rolled back eval/ssl/target to cached parameters."
-                )
-
-            # Periodic target update for hard and polyak modes
-            if epoch % update_target_interval == 0 and self.target_update_mode != "ema":
-                self.update_target_model_params()
-                logging.info(
-                    f"Epoch {epoch}: Target model updated via '{self.target_update_mode}' mode."
                 )
 
         logging.info(

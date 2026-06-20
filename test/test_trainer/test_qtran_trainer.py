@@ -118,6 +118,7 @@ trainer:
   eval_epsilon: 0.01
   lambda_opt: 1.0
   lambda_nopt: 1.0
+  is_optimal_mask_mode: true
   workdir: "./test/results/replace_by_tempfile"
   train_device: "cpu"
   epsilon_scheduler:
@@ -160,6 +161,41 @@ class TestQTRANTrainer(unittest.TestCase):
             self.assertTrue(hasattr(trainer.eval_critic, "psi_net"))
             self.assertTrue(hasattr(trainer.target_critic, "phi_net"))
             self.assertTrue(hasattr(trainer.target_critic, "psi_net"))
+
+    def test_is_optimal_mask_mode_default(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            trainer = self._create_trainer(temp_dir)
+            self.assertTrue(trainer.is_optimal_mask_mode)
+
+    def test_is_optimal_mask_mode_disabled(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cfg = yaml.safe_load(QTRAN_CFG)
+            cfg["trainer"]["is_optimal_mask_mode"] = False
+            cfg["trainer"]["workdir"] = temp_dir
+            trainer = TrainerConfig(cfg).create_trainer()
+            self.assertFalse(trainer.is_optimal_mask_mode)
+
+    def test_target_update_syncs_v_net(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            trainer = self._create_trainer(temp_dir)
+            for p in trainer.eval_v_net.parameters():
+                torch.nn.init.ones_(p)
+            for p in trainer.eval_agent_group.parameters():
+                torch.nn.init.ones_(p)
+            for p in trainer.eval_critic.parameters():
+                torch.nn.init.ones_(p)
+
+            trainer._update_target_after_batch()
+
+            for ep, tp in zip(
+                trainer.eval_agent_group.parameters(),
+                trainer.target_agent_group.parameters(),
+            ):
+                self.assertTrue(torch.equal(ep, tp))
+            for ep, tp in zip(
+                trainer.eval_critic.parameters(), trainer.target_critic.parameters()
+            ):
+                self.assertTrue(torch.equal(ep, tp))
 
     def test_create_trainer_has_three_optimizers(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -212,7 +248,7 @@ class TestQTRANTrainer(unittest.TestCase):
             for p in trainer.eval_critic.parameters():
                 torch.nn.init.ones_(p)
 
-            trainer.update_target_model_params()
+            trainer._update_target_after_batch()
 
             for ep, tp in zip(
                 trainer.eval_agent_group.parameters(),
@@ -242,7 +278,7 @@ class TestQTRANTrainer(unittest.TestCase):
             trainer = self._create_trainer(temp_dir)
             trainer.collect_experience(0.9)
             trainer.learn(sample_size=8, batch_size=4, times=1)
-            trainer.update_target_model_params()
+            trainer._update_target_after_batch()
             trainer.save_current_model("ckpt0")
 
             params_before = {

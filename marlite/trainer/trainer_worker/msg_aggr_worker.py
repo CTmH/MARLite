@@ -230,6 +230,9 @@ class MsgAggrWorker(OffPolicyWorker):
         self.critic_optimizer.step()
         self.agent_optimizer.step()
 
+        # Per-batch target update (hard / ema / polyak)
+        self._update_target_after_batch()
+
         return critic_loss.detach().cpu().item()
 
 
@@ -447,5 +450,8 @@ class ProbMsgAggrWorker(MsgAggrWorker):
         torch.nn.utils.clip_grad_norm_(self.eval_agent_group.parameters(), max_norm=self.max_grad_norm)
         self.critic_optimizer.step()
         self.agent_optimizer.step()
+
+        # Per-batch target update (hard / ema / polyak)
+        self._update_target_after_batch()
 
         return critic_loss.detach().cpu().item()

@@ -272,6 +272,9 @@ class GroupConsensusWorker(OffPolicyWorker):
         self.critic_optimizer.step()
         self.agent_optimizer.step()
 
+        # Per-batch target update (hard / ema / polyak)
+        self._update_target_after_batch()
+
         return critic_loss.detach().cpu().item()
 
     def handle_command(

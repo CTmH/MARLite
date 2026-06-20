@@ -233,6 +233,11 @@ class GroupConsensusTrainer(OffPolicyTrainer):
                     total_td += td_error.detach().cpu().item()
                     total_kl += kl_divergence.detach().cpu().item()
                     total_batches += 1
+
+                    # Per-batch target update (hard / ema / polyak)
+                    self._total_batches_processed += 1
+                    self._update_target_after_batch()
+
                     pbar.update(bs)
 
         self.eval_agent_group.to("cpu")

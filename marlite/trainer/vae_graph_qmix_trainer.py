@@ -189,6 +189,10 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
                         total_vae += vae_loss.detach().cpu().item()
                     total_batches += 1
 
+                    # Per-batch target update (hard / ema / polyak)
+                    self._total_batches_processed += 1
+                    self._update_target_after_batch()
+
                     bs = batch["states"].shape[0]
                     pbar.update(bs)
 

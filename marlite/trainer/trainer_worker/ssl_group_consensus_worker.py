@@ -374,6 +374,9 @@ class SSLGroupConsensusWorker(OffPolicyWorker):
         if not is_warmup:
             self.ssl_optimizer.step()
 
+        # Per-batch target update (hard / ema / polyak)
+        self._update_target_after_batch()
+
         ssl_loss_value = (
             ssl_loss.detach().cpu().item()
             if isinstance(ssl_loss, torch.Tensor)

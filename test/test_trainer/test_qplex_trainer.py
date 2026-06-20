@@ -216,7 +216,7 @@ class TestQPLEXTrainer(unittest.TestCase):
             trainer.collect_experience(0.9)
             origin_critic_params = deepcopy(trainer.target_critic.state_dict())
             loss = trainer.learn(sample_size=8, batch_size=4, times=1)
-            trainer.update_target_model_params()
+            trainer._update_target_after_batch()
             critic_params = trainer.target_critic.state_dict()
             n_changed = sum(
                 1 for k in origin_critic_params
@@ -231,7 +231,7 @@ class TestQPLEXTrainer(unittest.TestCase):
             trainer = self._create_trainer(temp_dir)
             trainer.collect_experience(0.9)
             trainer.learn(sample_size=8, batch_size=4, times=1)
-            trainer.update_target_model_params()
+            trainer._update_target_after_batch()
             trainer.save_current_model("ckpt0")
 
             params_before = {
@@ -257,7 +257,7 @@ class TestQPLEXTrainer(unittest.TestCase):
                 torch.nn.init.ones_(p)
             for p in trainer.eval_critic.parameters():
                 torch.nn.init.ones_(p)
-            trainer.update_target_model_params()
+            trainer._update_target_after_batch()
             for ep, tp in zip(
                 trainer.eval_agent_group.parameters(),
                 trainer.target_agent_group.parameters(),

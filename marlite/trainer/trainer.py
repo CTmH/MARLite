@@ -180,6 +180,9 @@ class Trainer:
             "eval_critic": get_state_dict(self.eval_critic),
             "reward_aggr_mode": self.reward_aggr_mode,
         }
+        # Off-policy trainers (subclasses) override _add_target_params_for_sync
+        # to also push target_agent_group, target_critic, target_update_mode,
+        # target_update_tau, update_target_interval.
         self._add_target_params_for_sync(trainable_params)
         self.worker_group.broadcast_params(trainable_params)
 

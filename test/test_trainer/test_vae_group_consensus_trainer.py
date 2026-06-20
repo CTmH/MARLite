@@ -310,6 +310,7 @@ trainer:
   kl_divergence_weight: 0.005
   loss_combination_method: "pit_loss"
   warmup_epochs: 0
+  update_target_interval: 1
 
   epsilon_scheduler:
     type: "linear"
@@ -326,7 +327,6 @@ trainer:
   train_args:
     epochs: 1
     target_first_metric: 10000000
-    update_target_interval: 1
     batch_size: 8
     learning_times_per_epoch: 1
 """
@@ -360,7 +360,7 @@ trainer:
             )
             self.trainer.collect_experience(0.9)
             self.trainer.learn(sample_size=32, batch_size=8, times=1)
-            self.trainer.update_target_model_params()
+            self.trainer._update_target_after_batch()
             critic_params = self.trainer.target_critic.state_dict()
             agent_group_params = self.trainer.target_agent_group.state_dict()
 
@@ -402,7 +402,7 @@ trainer:
             origin_critic_params = deepcopy(self.trainer.target_critic.state_dict())
             self.trainer.collect_experience(0.9)
             self.trainer.learn(sample_size=32, batch_size=8, times=1)
-            self.trainer.update_target_model_params()
+            self.trainer._update_target_after_batch()
             critic_params = self.trainer.target_critic.state_dict()
 
             for w1, w2 in zip(critic_params.values(), origin_critic_params.values()):
@@ -437,7 +437,7 @@ trainer:
 
             self.trainer.collect_experience(0.9)
             self.trainer.learn(sample_size=32, batch_size=8, times=1)
-            self.trainer.update_target_model_params()
+            self.trainer._update_target_after_batch()
 
             critic_params = self.trainer.target_critic.state_dict()
             agent_group_params = self.trainer.target_agent_group.state_dict()

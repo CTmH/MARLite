@@ -29,10 +29,12 @@ class QTRANTrainer(OffPolicyTrainer):
         v_lr_scheduler_conf: Optional[LRSchedulerConfig],
         lambda_opt: float = 1.0,
         lambda_nopt: float = 1.0,
+        is_optimal_mask_mode: bool = True,
         **kwargs,
     ):
         self.lambda_opt = lambda_opt
         self.lambda_nopt = lambda_nopt
+        self.is_optimal_mask_mode = is_optimal_mask_mode
         self.v_net_config = v_net_config
         self.v_optimizer_config = v_optimizer_config
         self.v_lr_scheduler_conf = v_lr_scheduler_conf
@@ -168,7 +170,7 @@ class QTRANTrainer(OffPolicyTrainer):
                             q_val_next_eval = torch.masked_fill(
                                 q_val_next_eval, ~next_avail_actions, -torch.inf
                             )
-                        best_actions = q_val_next_eval.argmax(dim=-1)
+                        next_best_actions = q_val_next_eval.argmax(dim=-1)
 
                         self.target_agent_group.eval()
                         ret_next_target = self.target_agent_group(
@@ -179,11 +181,11 @@ class QTRANTrainer(OffPolicyTrainer):
                         enc_out_next = ret_next_target["enc_out"]
 
                         self.target_critic.eval()
-                        Q_jt_next = self.target_critic(enc_out_next, best_actions)[
+                        Q_jt_next = self.target_critic(enc_out_next, next_best_actions)[
                             "q_per_action"
                         ]
                         q_jt_next_at_best = (
-                            Q_jt_next.gather(-1, best_actions.unsqueeze(-1))
+                            Q_jt_next.gather(-1, next_best_actions.unsqueeze(-1))
                             .squeeze(-1)
                             .mean(dim=1)
                         )
@@ -191,14 +193,14 @@ class QTRANTrainer(OffPolicyTrainer):
                     y = r_last + (1 - termination_last) * self.gamma * q_jt_next_at_best
                     td_loss = F.mse_loss(q_jt_scalar, y.detach())
 
-                    qmax_idx = q_val.argmax(dim=-1)
+                    current_best_actions = q_val.argmax(dim=-1)
                     qmax = q_val.max(dim=-1).values
                     q_jt_at_qmax = Q_jt_per_action.gather(
-                        -1, qmax_idx.unsqueeze(-1)
+                        -1, current_best_actions.unsqueeze(-1)
                     ).squeeze(-1)
-                    is_optimal = (actions_last == qmax_idx).all(dim=1).float()
+                    is_optimal = (actions_last == current_best_actions).all(dim=1).float()
                     diff_opt = qmax.sum(1) - q_jt_at_qmax.detach().sum(1) + v_jt.squeeze(-1)
-                    L_opt = (is_optimal * diff_opt.square()).mean()
+                    diff_opt_sq = diff_opt.square()
 
                     q_actual_i = q_val.gather(
                         -1, actions_last.unsqueeze(-1)
@@ -207,7 +209,17 @@ class QTRANTrainer(OffPolicyTrainer):
                     Q_prime_cf = q_val + counter_sum
                     D = Q_prime_cf - Q_jt_per_action.detach() + v_jt.unsqueeze(-1)
                     D_min = D.min(dim=-1).values
-                    L_nopt = (is_optimal.unsqueeze(-1) * D_min.square()).mean()
+                    D_min_sq = D_min.square()
+
+                    if self.is_optimal_mask_mode:
+                        is_suboptimal = 1.0 - is_optimal
+                        denom_opt = is_optimal.sum().clamp(min=1.0)
+                        denom_nopt = is_suboptimal.sum().clamp(min=1.0)
+                        L_opt = (is_optimal * diff_opt_sq).sum() / denom_opt
+                        L_nopt = (is_suboptimal.unsqueeze(-1) * D_min_sq).sum() / denom_nopt
+                    else:
+                        L_opt = diff_opt_sq.mean()
+                        L_nopt = D_min_sq.mean()
 
                     total_loss_batch = (
                         td_loss
@@ -236,6 +248,11 @@ class QTRANTrainer(OffPolicyTrainer):
 
                     total_loss += total_loss_batch.detach().cpu().item()
                     total_batches += 1
+
+                    # Per-batch target update (hard / ema / polyak)
+                    self._total_batches_processed += 1
+                    self._update_target_after_batch()
+
                     pbar.update(batch["states"].shape[0])
 
         self.eval_agent_group.to("cpu")
@@ -247,17 +264,6 @@ class QTRANTrainer(OffPolicyTrainer):
         torch.cuda.empty_cache()
 
         return total_loss / max(total_batches, 1)
-
-    def update_target_model_params(self):
-        if self.target_update_mode == "hard":
-            load_state_dict_into(self.target_agent_group, get_state_dict(self.eval_agent_group))
-            load_state_dict_into(self.target_critic, get_state_dict(self.eval_critic))
-        else:
-            self._ema_update(
-                self.target_agent_group, self.eval_agent_group, self.target_update_tau
-            )
-            self._ema_update(self.target_critic, self.eval_critic, self.target_update_tau)
-        return self
 
     def save_current_model(self, checkpoint: str):
         agent_path = os.path.join(self.checkpointdir, checkpoint, "agent")
@@ -340,7 +346,6 @@ class QTRANTrainer(OffPolicyTrainer):
         epochs,
         target_first_metric,
         rollback_interval=1,
-        update_target_interval=1,
         batch_size=64,
         learning_times_per_epoch=1,
     ):
@@ -375,8 +380,9 @@ class QTRANTrainer(OffPolicyTrainer):
             )
             logging.info(f"Epoch {epoch}: Loss {loss:.4f}")
 
-            if self.target_update_mode == "ema":
-                self.update_target_model_params()
+            # Per-batch target updates are performed inside _learn_single_gpu
+            # (see _update_target_after_batch).  QTRAN is single-GPU, so no
+            # worker sync is required.
 
             checkpoint_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             checkpoint_name = f"checkpoint_{checkpoint_time}_{epoch}"
@@ -475,12 +481,6 @@ class QTRANTrainer(OffPolicyTrainer):
                 load_state_dict_into(self.target_critic, get_state_dict(self.eval_critic))
                 logging.info(
                     f"Epoch {epoch}: Rolled back eval+v_net+target to cached parameters."
-                )
-
-            if epoch % update_target_interval == 0 and self.target_update_mode != "ema":
-                self.update_target_model_params()
-                logging.info(
-                    f"Epoch {epoch}: Target model updated via '{self.target_update_mode}' mode."
                 )
 
         logging.info(

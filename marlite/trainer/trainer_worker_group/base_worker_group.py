@@ -371,6 +371,20 @@ class BaseWorkerGroup(ABC):
         params = self.param_queues[0].get()
         return _dict_to_cpu(params)
 
+    def read_target_params_from_worker0(self) -> Dict[str, Any]:
+        """Read target parameters from Worker 0.
+
+        Workers do per-batch target updates locally (their eval models are
+        scattered and target is hard-coupled to that eval).  This method
+        pulls worker 0's target state back to the master so the master
+        view stays in sync — and the next epoch's broadcast
+        (``_sync_params_to_workers``) propagates it to all workers, which
+        prevents cross-worker drift.
+        """
+        self.cmd_queues[0].put("SYNC_TARGET_TO_MAIN")
+        params = self.param_queues[0].get()
+        return _dict_to_cpu(params)
+
     def train_step(self, batch: Dict[str, Any]) -> float:
         """
         Execute one training step across all workers.

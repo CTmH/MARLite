@@ -35,6 +35,7 @@ class OffPolicyTrainer(Trainer):
         eval_episodes_to_replay_ratio: float = 0.25,
         target_update_mode: str = "hard",
         target_update_tau: float = 0.005,
+        update_target_interval: int = 1,
         **kwargs,
     ):
         self.epsilon = epsilon_scheduler
@@ -43,6 +44,8 @@ class OffPolicyTrainer(Trainer):
         self.eval_episodes_to_replay_ratio = eval_episodes_to_replay_ratio
         self.target_update_mode = target_update_mode
         self.target_update_tau = target_update_tau
+        self.update_target_interval = update_target_interval
+        self._total_batches_processed = 0
         if self.target_update_mode not in ("hard", "polyak", "ema"):
             raise ValueError(
                 f"target_update_mode must be 'hard', 'polyak', or 'ema', got '{self.target_update_mode}'"
@@ -88,6 +91,12 @@ class OffPolicyTrainer(Trainer):
     def _add_target_params_for_sync(self, trainable_params):
         trainable_params["target_agent_group"] = get_state_dict(self.target_agent_group)
         trainable_params["target_critic"] = get_state_dict(self.target_critic)
+        # Push target-update config so workers can mirror the per-batch update
+        # that the master performs (workers run their own _update_target_after_batch
+        # in their train_step to avoid IPC on every batch).
+        trainable_params["target_update_mode"] = self.target_update_mode
+        trainable_params["target_update_tau"] = float(self.target_update_tau)
+        trainable_params["update_target_interval"] = int(self.update_target_interval)
 
     def _sync_eval_params_from_workers(self):
         if self.worker_group is None:
@@ -97,6 +106,26 @@ class OffPolicyTrainer(Trainer):
             self.eval_agent_group, eval_params["eval_agent_group"]
         )
         load_state_dict_into(self.eval_critic, eval_params["eval_critic"])
+
+    def _sync_target_params_from_workers(self):
+        """Read target params from worker 0 to the master GPU.
+
+        Workers do per-batch target updates locally (so target tracks eval
+        without IPC overhead).  This method syncs the master's copy of
+        target_agent_group / target_critic from worker 0 each epoch,
+        preventing drift between master and workers, and between workers
+        themselves (the next epoch's _sync_params_to_workers broadcasts
+        master→all workers, resetting the cross-worker drift).
+        """
+        if self.worker_group is None:
+            return
+        target_params = self.worker_group.read_target_params_from_worker0()
+        load_state_dict_into(
+            self.target_agent_group, target_params["target_agent_group"]
+        )
+        load_state_dict_into(
+            self.target_critic, target_params["target_critic"]
+        )
 
     def evaluate(self):
         self.eval_agent_group.eval().to("cpu")
@@ -138,20 +167,35 @@ class OffPolicyTrainer(Trainer):
             for tp, sp in zip(target.parameters(), source.parameters()):
                 tp.data.mul_(1 - tau).add_(sp.data, alpha=tau)
 
-    def update_target_model_params(self):
-        """Update target models per ``target_update_mode``.
+    def _update_target_after_batch(self):
+        """Per-batch target update.  Unified for hard / ema / polyak.
 
-        ``"hard"`` copies eval parameters directly (periodic hard sync).
-        ``"polyak"`` blends eval towards target at each update interval.
-        ``"ema"`` applies polyak averaging after every gradient step.
+        All three modes respect ``update_target_interval``:
+
+        - ``"hard"``: hard-copy eval → target every ``interval`` batches.
+        - ``"ema"`` / ``"polyak"``: Polyak averaging with τ=``target_update_tau``,
+          applied every ``interval`` batches.
+
+        With the default ``interval=1`` the update fires every batch.
+        With ``interval=N`` the update fires only on batches where
+        ``_total_batches_processed % N == 0``.
         """
+        if self._total_batches_processed % self.update_target_interval != 0:
+            return
         if self.target_update_mode == "hard":
-            load_state_dict_into(self.target_agent_group, get_state_dict(self.eval_agent_group))
-            load_state_dict_into(self.target_critic, get_state_dict(self.eval_critic))
+            load_state_dict_into(
+                self.target_agent_group, get_state_dict(self.eval_agent_group)
+            )
+            load_state_dict_into(
+                self.target_critic, get_state_dict(self.eval_critic)
+            )
         else:
-            self._ema_update(self.target_agent_group, self.eval_agent_group, self.target_update_tau)
-            self._ema_update(self.target_critic, self.eval_critic, self.target_update_tau)
-        return self
+            self._ema_update(
+                self.target_agent_group, self.eval_agent_group, self.target_update_tau
+            )
+            self._ema_update(
+                self.target_critic, self.eval_critic, self.target_update_tau
+            )
 
     def save_best_model(self):
         """Write cached best agent and critic params directly to disk."""
@@ -195,7 +239,6 @@ class OffPolicyTrainer(Trainer):
         epochs,
         target_first_metric,
         rollback_interval=1,
-        update_target_interval=1,
         batch_size=64,
         learning_times_per_epoch=1,
     ):
@@ -232,10 +275,7 @@ class OffPolicyTrainer(Trainer):
             logging.info(f"Epoch {epoch}: Loss {loss:.4f}")
 
             self._sync_eval_params_from_workers()
-
-            # EMA mode: soft-update target after each learning epoch.
-            if self.target_update_mode == "ema":
-                self.update_target_model_params()
+            self._sync_target_params_from_workers()
 
             checkpoint_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             checkpoint_name = f"checkpoint_{checkpoint_time}_{epoch}"
@@ -320,14 +360,6 @@ class OffPolicyTrainer(Trainer):
                 load_state_dict_into(self.target_critic, get_state_dict(self.eval_critic))
                 logging.info(
                     f"Epoch {epoch}: Rolled back eval/target to cached parameters."
-                )
-
-            # Periodic target update for hard and polyak modes (EMA updates
-            # after each gradient step, handled separately below).
-            if epoch % update_target_interval == 0 and self.target_update_mode != "ema":
-                self.update_target_model_params()
-                logging.info(
-                    f"Epoch {epoch}: Target model updated via '{self.target_update_mode}' mode."
                 )
 
         logging.info(
