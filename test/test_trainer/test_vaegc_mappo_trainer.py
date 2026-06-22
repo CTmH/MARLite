@@ -115,7 +115,7 @@ self_supervised_learning:
     max_entities_perception: 1
     n_workers: 0
   reconstruction_loss:
-    type: "MSE"
+    type: "PointSetMSE"
 
 trainer:
   type: "SSLGroupConsensusMAPPO"

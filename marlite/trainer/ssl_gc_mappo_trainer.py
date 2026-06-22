@@ -306,9 +306,13 @@ class SSLGroupConsensusMAPPOTrainer(SelfSupervisedMAPPOTrainer):
                     # ── Precompute group_indices from batch ──
                     group_indices_batch = batch.get("group_indices")
                     if group_indices_batch is not None:
-                        group_indices_np = group_indices_batch[:, -1, :].numpy()
+                        group_indices_t = group_indices_batch[:, -1, :].to(
+                            dtype=torch.long, device=device
+                        )
                     else:
-                        group_indices_np = np.zeros((bs, n_agents), dtype=np.int64) - 1
+                        group_indices_t = torch.full(
+                            (bs, n_agents), -1, dtype=torch.long, device=device
+                        )
 
                     # ── Critic forward: full sequence → V(s_{T-1}) only ──
                     self.eval_critic.train()
@@ -342,7 +346,7 @@ class SSLGroupConsensusMAPPOTrainer(SelfSupervisedMAPPOTrainer):
                     ret_agent = self.eval_agent_group(
                         observations_transposed, states_last,
                         timestep_padding_mask_expanded, alive_mask_d[:, -1, :],
-                        group_indices_np,
+                        group_indices_t,
                     )
                     action_logits = ret_agent["action_logits"]
                     group_consensus = ret_agent.get("group_consensus")
@@ -398,7 +402,7 @@ class SSLGroupConsensusMAPPOTrainer(SelfSupervisedMAPPOTrainer):
                             )
                         else:
                             recon_loss = self._recon_loss_per_agent(
-                                group_consensus, group_indices_np, targets,
+                                group_consensus, group_indices_t, targets,
                                 construct_mask, alive_mask_d,
                             )
                         kl = self._compute_kl_divergence(

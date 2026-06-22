@@ -455,10 +455,13 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
 
             # Compute KL divergence loss
             # KL(q(z|x) || p(z)) = -0.5 * sum(1 + log_var - mu^2 - exp(log_var))
-            # mu/log_var: (B, N, T, E), alive_mask: (B, T+1, N)
+            # mu/log_var: (B, N, E), alive_mask: (B, T, N)
+            # KL is per-agent (time dim aggregated in encoder); mask by last
+            # timestep - if agent is dead at the current step, it cannot
+            # receive messages and thus does not participate in consensus.
             kl_per_dim = 1 + log_var - mu.pow(2) - torch.exp(log_var)
-            kl_per_agent_t = -0.5 * kl_per_dim.sum(dim=-1)  # (B, N, T)
-            mask = alive_mask[:, :mu.shape[2], :].transpose(1, 2)  # (B, N, T)
+            kl_per_agent_t = -0.5 * kl_per_dim.sum(dim=-1)  # (B, N)
+            mask = alive_mask[:, -1, :]  # (B, N)
             kl_divergence = (kl_per_agent_t * mask).sum() / mask.sum().clamp(min=1)
 
             vae_loss = reconstruction_loss + self.kl_divergence_weight * kl_divergence
