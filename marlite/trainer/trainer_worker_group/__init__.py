@@ -24,6 +24,7 @@ from marlite.trainer.trainer_worker_group.group_consensus_worker_group import (
 from marlite.trainer.trainer_worker_group.ssl_group_consensus_worker_group import (
     SSLGroupConsensusWorkerGroup,
 )
+from marlite.trainer.trainer_worker_group.qtran_worker_group import QTRANWorkerGroup
 from marlite.trainer.trainer_worker_group.mappo_worker_group import (
     MAPPOWorkerGroup,
 )
@@ -41,6 +42,7 @@ __all__ = [
     "VAEGraphWorkerGroup",
     "GroupConsensusWorkerGroup",
     "SSLGroupConsensusWorkerGroup",
+    "QTRANWorkerGroup",
     "MAPPOWorkerGroup",
     "SSLGroupConsensusMAPPOWorkerGroup",
 ]

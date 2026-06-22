@@ -182,13 +182,27 @@ class Trainer:
         }
         # Off-policy trainers (subclasses) override _add_target_params_for_sync
         # to also push target_agent_group, target_critic, target_update_mode,
-        # target_update_tau, update_target_interval.
+        # target_update_tau, target_update_interval.
         self._add_target_params_for_sync(trainable_params)
         self.worker_group.broadcast_params(trainable_params)
 
         critic_lr = self.critic_optimizer.param_groups[0]["lr"]
         agent_lr = self.agent_optimizer.param_groups[0]["lr"]
-        self.worker_group.sync_lr_to_workers(critic_lr, agent_lr)
+        self.worker_group.sync_lr_to_workers(
+            critic_lr, agent_lr, **self._extra_sync_kwargs()
+        )
+
+    def _extra_sync_kwargs(self) -> dict:
+        """Return extra learning-rate kwargs forwarded to workers via SYNC_LR.
+
+        Subclasses that maintain additional optimizers (e.g. ``v_optimizer`` for
+        QTRAN, ``ssl_optimizer`` for self-supervised variants) override this
+        to inject their LRs into the per-epoch sync payload.
+
+        Returns:
+            Mapping of additional kwarg names to values.  Default is empty.
+        """
+        return {}
 
     def _add_target_params_for_sync(self, trainable_params):
         pass

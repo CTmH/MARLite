@@ -192,6 +192,10 @@ class SelfSupervisedQMIXTrainer(OffPolicyTrainer):
         load_state_dict_into(self.target_critic, get_state_dict(self.eval_critic))
         return self
 
+    def _extra_sync_kwargs(self) -> dict:
+        """Push the SSL auxiliary learning rate to workers via SYNC_LR."""
+        return {"ssl_lr": self.ssl_optimizer.param_groups[0]["lr"]}
+
     def save_best_model(self):
         """Write cached best params (agent, critic, ssl) directly to disk."""
         import os
@@ -224,6 +228,36 @@ class SelfSupervisedQMIXTrainer(OffPolicyTrainer):
         batch_size=64,
         learning_times_per_epoch=1,
     ):
+        """Run the self-supervised QMIX training loop.
+
+        Each iteration of the outer loop is one **epoch** (one roll-out +
+        one or more gradient updates + one evaluation).  ``rollback_interval``
+        is therefore expressed in **epoch** units, not in batch units.  This
+        is a different timescale from ``target_update_interval``, which is
+        expressed in **gradient-batch** units and gates per-batch target
+        refreshes inside ``_update_target_after_batch``.
+
+        Args:
+            epochs: Number of outer training iterations to run before
+                returning.  May terminate early if ``target_first_metric`` is
+                reached.
+            target_first_metric: Threshold on the first evaluation metric;
+                when ``first_metric >= target_first_metric`` the loop breaks
+                early and ``save_best_model`` is invoked.
+            rollback_interval: **Epoch-level** cadence at which the eval
+                networks (agent group, mixer critic, SSL auxiliary model)
+                are reverted to their cached best snapshots, and the target
+                networks are hard-copied from the reverted eval networks.
+                Measured in epochs (one rollback every ``rollback_interval``
+                epochs, including epoch 0).  Default ``1`` rolls back every
+                epoch.  Independent of ``target_update_interval``
+                (batch-level) — the two should be tuned separately, e.g. a
+                slow per-epoch rollback combined with a fast per-batch
+                target refresh.
+            batch_size: Mini-batch size for each gradient update.
+            learning_times_per_epoch: Number of gradient updates performed
+                after each roll-out (and before the next evaluation).
+        """
         for epoch in range(epochs):
             self.current_epoch = epoch
 
@@ -347,6 +381,15 @@ class SelfSupervisedQMIXTrainer(OffPolicyTrainer):
                 )
                 break
 
+            # Epoch-level rollback (independent of per-batch target updates):
+            # revert eval + SSL to the cached best snapshot every
+            # ``rollback_interval`` epochs, then re-anchor the target network
+            # by hard-copying the reverted eval weights into target.  The
+            # target refresh that happens *inside* this block is unconditional
+            # and overrides ``target_update_mode`` / ``target_update_interval``
+            # — those settings only govern the per-batch Polyak / hard
+            # refreshes performed by ``_update_target_after_batch`` between
+            # rollbacks.
             if epoch % rollback_interval == 0:
                 load_state_dict_into(
                     self.eval_agent_group,

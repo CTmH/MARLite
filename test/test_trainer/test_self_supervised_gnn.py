@@ -238,7 +238,7 @@ trainer:
   compile_models: false
   n_workers: 0
   self_supervised_learning_loss_weight: 0.75
-  update_target_interval: 2
+  target_update_interval: 2
 
   epsilon_scheduler:
     type: "linear"

@@ -135,7 +135,13 @@ class SSLGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
 
         critic_lr = self.critic_optimizer.param_groups[0]["lr"]
         agent_lr = self.agent_optimizer.param_groups[0]["lr"]
-        self.worker_group.sync_lr_to_workers(critic_lr, agent_lr)
+        self.worker_group.sync_lr_to_workers(
+            critic_lr, agent_lr, **self._extra_sync_kwargs()
+        )
+
+    def _extra_sync_kwargs(self) -> dict:
+        """Push the SSL auxiliary learning rate to workers via SYNC_LR."""
+        return {"ssl_lr": self.ssl_optimizer.param_groups[0]["lr"]}
 
     def _sync_eval_params_from_workers(self):
         if self.worker_group is None:

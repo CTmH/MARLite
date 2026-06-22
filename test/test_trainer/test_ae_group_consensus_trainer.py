@@ -307,7 +307,7 @@ trainer:
   sample_mode: "direct"
   n_workers: 0
   kl_divergence_weight: 0
-  update_target_interval: 1
+  target_update_interval: 1
   kl_on_agent: false
   kl_on_group: false
   consensus_mode: "ae"

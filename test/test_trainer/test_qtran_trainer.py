@@ -1,6 +1,7 @@
 import unittest
 import yaml
 import tempfile
+from copy import deepcopy
 import torch
 from marlite.trainer import TrainerConfig
 
@@ -302,6 +303,56 @@ class TestQTRANTrainer(unittest.TestCase):
                 self.assertTrue(torch.equal(v, trainer.eval_critic.state_dict()[k]))
             for k, v in params_before["v_net"].items():
                 self.assertTrue(torch.equal(v, trainer.eval_v_net.state_dict()[k]))
+
+    def test_distributed_data_parallel(self):
+        """Test QTRAN multi-GPU training with proper DDP initialization.
+
+        Skips on machines with fewer than 2 GPUs.  Verifies:
+
+        1. ``use_multi_gpu`` is True when ``train_device`` is a list.
+        2. ``QTRANWorkerGroup`` is constructed with one process per GPU.
+        3. ``learn()`` runs a multi-GPU step without error.
+        4. The per-batch target update fires and changes the target
+           critic (this exercises the round-trip from master → workers
+           and back through the target sync).
+        """
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA not available, skipping multi-GPU test")
+
+        gpu_count = torch.cuda.device_count()
+        if gpu_count < 2:
+            self.skipTest(
+                f"Need at least 2 GPUs for multi-GPU test, found {gpu_count}"
+            )
+
+        config = deepcopy(self.config)
+        config["rollout"]["episode_limit"] = 2
+        config["replay_buffer"]["capacity"] = 2
+        config["trainer"]["train_device"] = [f"cuda:{i}" for i in range(gpu_count)]
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config["trainer"]["workdir"] = temp_dir
+            trainer_config = TrainerConfig(config)
+            self.trainer = trainer_config.create_trainer()
+
+            self.assertTrue(self.trainer.use_multi_gpu)
+            self.assertEqual(len(self.trainer.device_list), gpu_count)
+            self.assertIsNotNone(self.trainer.worker_group)
+            self.assertEqual(self.trainer.worker_group.world_size, gpu_count)
+
+            origin_critic_params = deepcopy(
+                self.trainer.target_critic.state_dict()
+            )
+            self.trainer.collect_experience(0.9)
+            self.trainer.learn(sample_size=32, batch_size=8, times=1)
+            self.trainer._update_target_after_batch()
+
+            critic_params = self.trainer.target_critic.state_dict()
+            for w1, w2 in zip(
+                critic_params.values(), origin_critic_params.values()
+            ):
+                if w1.requires_grad:
+                    self.assertFalse(torch.equal(w1, w2))
 
 
 if __name__ == "__main__":

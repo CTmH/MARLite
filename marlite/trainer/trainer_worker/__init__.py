@@ -18,6 +18,7 @@ from marlite.trainer.trainer_worker.msg_aggr_worker import (
 )
 from marlite.trainer.trainer_worker.group_consensus_worker import GroupConsensusWorker
 from marlite.trainer.trainer_worker.ssl_group_consensus_worker import SSLGroupConsensusWorker
+from marlite.trainer.trainer_worker.qtran_worker import QTRANWorker
 from marlite.trainer.trainer_worker.mappo_worker import MAPPOWorker
 from marlite.trainer.trainer_worker.ssl_gc_mappo_worker import SSLGroupConsensusMAPPOWorker
 
@@ -32,6 +33,7 @@ __all__ = [
     "ProbMsgAggrWorker",
     "GroupConsensusWorker",
     "SSLGroupConsensusWorker",
+    "QTRANWorker",
     "MAPPOWorker",
     "SSLGroupConsensusMAPPOWorker",
 ]

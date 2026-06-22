@@ -310,7 +310,7 @@ trainer:
   kl_divergence_weight: 0.005
   loss_combination_method: "pit_loss"
   warmup_epochs: 0
-  update_target_interval: 1
+  target_update_interval: 1
 
   epsilon_scheduler:
     type: "linear"

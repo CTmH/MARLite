@@ -149,29 +149,14 @@ class SSLGroupConsensusWorker(OffPolicyWorker):
         return params
 
     def sync_params_from_main(self, params):
-        if isinstance(params, bytes):
-            buffer = io.BytesIO(params)
-            params = torch.load(buffer, weights_only=True)
-
-        if "eval_agent_group" in params and self.eval_agent_group is not None:
-            self.eval_agent_group.load_state_dict(
-                {k: v.clone() for k, v in params["eval_agent_group"].items()}
+        # Delegate to OffPolicyWorker for bytes-deserialisation,
+        # eval/target agent_group + critic, and target_update_*
+        # handling.  Only the SSL auxiliary model is added here.
+        params = super().sync_params_from_main(params)
+        if "ssl_model" in params and self.ssl_model is not None:
+            self.ssl_model.load_state_dict(
+                {k: v.clone() for k, v in params["ssl_model"].items()}
             )
-        if "target_agent_group" in params and self.target_agent_group is not None:
-            self.target_agent_group.load_state_dict(
-                {k: v.clone() for k, v in params["target_agent_group"].items()}
-            )
-        if "eval_critic" in params and self.eval_critic is not None:
-            self.eval_critic.load_state_dict(
-                {k: v.clone() for k, v in params["eval_critic"].items()}
-            )
-        if "target_critic" in params and self.target_critic is not None:
-            self.target_critic.load_state_dict(
-                {k: v.clone() for k, v in params["target_critic"].items()}
-            )
-        self.ssl_model.load_state_dict(
-            {k: v.clone() for k, v in params["ssl_model"].items()}
-        )
 
     def train_step(self, batch: Dict[str, Any]) -> tuple:
         current_epoch = batch.get("epoch", 0)

@@ -437,18 +437,27 @@ class BaseWorkerGroup(ABC):
             if ack != "ACK":
                 raise RuntimeError(f"Worker {i}: Expected ACK, got {ack}")
 
-    def sync_lr_to_workers(self, critic_lr: float, agent_lr: float):
+    def sync_lr_to_workers(
+        self, critic_lr: float, agent_lr: float, **extra
+    ):
         """
         Synchronize learning rates to all workers.
 
-        Called within _sync_params_to_workers() to ensure workers use the same
-        learning rates as the trainer.
+        Called within ``_sync_params_to_workers`` to ensure workers use the
+        same learning rates as the trainer.  ``critic_lr`` and ``agent_lr``
+        are always sent; additional algorithm-specific rates are forwarded
+        through ``**extra`` and consumed by the corresponding worker's
+        ``handle_command("SYNC_LR")`` override (e.g. ``v_lr`` for QTRAN,
+        ``ssl_lr`` for self-supervised variants).
 
         Args:
-            critic_lr: Current critic learning rate
-            agent_lr: Current agent group learning rate
+            critic_lr: Current critic learning rate.
+            agent_lr: Current agent group learning rate.
+            **extra: Additional learning rates (e.g. ``v_lr=...``,
+                ``ssl_lr=...``).  Each entry is included verbatim in the
+                per-worker ``lr_data`` payload.
         """
-        lr_data = {"critic_lr": critic_lr, "agent_lr": agent_lr}
+        lr_data = {"critic_lr": critic_lr, "agent_lr": agent_lr, **extra}
         for i in range(self.world_size):
             self.cmd_queues[i].put("SYNC_LR")
             self.param_queues[i].put(lr_data)

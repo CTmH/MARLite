@@ -568,7 +568,7 @@ trainer:
   train_device: "cpu"
   compile_models: false
   n_workers: 0
-  update_target_interval: 2
+  target_update_interval: 2
 
   epsilon_scheduler:
     type: "linear"

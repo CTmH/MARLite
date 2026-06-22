@@ -118,19 +118,6 @@ class GraphMAPPOTrainer(OnPolicyTrainer):
             max_grad_norm=self.max_grad_norm,
         )
 
-    def _sync_params_to_workers(self):
-        if self.worker_group is None:
-            return
-        trainable_params = {
-            "eval_agent_group": get_state_dict(self.eval_agent_group),
-            "eval_critic": get_state_dict(self.eval_critic),
-            "reward_aggr_mode": self.reward_aggr_mode,
-        }
-        self.worker_group.broadcast_params(trainable_params)
-        critic_lr = self.critic_optimizer.param_groups[0]["lr"]
-        agent_lr = self.agent_optimizer.param_groups[0]["lr"]
-        self.worker_group.sync_lr_to_workers(critic_lr, agent_lr)
-
     def _sync_eval_params_from_workers(self):
         if self.worker_group is None:
             return

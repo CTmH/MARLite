@@ -35,16 +35,37 @@ class OffPolicyTrainer(Trainer):
         eval_episodes_to_replay_ratio: float = 0.25,
         target_update_mode: str = "hard",
         target_update_tau: float = 0.005,
-        update_target_interval: int = 1,
+        target_update_interval: int = 1,
         **kwargs,
     ):
+        """Initialize the off-policy trainer.
+
+        Args:
+            epsilon_scheduler: Epsilon-greedy schedule for action exploration.
+            eval_epsilon: Constant epsilon used during evaluation rollouts.
+            update_cache_threshold: Minimum improvement required to refresh the
+                cached best-params snapshot.
+            eval_episodes_to_replay_ratio: Ratio of evaluation episodes used
+                to refresh the replay buffer (off-policy reuse).
+            target_update_mode: How the target network is updated each interval.
+                One of ``"hard"`` (direct copy), ``"ema"`` or ``"polyak"``
+                (Polyak averaging with τ = ``target_update_tau``).
+            target_update_tau: Polyak averaging coefficient τ ∈ (0, 1]. Only used
+                when ``target_update_mode`` is ``"ema"`` or ``"polyak"``.
+            target_update_interval: Number of gradient-update batches between
+                target network refreshes.  Applies uniformly to all three
+                update modes: hard copies the eval weights every interval;
+                ema/polyak apply one Polyak averaging step every interval.
+                ``1`` (default) updates every batch.
+            **kwargs: Forwarded to ``Trainer.__init__``.
+        """
         self.epsilon = epsilon_scheduler
         self.eval_epsilon = eval_epsilon
         self.update_cache_threshold = update_cache_threshold
         self.eval_episodes_to_replay_ratio = eval_episodes_to_replay_ratio
         self.target_update_mode = target_update_mode
         self.target_update_tau = target_update_tau
-        self.update_target_interval = update_target_interval
+        self.target_update_interval = target_update_interval
         self._total_batches_processed = 0
         if self.target_update_mode not in ("hard", "polyak", "ema"):
             raise ValueError(
@@ -96,7 +117,7 @@ class OffPolicyTrainer(Trainer):
         # in their train_step to avoid IPC on every batch).
         trainable_params["target_update_mode"] = self.target_update_mode
         trainable_params["target_update_tau"] = float(self.target_update_tau)
-        trainable_params["update_target_interval"] = int(self.update_target_interval)
+        trainable_params["target_update_interval"] = int(self.target_update_interval)
 
     def _sync_eval_params_from_workers(self):
         if self.worker_group is None:
@@ -168,19 +189,22 @@ class OffPolicyTrainer(Trainer):
                 tp.data.mul_(1 - tau).add_(sp.data, alpha=tau)
 
     def _update_target_after_batch(self):
-        """Per-batch target update.  Unified for hard / ema / polyak.
+        """Refresh the target networks after one gradient batch.
 
-        All three modes respect ``update_target_interval``:
+        Controlled by ``target_update_mode`` and ``target_update_interval``:
 
-        - ``"hard"``: hard-copy eval → target every ``interval`` batches.
-        - ``"ema"`` / ``"polyak"``: Polyak averaging with τ=``target_update_tau``,
-          applied every ``interval`` batches.
+        - ``"hard"``: hard-copy eval-network parameters into target networks
+          every ``target_update_interval`` batches.
+        - ``"ema"`` / ``"polyak"``: apply Polyak averaging
+          ``θ_target ← τ·θ_eval + (1-τ)·θ_target`` with
+          ``τ = target_update_tau``, every ``target_update_interval`` batches.
 
-        With the default ``interval=1`` the update fires every batch.
-        With ``interval=N`` the update fires only on batches where
-        ``_total_batches_processed % N == 0``.
+        The check ``_total_batches_processed % target_update_interval == 0``
+        gates the update; with the default interval of ``1`` the update
+        fires after every batch, while ``N > 1`` throttles the refresh rate
+        and lets eval drift further from target before re-syncing.
         """
-        if self._total_batches_processed % self.update_target_interval != 0:
+        if self._total_batches_processed % self.target_update_interval != 0:
             return
         if self.target_update_mode == "hard":
             load_state_dict_into(
@@ -242,6 +266,36 @@ class OffPolicyTrainer(Trainer):
         batch_size=64,
         learning_times_per_epoch=1,
     ):
+        """Run the off-policy training loop.
+
+        Each iteration of the outer loop is one **epoch** (one roll-out +
+        one or more gradient updates + one evaluation).  ``rollback_interval``
+        is therefore expressed in **epoch** units, not in batch units.  This
+        is a different timescale from ``target_update_interval``, which is
+        expressed in **gradient-batch** units and gates per-batch target
+        refreshes inside ``_update_target_after_batch``.
+
+        Args:
+            epochs: Number of outer training iterations to run before
+                returning.  May terminate early if ``target_first_metric`` is
+                reached.
+            target_first_metric: Threshold on the first evaluation metric;
+                when ``first_metric >= target_first_metric`` the loop breaks
+                early and ``save_best_model`` is invoked.
+            rollback_interval: **Epoch-level** cadence at which the eval
+                network is reverted to its cached best snapshot, and the
+                target network is hard-copied from the reverted eval
+                network.  Measured in epochs (one rollback every
+                ``rollback_interval`` epochs, including epoch 0).  Default
+                ``1`` rolls back every epoch.  Larger values let eval drift
+                further between rollbacks.  Independent of
+                ``target_update_interval`` (batch-level) — the two should be
+                set separately, e.g. a slow per-epoch rollback combined with
+                a fast per-batch target refresh.
+            batch_size: Mini-batch size for each gradient update.
+            learning_times_per_epoch: Number of gradient updates performed
+                after each roll-out (and before the next evaluation).
+        """
         for epoch in range(epochs):
             self.current_epoch = epoch
 
@@ -346,6 +400,14 @@ class OffPolicyTrainer(Trainer):
                 )
                 break
 
+            # Epoch-level rollback (independent of per-batch target updates):
+            # revert eval to the cached best snapshot every ``rollback_interval``
+            # epochs, then re-anchor the target network by hard-copying the
+            # reverted eval weights into target.  The target refresh that
+            # happens *inside* this block is unconditional and overrides
+            # ``target_update_mode`` / ``target_update_interval`` — those
+            # settings only govern the per-batch Polyak / hard refreshes
+            # performed by ``_update_target_after_batch`` between rollbacks.
             if epoch % rollback_interval == 0:
                 load_state_dict_into(
                     self.eval_agent_group,

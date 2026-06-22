@@ -1,8 +1,11 @@
 """
-Clean base worker with no target-network assumptions.
+Minimal generic worker base.
 
-Subclasses inject target models when needed (off-policy) or omit
-them (on-policy).  Must override :meth:`get_params_for_main`.
+Subclasses own their own state and the sync semantics for any
+algorithm-specific models (target networks, SSL models, V_net, etc.).
+``BaseWorker`` itself only knows about ``eval_agent_group``,
+``eval_critic`` and ``reward_aggr_mode`` — the parameters that are
+present in every trainer.
 """
 
 import io
@@ -12,12 +15,18 @@ from typing import Any, Dict, Optional
 
 
 class BaseWorker:
-    """Minimal multi-GPU worker base.
+    """Generic multi-GPU worker base.
 
     Each worker runs in a separate process and may hold copies of:
-    - eval_agent_group
-    - eval_critic
-    Subclasses for off-policy training add target_agent_group / target_critic.
+    - ``eval_agent_group``
+    - ``eval_critic``
+
+    Subclasses for off-policy training add target networks
+    (``OffPolicyWorker``); subclasses for self-supervised training add an
+    ``ssl_model`` and its optimizer; subclasses for QTRAN add an
+    auxiliary ``eval_v_net`` and ``v_optimizer``.  None of that lives in
+    this class — each subclass overrides the relevant sync / move
+    hooks explicitly.
     """
 
     def __init__(
@@ -42,13 +51,7 @@ class BaseWorker:
         self.eval_critic = None
         self.critic_optimizer: Optional[torch.optim.Optimizer] = None
         self.agent_optimizer: Optional[torch.optim.Optimizer] = None
-        self.ssl_optimizer: Optional[torch.optim.Optimizer] = None
-
-        # Target-update configuration (pushed by master via SYNC_FROM_MAIN)
-        self.target_update_mode: str = "hard"
-        self.target_update_tau: float = 0.005
-        self.update_target_interval: int = 1
-        self._total_batches_processed: int = 0
+        self.reward_aggr_mode: str = "sum"
 
     def _setup_distributed(self):
         torch.cuda.set_device(self.device_id)
@@ -60,10 +63,30 @@ class BaseWorker:
         )
 
     # ------------------------------------------------------------------
-    # Parameter sync — guards protect optional submodules (target, ssl)
+    # Parameter sync — generic subset only.
+    #
+    # Algorithm-specific keys (``target_*``, ``target_update_*``,
+    # ``ssl_model``, ``eval_v_net``, …) are NOT loaded here.  Subclasses
+    # override ``sync_params_from_main`` and add their own branches.
     # ------------------------------------------------------------------
 
     def sync_params_from_main(self, params):
+        """Load the generic per-epoch parameters from the master.
+
+        Accepts either a ``bytes`` blob (serialised via
+        :func:`serialize_params`) or a plain ``dict`` of state dicts.
+        Returns the deserialised ``dict`` so that subclasses extending
+        this method can keep operating on the resolved mapping.
+        Subclasses that override this method **must** call
+        ``super().sync_params_from_main(params)`` first and use the
+        returned ``params`` for their own key lookups.
+
+        Args:
+            params: Either a ``bytes`` blob or a ``dict``.
+
+        Returns:
+            The deserialised parameter dict.
+        """
         if isinstance(params, bytes):
             buf = io.BytesIO(params)
             params = torch.load(buf, weights_only=True)
@@ -77,77 +100,25 @@ class BaseWorker:
                 {k: v.clone() for k, v in params["eval_critic"].items()}
             )
 
-        # Off-policy subclasses may add these; guard via hasattr + None.
-        _load_opt(self, "target_agent_group", params)
-        _load_opt(self, "target_critic", params)
-        _load_opt(self, "ssl_model", params)
-
         if "reward_aggr_mode" in params:
             self.reward_aggr_mode = params["reward_aggr_mode"]
 
-        # Target-update configuration (master pushes these at every epoch)
-        if "target_update_mode" in params:
-            self.target_update_mode = params["target_update_mode"]
-        if "target_update_tau" in params:
-            self.target_update_tau = float(params["target_update_tau"])
-        if "update_target_interval" in params:
-            self.update_target_interval = int(params["update_target_interval"])
-
-    def get_target_params(self) -> Dict[str, Any]:
-        """Return current target-network state dicts (used by SYNC_TARGET_TO_MAIN)."""
-        params: Dict[str, Any] = {}
-        if getattr(self, "target_agent_group", None) is not None:
-            params["target_agent_group"] = {
-                k: v.clone() for k, v in self.target_agent_group.state_dict().items()
-            }
-        if getattr(self, "target_critic", None) is not None:
-            params["target_critic"] = {
-                k: v.clone() for k, v in self.target_critic.state_dict().items()
-            }
         return params
 
-    @staticmethod
-    def _ema_update(target, source, tau):
-        """Polyak averaging: θ_target = τ·θ_source + (1-τ)·θ_target."""
-        with torch.no_grad():
-            for tp, sp in zip(target.parameters(), source.parameters()):
-                tp.data.mul_(1 - tau).add_(sp.data, alpha=tau)
+    def get_target_params(self) -> Dict[str, Any]:
+        """Return target-network state dicts.
 
-    def _update_target_after_batch(self):
-        """Per-batch target update.  Mirrors OffPolicyTrainer._update_target_after_batch.
-
-        Called by the worker's ``train_step`` after ``optimizer.step()``.
-        Increments ``self._total_batches_processed`` and applies the configured
-        update mode every ``update_target_interval`` batches.
-
-        All three modes (hard / ema / polyak) respect ``update_target_interval``:
-
-        - ``"hard"``: hard-copy eval → target every ``interval`` batches.
-        - ``"ema"`` / ``"polyak"``: Polyak averaging with τ=``target_update_tau``,
-          applied every ``interval`` batches.
-
-        With the default ``interval=1`` the update fires every batch.
+        Default implementation returns an empty dict — no targets.
+        ``OffPolicyWorker`` overrides this to include
+        ``target_agent_group`` and ``target_critic``.
         """
-        self._total_batches_processed += 1
-        if self._total_batches_processed % self.update_target_interval != 0:
-            return
-        mode = self.target_update_mode
-        if mode == "hard":
-            self.target_agent_group.load_state_dict(
-                {k: v.clone() for k, v in self.eval_agent_group.state_dict().items()}
-            )
-            self.target_critic.load_state_dict(
-                {k: v.clone() for k, v in self.eval_critic.state_dict().items()}
-            )
-        elif mode in ("ema", "polyak"):
-            self._ema_update(
-                self.target_agent_group, self.eval_agent_group, self.target_update_tau
-            )
-            self._ema_update(
-                self.target_critic, self.eval_critic, self.target_update_tau
-            )
-        else:
-            raise ValueError(f"Unknown target_update_mode '{mode}'")
+        return {}
+
+    # ------------------------------------------------------------------
+    # Reward aggregation — generic helper shared by all off-policy
+    # subclasses.  The mode string is pushed by the master every epoch
+    # (see ``sync_params_from_main`` above).
+    # ------------------------------------------------------------------
 
     def _aggregate_rewards(self, rewards: torch.Tensor, dim: int = -1) -> torch.Tensor:
         """Aggregate per-agent rewards; see ``Trainer._aggregate_rewards``."""
@@ -160,13 +131,16 @@ class BaseWorker:
             raise ValueError(f"Unknown reward_aggr_mode '{mode}'")
 
     def move_to_device(self, device: str):
+        """Move the generic eval models to ``device``.
+
+        Subclasses that own additional modules (``target_*``, ``ssl_model``,
+        ``eval_v_net``) override this and call ``super().move_to_device()``
+        first.
+        """
         if self.eval_agent_group is not None:
             self.eval_agent_group.to(device)
         if self.eval_critic is not None:
             self.eval_critic.to(device)
-        _to_opt(self, "target_agent_group", device)
-        _to_opt(self, "target_critic", device)
-        _to_opt(self, "ssl_model", device)
         self.device = device
 
     # ------------------------------------------------------------------
@@ -177,14 +151,8 @@ class BaseWorker:
         raise NotImplementedError("subclass must implement get_params_for_main")
 
     def reduce_gradients(self):
-        for param in self.eval_critic.parameters():
-            if param.grad is not None:
-                dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
-                param.grad.data /= self.world_size
-        for param in self.eval_agent_group.parameters():
-            if param.grad is not None:
-                dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
-                param.grad.data /= self.world_size
+        """All-reduce gradients across all workers.  Subclasses override."""
+        raise NotImplementedError("subclass must implement reduce_gradients")
 
     def train_step(self, batch: Dict[str, Any]) -> float:
         raise NotImplementedError("subclasses must implement train_step()")
@@ -192,6 +160,12 @@ class BaseWorker:
     def handle_command(
         self, cmd, param_queue, data_queue, loss_queue, ack_queue=None
     ) -> bool:
+        """Dispatch generic worker commands.
+
+        Subclasses (e.g. ``OffPolicyWorker``, ``OnPolicyWorker``,
+        ``QTRANWorker``) extend this with algorithm-specific commands such
+        as ``SYNC_LR``.
+        """
         if cmd == "STOP":
             self.cleanup()
             return False
@@ -224,20 +198,6 @@ class BaseWorker:
             torch.cuda.empty_cache()
             if ack_queue:
                 ack_queue.put("ACK")
-        elif cmd == "SYNC_LR":
-            lr_data = param_queue.get()
-            if "critic_lr" in lr_data:
-                for pg in self.critic_optimizer.param_groups:
-                    pg["lr"] = lr_data["critic_lr"]
-            if "agent_lr" in lr_data:
-                for pg in self.agent_optimizer.param_groups:
-                    pg["lr"] = lr_data["agent_lr"]
-            if hasattr(self, "ssl_optimizer") and self.ssl_optimizer is not None:
-                if "ssl_lr" in lr_data:
-                    for pg in self.ssl_optimizer.param_groups:
-                        pg["lr"] = lr_data["ssl_lr"]
-            if ack_queue:
-                ack_queue.put("ACK")
         else:
             print(
                 f"Worker {self.worker_id}: Unknown command: {repr(cmd)}",
@@ -248,17 +208,3 @@ class BaseWorker:
     def cleanup(self):
         if dist.is_initialized():
             dist.destroy_process_group()
-
-
-# -- helpers that degrade gracefully when the attribute is missing ----
-
-def _load_opt(obj, attr, params):
-    if hasattr(obj, attr) and getattr(obj, attr) is not None:
-        getattr(obj, attr).load_state_dict(
-            {k: v.clone() for k, v in params[attr].items()}
-        )
-
-
-def _to_opt(obj, attr, device):
-    if hasattr(obj, attr) and getattr(obj, attr) is not None:
-        getattr(obj, attr).to(device)

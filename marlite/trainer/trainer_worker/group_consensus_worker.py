@@ -97,26 +97,9 @@ class GroupConsensusWorker(OffPolicyWorker):
         return params
 
     def sync_params_from_main(self, params):
-        if isinstance(params, bytes):
-            buffer = io.BytesIO(params)
-            params = torch.load(buffer, weights_only=True)
-
-        if "eval_agent_group" in params and self.eval_agent_group is not None:
-            self.eval_agent_group.load_state_dict(
-                {k: v.clone() for k, v in params["eval_agent_group"].items()}
-            )
-        if "target_agent_group" in params and self.target_agent_group is not None:
-            self.target_agent_group.load_state_dict(
-                {k: v.clone() for k, v in params["target_agent_group"].items()}
-            )
-        if "eval_critic" in params and self.eval_critic is not None:
-            self.eval_critic.load_state_dict(
-                {k: v.clone() for k, v in params["eval_critic"].items()}
-            )
-        if "target_critic" in params and self.target_critic is not None:
-            self.target_critic.load_state_dict(
-                {k: v.clone() for k, v in params["target_critic"].items()}
-            )
+        # Delegate to OffPolicyWorker for bytes-deserialisation and
+        # standard target / target_update_* handling.
+        super().sync_params_from_main(params)
 
     def train_step(self, batch: Dict[str, Any]) -> float:
         alive_mask = batch["alive_mask"].to(dtype=torch.bool)

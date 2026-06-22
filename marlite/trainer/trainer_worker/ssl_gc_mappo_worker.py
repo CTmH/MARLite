@@ -140,21 +140,14 @@ class SSLGroupConsensusMAPPOWorker(OnPolicyWorker):
         return params
 
     def sync_params_from_main(self, params):
-        if isinstance(params, bytes):
-            buffer = io.BytesIO(params)
-            params = torch.load(buffer, weights_only=True)
-
-        if "eval_agent_group" in params and self.eval_agent_group is not None:
-            self.eval_agent_group.load_state_dict(
-                {k: v.clone() for k, v in params["eval_agent_group"].items()}
+        # Delegate to OnPolicyWorker for bytes-deserialisation and
+        # standard eval_agent_group + eval_critic handling.  SSL
+        # auxiliary model is added here.
+        params = super().sync_params_from_main(params)
+        if "ssl_model" in params and self.ssl_model is not None:
+            self.ssl_model.load_state_dict(
+                {k: v.clone() for k, v in params["ssl_model"].items()}
             )
-        if "eval_critic" in params and self.eval_critic is not None:
-            self.eval_critic.load_state_dict(
-                {k: v.clone() for k, v in params["eval_critic"].items()}
-            )
-        self.ssl_model.load_state_dict(
-            {k: v.clone() for k, v in params["ssl_model"].items()}
-        )
 
     # ── SSL helpers ──────────────────────────────────────────────────────
 

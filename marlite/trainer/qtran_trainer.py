@@ -41,26 +41,77 @@ class QTRANTrainer(OffPolicyTrainer):
 
         self.eval_v_net = v_net_config.get_v_net()
 
-        super().__init__(**kwargs)
-
+        # Build the V optimizer + scheduler BEFORE super().__init__ so
+        # that OffPolicyTrainer._setup_multi_gpu → _sync_params_to_workers
+        # → _extra_sync_kwargs() can read self.v_optimizer.param_groups[0]
+        # at initial-broadcast time.
         self.v_optimizer = v_optimizer_config.get_optimizer(
             self.eval_v_net.parameters()
         )
-
         self.v_lr_scheduler = (
             v_lr_scheduler_conf.get_lr_scheduler(self.v_optimizer)
             if v_lr_scheduler_conf
             else None
         )
 
+        super().__init__(**kwargs)
+
         self.best_v_net_params = serialize_to_buffer(get_state_dict(self.eval_v_net))
         self._cached_v_net_params = serialize_to_buffer(get_state_dict(self.eval_v_net))
 
     def _create_worker_group(self):
-        return None
+        """Create QTRANWorkerGroup for multi-GPU training.
+
+        Returns ``None`` when ``use_multi_gpu`` is False — single-GPU
+        training is handled by :meth:`_learn_single_gpu`.
+        """
+        if not self.use_multi_gpu:
+            return None
+        from marlite.trainer.trainer_worker_group.qtran_worker_group import (
+            QTRANWorkerGroup,
+        )
+
+        return QTRANWorkerGroup(
+            device_ids=self._get_device_ids(),
+            agent_group_config=self.agent_group_config,
+            critic_config=self.critic_config,
+            critic_optimizer_config=self.critic_optimizer_config,
+            agent_optimizer_config=self.agent_optimizer_config,
+            v_net_config=self.v_net_config,
+            v_optimizer_config=self.v_optimizer_config,
+            v_lr_scheduler_config=self.v_lr_scheduler_conf,
+            gamma=self.gamma,
+            max_grad_norm=self.max_grad_norm,
+            lambda_opt=self.lambda_opt,
+            lambda_nopt=self.lambda_nopt,
+            is_optimal_mask_mode=self.is_optimal_mask_mode,
+        )
+
+    def _extra_sync_kwargs(self) -> dict:
+        """Push the V_net learning rate to workers via SYNC_LR."""
+        return {"v_lr": self.v_optimizer.param_groups[0]["lr"]}
+
+    def _add_target_params_for_sync(self, trainable_params):
+        super()._add_target_params_for_sync(trainable_params)
+        # V net is auxiliary, not a target network — but it must be
+        # broadcast to workers so they begin each epoch with the
+        # latest master V weights.
+        trainable_params["eval_v_net"] = get_state_dict(self.eval_v_net)
+
+    def _sync_eval_params_from_workers(self):
+        super()._sync_eval_params_from_workers()
+        if self.worker_group is None:
+            return
+        eval_params = self.worker_group.read_params_from_worker0()
+        if "eval_v_net" in eval_params:
+            load_state_dict_into(
+                self.eval_v_net, eval_params["eval_v_net"]
+            )
 
     def learn(self, sample_size, batch_size: int, times: int = 1):
-        return self._learn_single_gpu(sample_size, batch_size, times)
+        if not self.use_multi_gpu:
+            return self._learn_single_gpu(sample_size, batch_size, times)
+        return self._learn_multi_gpu(sample_size, batch_size, times)
 
     def _learn_single_gpu(self, sample_size, batch_size: int, times: int = 1):
         total_loss = 0.0
@@ -265,6 +316,43 @@ class QTRANTrainer(OffPolicyTrainer):
 
         return total_loss / max(total_batches, 1)
 
+    def _learn_multi_gpu(self, sample_size, batch_size: int, times: int = 1):
+        """Multi-GPU learning via QTRANWorkerGroup.
+
+        Each worker runs a copy of the QTRAN train step (TD + L_opt +
+        L_nopt with optional ``is_optimal_mask_mode``) on its data
+        slice; gradients for all three trainable models (eval_agent_group,
+        eval_critic, eval_v_net) are all-reduced across workers before
+        the three optimizers step.
+        """
+        self.worker_group.move_models_to_gpu()
+
+        total_loss = 0.0
+        total_batches = 0
+
+        for t in range(times):
+            with tqdm(
+                total=sample_size, desc=f"Times {t + 1}/{times}", unit="batch"
+            ) as pbar:
+                dataset = self.replaybuffer.sample(sample_size)
+                dataloader = TrajectoryDataLoader(
+                    dataset,
+                    batch_size=batch_size,
+                    shuffle=True,
+                    num_workers=self.n_workers,
+                )
+                for batch in dataloader:
+                    batch["epoch"] = self.current_epoch
+                    loss = self.worker_group.train_step(batch)
+                    total_loss += loss
+                    total_batches += 1
+                    pbar.update(batch["states"].shape[0])
+
+        self.worker_group.move_models_to_cpu()
+        torch.cuda.empty_cache()
+
+        return total_loss / max(total_batches, 1)
+
     def save_current_model(self, checkpoint: str):
         agent_path = os.path.join(self.checkpointdir, checkpoint, "agent")
         os.makedirs(agent_path, exist_ok=True)
@@ -349,6 +437,36 @@ class QTRANTrainer(OffPolicyTrainer):
         batch_size=64,
         learning_times_per_epoch=1,
     ):
+        """Run the QTRAN training loop.
+
+        Each iteration of the outer loop is one **epoch** (one roll-out +
+        one or more gradient updates + one evaluation).  ``rollback_interval``
+        is therefore expressed in **epoch** units, not in batch units.  This
+        is a different timescale from ``target_update_interval``, which is
+        expressed in **gradient-batch** units and gates per-batch target
+        refreshes inside ``_update_target_after_batch``.
+
+        Args:
+            epochs: Number of outer training iterations to run before
+                returning.  May terminate early if ``target_first_metric`` is
+                reached.
+            target_first_metric: Threshold on the first evaluation metric;
+                when ``first_metric >= target_first_metric`` the loop breaks
+                early and ``save_best_model`` is invoked.
+            rollback_interval: **Epoch-level** cadence at which the eval
+                networks (agent group, mixer critic, value net ``V``) are
+                reverted to their cached best snapshots, and the target
+                networks are hard-copied from the reverted eval networks.
+                Measured in epochs (one rollback every ``rollback_interval``
+                epochs, including epoch 0).  Default ``1`` rolls back every
+                epoch.  Independent of ``target_update_interval``
+                (batch-level) — the two should be tuned separately, e.g. a
+                slow per-epoch rollback combined with a fast per-batch
+                target refresh.
+            batch_size: Mini-batch size for each gradient update.
+            learning_times_per_epoch: Number of gradient updates performed
+                after each roll-out (and before the next evaluation).
+        """
         for epoch in range(epochs):
             self.current_epoch = epoch
 
@@ -381,8 +499,10 @@ class QTRANTrainer(OffPolicyTrainer):
             logging.info(f"Epoch {epoch}: Loss {loss:.4f}")
 
             # Per-batch target updates are performed inside _learn_single_gpu
-            # (see _update_target_after_batch).  QTRAN is single-GPU, so no
-            # worker sync is required.
+            # (see _update_target_after_batch).  In the multi-GPU path each
+            # worker's _update_target_after_batch runs locally after each
+            # batch; the next epoch's _sync_params_to_workers broadcasts
+            # the master target state to all workers, preventing drift.
 
             checkpoint_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             checkpoint_name = f"checkpoint_{checkpoint_time}_{epoch}"
@@ -464,6 +584,15 @@ class QTRANTrainer(OffPolicyTrainer):
                 )
                 break
 
+            # Epoch-level rollback (independent of per-batch target updates):
+            # revert eval + V to the cached best snapshot every
+            # ``rollback_interval`` epochs, then re-anchor the target network
+            # by hard-copying the reverted eval weights into target.  The
+            # target refresh that happens *inside* this block is unconditional
+            # and overrides ``target_update_mode`` / ``target_update_interval``
+            # — those settings only govern the per-batch Polyak / hard
+            # refreshes performed by ``_update_target_after_batch`` between
+            # rollbacks.
             if epoch % rollback_interval == 0:
                 load_state_dict_into(
                     self.eval_agent_group,

@@ -214,34 +214,13 @@ class VAEGraphQMIXWorker(OffPolicyWorker):
         """
         Synchronize parameters received from main process.
 
-        This method accepts either a dictionary of parameters or serialized bytes.
-        When receiving bytes, it deserializes them and loads into local models.
-
-        Args:
-            params: Dictionary containing parameter data, or serialized bytes
+        Delegates bytes-deserialisation, eval/target agent_group +
+        critic, and target_update_* handling to
+        :class:`OffPolicyWorker`.  Only the SSL auxiliary model
+        (VAE decoder) is added here.
         """
-        # Handle serialized bytes
-        if isinstance(params, bytes):
-            buffer = io.BytesIO(params)
-            params = torch.load(buffer, weights_only=True)
-
-        if "eval_agent_group" in params and self.eval_agent_group is not None:
-            self.eval_agent_group.load_state_dict(
-                {k: v.clone() for k, v in params["eval_agent_group"].items()}
-            )
-        if "target_agent_group" in params and self.target_agent_group is not None:
-            self.target_agent_group.load_state_dict(
-                {k: v.clone() for k, v in params["target_agent_group"].items()}
-            )
-        if "eval_critic" in params and self.eval_critic is not None:
-            self.eval_critic.load_state_dict(
-                {k: v.clone() for k, v in params["eval_critic"].items()}
-            )
-        if "target_critic" in params and self.target_critic is not None:
-            self.target_critic.load_state_dict(
-                {k: v.clone() for k, v in params["target_critic"].items()}
-            )
-        if "ssl_model" in params:
+        params = super().sync_params_from_main(params)
+        if "ssl_model" in params and self.ssl_model is not None:
             self.ssl_model.load_state_dict(
                 {k: v.clone() for k, v in params["ssl_model"].items()}
             )
@@ -542,61 +521,32 @@ class VAEGraphQMIXWorker(OffPolicyWorker):
         Returns:
             True if should continue, False if should stop
         """
-        if cmd == "STOP":
-            self.cleanup()
-            return False
-
-        elif cmd == "SYNC_FROM_MAIN":
-            params = param_queue.get()
-            self.sync_params_from_main(params)
-            del params
-            ack_queue.put("ACK")
-
-        elif cmd == "BROADCAST":
-            params = param_queue.get()
-            self.sync_params_from_main(params)
-            del params
-
-        elif cmd == "SYNC_TO_MAIN":
-            params = self.get_params_for_main()
-            param_queue.put(params)
-
-        elif cmd == "TRAIN_STEP":
+        if cmd == "TRAIN_STEP":
             batch = data_queue.get()
             result = self.train_step(batch)
             del batch
             combined, critic, vae = result
             loss_queue.put((combined, critic, vae))
+            return True
 
-        elif cmd == "MOVE_TO_GPU":
-            self.move_to_device(self.assigned_device)
-            if ack_queue:
-                ack_queue.put("ACK")
-
-        elif cmd == "MOVE_TO_CPU":
-            self.move_to_device("cpu")
-            torch.cuda.empty_cache()
-            if ack_queue:
-                ack_queue.put("ACK")
-
-        elif cmd == "SYNC_LR":
+        if cmd == "SYNC_LR":
             lr_data = param_queue.get()
-            if "critic_lr" in lr_data:
+            if "critic_lr" in lr_data and self.critic_optimizer is not None:
                 for param_group in self.critic_optimizer.param_groups:
                     param_group["lr"] = lr_data["critic_lr"]
-            if "agent_lr" in lr_data:
+            if "agent_lr" in lr_data and self.agent_optimizer is not None:
                 for param_group in self.agent_optimizer.param_groups:
                     param_group["lr"] = lr_data["agent_lr"]
-            if "ssl_lr" in lr_data:
+            if "ssl_lr" in lr_data and self.ssl_optimizer is not None:
                 for param_group in self.ssl_optimizer.param_groups:
                     param_group["lr"] = lr_data["ssl_lr"]
             if ack_queue:
                 ack_queue.put("ACK")
+            return True
 
-        else:
-            print(f"Worker {self.worker_id}: Unknown command: {repr(cmd)}", flush=True)
-
-        return True
+        return super().handle_command(
+            cmd, param_queue, data_queue, loss_queue, ack_queue
+        )
 
     def cleanup(self):
         """Clean up distributed process group."""
