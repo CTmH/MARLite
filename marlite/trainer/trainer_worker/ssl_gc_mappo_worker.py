@@ -109,20 +109,17 @@ class SSLGroupConsensusMAPPOWorker(OnPolicyWorker):
         self.device = device
 
     def reduce_gradients(self):
-        for param in self.eval_critic.parameters():
-            if param.grad is not None:
-                dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
-                param.grad.data /= self.world_size
-
-        for param in self.eval_agent_group.parameters():
-            if param.grad is not None:
-                dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
-                param.grad.data /= self.world_size
-
+        super().reduce_gradients()
         for param in self.ssl_model.parameters():
             if param.grad is not None:
                 dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
                 param.grad.data /= self.world_size
+
+    def synchronize_eval_params(self):
+        super().synchronize_eval_params()
+        for param in self.ssl_model.parameters():
+            dist.all_reduce(param.data, op=dist.ReduceOp.SUM)
+            param.data /= self.world_size
 
     def get_params_for_main(self) -> Dict[str, Any]:
         params = {

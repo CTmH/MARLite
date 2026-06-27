@@ -148,6 +148,43 @@ class OffPolicyTrainer(Trainer):
             self.target_critic, target_params["target_critic"]
         )
 
+    def save_current_model(self, checkpoint: str):
+        """Off-policy: save eval models and target networks."""
+        agent_path = os.path.join(self.checkpointdir, checkpoint, "agent")
+        os.makedirs(agent_path, exist_ok=True)
+        self.eval_agent_group.to("cpu")
+        torch.save(
+            get_state_dict(self.eval_agent_group),
+            os.path.join(agent_path, "agent.pth"),
+        )
+
+        critic_path = os.path.join(self.checkpointdir, checkpoint, "critic")
+        os.makedirs(critic_path, exist_ok=True)
+        self.eval_critic.to("cpu")
+        torch.save(
+            get_state_dict(self.eval_critic),
+            os.path.join(critic_path, "critic.pth"),
+        )
+
+        target_agent_path = os.path.join(
+            self.checkpointdir, checkpoint, "target_agent"
+        )
+        os.makedirs(target_agent_path, exist_ok=True)
+        torch.save(
+            get_state_dict(self.target_agent_group),
+            os.path.join(target_agent_path, "target_agent.pth"),
+        )
+
+        target_critic_path = os.path.join(
+            self.checkpointdir, checkpoint, "target_critic"
+        )
+        os.makedirs(target_critic_path, exist_ok=True)
+        torch.save(
+            get_state_dict(self.target_critic),
+            os.path.join(target_critic_path, "target_critic.pth"),
+        )
+        return self
+
     def evaluate(self):
         self.eval_agent_group.eval().to("cpu")
         serialized_params = serialize_to_buffer(
@@ -256,6 +293,9 @@ class OffPolicyTrainer(Trainer):
         # Hard-copy eval → target regardless of target_update_mode.
         load_state_dict_into(self.target_agent_group, get_state_dict(self.eval_agent_group))
         load_state_dict_into(self.target_critic, get_state_dict(self.eval_critic))
+        # Broadcast loaded state to all workers so they start from the
+        # checkpointed eval with target = eval (initial polyak state).
+        self._sync_params_to_workers()
         return self
 
     def train(
@@ -328,6 +368,11 @@ class OffPolicyTrainer(Trainer):
             )
             logging.info(f"Epoch {epoch}: Loss {loss:.4f}")
 
+            # Average parameters across workers before reading from worker 0,
+            # ensuring the master receives the consensus state.
+            if self.worker_group is not None:
+                self.worker_group.average_eval_params()
+                self.worker_group.average_target_params()
             self._sync_eval_params_from_workers()
             self._sync_target_params_from_workers()
 
@@ -420,8 +465,12 @@ class OffPolicyTrainer(Trainer):
                 # Rollback: hard-copy eval → target regardless of target_update_mode.
                 load_state_dict_into(self.target_agent_group, get_state_dict(self.eval_agent_group))
                 load_state_dict_into(self.target_critic, get_state_dict(self.eval_critic))
+                # Broadcast the rolled-back state to workers via existing
+                # _sync_params_to_workers (BROADCAST). No new command needed.
+                self._sync_params_to_workers()
                 logging.info(
-                    f"Epoch {epoch}: Rolled back eval/target to cached parameters."
+                    f"Epoch {epoch}: Rolled back eval/target on master and all workers "
+                    f"(rollback_interval={rollback_interval})."
                 )
 
         logging.info(

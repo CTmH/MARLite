@@ -371,6 +371,11 @@ class GroupConsensusAgentGroup(AgentGroup):
             dim = agent_latent.size(-1) // 2
             agent_mu = agent_latent[:, :, :dim]
             agent_log_var = agent_latent[:, :, dim:]
+            # Clamp log_var to keep KL gradient stable.  exp(10) ≈ 2.2e4 gives
+            # a tractable gradient magnitude; exp(20) ≈ 4.9e8 already produces
+            # a combined loss ~1e7 even with polyak weights, and the resulting
+            # clipped gradient is noise-dominated, leading to training collapse.
+            agent_log_var = torch.clamp(agent_log_var, min=-10.0, max=10.0)
 
             group_mu, group_log_var = self._merge_group_distributions(
                 agent_mu, agent_log_var, group_indices

@@ -153,6 +153,8 @@ class Trainer:
             if self.worker_group is not None:
                 self.worker_group.start_workers()
                 self._sync_params_to_workers()
+                if self.train_device.startswith("cuda"):
+                    self.worker_group.move_models_to_gpu()
             logging.info(
                 f"Using multi-GPU training with {len(self.device_list)} devices: {self.device_list}"
             )
@@ -225,18 +227,13 @@ class Trainer:
         raise NotImplementedError
 
     def save_current_model(self, checkpoint: str):
-        agent_path = os.path.join(self.checkpointdir, checkpoint, "agent")
-        os.makedirs(agent_path, exist_ok=True)
-        self.eval_agent_group.to("cpu")
-        agent_params = get_state_dict(self.eval_agent_group)
-        torch.save(agent_params, os.path.join(agent_path, "agent.pth"))
+        """Save model parameters to disk.
 
-        critic_path = os.path.join(self.checkpointdir, checkpoint, "critic")
-        os.makedirs(critic_path, exist_ok=True)
-        self.eval_critic.to("cpu")
-        critic_params = get_state_dict(self.eval_critic)
-        torch.save(critic_params, os.path.join(critic_path, "critic.pth"))
-        return self
+        Base implementation is abstract — subclasses must override to
+        save the models they own (on-policy: eval only; off-policy:
+        eval + target; SSL variants: eval + target + ssl_model).
+        """
+        raise NotImplementedError("subclass must implement save_current_model")
 
     def load_checkpoint(self, checkpoint: str):
         self.best_metrics = {key: -np.inf for key in self.eval_metric_list}

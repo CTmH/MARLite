@@ -242,8 +242,6 @@ class MsgAggrQMIXTrainer(OffPolicyTrainer):
         return total_loss / total_batches
 
     def _learn_multi_gpu(self, sample_size, batch_size: int, times: int = 1):
-        self.worker_group.move_models_to_gpu()
-
         total_loss = 0.0
         total_batches = 0
 
@@ -265,9 +263,6 @@ class MsgAggrQMIXTrainer(OffPolicyTrainer):
                     total_batches += 1
                     bs = batch["states"].shape[0]
                     pbar.update(bs)
-
-        self.worker_group.move_models_to_cpu()
-        torch.cuda.empty_cache()
 
         return total_loss / total_batches
 
@@ -497,8 +492,6 @@ class ProbMsgAggrQMIXTrainer(OffPolicyTrainer):
         return total_loss / total_batches
 
     def _learn_multi_gpu(self, sample_size, batch_size: int, times: int = 1):
-        self.worker_group.move_models_to_gpu()
-
         total_loss = 0.0
         total_batches = 0
 
@@ -520,8 +513,5 @@ class ProbMsgAggrQMIXTrainer(OffPolicyTrainer):
                     total_batches += 1
                     bs = batch["states"].shape[0]
                     pbar.update(bs)
-
-        self.worker_group.move_models_to_cpu()
-        torch.cuda.empty_cache()
 
         return total_loss / total_batches

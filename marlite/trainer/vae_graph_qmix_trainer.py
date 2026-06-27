@@ -5,7 +5,7 @@ import absl.logging as logging
 from tqdm import tqdm
 
 from marlite.trainer.self_supervised_qmix_trainer import SelfSupervisedQMIXTrainer
-from marlite.trainer.trainer_worker_group import VAEGraphWorkerGroup
+from marlite.trainer.trainer_worker_group import VAEGraphQMIXWorkerGroup
 from marlite.util.trajectory_dataset import (
     GraphSSLEnrichedTrajectoryDataset,
     TrajectoryDataLoader,
@@ -63,11 +63,11 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
         )
 
     def _create_worker_group(self):
-        """Create VAEGraphWorkerGroup for multi-GPU joint RL+SSL training."""
+        """Create VAEGraphQMIXWorkerGroup for multi-GPU joint RL+SSL training."""
         if not self.use_multi_gpu:
             return None
 
-        return VAEGraphWorkerGroup(
+        return VAEGraphQMIXWorkerGroup(
             device_ids=self._get_device_ids(),
             agent_group_config=self.agent_group_config,
             critic_config=self.critic_config,
@@ -218,7 +218,7 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
         """
         Joint RL+SSL learning on multiple GPUs.
 
-        Delegates to VAEGraphWorkerGroup which handles:
+        Delegates to VAEGraphQMIXWorkerGroup which handles:
         - Batch distribution across workers
         - Gradient synchronization
         - Loss aggregation
@@ -231,8 +231,6 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
         Returns:
             Combined loss (avg across batches)
         """
-        self.worker_group.move_models_to_gpu()
-
         total_combined = 0.0
         total_critic = 0.0
         total_vae = 0.0
@@ -266,9 +264,6 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
 
                     bs = batch["states"].shape[0]
                     pbar.update(bs)
-
-        self.worker_group.move_models_to_cpu()
-        torch.cuda.empty_cache()
 
         avg_combined = total_combined / total_batches
         avg_critic = total_critic / total_batches

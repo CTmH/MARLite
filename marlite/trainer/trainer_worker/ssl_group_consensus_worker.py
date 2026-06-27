@@ -2,6 +2,7 @@ import io
 import torch
 import torch.nn.functional as F
 import torch.distributed as dist
+import absl.logging as logging
 from typing import Any, Dict
 
 from marlite.algorithm.agents import AgentGroupConfig
@@ -111,20 +112,17 @@ class SSLGroupConsensusWorker(OffPolicyWorker):
         self.device = device
 
     def reduce_gradients(self):
-        for param in self.eval_critic.parameters():
-            if param.grad is not None:
-                dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
-                param.grad.data /= self.world_size
-
-        for param in self.eval_agent_group.parameters():
-            if param.grad is not None:
-                dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
-                param.grad.data /= self.world_size
-
+        super().reduce_gradients()
         for param in self.ssl_model.parameters():
             if param.grad is not None:
                 dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
                 param.grad.data /= self.world_size
+
+    def synchronize_eval_params(self):
+        super().synchronize_eval_params()
+        for param in self.ssl_model.parameters():
+            dist.all_reduce(param.data, op=dist.ReduceOp.SUM)
+            param.data /= self.world_size
 
     def get_params_for_main(self) -> Dict[str, Any]:
         params = {
@@ -158,9 +156,30 @@ class SSLGroupConsensusWorker(OffPolicyWorker):
                 {k: v.clone() for k, v in params["ssl_model"].items()}
             )
 
+    @staticmethod
+    def _check_nan(t, name):
+        if t is not None and isinstance(t, torch.Tensor) and not torch.isfinite(t).all():
+            nan_count = torch.isnan(t).sum().item()
+            inf_count = torch.isinf(t).sum().item()
+            logging.error(
+                f"NAN CHECK FAIL: {name} "
+                f"({t.shape}, {t.dtype}, nan={nan_count}, inf={inf_count}, "
+                f"max={t.max().item() if torch.isfinite(t).any() else 'N/A'})"
+            )
+
     def train_step(self, batch: Dict[str, Any]) -> tuple:
         current_epoch = batch.get("epoch", 0)
         is_warmup = current_epoch < self.warmup_epochs
+
+        torch.autograd.set_detect_anomaly(True)
+
+        # Detect corrupted parameters BEFORE forward
+        for name, p in self.eval_agent_group.named_parameters():
+            self._check_nan(p, f"param.eval_agent_group.{name}")
+        for name, p in self.eval_critic.named_parameters():
+            self._check_nan(p, f"param.eval_critic.{name}")
+        for name, p in self.ssl_model.named_parameters():
+            self._check_nan(p, f"param.ssl_model.{name}")
 
         alive_mask = batch["alive_mask"].to(dtype=torch.bool)
         observations = batch["observations"].to(dtype=torch.float32)
@@ -224,9 +243,14 @@ class SSLGroupConsensusWorker(OffPolicyWorker):
         group_consensus = ret["group_consensus"]
         agent_mu = ret["agent_mu"]
         agent_log_var = ret["agent_log_var"]
+        self._check_nan(q_val, "agent_forward.q_val")
+        self._check_nan(group_consensus, "agent_forward.group_consensus")
+        self._check_nan(agent_mu, "agent_forward.agent_mu")
+        self._check_nan(agent_log_var, "agent_forward.agent_log_var")
 
         actions_last = actions[:, -1].to(device=self.device, dtype=torch.int64)
         q_val = torch.gather(q_val, dim=-1, index=actions_last.unsqueeze(-1)).squeeze(-1)
+        self._check_nan(q_val, "q_val")
 
         self.eval_critic.train()
         ret_critic = self.eval_critic(
@@ -236,6 +260,9 @@ class SSLGroupConsensusWorker(OffPolicyWorker):
             timestep_padding_mask[:, 0, :],
         )
         q_tot = ret_critic["q_tot"]
+        self._check_nan(q_tot, "q_tot")
+        if "state_features" in ret_critic:
+            self._check_nan(ret_critic["state_features"], "state_features")
 
         # === TD Targets (Double Q-learning) ===
         # eval_agent_group selects actions, target_agent_group evaluates.
@@ -287,7 +314,9 @@ class SSLGroupConsensusWorker(OffPolicyWorker):
             q_tot_next = ret_next_critic["q_tot"]
 
         y_tot = r_last + (1 - termination_last) * self.gamma * q_tot_next
+        self._check_nan(y_tot, "y_tot")
         critic_loss = torch.nn.functional.mse_loss(q_tot, y_tot.detach())
+        self._check_nan(critic_loss, "critic_loss")
 
         # === SSL Reconstruction Loss ===
         if is_warmup:
@@ -298,6 +327,7 @@ class SSLGroupConsensusWorker(OffPolicyWorker):
             targets = batch["formatted_obs"].to(
                 dtype=torch.float32, device=self.device
             )
+            self._check_nan(targets, "batch.formatted_obs")
             construct_mask = batch["construct_padding_mask"].to(
                 dtype=torch.bool, device=self.device
             )
@@ -311,6 +341,7 @@ class SSLGroupConsensusWorker(OffPolicyWorker):
                     group_consensus, group_indices, targets,
                     construct_mask, alive_mask
                 )
+            self._check_nan(reconstruction_loss, "reconstruction_loss")
 
             if self.consensus_mode == "ae":
                 kl_divergence = torch.tensor(0.0, device=self.device)
@@ -334,11 +365,14 @@ class SSLGroupConsensusWorker(OffPolicyWorker):
                     ).sum() / mask.sum().clamp(min=1)
 
             ssl_loss = reconstruction_loss + self.kl_divergence_weight * kl_divergence
+        if isinstance(ssl_loss, torch.Tensor):
+            self._check_nan(ssl_loss, "ssl_loss")
 
         if is_warmup:
             combined_loss = critic_loss
         else:
             combined_loss = self._combine_rl_ssl_loss(critic_loss, ssl_loss)
+        self._check_nan(combined_loss, "combined_loss")
 
         # === Backward Pass ===
         self.critic_optimizer.zero_grad()
@@ -442,61 +476,28 @@ class SSLGroupConsensusWorker(OffPolicyWorker):
         loss_queue,
         ack_queue=None,
     ) -> bool:
-        if cmd == "STOP":
-            self.cleanup()
-            return False
-
-        elif cmd == "SYNC_FROM_MAIN":
-            params = param_queue.get()
-            self.sync_params_from_main(params)
-            del params
-            ack_queue.put("ACK")
-
-        elif cmd == "BROADCAST":
-            params = param_queue.get()
-            self.sync_params_from_main(params)
-            del params
-
-        elif cmd == "SYNC_TO_MAIN":
-            params = self.get_params_for_main()
-            param_queue.put(params)
-
-        elif cmd == "TRAIN_STEP":
+        if cmd == "TRAIN_STEP":
             batch = data_queue.get()
             result = self.train_step(batch)
             del batch
             combined, critic, ssl = result
             loss_queue.put((combined, critic, ssl))
-
-        elif cmd == "MOVE_TO_GPU":
-            self.move_to_device(self.assigned_device)
-            if ack_queue:
-                ack_queue.put("ACK")
-
-        elif cmd == "MOVE_TO_CPU":
-            self.move_to_device("cpu")
-            torch.cuda.empty_cache()
-            if ack_queue:
-                ack_queue.put("ACK")
-
-        elif cmd == "SYNC_LR":
+            return True
+        if cmd == "SYNC_LR":
             lr_data = param_queue.get()
-            if "critic_lr" in lr_data:
-                for param_group in self.critic_optimizer.param_groups:
-                    param_group["lr"] = lr_data["critic_lr"]
-            if "agent_lr" in lr_data:
-                for param_group in self.agent_optimizer.param_groups:
-                    param_group["lr"] = lr_data["agent_lr"]
-            if "ssl_lr" in lr_data:
-                for param_group in self.ssl_optimizer.param_groups:
-                    param_group["lr"] = lr_data["ssl_lr"]
+            if "critic_lr" in lr_data and self.critic_optimizer is not None:
+                for pg in self.critic_optimizer.param_groups:
+                    pg["lr"] = lr_data["critic_lr"]
+            if "agent_lr" in lr_data and self.agent_optimizer is not None:
+                for pg in self.agent_optimizer.param_groups:
+                    pg["lr"] = lr_data["agent_lr"]
+            if "ssl_lr" in lr_data and self.ssl_optimizer is not None:
+                for pg in self.ssl_optimizer.param_groups:
+                    pg["lr"] = lr_data["ssl_lr"]
             if ack_queue:
                 ack_queue.put("ACK")
-
-        else:
-            print(f"Worker {self.worker_id}: Unknown command: {repr(cmd)}", flush=True)
-
-        return True
+            return True
+        return super().handle_command(cmd, param_queue, data_queue, loss_queue, ack_queue)
 
     def cleanup(self):
         if dist.is_initialized():

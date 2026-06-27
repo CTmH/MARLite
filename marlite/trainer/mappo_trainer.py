@@ -328,8 +328,6 @@ class MAPPOTrainer(OnPolicyTrainer):
 
         For each PPO epoch (``times``), a progress bar shows batch progress.
         """
-        self.worker_group.move_models_to_gpu()
-
         total_combined = 0.0
         total_batches = 0
 
@@ -351,9 +349,6 @@ class MAPPOTrainer(OnPolicyTrainer):
 
                     bs = batch["states"].shape[0]
                     pbar.update(bs)
-
-        self.worker_group.move_models_to_cpu()
-        torch.cuda.empty_cache()
 
         return total_combined / max(total_batches, 1)
 
@@ -424,6 +419,8 @@ class MAPPOTrainer(OnPolicyTrainer):
                     batch_size=batch_size,
                     times=learning_times_per_iteration,
                 )
+                if self.worker_group is not None:
+                    self.worker_group.average_eval_params()
                 self._sync_eval_params_from_workers()
                 logging.info(f"Iteration {iteration}: Loss {loss:.4f}")
 

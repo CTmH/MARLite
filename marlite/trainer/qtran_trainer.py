@@ -325,8 +325,6 @@ class QTRANTrainer(OffPolicyTrainer):
         eval_critic, eval_v_net) are all-reduced across workers before
         the three optimizers step.
         """
-        self.worker_group.move_models_to_gpu()
-
         total_loss = 0.0
         total_batches = 0
 
@@ -347,9 +345,6 @@ class QTRANTrainer(OffPolicyTrainer):
                     total_loss += loss
                     total_batches += 1
                     pbar.update(batch["states"].shape[0])
-
-        self.worker_group.move_models_to_cpu()
-        torch.cuda.empty_cache()
 
         return total_loss / max(total_batches, 1)
 

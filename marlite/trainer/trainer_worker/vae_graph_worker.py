@@ -156,31 +156,17 @@ class VAEGraphQMIXWorker(OffPolicyWorker):
         self.device = device
 
     def reduce_gradients(self):
-        """
-        Reduce (average) gradients across all workers for critic, agent, and ssl_model.
-
-        Implements DDP-style gradient synchronization:
-        - All workers compute local gradients
-        - all_reduce sums gradients across all workers
-        - Divide by world_size to get average
-        """
-        # Critic gradients
-        for param in self.eval_critic.parameters():
-            if param.grad is not None:
-                dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
-                param.grad.data /= self.world_size
-
-        # Agent group gradients
-        for param in self.eval_agent_group.parameters():
-            if param.grad is not None:
-                dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
-                param.grad.data /= self.world_size
-
-        # SSL model gradients
+        super().reduce_gradients()
         for param in self.ssl_model.parameters():
             if param.grad is not None:
                 dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
                 param.grad.data /= self.world_size
+
+    def synchronize_eval_params(self):
+        super().synchronize_eval_params()
+        for param in self.ssl_model.parameters():
+            dist.all_reduce(param.data, op=dist.ReduceOp.SUM)
+            param.data /= self.world_size
 
     def get_params_for_main(self) -> Dict[str, Any]:
         """

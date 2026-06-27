@@ -179,7 +179,6 @@ class SSLGroupConsensusMAPPOTrainer(SelfSupervisedMAPPOTrainer):
         via ``GroupSSLEnrichedTrajectoryDataset`` so workers read
         ``formatted_obs`` / ``construct_padding_mask`` from the batch.
         """
-        self.worker_group.move_models_to_gpu()
         total_combined = 0.0
         total_critic = 0.0
         total_ssl = 0.0
@@ -224,8 +223,7 @@ class SSLGroupConsensusMAPPOTrainer(SelfSupervisedMAPPOTrainer):
                     bs = batch["states"].shape[0]
                     pbar.update(bs)
 
-            self.worker_group.move_models_to_cpu()
-        torch.cuda.empty_cache()
+
         avg_rl = total_critic / max(total_batches, 1)
         avg_ssl = total_ssl / max(total_batches, 1)
         logging.info(f"  Iter {self.current_epoch}: RL Loss {avg_rl:.4f}, SSL Loss {avg_ssl:.4f}")

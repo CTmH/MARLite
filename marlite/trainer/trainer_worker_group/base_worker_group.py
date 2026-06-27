@@ -385,6 +385,39 @@ class BaseWorkerGroup(ABC):
         params = self.param_queues[0].get()
         return _dict_to_cpu(params)
 
+    def average_eval_params(self):
+        """Synchronise (all-reduce) eval-parameters across all workers.
+
+        Every worker's ``eval_agent_group``, ``eval_critic`` (and
+        algorithm-specific auxiliary add-ons such as ``ssl_model``) are
+        averaged so that a subsequent read from worker 0 returns the
+        consensus state rather than any single worker's local state.
+
+        Blocks until all workers acknowledge.
+        """
+        for i in range(self.world_size):
+            self.cmd_queues[i].put("AVERAGE_EVAL_PARAMS")
+        for i in range(self.world_size):
+            ack = self.ack_queues[i].get()
+            if ack != "ACK":
+                raise RuntimeError(f"Worker {i}: Expected ACK, got {ack}")
+
+    def average_target_params(self):
+        """Synchronise (all-reduce) target-parameters across all workers.
+
+        Every worker's ``target_agent_group`` and ``target_critic`` are
+        averaged so that the next read from worker 0 returns the
+        consensus state.  Prevents per-worker drift in polyak trajectories.
+
+        Blocks until all workers acknowledge.
+        """
+        for i in range(self.world_size):
+            self.cmd_queues[i].put("AVERAGE_TARGET_PARAMS")
+        for i in range(self.world_size):
+            ack = self.ack_queues[i].get()
+            if ack != "ACK":
+                raise RuntimeError(f"Worker {i}: Expected ACK, got {ack}")
+
     def train_step(self, batch: Dict[str, Any]) -> float:
         """
         Execute one training step across all workers.

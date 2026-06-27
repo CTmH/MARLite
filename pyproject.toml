@@ -71,4 +71,3 @@ default = false
 [tool.pytest.ini_options]
 addopts = "-n auto --import-mode=importlib"
 testpaths = ["test"]
-env_files = [".env"]

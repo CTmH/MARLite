@@ -110,26 +110,15 @@ class SelfSupervisedQMIXTrainer(OffPolicyTrainer):
         )
 
         # Note: ssl_worker_group is removed. Multi-GPU SSL training is now handled
-        # by VAEGraphWorkerGroup which combines RL and SSL in a single train_step.
+        # by VAEGraphQMIXWorkerGroup which combines RL and SSL in a single train_step.
 
     def _create_worker_group(self):
         """Create worker group for RL+SSL joint training. Override in subclass."""
         pass
 
     def save_current_model(self, checkpoint: str):
-        """Save current model including self_supervised_model parameters"""
-        agent_path = os.path.join(self.checkpointdir, checkpoint, "agent")
-        os.makedirs(agent_path, exist_ok=True)
-        self.eval_agent_group.to("cpu")
-        agent_params = get_state_dict(self.eval_agent_group)
-        torch.save(agent_params, os.path.join(agent_path, "agent.pth"))
-
-        critic_path = os.path.join(self.checkpointdir, checkpoint, "critic")
-        os.makedirs(critic_path, exist_ok=True)
-        self.eval_critic.to("cpu")
-        critic_params = get_state_dict(self.eval_critic)
-        torch.save(critic_params, os.path.join(critic_path, "critic.pth"))
-
+        """Save current model including target networks and self_supervised_model."""
+        super().save_current_model(checkpoint)
         ssl_model_path = os.path.join(
             self.checkpointdir, checkpoint, "self_supervised_model"
         )
@@ -142,21 +131,8 @@ class SelfSupervisedQMIXTrainer(OffPolicyTrainer):
         return self
 
     def load_checkpoint(self, checkpoint: str):
-        """Load checkpoint including self_supervised_model parameters"""
-        self.best_metrics = {key: -np.inf for key in self.eval_metric_list}
-        agent_path = os.path.join(self.checkpointdir, checkpoint, "agent", "agent.pth")
-        self.eval_agent_group.to("cpu")
-        self.eval_critic.to("cpu")
-        self.ssl_model.to("cpu")
-        load_state_dict_into(
-            self.eval_agent_group, torch.load(agent_path, weights_only=True)
-        )
-        critic_path = os.path.join(
-            self.checkpointdir, checkpoint, "critic", "critic.pth"
-        )
-        load_state_dict_into(
-            self.eval_critic, torch.load(critic_path, weights_only=True)
-        )
+        """Load checkpoint including self_supervised_model parameters."""
+        super().load_checkpoint(checkpoint)
 
         ssl_model_path = os.path.join(
             self.checkpointdir,
@@ -165,32 +141,33 @@ class SelfSupervisedQMIXTrainer(OffPolicyTrainer):
             "self_supervised_model.pth",
         )
         if os.path.exists(ssl_model_path):
+            self.ssl_model.to("cpu")
             load_state_dict_into(
                 self.ssl_model, torch.load(ssl_model_path, weights_only=True)
             )
 
-        self.best_agent_group_params = serialize_to_buffer(
-            get_state_dict(self.eval_agent_group)
-        )
-        self.best_critic_params = serialize_to_buffer(
-            get_state_dict(self.eval_critic)
-        )
         self.best_ssl_model_params = serialize_to_buffer(
             get_state_dict(self.ssl_model)
-        )
-        self._cached_agent_group_params = serialize_to_buffer(
-            get_state_dict(self.eval_agent_group)
-        )
-        self._cached_critic_params = serialize_to_buffer(
-            get_state_dict(self.eval_critic)
         )
         self._cached_ssl_model_params = serialize_to_buffer(
             get_state_dict(self.ssl_model)
         )
-        # Hard-copy eval → target regardless of target_update_mode.
-        load_state_dict_into(self.target_agent_group, get_state_dict(self.eval_agent_group))
-        load_state_dict_into(self.target_critic, get_state_dict(self.eval_critic))
+
+        # Rebroadcast so workers get the loaded SSL model too.
+        self._sync_params_to_workers()
         return self
+
+    def _add_target_params_for_sync(self, trainable_params):
+        """Add ``ssl_model`` to the per-epoch broadcast payload.
+
+        The off-policy base already pushes ``target_agent_group``,
+        ``target_critic``, and the ``target_update_*`` configuration; the
+        SSL auxiliary model is the only trainable module that lives on
+        this branch and is not visible to the base.
+        """
+        super()._add_target_params_for_sync(trainable_params)
+        if self.ssl_model is not None:
+            trainable_params["ssl_model"] = get_state_dict(self.ssl_model)
 
     def _extra_sync_kwargs(self) -> dict:
         """Push the SSL auxiliary learning rate to workers via SYNC_LR."""
@@ -293,6 +270,9 @@ class SelfSupervisedQMIXTrainer(OffPolicyTrainer):
             logging.info(f"Epoch {epoch}: Combined Loss {loss:.4f}")
 
             # Sync eval params from workers before evaluation
+            if self.worker_group is not None:
+                self.worker_group.average_eval_params()
+                self.worker_group.average_target_params()
             self._sync_eval_params_from_workers()
             self._sync_target_params_from_workers()
 
@@ -406,8 +386,11 @@ class SelfSupervisedQMIXTrainer(OffPolicyTrainer):
                 # Rollback: hard-copy eval → target regardless of target_update_mode.
                 load_state_dict_into(self.target_agent_group, get_state_dict(self.eval_agent_group))
                 load_state_dict_into(self.target_critic, get_state_dict(self.eval_critic))
+                # Broadcast the rolled-back state to workers.
+                self._sync_params_to_workers()
                 logging.info(
-                    f"Epoch {epoch}: Rolled back eval/ssl/target to cached parameters."
+                    f"Epoch {epoch}: Rolled back eval/ssl/target on master and all workers "
+                    f"(rollback_interval={rollback_interval})."
                 )
 
         logging.info(

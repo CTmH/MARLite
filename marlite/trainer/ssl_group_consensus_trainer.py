@@ -13,7 +13,7 @@ from marlite.util.trajectory_dataset import (
     TrajectoryDataLoader,
     GroupSSLEnrichedTrajectoryDataset,
 )
-from marlite.util.serialization import get_state_dict, load_state_dict_into
+from marlite.util.serialization import load_state_dict_into
 
 # ────────────────────────────────────────────────────────────────────────
 # Dimension reference
@@ -119,25 +119,12 @@ class SSLGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
         )
 
     def _sync_params_to_workers(self):
-        if self.worker_group is None:
-            return
-
-        trainable_params = {
-            "eval_agent_group": get_state_dict(self.eval_agent_group),
-            "target_agent_group": get_state_dict(self.target_agent_group),
-            "eval_critic": get_state_dict(self.eval_critic),
-            "target_critic": get_state_dict(self.target_critic),
-            "reward_aggr_mode": self.reward_aggr_mode,
-        }
-        if self.ssl_model is not None:
-            trainable_params["ssl_model"] = get_state_dict(self.ssl_model)
-        self.worker_group.broadcast_params(trainable_params)
-
-        critic_lr = self.critic_optimizer.param_groups[0]["lr"]
-        agent_lr = self.agent_optimizer.param_groups[0]["lr"]
-        self.worker_group.sync_lr_to_workers(
-            critic_lr, agent_lr, **self._extra_sync_kwargs()
-        )
+        # Inherit the off-policy base flow so the per-epoch broadcast includes
+        # ``target_agent_group``, ``target_critic``, and the
+        # ``target_update_*`` configuration (mode/tau/interval).  The SSL
+        # auxiliary model is added by ``SelfSupervisedQMIXTrainer.
+        # _add_target_params_for_sync`` via the standard extension point.
+        super()._sync_params_to_workers()
 
     def _extra_sync_kwargs(self) -> dict:
         """Push the SSL auxiliary learning rate to workers via SYNC_LR."""
@@ -256,8 +243,6 @@ class SSLGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
         return avg_combined
 
     def _joint_learn_multi_gpu(self, sample_size, batch_size: int, times: int = 1):
-        self.worker_group.move_models_to_gpu()
-
         total_combined = 0.0
         total_critic = 0.0
         total_ssl = 0.0
@@ -302,9 +287,6 @@ class SSLGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
 
                     bs = batch["states"].shape[0]
                     pbar.update(bs)
-
-        self.worker_group.move_models_to_cpu()
-        torch.cuda.empty_cache()
 
         avg_combined = total_combined / total_batches
         avg_critic = total_critic / total_batches
@@ -637,6 +619,12 @@ class SSLGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
             #   weighted_sum: L_TD + w_ssl * L_SSL
             #   pit_loss:     PITLoss([L_TD, L_SSL])
 
+        if isinstance(combined_loss, torch.Tensor) and not torch.isfinite(combined_loss).any():
+            logging.error(
+                f"_compute_loss NaN: combined={combined_loss.item()}, "
+                f"critic={critic_loss.item() if isinstance(critic_loss, torch.Tensor) else critic_loss}, "
+                f"ssl={ssl_loss.item() if isinstance(ssl_loss, torch.Tensor) else ssl_loss}"
+            )
         return combined_loss, critic_loss, ssl_loss
 
     # ── Reconstruction target builder ────────────────────────────────────

@@ -71,16 +71,6 @@ class G2ANetMAPPOWorker(OnPolicyWorker):
             self.eval_critic.to(device)
         self.device = device
 
-    def reduce_gradients(self):
-        for param in self.eval_critic.parameters():
-            if param.grad is not None:
-                dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
-                param.grad.data /= self.world_size
-        for param in self.eval_agent_group.parameters():
-            if param.grad is not None:
-                dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
-                param.grad.data /= self.world_size
-
     def train_step(self, batch: Dict[str, Any]) -> float:
         alive_mask = batch["alive_mask"].to(dtype=torch.bool)
         observations = batch["observations"].to(dtype=torch.float32)

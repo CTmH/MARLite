@@ -144,6 +144,35 @@ class BaseWorker:
         self.device = device
 
     # ------------------------------------------------------------------
+    # Parameter synchronisation — all_reduce across workers
+    # ------------------------------------------------------------------
+
+    def synchronize_eval_params(self):
+        """Average ``eval_agent_group`` and ``eval_critic`` across all workers
+        via ``dist.all_reduce``.
+
+        Subclasses that own additional trainable modules (``ssl_model``,
+        ``eval_v_net``) override this and call ``super()`` first.
+        Called at the end of each epoch before the master reads from
+        worker 0, ensuring the master receives the consensus state.
+        """
+        for net in (self.eval_agent_group, self.eval_critic):
+            if net is None:
+                continue
+            for param in net.parameters():
+                dist.all_reduce(param.data, op=dist.ReduceOp.SUM)
+                param.data /= self.world_size
+
+    def synchronize_target_params(self):
+        """Average target-network parameters across all workers.
+
+        ``BaseWorker`` has no targets, so the default is a no-op.
+        ``OffPolicyWorker`` overrides this to average
+        ``target_agent_group`` and ``target_critic``.
+        """
+        pass
+
+    # ------------------------------------------------------------------
     # Subclass interface
     # ------------------------------------------------------------------
 
@@ -196,6 +225,14 @@ class BaseWorker:
         elif cmd == "MOVE_TO_CPU":
             self.move_to_device("cpu")
             torch.cuda.empty_cache()
+            if ack_queue:
+                ack_queue.put("ACK")
+        elif cmd == "AVERAGE_EVAL_PARAMS":
+            self.synchronize_eval_params()
+            if ack_queue:
+                ack_queue.put("ACK")
+        elif cmd == "AVERAGE_TARGET_PARAMS":
+            self.synchronize_target_params()
             if ack_queue:
                 ack_queue.put("ACK")
         else:

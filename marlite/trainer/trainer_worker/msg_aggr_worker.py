@@ -163,6 +163,13 @@ class MsgAggrWorker(OffPolicyWorker):
         )
         q_tot = ret["q_tot"]
 
+        with torch.no_grad():
+            self.target_critic.eval()
+            ret = self.target_critic(
+                q_val, states, alive_mask, timestep_padding_mask[:, 0, :]
+            )
+            state_features = ret["state_features"]
+
         # Use target model for stability (Double Q-learning)
         with torch.no_grad():
             # Double Q: eval agent group selects best actions

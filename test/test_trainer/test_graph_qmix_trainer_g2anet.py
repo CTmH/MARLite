@@ -284,8 +284,11 @@ trainer:
 
     def test_distributed_data_parallel(self):
         """Test DistributedDataParallel training with proper DDP initialization."""
+        gpu_count = torch.cuda.device_count()
+        if gpu_count < 2:
+            self.skipTest(f"Need at least 2 GPUs for multi-GPU test, found {gpu_count}")
         config = deepcopy(self.config)
-        config["trainer"]["train_device"] = ["cuda:0"]
+        config["trainer"]["train_device"] = [f"cuda:{i}" for i in range(gpu_count)]
 
         with tempfile.TemporaryDirectory() as temp_dir:
             config["trainer"]["workdir"] = temp_dir

@@ -1,8 +1,8 @@
 """
-VAE Graph worker group implementation for joint RL+SSL multi-GPU training.
+VAEGraphQMIXWorkerGroup — worker group for VAE-based joint RL+SSL multi-GPU training.
 
-This module provides VAEGraphWorkerGroup that manages GraphWorker instances
-for joint RL+SSL training with VAEGraphQMIXTrainer.
+This module provides VAEGraphQMIXWorkerGroup that manages VAEGraphQMIXWorker
+instances for joint RL+SSL training with VAEGraphQMIXTrainer.
 """
 
 from typing import Any, Dict
@@ -12,11 +12,11 @@ from marlite.trainer.trainer_worker_group.base_worker_group import (
 )
 
 
-class VAEGraphWorkerGroup(OffPolicyWorkerGroup):
+class VAEGraphQMIXWorkerGroup(OffPolicyWorkerGroup):
     """
     Worker group for VAE-based joint RL+SSL multi-GPU training.
 
-    This group manages GraphWorker instances that support joint training where:
+    This group manages VAEGraphQMIXWorker instances that support joint training where:
     - eval_agent_group, target_agent_group for RL
     - eval_critic, target_critic for RL
     - ssl_model for SSL (VAE decoder)

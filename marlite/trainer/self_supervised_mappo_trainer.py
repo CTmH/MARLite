@@ -318,6 +318,8 @@ class SelfSupervisedMAPPOTrainer(OnPolicyTrainer):
                     batch_size=batch_size,
                     times=learning_times_per_iteration,
                 )
+                if self.worker_group is not None:
+                    self.worker_group.average_eval_params()
                 self._sync_eval_params_from_workers()
                 logging.info(f"Iteration {iteration}: Loss {loss:.4f}")
 

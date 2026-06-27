@@ -154,16 +154,17 @@ class QTRANWorker(OffPolicyWorker):
     # ------------------------------------------------------------------
 
     def reduce_gradients(self):
-        """All-reduce gradients for eval_agent_group, eval_critic, eval_v_net."""
-        for net in (
-            self.eval_critic,
-            self.eval_agent_group,
-            self.eval_v_net,
-        ):
-            for param in net.parameters():
-                if param.grad is not None:
-                    dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
-                    param.grad.data /= self.world_size
+        super().reduce_gradients()
+        for param in self.eval_v_net.parameters():
+            if param.grad is not None:
+                dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
+                param.grad.data /= self.world_size
+
+    def synchronize_eval_params(self):
+        super().synchronize_eval_params()
+        for param in self.eval_v_net.parameters():
+            dist.all_reduce(param.data, op=dist.ReduceOp.SUM)
+            param.data /= self.world_size
 
     # ------------------------------------------------------------------
     # Learning-rate sync — add v_lr on top of critic + agent

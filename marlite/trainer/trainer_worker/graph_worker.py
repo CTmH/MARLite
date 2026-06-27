@@ -96,27 +96,6 @@ class GraphWorker(OffPolicyWorker):
             self.target_critic.to(device)
         self.device = device
 
-    def reduce_gradients(self):
-        """
-        Reduce (average) gradients across all workers for critic and agent.
-
-        Implements DDP-style gradient synchronization:
-        - All workers compute local gradients
-        - all_reduce sums gradients across all workers
-        - Divide by world_size to get average
-        """
-        # Critic gradients
-        for param in self.eval_critic.parameters():
-            if param.grad is not None:
-                dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
-                param.grad.data /= self.world_size
-
-        # Agent group gradients
-        for param in self.eval_agent_group.parameters():
-            if param.grad is not None:
-                dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
-                param.grad.data /= self.world_size
-
     def get_params_for_main(self) -> Dict[str, Any]:
         """
         Get current parameters to send back to main process.
@@ -330,78 +309,7 @@ class GraphWorker(OffPolicyWorker):
 
         return critic_loss.detach().cpu().item()
 
-    def handle_command(
-        self,
-        cmd: str,
-        param_queue,
-        data_queue,
-        loss_queue,
-        ack_queue=None,
-    ) -> bool:
-        """
-        Handle a command from the main process.
 
-        Args:
-            cmd: Command string
-            param_queue: Queue for parameter exchange
-            data_queue: Queue for receiving training data
-            loss_queue: Queue for returning loss values
-            ack_queue: Queue for sending ACK signals back to main process
-
-        Returns:
-            True if should continue, False if should stop
-        """
-        if cmd == "STOP":
-            self.cleanup()
-            return False
-
-        elif cmd == "SYNC_FROM_MAIN":
-            params = param_queue.get()
-            self.sync_params_from_main(params)
-            del params
-            ack_queue.put("ACK")
-
-        elif cmd == "BROADCAST":
-            params = param_queue.get()
-            self.sync_params_from_main(params)
-            del params
-
-        elif cmd == "SYNC_TO_MAIN":
-            params = self.get_params_for_main()
-            param_queue.put(params)
-
-        elif cmd == "TRAIN_STEP":
-            batch = data_queue.get()
-            loss = self.train_step(batch)
-            del batch
-            loss_queue.put(loss)
-
-        elif cmd == "MOVE_TO_GPU":
-            self.move_to_device(self.assigned_device)
-            if ack_queue:
-                ack_queue.put("ACK")
-
-        elif cmd == "MOVE_TO_CPU":
-            self.move_to_device("cpu")
-            torch.cuda.empty_cache()
-            if ack_queue:
-                ack_queue.put("ACK")
-
-        elif cmd == "SYNC_LR":
-            lr_data = param_queue.get()
-            if "critic_lr" in lr_data:
-                for param_group in self.critic_optimizer.param_groups:
-                    param_group["lr"] = lr_data["critic_lr"]
-            if "agent_lr" in lr_data:
-                for param_group in self.agent_optimizer.param_groups:
-                    param_group["lr"] = lr_data["agent_lr"]
-            if ack_queue:
-                ack_queue.put("ACK")
-
-        else:
-            print(f"Worker {self.worker_id}: Unknown command: {repr(cmd)}", flush=True)
-
-        return True
 
     def cleanup(self):
         """Clean up distributed process group."""

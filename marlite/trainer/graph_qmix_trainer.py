@@ -203,8 +203,6 @@ class GraphQMIXTrainer(OffPolicyTrainer):
 
     def _learn_multi_gpu(self, sample_size, batch_size: int, times: int = 1):
         """Multi-GPU learning via worker processes."""
-        self.worker_group.move_models_to_gpu()
-
         total_loss = 0.0
         total_batches = 0
 
@@ -229,8 +227,5 @@ class GraphQMIXTrainer(OffPolicyTrainer):
 
                     bs = batch["states"].shape[0]
                     pbar.update(bs)
-
-        self.worker_group.move_models_to_cpu()
-        torch.cuda.empty_cache()
 
         return total_loss / total_batches

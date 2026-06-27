@@ -20,6 +20,25 @@ class OnPolicyTrainer(Trainer):
         self._setup_multi_gpu()
         self._compile_eval_models()
 
+    def save_current_model(self, checkpoint: str):
+        """On-policy: save eval models only (no target networks)."""
+        agent_path = os.path.join(self.checkpointdir, checkpoint, "agent")
+        os.makedirs(agent_path, exist_ok=True)
+        self.eval_agent_group.to("cpu")
+        torch.save(
+            get_state_dict(self.eval_agent_group),
+            os.path.join(agent_path, "agent.pth"),
+        )
+
+        critic_path = os.path.join(self.checkpointdir, checkpoint, "critic")
+        os.makedirs(critic_path, exist_ok=True)
+        self.eval_critic.to("cpu")
+        torch.save(
+            get_state_dict(self.eval_critic),
+            os.path.join(critic_path, "critic.pth"),
+        )
+        return self
+
     def evaluate(self):
         self.eval_agent_group.eval().to("cpu")
         serialized_params = serialize_to_buffer(

@@ -9,7 +9,7 @@ further subclasses.
 
 from typing import Any, Dict
 import torch
-
+import torch.distributed as dist
 from marlite.trainer.trainer_worker.base_worker import BaseWorker
 
 
@@ -139,6 +139,42 @@ class OffPolicyWorker(BaseWorker):
             )
         else:
             raise ValueError(f"Unknown target_update_mode '{mode}'")
+
+    # ------------------------------------------------------------------
+    # Parameter synchronisation — all_reduce across workers
+    # ------------------------------------------------------------------
+
+    def synchronize_target_params(self):
+        """Average ``target_agent_group`` and ``target_critic`` across all
+        workers via ``dist.all_reduce``.
+
+        Called at the end of each epoch (after local polyak updates) to
+        ensure all workers operate on the same target-parameter baseline,
+        preventing error accumulation from per-worker independent polyak
+        trajectories.  After this call the master reads the consensus
+        state from worker 0.
+        """
+        for net in (self.target_agent_group, self.target_critic):
+            if net is None:
+                continue
+            for param in net.parameters():
+                dist.all_reduce(param.data, op=dist.ReduceOp.SUM)
+                param.data /= self.world_size
+
+    def reduce_gradients(self):
+        """All-reduce gradients across all workers for the standard
+        ``eval_critic`` and ``eval_agent_group`` modules.
+
+        Subclasses that own additional modules (e.g. ``ssl_model`` for
+        self-supervised variants, ``eval_v_net`` for QTRAN) override this
+        and call ``super().reduce_gradients()`` first, then add the extra
+        networks' gradient all-reduce.
+        """
+        for net in (self.eval_critic, self.eval_agent_group):
+            for param in net.parameters():
+                if param.grad is not None:
+                    dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
+                    param.grad.data /= self.world_size
 
     # ------------------------------------------------------------------
     # Learning-rate sync (standard critic + agent optimizers)
