@@ -407,7 +407,7 @@ class BaseWorkerGroup(ABC):
 
         Every worker's ``target_agent_group`` and ``target_critic`` are
         averaged so that the next read from worker 0 returns the
-        consensus state.  Prevents per-worker drift in polyak trajectories.
+        consensus state.  Prevents per-worker drift in ema trajectories.
 
         Blocks until all workers acknowledge.
         """

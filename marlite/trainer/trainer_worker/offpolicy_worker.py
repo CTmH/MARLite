@@ -115,7 +115,7 @@ class OffPolicyWorker(BaseWorker):
         ``target_update_interval`` throttles all three modes uniformly:
 
         - ``"hard"``: hard-copy eval-network parameters into target networks.
-        - ``"ema"`` / ``"polyak"``: Polyak averaging
+        - ``"ema"``: exponential moving-average (Polyak averaging)
           ``θ_target ← τ·θ_eval + (1-τ)·θ_target`` with
           ``τ = target_update_tau``.
         """
@@ -130,7 +130,7 @@ class OffPolicyWorker(BaseWorker):
             self.target_critic.load_state_dict(
                 {k: v.clone() for k, v in self.eval_critic.state_dict().items()}
             )
-        elif mode in ("ema", "polyak"):
+        elif mode == "ema":
             self._ema_update(
                 self.target_agent_group, self.eval_agent_group, self.target_update_tau
             )
@@ -148,9 +148,9 @@ class OffPolicyWorker(BaseWorker):
         """Average ``target_agent_group`` and ``target_critic`` across all
         workers via ``dist.all_reduce``.
 
-        Called at the end of each epoch (after local polyak updates) to
+        Called at the end of each epoch (after local ema updates) to
         ensure all workers operate on the same target-parameter baseline,
-        preventing error accumulation from per-worker independent polyak
+        preventing error accumulation from per-worker independent ema
         trajectories.  After this call the master reads the consensus
         state from worker 0.
         """

@@ -61,6 +61,7 @@ class TestMagentVecStateGroupFeaturesConstructor(unittest.TestCase):
 
         grouping = np.array([[0, 0, 1, -1], [0, 0, 1, -1]], dtype=np.int8)
         alive_mask = np.ones((B, T, self.N_OUR), dtype=bool)
+        alive_mask[:, :, 3] = False  # agent 3 is dead (HP=0)
         observations = np.zeros((B, T, self.N_OUR, 1), dtype=np.float16)
         return states, observations, grouping, alive_mask
 
@@ -105,13 +106,33 @@ class TestMagentVecStateGroupFeaturesConstructor(unittest.TestCase):
         self.assertAlmostEqual(float(f[1]), 7.5, places=1)            # HP mean
         self.assertAlmostEqual(float(f[3]), 15.0, places=1)           # HP total
 
-    def test_dead_excluded_by_hp(self):
+    def test_dead_excluded_from_group(self):
         s, o, g, a = self._make_data()
-        g[:, 3] = 0  # dead agent 3 into group 0
+        g[:, 3] = 0  # dead agent 3 into group 0 (excluded via alive_mask)
         c = self._make_ctor(n_groups=2)
         r, pm = c.process(o, s, g, a)
         f = r[0, 0]
         self.assertAlmostEqual(float(f[0]), 2.0 / self.K, places=3)
+
+    def test_alive_mask_is_authoritative(self):
+        """Liveness is determined by alive_mask, not the HP field."""
+        c = self._make_ctor(n_groups=2, observation_range=0.3)
+
+        # Case A: HP>0 but alive_mask=False → excluded from the group.
+        s, o, g, a = self._make_data()
+        a[:, :, 1] = False  # agent 1 has HP=5 but is marked dead
+        r, pm = c.process(o, s, g, a)
+        f = r[0, 0]
+        self.assertAlmostEqual(float(f[0]), 1.0 / self.K, places=3)  # only agent 0
+        self.assertAlmostEqual(float(f[1]), 10.0, places=1)          # HP mean = 10
+
+        # Case B: HP=0 but alive_mask=True → still included in the group.
+        s2, o2, g2, a2 = self._make_data()
+        s2[:, :, 1, 0] = 0  # agent 1 HP=0 but alive_mask stays True
+        r2, pm2 = c.process(o2, s2, g2, a2)
+        f2 = r2[0, 0]
+        self.assertAlmostEqual(float(f2[0]), 2.0 / self.K, places=3)  # agents 0,1
+        self.assertAlmostEqual(float(f2[1]), 5.0, places=1)          # HP mean = (10+0)/2
 
     # ── enemy features via observation range ──────────────────────────────
 
@@ -173,6 +194,7 @@ class TestMagentVecStateGroupFeaturesConstructor(unittest.TestCase):
         s, o, g, a = self._make_data()
         s[:, :, 0, 3] = 0.01; s[:, :, 0, 4] = 0.50
         s[:, :, 1, 0] = 0; s[:, :, 2, 0] = 0  # kill 1,2
+        a[:, :, 1] = False; a[:, :, 2] = False
         c = self._make_ctor(n_groups=1, observation_range=0.3)
         r, pm = c.process(o, s, g, a)
         self.assertLess(float(r[0, 0, 13]), 0.02)
@@ -183,6 +205,7 @@ class TestMagentVecStateGroupFeaturesConstructor(unittest.TestCase):
         s, o, g, a = self._make_data()
         for i in range(self.N_OUR):
             s[:, :, i, 0] = 0
+        a[:, :, :] = False
         c = self._make_ctor(n_groups=2, observation_range=0.3)
         r, pm = c.process(o, s, g, a)
         self.assertTrue(np.all(r == 0))
@@ -228,6 +251,7 @@ class TestMagentVecStateGroupFeaturesConstructor(unittest.TestCase):
     def test_single_agent_no_dispersion(self):
         s, o, g, a = self._make_data()
         s[:, :, 1, 0] = 0  # kill agent 1
+        a[:, :, 1] = False
         c = self._make_ctor(n_groups=2, observation_range=0.3)
         r, pm = c.process(o, s, g, a)
         self.assertAlmostEqual(float(r[0, 0, 4]), 0.0, places=3)
@@ -235,6 +259,7 @@ class TestMagentVecStateGroupFeaturesConstructor(unittest.TestCase):
     def test_partially_dead(self):
         s, o, g, a = self._make_data()
         s[:, :, 1, 0] = 0; s[:, :, 5, 0] = 0
+        a[:, :, 1] = False
         g[:, 1] = -1
         c = self._make_ctor(n_groups=2, observation_range=0.3)
         r, pm = c.process(o, s, g, a)
@@ -246,6 +271,7 @@ class TestMagentVecStateGroupFeaturesConstructor(unittest.TestCase):
     def test_all_dead_enemies_zero_ratio(self):
         s, o, g, a = self._make_data()
         s[:, :, 0, 0] = 0; s[:, :, 1, 0] = 0; s[:, :, 2, 0] = 0
+        a[:, :, :] = False
         g[:, :] = 0
         c = self._make_ctor(n_groups=1, observation_range=0.5)
         r, pm = c.process(o, s, g, a)
@@ -275,6 +301,19 @@ class TestMagentVecStateGroupFeaturesConstructor(unittest.TestCase):
         f = r[0, 0]
         self.assertAlmostEqual(float(f[5]), 1.0 / self.K, places=3,
             msg="Only enemy 4 visible (square range)")
+
+
+    def test_parallel_vs_sequential_consistency(self):
+        """Ensure n_workers=0 and n_workers=2 produce identical feature vectors."""
+        s, o, g, a = self._make_data()
+        constructor_seq = self._make_ctor(n_groups=3, n_workers=0)
+        constructor_par = self._make_ctor(n_groups=3, n_workers=2)
+
+        result_seq, mask_seq = constructor_seq.process(o, s, g, a)
+        result_par, mask_par = constructor_par.process(o, s, g, a)
+
+        np.testing.assert_array_equal(result_seq, result_par)
+        np.testing.assert_array_equal(mask_seq, mask_par)
 
 
 if __name__ == "__main__":

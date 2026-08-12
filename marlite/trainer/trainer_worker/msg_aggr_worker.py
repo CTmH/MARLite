@@ -237,7 +237,7 @@ class MsgAggrWorker(OffPolicyWorker):
         self.critic_optimizer.step()
         self.agent_optimizer.step()
 
-        # Per-batch target update (hard / ema / polyak)
+        # Per-batch target update (hard / ema)
         self._update_target_after_batch()
 
         return critic_loss.detach().cpu().item()
@@ -458,7 +458,7 @@ class ProbMsgAggrWorker(MsgAggrWorker):
         self.critic_optimizer.step()
         self.agent_optimizer.step()
 
-        # Per-batch target update (hard / ema / polyak)
+        # Per-batch target update (hard / ema)
         self._update_target_after_batch()
 
         return critic_loss.detach().cpu().item()

@@ -428,7 +428,7 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
         np.testing.assert_array_equal(mask, expected_mask)
 
     def test_process_parallel_vs_sequential_consistency_without_time_seq(self):
-        """Ensure n_workers=0 and n_workers=1 produce identical results without time sequence."""
+        """Ensure n_workers=0 and n_workers=2 produce identical results without time sequence."""
         # Larger test case: batch_size=1, seq_len=1, 3 agents, max_observed_entities=2, feature_dim=2
         observations = np.array(
             [
@@ -463,7 +463,7 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
             max_entities_perception=6, with_time_seq=False, n_workers=0
         )
         constructor_par = MagentVecObsDataConstructor(
-            max_entities_perception=6, with_time_seq=False, n_workers=1
+            max_entities_perception=6, with_time_seq=False, n_workers=2
         )
 
         result_seq, mask_seq = constructor_seq.process(

@@ -367,5 +367,47 @@ class TestMagentGroupFeaturesConstructor(unittest.TestCase):
         self.assertGreater(float(f[14]), 0.0, "Should not be at exact border")
 
 
+    def test_parallel_vs_sequential_consistency(self):
+        """Ensure n_workers=0 and n_workers=2 produce identical feature vectors."""
+        for channel_first in (False, True):
+            states, obs, grouping, alive_mask = self._make_data(channel_first=channel_first)
+            constructor_seq = MagentGroupFeaturesConstructor(
+                n_groups=3,
+                window_size=7,
+                binary_agent_id_dim=list(range(5, 15)),
+                agent_presence_dim=[1, 3],
+                our_team_presence_dim=1,
+                our_team_hp_dim=2,
+                enemy_team_presence_dim=3,
+                enemy_team_hp_dim=4,
+                obstacle_dim=0,
+                channel_first=channel_first,
+                n_workers=0,
+            )
+            constructor_par = MagentGroupFeaturesConstructor(
+                n_groups=3,
+                window_size=7,
+                binary_agent_id_dim=list(range(5, 15)),
+                agent_presence_dim=[1, 3],
+                our_team_presence_dim=1,
+                our_team_hp_dim=2,
+                enemy_team_presence_dim=3,
+                enemy_team_hp_dim=4,
+                obstacle_dim=0,
+                channel_first=channel_first,
+                n_workers=2,
+            )
+
+            result_seq, mask_seq = constructor_seq.process(
+                obs, states, grouping, alive_mask
+            )
+            result_par, mask_par = constructor_par.process(
+                obs, states, grouping, alive_mask
+            )
+
+            np.testing.assert_array_equal(result_seq, result_par)
+            np.testing.assert_array_equal(mask_seq, mask_par)
+
+
 if __name__ == "__main__":
     unittest.main()

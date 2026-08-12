@@ -219,7 +219,7 @@ class SSLGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
                         total_ssl += ssl_loss.detach().cpu().item()
                     total_batches += 1
 
-                    # Per-batch target update (hard / ema / polyak)
+                    # Per-batch target update (hard / ema)
                     self._total_batches_processed += 1
                     self._update_target_after_batch()
 

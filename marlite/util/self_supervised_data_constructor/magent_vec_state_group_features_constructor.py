@@ -11,6 +11,11 @@ class MagentVecStateGroupFeaturesConstructor:
     agents to match grouping dimensions. Enemy features are computed from
     deduplicated enemies within each group member's observation range.
 
+    ``alive_mask`` (B, T, N) is the authoritative our-team liveness signal
+    (aligned positionally with ``grouping``). Only its last timestep is used;
+    agents marked dead are excluded from group membership regardless of their
+    HP field. Enemy liveness continues to be inferred from HP.
+
     Feature vector (N_FEATURES=17):
         0:  Our team agent count density (count / total_our_team_count)
         1:  Our team health mean
@@ -66,25 +71,33 @@ class MagentVecStateGroupFeaturesConstructor:
         states: np.ndarray,
         grouping: np.ndarray,
         alive_mask: np.ndarray,
-    ) -> np.ndarray:
+    ) -> Tuple[np.ndarray, np.ndarray]:
         state_last = states[:, -1]
+        # ``alive_mask`` is the authoritative our-team liveness signal.
+        # Only the last timestep is processed, so take its last frame.
+        alive_last = alive_mask[:, -1]
         batch_size = state_last.shape[0]
 
-        if self.n_workers > 1 and batch_size > 1:
-            return self._process_parallel(state_last, grouping)
+        if self.n_workers > 1:
+            return self._process_parallel(state_last, grouping, alive_last)
 
         result = np.zeros(
             (batch_size, self.n_groups, self.N_FEATURES), dtype=np.float16
         )
         padding_mask = np.ones((batch_size, self.n_groups), dtype=bool)
         for b in range(batch_size):
-            r, m = self._process_single(state_last[b], grouping[b])
+            r, m = self._process_single(state_last[b], grouping[b], alive_last[b])
             result[b] = r
             padding_mask[b] = m
         return result, padding_mask
 
-    def _process_parallel(self, state_last, grouping):
+    def _process_parallel(self, state_last, grouping, alive_last):
         batch_size = state_last.shape[0]
+        if batch_size == 0:
+            return (
+                np.zeros((0, self.n_groups, self.N_FEATURES), dtype=np.float16),
+                np.ones((0, self.n_groups), dtype=bool),
+            )
         n_workers = min(batch_size, self.n_workers)
 
         shm = SharedMemory(create=True, size=state_last.nbytes)
@@ -101,7 +114,15 @@ class MagentVecStateGroupFeaturesConstructor:
                 for i in range(0, batch_size, chunk_size)
             ]
             args = [
-                (shm.name, state_last.shape, state_last.dtype, chunk, grouping, self)
+                (
+                    shm.name,
+                    state_last.shape,
+                    state_last.dtype,
+                    chunk,
+                    grouping,
+                    alive_last,
+                    self,
+                )
                 for chunk in chunks
             ]
 
@@ -122,7 +143,7 @@ class MagentVecStateGroupFeaturesConstructor:
             shm.close()
             shm.unlink()
 
-    def _process_single(self, st_all, grp):
+    def _process_single(self, st_all, grp, alv):
         teams = st_all[:, self.team_dim]
         our_mask = teams == self.my_team
         en_mask = teams == self.enemy_team
@@ -137,8 +158,11 @@ class MagentVecStateGroupFeaturesConstructor:
                 np.zeros(self.n_groups, dtype=bool),
             )
 
+        # ``alv`` is the authoritative our-team liveness vector (aligned
+        # positionally with ``grp`` and ``our_st`` rows).
+        assert len(alv) == K, "alive_mask length must match our-team agent count"
+        our_alive = alv.astype(bool)
         our_hps = our_st[:, self.hp_dim]
-        our_alive = our_hps > 0
 
         en_hps = en_st[:, self.hp_dim]
         en_alive = en_hps > 0
@@ -303,7 +327,7 @@ class MagentVecStateGroupFeaturesConstructor:
 
 
 def _process_chunk_worker(args):
-    shm_name, shape, dtype, chunk_ids, grouping, constructor = args
+    shm_name, shape, dtype, chunk_ids, grouping, alive_last, constructor = args
 
     shm = SharedMemory(name=shm_name)
     try:
@@ -314,7 +338,9 @@ def _process_chunk_worker(args):
         )
         padding_mask = np.zeros((len(chunk_ids), constructor.n_groups), dtype=bool)
         for i, b in enumerate(chunk_ids):
-            r, m = constructor._process_single(state_last[b], grouping[b])
+            r, m = constructor._process_single(
+                state_last[b], grouping[b], alive_last[b]
+            )
             result[i] = r
             padding_mask[i] = m
         return result, padding_mask

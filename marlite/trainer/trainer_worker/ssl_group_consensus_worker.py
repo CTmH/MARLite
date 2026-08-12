@@ -393,7 +393,7 @@ class SSLGroupConsensusWorker(OffPolicyWorker):
         if not is_warmup:
             self.ssl_optimizer.step()
 
-        # Per-batch target update (hard / ema / polyak)
+        # Per-batch target update (hard / ema)
         self._update_target_after_batch()
 
         ssl_loss_value = (

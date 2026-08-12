@@ -359,7 +359,7 @@ class QTRANWorker(OffPolicyWorker):
         self.v_optimizer.step()
         self.agent_optimizer.step()
 
-        # Per-batch target update (hard / ema / polyak) — V has no target
+        # Per-batch target update (hard / ema) — V has no target
         self._update_target_after_batch()
 
         return total_loss_batch.detach().cpu().item()

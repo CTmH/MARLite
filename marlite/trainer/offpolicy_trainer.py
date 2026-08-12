@@ -48,14 +48,15 @@ class OffPolicyTrainer(Trainer):
             eval_episodes_to_replay_ratio: Ratio of evaluation episodes used
                 to refresh the replay buffer (off-policy reuse).
             target_update_mode: How the target network is updated each interval.
-                One of ``"hard"`` (direct copy), ``"ema"`` or ``"polyak"``
-                (Polyak averaging with τ = ``target_update_tau``).
-            target_update_tau: Polyak averaging coefficient τ ∈ (0, 1]. Only used
-                when ``target_update_mode`` is ``"ema"`` or ``"polyak"``.
+                One of ``"hard"`` (direct copy) or ``"ema"``
+                (exponential moving average / Polyak averaging with
+                τ = ``target_update_tau``).
+            target_update_tau: EMA averaging coefficient τ ∈ (0, 1]. Only used
+                when ``target_update_mode`` is ``"ema"``.
             target_update_interval: Number of gradient-update batches between
-                target network refreshes.  Applies uniformly to all three
+                target network refreshes.  Applies uniformly to both
                 update modes: hard copies the eval weights every interval;
-                ema/polyak apply one Polyak averaging step every interval.
+                ema applies one averaging step every interval.
                 ``1`` (default) updates every batch.
             **kwargs: Forwarded to ``Trainer.__init__``.
         """
@@ -67,9 +68,9 @@ class OffPolicyTrainer(Trainer):
         self.target_update_tau = target_update_tau
         self.target_update_interval = target_update_interval
         self._total_batches_processed = 0
-        if self.target_update_mode not in ("hard", "polyak", "ema"):
+        if self.target_update_mode not in ("hard", "ema"):
             raise ValueError(
-                f"target_update_mode must be 'hard', 'polyak', or 'ema', got '{self.target_update_mode}'"
+                f"target_update_mode must be 'hard' or 'ema', got '{self.target_update_mode}'"
             )
         super().__init__(**kwargs)
         if not isinstance(self.eval_critic, MixerCritic):
@@ -232,7 +233,7 @@ class OffPolicyTrainer(Trainer):
 
         - ``"hard"``: hard-copy eval-network parameters into target networks
           every ``target_update_interval`` batches.
-        - ``"ema"`` / ``"polyak"``: apply Polyak averaging
+        - ``"ema"``: apply exponential moving-average (Polyak averaging)
           ``θ_target ← τ·θ_eval + (1-τ)·θ_target`` with
           ``τ = target_update_tau``, every ``target_update_interval`` batches.
 
@@ -294,7 +295,7 @@ class OffPolicyTrainer(Trainer):
         load_state_dict_into(self.target_agent_group, get_state_dict(self.eval_agent_group))
         load_state_dict_into(self.target_critic, get_state_dict(self.eval_critic))
         # Broadcast loaded state to all workers so they start from the
-        # checkpointed eval with target = eval (initial polyak state).
+        # checkpointed eval with target = eval (initial ema state).
         self._sync_params_to_workers()
         return self
 

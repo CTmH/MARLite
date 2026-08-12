@@ -321,55 +321,57 @@ class MagentObsDataConstructor(SelfSupervisedDataConstructor):
         )
 
         if self.n_workers > 1:
-            shm_obs, shm_alive, _, _ = _create_shared_memory_arrays(
-                processed_observations, alive_mask
-            )
+            n_workers = min(self.n_workers, batch_size)
+            if n_workers >= 1:
+                shm_obs, shm_alive, _, _ = _create_shared_memory_arrays(
+                    processed_observations, alive_mask
+                )
 
-            try:
-                n_workers = min(self.n_workers, batch_size)
-                base_samples = batch_size // n_workers
-                extra_samples = batch_size % n_workers
+                try:
+                    base_samples = batch_size // n_workers
+                    extra_samples = batch_size % n_workers
 
-                worker_args = []
-                for worker_id in range(n_workers):
-                    start_idx = worker_id * base_samples + min(worker_id, extra_samples)
-                    end_idx = (
-                        start_idx
-                        + base_samples
-                        + (1 if worker_id < extra_samples else 0)
-                    )
-                    if start_idx >= batch_size:
-                        break
-                    batch_indices = list(range(start_idx, end_idx))
-                    worker_args.append(
-                        (batch_indices, edge_indices, self.max_entities_perception)
-                    )
+                    worker_args = []
+                    for worker_id in range(n_workers):
+                        start_idx = worker_id * base_samples + min(worker_id, extra_samples)
+                        end_idx = (
+                            start_idx
+                            + base_samples
+                            + (1 if worker_id < extra_samples else 0)
+                        )
+                        if start_idx >= batch_size:
+                            break
+                        batch_indices = list(range(start_idx, end_idx))
+                        worker_args.append(
+                            (batch_indices, edge_indices, self.max_entities_perception)
+                        )
 
-                mp_ctx = mp.get_context("fork") if _is_linux() else None
+                    mp_ctx = mp.get_context("fork") if _is_linux() else None
 
-                with ProcessPoolExecutor(
-                    max_workers=n_workers,
-                    initializer=_worker_init,
-                    initargs=(
-                        shm_obs.name,
-                        processed_observations.shape,
-                        processed_observations.dtype,
-                        shm_alive.name,
-                        alive_mask.shape,
-                        alive_mask.dtype,
-                    ),
-                    mp_context=mp_ctx,
-                ) as executor:
-                    results = list(executor.map(_worker_process_batch, worker_args))
+                    with ProcessPoolExecutor(
+                        max_workers=n_workers,
+                        initializer=_worker_init,
+                        initargs=(
+                            shm_obs.name,
+                            processed_observations.shape,
+                            processed_observations.dtype,
+                            shm_alive.name,
+                            alive_mask.shape,
+                            alive_mask.dtype,
+                        ),
+                        mp_context=mp_ctx,
+                    ) as executor:
+                        results = list(executor.map(_worker_process_batch, worker_args))
 
-                batch_idx = 0
-                for worker_result_list in results:
-                    for processed_sample, mask_batch in worker_result_list:
-                        result[batch_idx] = processed_sample
-                        mask[batch_idx] = mask_batch
-                        batch_idx += 1
-            finally:
-                _cleanup_shared_memory(shm_obs, shm_alive)
+                    batch_idx = 0
+                    for worker_result_list in results:
+                        for processed_sample, mask_batch in worker_result_list:
+                            result[batch_idx] = processed_sample
+                            mask[batch_idx] = mask_batch
+                            batch_idx += 1
+                finally:
+                    _cleanup_shared_memory(shm_obs, shm_alive)
+            # else: batch_size == 0, nothing to process; result/mask stay zeros
         else:
             for batch_idx in range(batch_size):
                 processed_sample, mask_batch = _process_single_sample(

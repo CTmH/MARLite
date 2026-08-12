@@ -340,7 +340,7 @@ class TestSumoObsDataConstructor(unittest.TestCase):
         np.testing.assert_array_equal(result[0, 0], expected_agent0)
 
     def test_parallel_vs_sequential_consistency(self):
-        """Ensure n_workers=0 and n_workers=1 produce identical results."""
+        """Ensure n_workers=0 and n_workers=2 produce identical results."""
         # Larger test case
         np.random.seed(42)
         batch_size = 2
@@ -365,7 +365,7 @@ class TestSumoObsDataConstructor(unittest.TestCase):
         alive_mask = np.ones((batch_size, seq_len, n_agents), dtype=bool)
 
         constructor_seq = SumoObsDataConstructor(max_entities_perception=6, with_time_seq=True, n_workers=0)
-        constructor_par = SumoObsDataConstructor(max_entities_perception=6, with_time_seq=True, n_workers=1)
+        constructor_par = SumoObsDataConstructor(max_entities_perception=6, with_time_seq=True, n_workers=2)
 
         result_seq, mask_seq = constructor_seq.process(
             observations=observations,

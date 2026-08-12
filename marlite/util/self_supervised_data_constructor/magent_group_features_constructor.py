@@ -1,5 +1,29 @@
 import numpy as np
 from typing import Optional, List
+from concurrent.futures import ProcessPoolExecutor
+from multiprocessing.shared_memory import SharedMemory
+
+
+def _group_features_chunk_worker(args):
+    """Process a chunk of batch samples in a worker process.
+
+    The large state array is read from shared memory; grouping, alive_last
+    and the constructor config are passed via pickle.
+    """
+    shm_name, shape, dtype, chunk_ids, grouping, alive_last, constructor = args
+
+    shm = SharedMemory(name=shm_name)
+    try:
+        state_last = np.ndarray(shape, dtype=dtype, buffer=shm.buf)
+        results = []
+        for b in chunk_ids:
+            r, m = constructor._process_single(
+                state_last[b], grouping[b], alive_last[b]
+            )
+            results.append((r, m))
+        return results
+    finally:
+        shm.close()
 
 
 class MagentGroupFeaturesConstructor:
@@ -55,6 +79,7 @@ class MagentGroupFeaturesConstructor:
         enemy_team_hp_dim: int,
         obstacle_dim: int,
         channel_first: bool = False,
+        n_workers: int = 0,
     ):
         self.n_groups = n_groups
         self.window_size = window_size
@@ -66,6 +91,7 @@ class MagentGroupFeaturesConstructor:
         self.enemy_team_hp_dim = enemy_team_hp_dim
         self.obstacle_dim = obstacle_dim
         self.channel_first = channel_first
+        self.n_workers = n_workers
 
     def process(
         self,
@@ -94,63 +120,135 @@ class MagentGroupFeaturesConstructor:
         batch_size = state_last.shape[0]
         alive_last = alive_mask[:, -1]
         K = self.window_size
-        K_sq = K * K
 
         result = np.zeros((batch_size, self.n_groups, self.N_FEATURES), dtype=np.float16)
         padding_mask = np.zeros((batch_size, self.n_groups), dtype=bool)
 
+        if self.n_workers > 1 and batch_size > 0:
+            return self._process_parallel(state_last, grouping, alive_last)
+
         for b in range(batch_size):
-            st = state_last[b]
-            grp = grouping[b]
-            alv = alive_last[b]
-
-            if self.channel_first:
-                C, H_map, W_map = st.shape
-            else:
-                H_map, W_map, C = st.shape
-
-            # Extract agent positions from state
-            agent_positions = self._extract_positions(st)
-
-            # Collect per-group positions (only alive agents with known positions)
-            group_positions = {}
-            for agent_idx in range(len(grp)):
-                gid = int(grp[agent_idx])
-                if gid < 0 or not alv[agent_idx]:
-                    continue
-                if agent_idx in agent_positions:
-                    if gid not in group_positions:
-                        group_positions[gid] = []
-                    group_positions[gid].append(agent_positions[agent_idx])
-
-            for gid, positions in group_positions.items():
-                if gid >= self.n_groups or gid < 0 or len(positions) == 0:
-                    continue
-
-                # Group centroid
-                ys = np.array([p[0] for p in positions], dtype=np.float64)
-                xs = np.array([p[1] for p in positions], dtype=np.float64)
-                cy = np.mean(ys)
-                cx = np.mean(xs)
-
-                # Crop window
-                y_start = int(np.round(cy - K // 2))
-                x_start = int(np.round(cx - K // 2))
-                y_end = y_start + K
-                x_end = x_start + K
-
-                # Get window data from state
-                window = self._crop_window(st, y_start, x_start, y_end, x_end,
-                                            H_map, W_map, self.channel_first)
-
-                # Extract per-channel data from window
-                features = self._compute_features(
-                    window, ys, xs, cy, cx, H_map, W_map, K, self.channel_first
-                )
-                result[b, gid] = features
-                padding_mask[b, gid] = True
+            group_result, group_padding = self._process_single(
+                state_last[b], grouping[b], alive_last[b]
+            )
+            result[b] = group_result
+            padding_mask[b] = group_padding
 
         return result, padding_mask
+
+    def _process_parallel(self, state_last, grouping, alive_last):
+        """Process all batch samples using a process pool with shared memory."""
+        batch_size = state_last.shape[0]
+        n_workers = min(batch_size, self.n_workers)
+
+        shm = SharedMemory(create=True, size=state_last.nbytes)
+        try:
+            shm_array = np.ndarray(
+                state_last.shape, dtype=state_last.dtype, buffer=shm.buf
+            )
+            np.copyto(shm_array, state_last)
+
+            sample_ids = list(range(batch_size))
+            chunk_size = (batch_size + n_workers - 1) // n_workers
+            chunks = [
+                sample_ids[i : i + chunk_size]
+                for i in range(0, batch_size, chunk_size)
+            ]
+            args = [
+                (
+                    shm.name,
+                    state_last.shape,
+                    state_last.dtype,
+                    chunk,
+                    grouping,
+                    alive_last,
+                    self,
+                )
+                for chunk in chunks
+            ]
+
+            with ProcessPoolExecutor(max_workers=n_workers) as executor:
+                chunk_results = list(
+                    executor.map(_group_features_chunk_worker, args)
+                )
+
+            result = np.zeros(
+                (batch_size, self.n_groups, self.N_FEATURES), dtype=np.float16
+            )
+            padding_mask = np.zeros((batch_size, self.n_groups), dtype=bool)
+            for chunk, chunk_result in zip(chunks, chunk_results):
+                for i, b in enumerate(chunk):
+                    result[b] = chunk_result[i][0]
+                    padding_mask[b] = chunk_result[i][1]
+            return result, padding_mask
+        finally:
+            shm.close()
+            shm.unlink()
+
+    def _process_single(self, st, grp, alv):
+        """Process a single batch element into per-group semantic feature vectors.
+
+        Args:
+            st: Single state grid, (C, H, W) if channel_first else (H, W, C).
+            grp: (N,) zone indices; -1 for dead/unassigned agents.
+            alv: (N,) boolean alive mask.
+
+        Returns:
+            (group_result, group_padding_mask):
+            - group_result: (n_groups, N_FEATURES)
+            - group_padding_mask: (n_groups,) indicating populated groups
+        """
+        K = self.window_size
+        group_result = np.zeros((self.n_groups, self.N_FEATURES), dtype=np.float16)
+        group_padding_mask = np.zeros(self.n_groups, dtype=bool)
+
+        if self.channel_first:
+            C, H_map, W_map = st.shape
+        else:
+            H_map, W_map, C = st.shape
+
+        # Extract agent positions from state
+        agent_positions = self._extract_positions(st)
+
+        # Collect per-group positions (only alive agents with known positions)
+        group_positions = {}
+        for agent_idx in range(len(grp)):
+            gid = int(grp[agent_idx])
+            if gid < 0 or not alv[agent_idx]:
+                continue
+            if agent_idx in agent_positions:
+                if gid not in group_positions:
+                    group_positions[gid] = []
+                group_positions[gid].append(agent_positions[agent_idx])
+
+        for gid, positions in group_positions.items():
+            if gid >= self.n_groups or gid < 0 or len(positions) == 0:
+                continue
+
+            # Group centroid
+            ys = np.array([p[0] for p in positions], dtype=np.float64)
+            xs = np.array([p[1] for p in positions], dtype=np.float64)
+            cy = np.mean(ys)
+            cx = np.mean(xs)
+
+            # Crop window
+            y_start = int(np.round(cy - K // 2))
+            x_start = int(np.round(cx - K // 2))
+            y_end = y_start + K
+            x_end = x_start + K
+
+            # Get window data from state
+            window = self._crop_window(st, y_start, x_start, y_end, x_end,
+                                        H_map, W_map, self.channel_first)
+
+            # Extract per-channel data from window
+            features = self._compute_features(
+                window, ys, xs, cy, cx, H_map, W_map, K, self.channel_first
+            )
+            group_result[gid] = features
+            group_padding_mask[gid] = True
+
+        return group_result, group_padding_mask
 
     def _crop_window(self, st, y_start, x_start, y_end, x_end, H, W, channel_first):
         """Crop a K×K window from state with zero-padding for out-of-bounds."""
