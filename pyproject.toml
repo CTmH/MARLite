@@ -7,7 +7,6 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "pyyaml>=6.0.2",
-    "torch>=2.8.0",
     "torch-geometric>=2.6.1",
     "tqdm>=4.67.1",
     "mpe2",
@@ -36,6 +35,14 @@ develop = [
     "pytest-xdist>=3.8.0",
 ]
 
+cuda = [
+    "torch>=2.8.0",
+]
+
+rocm = [
+    "torch>=2.8.0",
+]
+
 analysis = [
     "matplotlib>=3.10.3",
     "notebook>=7.4.2",
@@ -47,14 +54,22 @@ analysis = [
 [tool.uv]
 index-strategy = "unsafe-best-match"
 package = true
-no-build-isolation-package = ["pygame"]
+conflicts = [
+    [{ extra = "cuda" }, { extra = "rocm" }],
+]
+
+[tool.uv.extra-build-dependencies]
+pygame = ["setuptools", "cython", "numpy"]
 
 [tool.uv.sources]
 smac-pettingzoo = { git = "https://github.com/CTmH/SMAC-PettingZoo.git" }
 magent2 = { git = "https://github.com/CTmH/MAgent2.git" }
 dm_env = { git = "https://github.com/CTmH/dm_env.git" }
 sumo-rl = { git = "https://github.com/LucasAlegre/sumo-rl.git" }
-torch = { index = "pytorch-rocm" }
+torch = [
+    { index = "pytorch-cu128", extra = "cuda" },
+    { index = "pytorch-rocm", extra = "rocm" },
+]
 mpe2 = {git = "https://github.com/Farama-Foundation/MPE2.git"}
 pygame = { git = "https://github.com/pygame/pygame.git", rev = "7357d445d7210c0b9309dac51f6229eb5e61a331" }
 
@@ -64,8 +79,13 @@ url = "https://pypi.org/simple"
 default = true
 
 [[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+default = false
+
+[[tool.uv.index]]
 name = "pytorch-rocm"
-url = "https://download.pytorch.org/whl/rocm7.1"
+url = "https://download.pytorch.org/whl/rocm7.2"
 default = false
 
 [tool.pytest.ini_options]
