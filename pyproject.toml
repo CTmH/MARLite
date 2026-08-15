@@ -67,7 +67,7 @@ magent2 = { git = "https://github.com/CTmH/MAgent2.git" }
 dm_env = { git = "https://github.com/CTmH/dm_env.git" }
 sumo-rl = { git = "https://github.com/LucasAlegre/sumo-rl.git" }
 torch = [
-    { index = "pytorch-cu128", extra = "cuda" },
+    { index = "pytorch-cu130", extra = "cuda" },
     { index = "pytorch-rocm", extra = "rocm" },
 ]
 mpe2 = {git = "https://github.com/Farama-Foundation/MPE2.git"}
@@ -79,13 +79,13 @@ url = "https://pypi.org/simple"
 default = true
 
 [[tool.uv.index]]
-name = "pytorch-cu128"
-url = "https://download.pytorch.org/whl/cu128"
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
 default = false
 
 [[tool.uv.index]]
 name = "pytorch-rocm"
-url = "https://download.pytorch.org/whl/rocm7.2"
+url = "https://download.pytorch.org/whl/nightly/rocm7.14"
 default = false
 
 [tool.pytest.ini_options]

@@ -24,16 +24,24 @@ class GroupConsensusAgentGroup(AgentGroup):
         enable_rl_grad_to_group_estimate: bool = False,
         merge_mode: str = "bayesian",
         consensus_mode: str = "vae",
+        ci_omega_mode: str = "info_proportional",
     ) -> None:
         super().__init__()
         self.agent_model_dict = agent_model_dict
         self.deterministic_eval = deterministic_eval
         self.enable_rl_grad_to_group_estimate = enable_rl_grad_to_group_estimate
-        if merge_mode not in ("sample_mean", "bayesian"):
+        if merge_mode not in ("sample_mean", "bayesian", "ci"):
             raise ValueError(
-                f"merge_mode must be 'sample_mean' or 'bayesian', got '{merge_mode}'"
+                f"merge_mode must be 'sample_mean', 'bayesian' or 'ci', "
+                f"got '{merge_mode}'"
             )
         self.merge_mode = merge_mode
+        if ci_omega_mode not in ("info_proportional",):
+            raise ValueError(
+                f"ci_omega_mode must be 'info_proportional' (others reserved for "
+                f"future learnable omega head), got '{ci_omega_mode}'"
+            )
+        self.ci_omega_mode = ci_omega_mode
         if consensus_mode not in ("vae", "ae"):
             raise ValueError(
                 f"consensus_mode must be 'vae' or 'ae', got '{consensus_mode}'"
@@ -208,6 +216,10 @@ class GroupConsensusAgentGroup(AgentGroup):
             return GroupConsensusAgentGroup._merge_sample_mean(
                 self, agent_mu, agent_log_var, group_indices
             )
+        if self.merge_mode == "ci":
+            return GroupConsensusAgentGroup._merge_ci(
+                self, agent_mu, agent_log_var, group_indices
+            )
         return GroupConsensusAgentGroup._merge_bayesian(
             self, agent_mu, agent_log_var, group_indices
         )
@@ -284,6 +296,88 @@ class GroupConsensusAgentGroup(AgentGroup):
         group_log_var = group_log_var * count_mask.float()
 
         return group_mu, group_log_var
+
+    def _merge_ci(self, agent_mu, agent_log_var, group_indices):
+        """Covariance Intersection (CI) fusion of member distributions.
+
+        Diagonal-covariance CI: for each group ``g`` and latent dimension
+        ``d``, the fused variance is the inverse of a convex combination of
+        member precisions,
+
+            σ_g²(d) = 1 / (Σ_i ω_i(d) · p_i(d)),   ω_i ≥ 0,  Σ_i ω_i = 1
+
+        with ``p_i(d) = exp(-log_var_i(d))`` and weights chosen by
+        ``ci_omega_mode`` (currently ``"info_proportional"``: ω_i ∝ p_i).
+
+        Unlike the precision-weighted Bayesian merge (which assumes
+        conditionally independent beliefs and shrinks variance as O(1/n)),
+        CI is consistent for *arbitrary* unknown correlation between members:
+        the fused variance never falls below the most confident member's
+        variance, i.e.  σ_CI² ≥ min_i σ_i².  A singleton group is the exact
+        identity.  See ``_compute_ci_omega`` for the weight-selection hook.
+        """
+        bs, n_agents, f_z = agent_mu.shape
+        G = int(group_indices.max()) + 1
+
+        gids = group_indices.to(dtype=torch.long, device=self.device)
+        dead = gids < 0
+        gids_safe = gids.clamp(min=0)
+
+        mask = F.one_hot(gids_safe, num_classes=G).float()
+        mask[dead] = 0.0
+
+        count = mask.sum(dim=1)
+        count_mask = (count > 0).unsqueeze(-1)
+
+        neg_log_var = -agent_log_var
+        neg_inf = torch.tensor(
+            float('-inf'), dtype=agent_log_var.dtype, device=self.device
+        )
+        agent_nlv_exp = neg_log_var.unsqueeze(2)
+        agent_mu_exp = agent_mu.unsqueeze(2)
+        mask_z = mask.unsqueeze(-1)
+
+        max_nlv, _ = torch.where(mask_z.bool(), agent_nlv_exp, neg_inf).max(dim=1)
+        max_nlv = torch.where(count_mask, max_nlv, torch.zeros_like(max_nlv))
+
+        precision = torch.exp(agent_nlv_exp - max_nlv.unsqueeze(1)) * mask_z
+
+        omega = GroupConsensusAgentGroup._compute_ci_omega(
+            self, agent_mu, agent_log_var, precision, mask_z
+        )
+        weighted_precision = omega * precision
+        sum_wp = weighted_precision.sum(dim=1)
+
+        group_log_var = -(max_nlv + torch.log(sum_wp + 1e-8))
+
+        weighted_mu = (weighted_precision * agent_mu_exp).sum(dim=1)
+        group_mu = weighted_mu / sum_wp.clamp(min=1e-8)
+
+        group_mu = group_mu * count_mask.float()
+        group_log_var = group_log_var * count_mask.float()
+
+        return group_mu, group_log_var
+
+    def _compute_ci_omega(self, agent_mu, agent_log_var, precision, mask_z):
+        """Return CI weights ω, normalized over members (dim=1).
+
+        ``precision`` is the max-shifted, masked member precision tensor of
+        shape ``(B, N, G, L)`` (non-members are zero, in-group max is 1).
+        Weights satisfy ``ω_i ≥ 0`` and ``Σ_i ω_i = 1`` per (batch, group,
+        latent dimension).
+
+        Only ``"info_proportional"`` is currently supported: ω_i = p_i / Σp_j.
+        The full signature (``agent_mu`` / ``agent_log_var``) is kept so a
+        future learnable omega head — a small module conditioning on member
+        features and emitting a softmax over members — can be dropped in
+        without changing the caller.
+        """
+        if self.ci_omega_mode == "info_proportional":
+            sum_precision = precision.sum(dim=1, keepdim=True)
+            return precision / sum_precision.clamp(min=1e-8)
+        raise ValueError(
+            f"Unsupported ci_omega_mode: '{self.ci_omega_mode}'"
+        )
 
     def _merge_group_mean(self, agent_vectors, group_indices):
         bs, n_agents, f_z = agent_vectors.shape

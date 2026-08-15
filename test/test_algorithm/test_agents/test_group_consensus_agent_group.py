@@ -2,6 +2,7 @@ import unittest
 import numpy as np
 import yaml
 import torch
+import torch.nn.functional as F
 
 from marlite.algorithm.agents import AgentGroupConfig
 from marlite.algorithm.agents.group_consensus_agent_group import GroupConsensusAgentGroup
@@ -28,6 +29,32 @@ def _merge_bayesian_reference(agent_mu, agent_log_var, group_indices, device):
             sum_prec = prec.sum(dim=0).clamp(min=1e-8)
             group_mu[b, g] = (agent_mu[b, mask] * prec).sum(dim=0) / sum_prec
             group_log_var[b, g] = -torch.log(sum_prec)
+
+    return group_mu, group_log_var
+
+
+def _merge_ci_info_proportional_reference(
+    agent_mu, agent_log_var, group_indices, device
+):
+    """Loop-based reference for CI fusion with info-proportional omega."""
+    bs, n_agents, f_z = agent_mu.shape
+    G = int(group_indices.max()) + 1
+    gids = torch.as_tensor(group_indices, dtype=torch.long, device=device)
+
+    group_mu = agent_mu.new_zeros(bs, G, f_z)
+    group_log_var = agent_log_var.new_zeros(bs, G, f_z)
+
+    for b in range(bs):
+        for g in range(G):
+            mask = gids[b] == g
+            if not mask.any():
+                continue
+            p = torch.exp(-agent_log_var[b, mask])           # (n_g, L)
+            omega = p / p.sum(dim=0, keepdim=True)           # info_proportional
+            wp = omega * p                                   # (n_g, L)
+            sum_wp = wp.sum(dim=0)
+            group_log_var[b, g] = -torch.log(sum_wp)
+            group_mu[b, g] = (wp * agent_mu[b, mask]).sum(dim=0) / sum_wp
 
     return group_mu, group_log_var
 
@@ -489,6 +516,224 @@ class TestBayesianMerge(unittest.TestCase):
         torch.testing.assert_close(ref_lv, new_lv, atol=1e-5, rtol=1e-5)
 
 
+class TestCIMerge(unittest.TestCase):
+    def setUp(self):
+        self.fake_self = FakeAgentGroup()
+        self.fake_self.ci_omega_mode = "info_proportional"
+        self.bs, self.n_agents, self.f_z = 4, 6, 8
+
+    def _run_comparison(self, group_indices_np):
+        agent_mu = torch.randn(self.bs, self.n_agents, self.f_z)
+        agent_log_var = torch.randn(self.bs, self.n_agents, self.f_z) * 2.0 - 2.0
+
+        ref_mu, ref_lv = _merge_ci_info_proportional_reference(
+            agent_mu, agent_log_var, group_indices_np, self.fake_self.device
+        )
+        new_mu, new_lv = GroupConsensusAgentGroup._merge_ci(
+            self.fake_self, agent_mu, agent_log_var, group_indices_np
+        )
+
+        torch.testing.assert_close(ref_mu, new_mu, atol=1e-5, rtol=1e-5)
+        torch.testing.assert_close(ref_lv, new_lv, atol=1e-5, rtol=1e-5)
+
+    def test_ci_normal_grouping(self):
+        group_indices = np.array([
+            [0, 0, 1, 1, 2, 2],
+            [0, 1, 2, 0, 1, 2],
+            [0, 0, 0, 1, 1, 1],
+            [2, 1, 0, 0, 1, 2],
+        ], dtype=np.int16)
+        group_indices = torch.from_numpy(group_indices)
+        self._run_comparison(group_indices)
+
+    def test_ci_with_dead_agents(self):
+        group_indices = np.array([
+            [0, 0, -1, 1, 1, -1],
+            [0, -1, -1, 1, 2, 2],
+            [0, 0, 0, -1, -1, -1],
+            [-1, -1, -1, -1, -1, -1],
+        ], dtype=np.int16)
+        group_indices = torch.from_numpy(group_indices)
+        self._run_comparison(group_indices)
+
+    def test_ci_single_group(self):
+        group_indices = np.array([
+            [0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0],
+        ], dtype=np.int16)
+        group_indices = torch.from_numpy(group_indices)
+        self._run_comparison(group_indices)
+
+    def test_ci_each_agent_own_group(self):
+        group_indices = np.array([
+            [0, 1, 2, 3, 4, 5],
+            [5, 4, 3, 2, 1, 0],
+            [0, 1, 2, 3, 4, 5],
+            [2, 3, 0, 1, 5, 4],
+        ], dtype=np.int16)
+        group_indices = torch.from_numpy(group_indices)
+        self._run_comparison(group_indices)
+
+    def test_ci_large_batch(self):
+        bs, n_agents, f_z = 64, 36, 64
+        agent_mu = torch.randn(bs, n_agents, f_z)
+        agent_log_var = torch.randn(bs, n_agents, f_z) - 1.0
+        group_indices = np.random.randint(0, 6, size=(bs, n_agents)).astype(np.int16)
+        group_indices = torch.from_numpy(group_indices)
+        group_indices[group_indices == 5] = -1
+
+        ref_mu, ref_lv = _merge_ci_info_proportional_reference(
+            agent_mu, agent_log_var, group_indices, self.fake_self.device
+        )
+        new_mu, new_lv = GroupConsensusAgentGroup._merge_ci(
+            self.fake_self, agent_mu, agent_log_var, group_indices
+        )
+
+        torch.testing.assert_close(ref_mu, new_mu, atol=1e-5, rtol=1e-5)
+        torch.testing.assert_close(ref_lv, new_lv, atol=1e-5, rtol=1e-5)
+
+    def test_ci_single_member_identity(self):
+        group_indices = np.array([[0, 1, 2, 3, 4, 5]], dtype=np.int16)
+        group_indices = torch.from_numpy(group_indices)
+        agent_mu = torch.randn(1, self.n_agents, self.f_z)
+        agent_log_var = torch.randn(1, self.n_agents, self.f_z) * 2.0 - 2.0
+
+        new_mu, new_lv = GroupConsensusAgentGroup._merge_ci(
+            self.fake_self, agent_mu, agent_log_var, group_indices
+        )
+
+        torch.testing.assert_close(new_mu, agent_mu, atol=1e-6, rtol=1e-6)
+        torch.testing.assert_close(new_lv, agent_log_var, atol=1e-6, rtol=1e-6)
+
+    def test_ci_variance_lower_bound(self):
+        group_indices = np.array([
+            [0, 0, 1, 1, 2, 2],
+            [0, 0, 0, 1, 1, 1],
+            [2, 1, 0, 0, 1, 2],
+            [0, 0, 0, 0, 0, 0],
+        ], dtype=np.int16)
+        group_indices = torch.from_numpy(group_indices)
+        agent_mu = torch.randn(self.bs, self.n_agents, self.f_z)
+        agent_log_var = torch.randn(self.bs, self.n_agents, self.f_z) * 2.0 - 2.0
+
+        ci_mu, ci_lv = GroupConsensusAgentGroup._merge_ci(
+            self.fake_self, agent_mu, agent_log_var, group_indices
+        )
+        bay_mu, bay_lv = GroupConsensusAgentGroup._merge_bayesian(
+            self.fake_self, agent_mu, agent_log_var, group_indices
+        )
+
+        gids = group_indices.to(dtype=torch.long)
+        dead = gids < 0
+        gids_safe = gids.clamp(min=0)
+        mask = F.one_hot(gids_safe, num_classes=ci_lv.shape[1]).float()
+        mask[dead] = 0.0
+
+        neg_inf = torch.tensor(float('-inf'))
+        agent_lv_exp = agent_log_var.unsqueeze(2)
+        mask_z = mask.unsqueeze(-1)
+        min_member_lv, _ = torch.where(
+            mask_z.bool(), agent_lv_exp, neg_inf
+        ).min(dim=1)
+
+        # CI variance must never fall below the most confident member.
+        self.assertTrue(
+            torch.all(ci_lv >= min_member_lv - 1e-5),
+            "CI fused variance must be >= min member variance (consistency)",
+        )
+        # CI is more conservative than the independent-Bayes fusion.
+        self.assertTrue(
+            torch.all(ci_lv >= bay_lv - 1e-5),
+            "CI fused variance must be >= Bayesian fused variance",
+        )
+
+    def test_ci_precision_squared_weighting(self):
+        group_indices = np.array([[0, 0]], dtype=np.int16)
+        group_indices = torch.from_numpy(group_indices)
+        agent_mu = torch.tensor([[[1.0, 2.0, 3.0], [8.0, 9.0, 10.0]]])
+        agent_log_var = torch.tensor([[[-2.0, -2.0, -2.0], [2.0, 2.0, 2.0]]])
+
+        ci_mu, _ = GroupConsensusAgentGroup._merge_ci(
+            self.fake_self, agent_mu, agent_log_var, group_indices
+        )
+        bay_mu, _ = GroupConsensusAgentGroup._merge_bayesian(
+            self.fake_self, agent_mu, agent_log_var, group_indices
+        )
+
+        dist_ci = (ci_mu[0, 0, 0].item() - 1.0) ** 2
+        dist_bay = (bay_mu[0, 0, 0].item() - 1.0) ** 2
+        self.assertLess(
+            dist_ci, dist_bay,
+            "CI info-proportional weights should favor the low-variance agent "
+            "more strongly than Bayesian precision weighting",
+        )
+
+    def test_ci_output_no_nan_inf(self):
+        group_indices = np.array([
+            [0, 0, 1, 1, 2, 2],
+            [0, 0, 0, 1, 1, 1],
+        ], dtype=np.int16)
+        group_indices = torch.from_numpy(group_indices)
+        agent_mu = torch.randn(2, self.n_agents, self.f_z)
+        agent_log_var = torch.randn(2, self.n_agents, self.f_z) * 2.0 - 2.0
+
+        new_mu, new_lv = GroupConsensusAgentGroup._merge_ci(
+            self.fake_self, agent_mu, agent_log_var, group_indices
+        )
+
+        self.assertFalse(torch.isnan(new_mu).any())
+        self.assertFalse(torch.isnan(new_lv).any())
+        self.assertFalse(torch.isinf(new_mu).any())
+        self.assertFalse(torch.isinf(new_lv).any())
+
+    def test_ci_backward(self):
+        group_indices = np.array([
+            [0, 0, 1, 1, 2, 2],
+        ], dtype=np.int16)
+        group_indices = torch.from_numpy(group_indices)
+        agent_mu = torch.randn(1, self.n_agents, self.f_z, requires_grad=True)
+        agent_log_var = torch.randn(
+            1, self.n_agents, self.f_z, requires_grad=True
+        )
+
+        new_mu, new_lv = GroupConsensusAgentGroup._merge_ci(
+            self.fake_self, agent_mu, agent_log_var, group_indices
+        )
+        loss = new_mu.sum() + new_lv.sum()
+        loss.backward()
+
+        self.assertIsNotNone(agent_mu.grad)
+        self.assertIsNotNone(agent_log_var.grad)
+        self.assertFalse(torch.isnan(agent_mu.grad).any())
+        self.assertFalse(torch.isnan(agent_log_var.grad).any())
+        self.assertFalse(torch.isinf(agent_mu.grad).any())
+        self.assertFalse(torch.isinf(agent_log_var.grad).any())
+
+    def test_ci_dispatch_matches_direct_call(self):
+        self.fake_self.merge_mode = "ci"
+        agent_mu = torch.randn(self.bs, self.n_agents, self.f_z)
+        agent_log_var = torch.randn(self.bs, self.n_agents, self.f_z) * 2.0 - 2.0
+        group_indices = np.array([
+            [0, 0, 1, 1, 2, 2],
+            [0, 1, 2, 0, 1, 2],
+            [0, 0, 0, 1, 1, 1],
+            [2, 1, 0, 0, 1, 2],
+        ], dtype=np.int16)
+        group_indices = torch.from_numpy(group_indices)
+
+        result_mu, result_lv = GroupConsensusAgentGroup._merge_group_distributions(
+            self.fake_self, agent_mu, agent_log_var, group_indices
+        )
+        expected_mu, expected_lv = GroupConsensusAgentGroup._merge_ci(
+            self.fake_self, agent_mu, agent_log_var, group_indices
+        )
+
+        torch.testing.assert_close(result_mu, expected_mu)
+        torch.testing.assert_close(result_lv, expected_lv)
+
+
 class TestMergeModeDispatch(unittest.TestCase):
     def setUp(self):
         self.fake = FakeAgentGroup()
@@ -617,6 +862,124 @@ class TestScatterRoundtrip(unittest.TestCase):
                 gid = group_indices[b, i]
                 if gid >= 0:
                     self.assertTrue(torch.allclose(scattered_mu[b, i], group_mu[b, gid]))
+
+    def test_roundtrip_ci(self):
+        bs, n_agents, f_z = 4, 6, 8
+        fake = FakeAgentGroup()
+        fake.merge_mode = "ci"
+        fake.ci_omega_mode = "info_proportional"
+        agent_mu = torch.randn(bs, n_agents, f_z)
+        agent_log_var = torch.randn(bs, n_agents, f_z) - 1.0
+        group_indices = np.array([
+            [0, 0, 1, 1, 2, 2],
+            [0, 0, 0, 1, 1, 1],
+            [2, 1, 0, 0, 1, 2],
+            [0, 0, 0, 0, 0, 0],
+        ], dtype=np.int16)
+        group_indices = torch.from_numpy(group_indices)
+
+        group_mu, group_log_var = GroupConsensusAgentGroup._merge_group_distributions(
+            fake, agent_mu, agent_log_var, group_indices
+        )
+        scattered_mu = GroupConsensusAgentGroup._scatter(group_mu, group_indices)
+
+        for b in range(bs):
+            for i in range(n_agents):
+                gid = group_indices[b, i]
+                if gid >= 0:
+                    self.assertTrue(torch.allclose(scattered_mu[b, i], group_mu[b, gid]))
+
+
+class TestCIConstruction(unittest.TestCase):
+    _BASE_CONFIG = """
+agent_group:
+  type: "GroupConsensusQMIX"
+  merge_mode: "ci"
+  ci_omega_mode: "info_proportional"
+  agent_list:
+    agent_0: model1
+    agent_1: model1
+    agent_2: model1
+  models:
+    model1:
+      feature_extractor:
+        model_type: "Custom"
+        layers:
+        - type: Linear
+          in_features: 18
+          out_features: 32
+      group_estimate_feature_extractor:
+        model_type: "Custom"
+        layers:
+        - type: Linear
+          in_features: 18
+          out_features: 16
+      encoder:
+        model_type: "Custom"
+        layers:
+        - type: Linear
+          in_features: 32
+          out_features: 128
+      decoder:
+        model_type: "Custom"
+        layers:
+        - type: Linear
+          in_features: 136
+          out_features: 5
+  group_builder:
+    type: "Fixed"
+    group_ids: [0, 0, 1]
+"""
+
+    def test_ci_config_constructs(self):
+        config = yaml.safe_load(self._BASE_CONFIG)
+        agent_group = AgentGroupConfig(**config["agent_group"]).get_agent_group()
+        self.assertIsInstance(agent_group, GroupConsensusAgentGroup)
+        self.assertEqual(agent_group.merge_mode, "ci")
+        self.assertEqual(agent_group.ci_omega_mode, "info_proportional")
+
+    def test_ci_forward_runs(self):
+        config = yaml.safe_load(self._BASE_CONFIG)
+        agent_group = AgentGroupConfig(**config["agent_group"]).get_agent_group()
+        bs, n_agents, obs_dim, seq_len = 2, 3, 18, 5
+        obs = torch.randn(bs, n_agents, seq_len, obs_dim)
+        states = np.random.randn(bs, 1, 1)
+        traj_padding_mask = torch.zeros(bs, seq_len)
+        alive_mask = torch.ones(bs, n_agents, dtype=torch.bool)
+
+        ret = agent_group.forward(
+            observations=obs,
+            states=torch.from_numpy(states).float(),
+            traj_padding_mask=traj_padding_mask,
+            alive_mask=alive_mask,
+        )
+        self.assertEqual(ret["q_val"].shape, (bs, n_agents, 5))
+        self.assertFalse(torch.isnan(ret["q_val"]).any())
+        self.assertFalse(torch.isinf(ret["q_val"]).any())
+
+    def test_ci_default_omega_mode(self):
+        config = yaml.safe_load(
+            self._BASE_CONFIG.replace('  ci_omega_mode: "info_proportional"\n', "")
+        )
+        agent_group = AgentGroupConfig(**config["agent_group"]).get_agent_group()
+        self.assertEqual(agent_group.ci_omega_mode, "info_proportional")
+
+    def test_unsupported_merge_mode_raises(self):
+        config = yaml.safe_load(
+            self._BASE_CONFIG.replace('merge_mode: "ci"', 'merge_mode: "nonexistent"')
+        )
+        with self.assertRaises(ValueError):
+            AgentGroupConfig(**config["agent_group"]).get_agent_group()
+
+    def test_unsupported_ci_omega_mode_raises(self):
+        config = yaml.safe_load(
+            self._BASE_CONFIG.replace(
+                'ci_omega_mode: "info_proportional"',
+                'ci_omega_mode: "learnable"',
+            )
+        )
+        with self.assertRaises(ValueError):
+            AgentGroupConfig(**config["agent_group"]).get_agent_group()
 
 
 if __name__ == "__main__":
