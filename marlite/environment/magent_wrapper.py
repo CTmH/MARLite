@@ -50,7 +50,8 @@ class MAgentWrapper(BaseParallelWrapper):
             channel_first: bool = False,
             vector_state: bool = False,
             vector_observation: bool = False,
-            max_vector_observation_records: int = 8
+            max_vector_observation_records: int = 8,
+            win_bonus_factor: float = 0.0
             ):
         """Initialize the wrapper with opponent agent configuration.
 
@@ -66,6 +67,10 @@ class MAgentWrapper(BaseParallelWrapper):
             vector_observation: If True, observations will be processed to extract
                 the closest max_vector_observation_records agents by Manhattan distance
             max_vector_observation_records: Maximum number of agents to include in vectorized observations
+            win_bonus_factor: If non-zero, the wrapper adds an early-win bonus to every
+                surviving agent's reward on the step victory is achieved. The bonus equals
+                win_bonus_factor * (max_cycles - steps_used) / max_cycles, rewarding faster
+                victories. Victory is defined by _check_victory() (default: all opponents dead).
         """
         self.opponent_agent_group_config = opponent_agent_group_config
         self.opponent_agent_group_config = AgentGroupConfig(**self.opponent_agent_group_config)
@@ -78,6 +83,17 @@ class MAgentWrapper(BaseParallelWrapper):
         # New attributes for vectorized observation
         self.vector_agent_observation = vector_observation
         self.max_vector_observation_records = max_vector_observation_records
+
+        # Early-win bonus configuration
+        self.win_bonus_factor = win_bonus_factor
+        self._step_count = 0
+        max_cycles = getattr(self.env, 'max_cycles', None)
+        if win_bonus_factor != 0 and max_cycles is None:
+            raise ValueError(
+                "win_bonus_factor is set but the wrapped environment has no "
+                "'max_cycles' attribute; cannot compute the early-win bonus."
+            )
+        self._max_cycles: int = max_cycles or 0
 
         self.possible_agents = []
         self._possible_agents_set = set(self.possible_agents)
@@ -143,6 +159,18 @@ class MAgentWrapper(BaseParallelWrapper):
             Maximum number of agents that could be present in the environment
         """
         return len(self.possible_agents)
+
+    def _check_victory(self) -> bool:
+        """Check whether the agent side has won the game.
+
+        By default, the agent side wins when every opponent agent is dead.
+        Subclasses may override this method to define environment-specific
+        victory conditions.
+
+        Returns:
+            True if the agent side has won, False otherwise
+        """
+        return len(self.opponent_agents) == 0
 
     def _concat_action_dict(self, agent_actions: Dict[str, Any], opponent_actions: Dict[str, Any]) -> Dict[str, Any]:
         """Concatenate agent actions with opponent actions.
@@ -419,6 +447,11 @@ class MAgentWrapper(BaseParallelWrapper):
         agent_truncations = {agent: truncations[agent] for agent in truncations.keys() if agent in self._possible_agents_set}
         agent_infos = {agent: infos[agent] for agent in infos.keys() if agent in self._possible_agents_set}
 
+        self._step_count += 1
+        if self.win_bonus_factor != 0 and self._check_victory():
+            bonus = self.win_bonus_factor * (self._max_cycles - self._step_count) / self._max_cycles
+            agent_rewards = {agent: reward + bonus for agent, reward in agent_rewards.items()}
+
         agent_observations = self._process_observations(agent_observations)
 
         return agent_observations, agent_rewards, agent_terminations, agent_truncations, agent_infos
@@ -439,6 +472,7 @@ class MAgentWrapper(BaseParallelWrapper):
                 - Initial info dictionary (dictionary mapping agent names to info dictionaries)
         """
         observations, infos = self.env.reset(seed=seed, options=options)
+        self._step_count = 0
         self.opponent_observations = {agent: observations[agent] for agent in self.possible_opponent_agents}
         self.opponent_observation_history.clear()
         self.opponent_observation_history.append(self.opponent_observations)
@@ -601,7 +635,8 @@ class BattleWrapper(MAgentWrapper):
             channel_first: bool = False,
             vector_state: bool = False,
             vector_observation: bool = False,
-            max_vector_observation_records: int = 8
+            max_vector_observation_records: int = 8,
+            win_bonus_factor: float = 0.0
             ):
         """Initialize the battle wrapper.
 
@@ -613,6 +648,8 @@ class BattleWrapper(MAgentWrapper):
             vector_state: If True, state() will output vectorized state representation
             vector_observation: If True, observations will be vectorized
             max_vector_observation_records: Maximum number of agents in vectorized observations
+            win_bonus_factor: If non-zero, surviving red agents receive an early-win bonus
+                on the step all blue agents are eliminated. See MAgentWrapper.
         """
         super().__init__(
             env,
@@ -621,7 +658,8 @@ class BattleWrapper(MAgentWrapper):
             channel_first,
             vector_state,
             vector_observation,
-            max_vector_observation_records)
+            max_vector_observation_records,
+            win_bonus_factor=win_bonus_factor)
 
         self.possible_agents = [agent for agent in self.env.possible_agents if agent.startswith('red_')]
         self.observation_spaces = {agent: self.env.observation_space(agent) for agent in self.possible_agents}
