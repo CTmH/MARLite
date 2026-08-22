@@ -103,12 +103,17 @@ class Analyzer:
         """
         edge_counts = []
         for episode in episodes:
-            for step_edges in episode['edge_indices']:
+            step_edges_list = episode.get('edge_indices')
+            if step_edges_list is None:
+                continue
+            for step_edges in step_edges_list:
                 if step_edges is not None and step_edges.shape[1] > 0:
                     edge_counts.append(step_edges.shape[1])
                 else:
                     edge_counts.append(0)
 
+        if not edge_counts:
+            return None
         return self._calculate_statistics(edge_counts)
 
     def analyze_rewards_per_step(self, episodes, reward_condition):
@@ -267,7 +272,7 @@ class Analyzer:
         Returns:
             Dictionary containing all analysis results
         """
-        return {
+        results = {
             #'decision_distribution': self.analyze_decision_distribution(episodes),
             'reward': self.analyze_reward_distribution(episodes),
             'edge_counts': self.analyze_edge_counts(episodes),
@@ -279,3 +284,4 @@ class Analyzer:
             'surviving_agents': self.analyze_surviving_agents(episodes),
             'win_rate': self.analyze_win_rate(episodes),
         }
+        return {k: v for k, v in results.items() if v is not None}
