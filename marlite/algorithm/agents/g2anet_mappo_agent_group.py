@@ -69,9 +69,12 @@ class G2ANetMAPPOAgentGroup(G2ANetAgentGroup):
         alive_mask = alive_mask.unsqueeze(0).to(self.device)
 
         with torch.no_grad():
+            states_tensor = torch.from_numpy(state).float().unsqueeze(0).to(
+                device=self.device
+            )
             ret = self(
                 obs,
-                np.expand_dims(state, axis=0),
+                states_tensor,
                 padding_mask,
                 alive_mask,
             )

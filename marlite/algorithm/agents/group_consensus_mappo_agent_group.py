@@ -71,8 +71,11 @@ class GroupConsensusMAPPOAgentGroup(GroupConsensusAgentGroup):
         alive_mask = alive_mask.unsqueeze(0).to(self.device)
 
         with torch.no_grad():
+            states_tensor = torch.from_numpy(state).float().unsqueeze(0).to(
+                device=self.device
+            )
             ret = self(
-                obs, np.expand_dims(state, axis=0), padding_mask, alive_mask
+                obs, states_tensor, padding_mask, alive_mask
             )
             logits = ret["action_logits"].squeeze(0).detach()
             group_indices_arr = ret["group_indices"].squeeze(0)
