@@ -3,6 +3,8 @@ SSL Group Consensus MAPPO worker group for multi-GPU training.
 """
 
 from typing import Any, Dict
+from marlite.algorithm.model import ModelConfig
+from marlite.util.optimizer_config import OptimizerConfig
 from marlite.trainer.trainer_worker_group.base_worker_group import (
     OnPolicyWorkerGroup,
     _slice_batch,

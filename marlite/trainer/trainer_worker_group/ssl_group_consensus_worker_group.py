@@ -1,4 +1,6 @@
 from typing import Any, Dict
+from marlite.algorithm.model import ModelConfig
+from marlite.util.optimizer_config import OptimizerConfig
 from marlite.trainer.trainer_worker_group.base_worker_group import (
     OffPolicyWorkerGroup,
     _slice_batch,
