@@ -2,7 +2,6 @@
 SSL Group Consensus MAPPO worker for multi-GPU training.
 """
 
-import io
 import torch
 import torch.nn.functional as F
 import torch.distributed as dist
@@ -429,62 +428,29 @@ class SSLGroupConsensusMAPPOWorker(OnPolicyWorker):
         loss_queue,
         ack_queue=None,
     ) -> bool:
-        if cmd == "STOP":
-            self.cleanup()
-            return False
-
-        elif cmd == "SYNC_FROM_MAIN":
-            params = param_queue.get()
-            self.sync_params_from_main(params)
-            del params
-            ack_queue.put("ACK")
-
-        elif cmd == "BROADCAST":
-            params = param_queue.get()
-            self.sync_params_from_main(params)
-            del params
-
-        elif cmd == "SYNC_TO_MAIN":
-            params = self.get_params_for_main()
-            param_queue.put(params)
-
-        elif cmd == "TRAIN_STEP":
+        if cmd == "TRAIN_STEP":
             batch = data_queue.get()
             result = self.train_step(batch)
             del batch
             combined, critic, ssl = result
             loss_queue.put((combined, critic, ssl))
+            return True
 
-        elif cmd == "MOVE_TO_GPU":
-            self.move_to_device(self.assigned_device)
-            if ack_queue:
-                ack_queue.put("ACK")
-
-        elif cmd == "MOVE_TO_CPU":
-            self.move_to_device("cpu")
-            torch.cuda.empty_cache()
-            if ack_queue:
-                ack_queue.put("ACK")
-
-        elif cmd == "SYNC_LR":
+        if cmd == "SYNC_LR":
             lr_data = param_queue.get()
-            if "critic_lr" in lr_data:
+            if "critic_lr" in lr_data and self.critic_optimizer is not None:
                 for param_group in self.critic_optimizer.param_groups:
                     param_group["lr"] = lr_data["critic_lr"]
-            if "agent_lr" in lr_data:
+            if "agent_lr" in lr_data and self.agent_optimizer is not None:
                 for param_group in self.agent_optimizer.param_groups:
                     param_group["lr"] = lr_data["agent_lr"]
-            if "ssl_lr" in lr_data:
+            if "ssl_lr" in lr_data and self.ssl_optimizer is not None:
                 for param_group in self.ssl_optimizer.param_groups:
                     param_group["lr"] = lr_data["ssl_lr"]
             if ack_queue:
                 ack_queue.put("ACK")
+            return True
 
-        else:
-            print(f"Worker {self.worker_id}: Unknown command: {repr(cmd)}", flush=True)
-
-        return True
-
-    def cleanup(self):
-        if dist.is_initialized():
-            dist.destroy_process_group()
+        return super().handle_command(
+            cmd, param_queue, data_queue, loss_queue, ack_queue
+        )

@@ -8,7 +8,6 @@ all_reduce across workers.
 """
 
 import torch
-import torch.distributed as dist
 import torch.nn.functional as F
 from torch.distributions import Categorical
 from typing import Any, Dict
@@ -199,75 +198,3 @@ class G2ANetMAPPOWorker(OnPolicyWorker):
         self.critic_optimizer.step()
 
         return combined_loss.detach().cpu().item()
-
-    def handle_command(
-        self, cmd, param_queue, data_queue, loss_queue, ack_queue=None
-    ) -> bool:
-        if cmd == "STOP":
-            self.cleanup()
-            return False
-        elif cmd == "SYNC_FROM_MAIN":
-            import io
-            params = param_queue.get()
-            if isinstance(params, bytes):
-                buf = io.BytesIO(params)
-                params = torch.load(buf, weights_only=True)
-            if "eval_agent_group" in params and self.eval_agent_group is not None:
-                self.eval_agent_group.load_state_dict(
-                    {k: v.clone() for k, v in params["eval_agent_group"].items()}
-                )
-            if "eval_critic" in params and self.eval_critic is not None:
-                self.eval_critic.load_state_dict(
-                    {k: v.clone() for k, v in params["eval_critic"].items()}
-                )
-            del params
-            ack_queue.put("ACK")
-        elif cmd == "BROADCAST":
-            import io
-            params = param_queue.get()
-            if isinstance(params, bytes):
-                buf = io.BytesIO(params)
-                params = torch.load(buf, weights_only=True)
-            if "eval_agent_group" in params and self.eval_agent_group is not None:
-                self.eval_agent_group.load_state_dict(
-                    {k: v.clone() for k, v in params["eval_agent_group"].items()}
-                )
-            if "eval_critic" in params and self.eval_critic is not None:
-                self.eval_critic.load_state_dict(
-                    {k: v.clone() for k, v in params["eval_critic"].items()}
-                )
-            del params
-        elif cmd == "SYNC_TO_MAIN":
-            params = self.get_params_for_main()
-            param_queue.put(params)
-        elif cmd == "TRAIN_STEP":
-            batch = data_queue.get()
-            loss = self.train_step(batch)
-            del batch
-            loss_queue.put(loss)
-        elif cmd == "MOVE_TO_GPU":
-            self.move_to_device(self.assigned_device)
-            if ack_queue:
-                ack_queue.put("ACK")
-        elif cmd == "MOVE_TO_CPU":
-            self.move_to_device("cpu")
-            torch.cuda.empty_cache()
-            if ack_queue:
-                ack_queue.put("ACK")
-        elif cmd == "SYNC_LR":
-            lr_data = param_queue.get()
-            if "critic_lr" in lr_data:
-                for pg in self.critic_optimizer.param_groups:
-                    pg["lr"] = lr_data["critic_lr"]
-            if "agent_lr" in lr_data:
-                for pg in self.agent_optimizer.param_groups:
-                    pg["lr"] = lr_data["agent_lr"]
-            if ack_queue:
-                ack_queue.put("ACK")
-        else:
-            print(f"Worker {self.worker_id}: Unknown command: {repr(cmd)}", flush=True)
-        return True
-
-    def cleanup(self):
-        if dist.is_initialized():
-            dist.destroy_process_group()
