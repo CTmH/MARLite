@@ -8,6 +8,10 @@ class FixedGroupBuilder(GroupBuilder):
     def __init__(self, group_ids: List[int], dtype: str = 'int16'):
         super().__init__(dtype=dtype)
         self.group_ids = np.array(group_ids, dtype=dtype)
+        valid_group_ids = self.group_ids[self.group_ids >= 0]
+        self.n_groups = (
+            int(valid_group_ids.max()) + 1 if valid_group_ids.size > 0 else None
+        )
 
     def forward(self, states: torch.Tensor) -> torch.Tensor:
         bs = states.shape[0]

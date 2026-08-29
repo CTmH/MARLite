@@ -23,6 +23,10 @@ from marlite.trainer.trainer_worker_group.ssl_gc_mappo_worker_group import (
     SSLGroupConsensusMAPPOWorkerGroup,
 )
 from marlite.util.serialization import get_state_dict, load_state_dict_into
+from marlite.util.group_consensus import (
+    validate_group_capacity,
+    validate_group_reconstruction_shapes,
+)
 from marlite.util.trajectory_dataset import (
     TrajectoryDataLoader,
     GroupSSLEnrichedTrajectoryDataset,
@@ -75,12 +79,14 @@ class SSLGroupConsensusMAPPOTrainer(SelfSupervisedMAPPOTrainer):
         self.consensus_mode = consensus_mode
 
         super().__init__(**kwargs)
+        validate_group_capacity(self.eval_agent_group, self.data_constructor)
 
     # ------------------------------------------------------------------
     # SSL reconstruction helpers
     # ------------------------------------------------------------------
 
     def _recon_loss_per_group(self, consensus, targets, construct_mask):
+        validate_group_reconstruction_shapes(consensus, targets, construct_mask)
         bs, G, L = consensus.shape
         target_flat_dim = targets.shape[2:]
         pred_flat = self.ssl_model(consensus.reshape(bs * G, L))
@@ -90,6 +96,7 @@ class SSLGroupConsensusMAPPOTrainer(SelfSupervisedMAPPOTrainer):
     def _recon_loss_per_agent(
         self, consensus, group_indices, targets, construct_mask, alive_mask
     ):
+        validate_group_reconstruction_shapes(consensus, targets, construct_mask)
         bs, G, L = consensus.shape
         n_agents = group_indices.shape[1]
         target_flat_dim = targets.shape[2:]

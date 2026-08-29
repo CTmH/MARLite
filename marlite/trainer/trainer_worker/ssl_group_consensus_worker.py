@@ -10,6 +10,10 @@ from marlite.algorithm.critic import CriticConfig
 from marlite.algorithm.model import ModelConfig
 from marlite.util.optimizer_config import OptimizerConfig
 from marlite.util.loss_func import PITLoss, ReconstructionLoss
+from marlite.util.group_consensus import (
+    validate_group_capacity,
+    validate_group_reconstruction_shapes,
+)
 from marlite.trainer.trainer_worker.offpolicy_worker import OffPolicyWorker
 
 
@@ -82,6 +86,7 @@ class SSLGroupConsensusWorker(OffPolicyWorker):
 
         self.self_supervised_learning_loss_weight = self_supervised_learning_loss_weight
         self.data_constructor = data_constructor
+        validate_group_capacity(self.eval_agent_group, self.data_constructor)
 
         self.ssl_model = ssl_model_config.get_model()
         self.reconstruction_loss = reconstruction_loss
@@ -424,6 +429,7 @@ class SSLGroupConsensusWorker(OffPolicyWorker):
         return targets, construct_mask
 
     def _recon_loss_per_agent(self, consensus, group_indices, targets, construct_mask, alive_mask):
+        validate_group_reconstruction_shapes(consensus, targets, construct_mask)
         bs, G, L = consensus.shape
         n_agents = group_indices.shape[1]
         device = consensus.device
@@ -447,6 +453,7 @@ class SSLGroupConsensusWorker(OffPolicyWorker):
         return self._compute_ssl_loss(pred_agent, target_agent, agent_alive)
 
     def _recon_loss_per_group(self, consensus, targets, construct_mask):
+        validate_group_reconstruction_shapes(consensus, targets, construct_mask)
         bs, G, L = consensus.shape
         target_flat_dim = targets.shape[2:]
 

@@ -2,7 +2,6 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
-from absl import logging
 from typing import Dict, Any, List, Optional
 from marlite.algorithm.model.model_config import ModelConfig
 from marlite.algorithm.model import RNNModel, Conv1DModel, AttentionModel
@@ -65,6 +64,20 @@ class GroupConsensusAgentGroup(AgentGroup):
             self.decoders[model_name] = config.get_model()
 
         self.add_module("group_builder", group_builder_config.get_group_builder())
+        # ``n_groups`` is a capacity, not the number of groups that must be
+        # populated in every state.  Group builders such as PartialMAgent can
+        # legitimately return fewer groups as agents disappear or communities
+        # contain no controlled agents.  Keeping this capacity on the agent
+        # group gives every group-level tensor a stable shape.
+        configured_n_groups = getattr(self.group_builder, "n_groups", None)
+        if configured_n_groups is not None:
+            configured_n_groups = int(configured_n_groups)
+            if configured_n_groups <= 0:
+                raise ValueError(
+                    f"group_builder.n_groups must be positive, got "
+                    f"{configured_n_groups}"
+                )
+        self.n_groups = configured_n_groups
 
         self.model_to_agents = {model_name: [] for model_name in encoder_configs.keys()}
         self.model_to_agent_indices = {
@@ -200,18 +213,34 @@ class GroupConsensusAgentGroup(AgentGroup):
 
         return agent_latent, local_obs
 
+    def _resolve_group_count(self, group_indices) -> int:
+        """Return the stable group-axis capacity for a merge operation.
+
+        A configured ``n_groups`` is treated as the maximum number of group
+        slots.  Fewer observed groups leave zero-filled slots at the end.  A
+        dynamic fallback is retained for legacy non-SSL builders that do not
+        expose a capacity.
+        """
+        configured_n_groups = getattr(self, "n_groups", None)
+
+        if configured_n_groups is not None:
+            # The capacity is a Python constant, so compiled models retain a
+            # static group dimension.  Eager execution additionally provides
+            # a precise configuration error; F.one_hot still enforces the
+            # bound inside a compiled graph.
+            if not torch.compiler.is_compiling():
+                observed_max = int(group_indices.max().item())
+                if observed_max >= configured_n_groups:
+                    raise ValueError(
+                        f"Observed group id {observed_max} exceeds configured "
+                        f"group capacity n_groups={configured_n_groups}"
+                    )
+            return configured_n_groups
+
+        observed_max = int(group_indices.max().item())
+        return max(observed_max + 1, 1)
+
     def _merge_group_distributions(self, agent_mu, agent_log_var, group_indices):
-        if group_indices.max() < 0:
-            logging.warning(
-                "GroupConsensus: all group_indices are -1 "
-                "(no agents grouped — check agent_presence_dim config). "
-                "Returning zero-filled group_mu / group_log_var."
-            )
-            bs, n_agents, f_z = agent_mu.shape
-            return (
-                torch.zeros(bs, 1, f_z, device=self.device, dtype=agent_mu.dtype),
-                torch.zeros(bs, 1, f_z, device=self.device, dtype=agent_log_var.dtype),
-            )
         if self.merge_mode == "sample_mean":
             return GroupConsensusAgentGroup._merge_sample_mean(
                 self, agent_mu, agent_log_var, group_indices
@@ -226,7 +255,7 @@ class GroupConsensusAgentGroup(AgentGroup):
 
     def _merge_sample_mean(self, agent_mu, agent_log_var, group_indices):
         bs, n_agents, f_z = agent_mu.shape
-        G = int(group_indices.max()) + 1
+        G = GroupConsensusAgentGroup._resolve_group_count(self, group_indices)
 
         gids = group_indices.to(dtype=torch.long, device=self.device)
         dead = gids < 0
@@ -259,7 +288,7 @@ class GroupConsensusAgentGroup(AgentGroup):
 
     def _merge_bayesian(self, agent_mu, agent_log_var, group_indices):
         bs, n_agents, f_z = agent_mu.shape
-        G = int(group_indices.max()) + 1
+        G = GroupConsensusAgentGroup._resolve_group_count(self, group_indices)
 
         gids = group_indices.to(dtype=torch.long, device=self.device)
         dead = gids < 0
@@ -317,7 +346,7 @@ class GroupConsensusAgentGroup(AgentGroup):
         identity.  See ``_compute_ci_omega`` for the weight-selection hook.
         """
         bs, n_agents, f_z = agent_mu.shape
-        G = int(group_indices.max()) + 1
+        G = GroupConsensusAgentGroup._resolve_group_count(self, group_indices)
 
         gids = group_indices.to(dtype=torch.long, device=self.device)
         dead = gids < 0
@@ -381,7 +410,7 @@ class GroupConsensusAgentGroup(AgentGroup):
 
     def _merge_group_mean(self, agent_vectors, group_indices):
         bs, n_agents, f_z = agent_vectors.shape
-        G = int(group_indices.max()) + 1
+        G = GroupConsensusAgentGroup._resolve_group_count(self, group_indices)
 
         gids = group_indices.to(dtype=torch.long, device=self.device)
         dead = gids < 0

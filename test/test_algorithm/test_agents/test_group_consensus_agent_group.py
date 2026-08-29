@@ -838,6 +838,7 @@ class TestScatterRoundtrip(unittest.TestCase):
                 if gid >= 0:
                     self.assertTrue(torch.allclose(scattered_mu[b, i], group_mu[b, gid]))
 
+
     def test_roundtrip_bayesian(self):
         bs, n_agents, f_z = 4, 6, 8
         fake = FakeAgentGroup()
@@ -888,6 +889,96 @@ class TestScatterRoundtrip(unittest.TestCase):
                 gid = group_indices[b, i]
                 if gid >= 0:
                     self.assertTrue(torch.allclose(scattered_mu[b, i], group_mu[b, gid]))
+
+
+class TestFixedGroupCapacity(unittest.TestCase):
+    def setUp(self):
+        self.bs = 4
+        self.n_agents = 6
+        self.latent_dim = 8
+        self.agent_mu = torch.randn(self.bs, self.n_agents, self.latent_dim)
+        self.agent_log_var = torch.randn(
+            self.bs, self.n_agents, self.latent_dim
+        ).clamp(-3.0, 3.0)
+        # Only groups 0 and 1 are populated although the configured capacity
+        # below is four groups.
+        self.group_indices = torch.tensor(
+            [
+                [0, 0, 1, 1, -1, -1],
+                [0, 1, 0, 1, -1, -1],
+                [0, 0, 0, 1, 1, -1],
+                [0, 0, 0, 0, 0, 0],
+            ],
+            dtype=torch.int16,
+        )
+
+    def _fake(self, merge_mode):
+        fake = FakeAgentGroup()
+        fake.n_groups = 4
+        fake.merge_mode = merge_mode
+        fake.ci_omega_mode = "info_proportional"
+        return fake
+
+    def test_probabilistic_merges_zero_pad_missing_groups(self):
+        for merge_mode in ("sample_mean", "bayesian", "ci"):
+            with self.subTest(merge_mode=merge_mode):
+                group_mu, group_log_var = (
+                    GroupConsensusAgentGroup._merge_group_distributions(
+                        self._fake(merge_mode),
+                        self.agent_mu,
+                        self.agent_log_var,
+                        self.group_indices,
+                    )
+                )
+                self.assertEqual(
+                    group_mu.shape, (self.bs, 4, self.latent_dim)
+                )
+                self.assertEqual(
+                    group_log_var.shape, (self.bs, 4, self.latent_dim)
+                )
+                self.assertTrue(torch.all(group_mu[:, 2:] == 0))
+                self.assertTrue(torch.all(group_log_var[:, 2:] == 0))
+                self.assertTrue(torch.isfinite(group_mu).all())
+                self.assertTrue(torch.isfinite(group_log_var).all())
+
+    def test_ae_merge_zero_pads_missing_groups(self):
+        group_mean, group_log_var = GroupConsensusAgentGroup._merge_group_mean(
+            self._fake("bayesian"), self.agent_mu, self.group_indices
+        )
+        self.assertEqual(group_mean.shape, (self.bs, 4, self.latent_dim))
+        self.assertTrue(torch.all(group_mean[:, 2:] == 0))
+        self.assertTrue(torch.all(group_log_var == 0))
+
+    def test_all_dead_keeps_configured_capacity(self):
+        all_dead = torch.full_like(self.group_indices, -1)
+        for merge_mode in ("sample_mean", "bayesian", "ci"):
+            with self.subTest(merge_mode=merge_mode):
+                group_mu, group_log_var = (
+                    GroupConsensusAgentGroup._merge_group_distributions(
+                        self._fake(merge_mode),
+                        self.agent_mu,
+                        self.agent_log_var,
+                        all_dead,
+                    )
+                )
+                self.assertEqual(
+                    group_mu.shape, (self.bs, 4, self.latent_dim)
+                )
+                self.assertTrue(torch.all(group_mu == 0))
+                self.assertTrue(torch.all(group_log_var == 0))
+
+    def test_group_id_outside_capacity_raises(self):
+        invalid = self.group_indices.clone()
+        invalid[0, 0] = 4
+        with self.assertRaisesRegex(
+            ValueError, "group id 4 exceeds configured group capacity n_groups=4"
+        ):
+            GroupConsensusAgentGroup._merge_bayesian(
+                self._fake("bayesian"),
+                self.agent_mu,
+                self.agent_log_var,
+                invalid,
+            )
 
 
 class TestCIConstruction(unittest.TestCase):

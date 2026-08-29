@@ -14,6 +14,10 @@ from marlite.util.trajectory_dataset import (
     GroupSSLEnrichedTrajectoryDataset,
 )
 from marlite.util.serialization import load_state_dict_into
+from marlite.util.group_consensus import (
+    validate_group_capacity,
+    validate_group_reconstruction_shapes,
+)
 
 # ────────────────────────────────────────────────────────────────────────
 # Dimension reference
@@ -88,6 +92,7 @@ class SSLGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
             pit_loss_alpha=pit_loss_alpha,
             **kwargs,
         )
+        validate_group_capacity(self.eval_agent_group, self.data_constructor)
 
     # ── Multi-GPU support ───────────────────────────────────────────────
 
@@ -666,6 +671,7 @@ class SSLGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
     # ── Reconstruction loss: per-agent mode ──────────────────────────────
 
     def _recon_loss_per_agent(self, consensus, group_indices, targets, construct_mask, alive_mask):
+        validate_group_reconstruction_shapes(consensus, targets, construct_mask)
         bs, G, L = consensus.shape
         n_agents = group_indices.shape[1]
         device = consensus.device
@@ -698,6 +704,7 @@ class SSLGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
             targets:        (B, G, …)  reconstruction target
             construct_mask: (B, G)     torch bool — True if group has data
         """
+        validate_group_reconstruction_shapes(consensus, targets, construct_mask)
         bs, G, L = consensus.shape
         target_flat_dim = targets.shape[2:]
         D = targets.numel() // (bs * G)
