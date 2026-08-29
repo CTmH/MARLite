@@ -478,9 +478,25 @@ class GroupConsensusAgentGroup(AgentGroup):
             observations, traj_padding_mask
         )
 
-        if group_indices is None:
+        generated_group_indices = group_indices is None
+        if generated_group_indices:
             group_indices = self.group_builder(states)
-            group_indices = group_indices.to(device=alive_mask.device)
+
+        # All merge implementations operate on tensors (for device movement,
+        # one-hot encoding, and compiled execution).  The public interface is
+        # Tensor-based, so validate that contract and only normalize dtype and
+        # device here.  ``Tensor.to`` is a no-op when both already match.
+        if not torch.is_tensor(group_indices):
+            raise TypeError(
+                "group_indices must be a torch.Tensor, got "
+                f"{type(group_indices).__name__}"
+            )
+        group_indices = group_indices.to(
+            dtype=torch.long,
+            device=alive_mask.device,
+        )
+        if generated_group_indices:
+            group_indices = group_indices.clone()
             group_indices[~alive_mask] = -1
 
         if self.consensus_mode == "ae":

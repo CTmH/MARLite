@@ -242,9 +242,21 @@ class SSLGroupConsensusMAPPOWorker(OnPolicyWorker):
 
         group_indices_batch = batch.get("group_indices")
         if group_indices_batch is not None:
-            group_indices_np = group_indices_batch[:, -1, :].numpy()
+            # AgentGroup expects a tensor because it performs device and dtype
+            # conversion before the group merge.  Keep the indices on-device;
+            # the previous NumPy conversion caused MAPPO workers to fail in
+            # _merge_ci() on the first forward pass.
+            group_indices = group_indices_batch[:, -1, :].to(
+                dtype=torch.long,
+                device=self.device,
+            )
         else:
-            group_indices_np = np.zeros((bs, n_agents), dtype=np.int64) - 1
+            group_indices = torch.full(
+                (bs, n_agents),
+                -1,
+                dtype=torch.long,
+                device=self.device,
+            )
 
         # ── critic forward ──
         self.eval_critic.train()
@@ -277,7 +289,7 @@ class SSLGroupConsensusMAPPOWorker(OnPolicyWorker):
         ret_agent = self.eval_agent_group(
             observations_transposed, states_last,
             timestep_padding_mask_expanded, alive_mask[:, -1, :],
-            group_indices_np,
+            group_indices,
         )
         action_logits = ret_agent["action_logits"]
         group_consensus = ret_agent.get("group_consensus")
@@ -337,7 +349,7 @@ class SSLGroupConsensusMAPPOWorker(OnPolicyWorker):
                 )
             else:
                 recon_loss = self._recon_loss_per_agent(
-                    group_consensus, group_indices_np, targets,
+                    group_consensus, group_indices, targets,
                     construct_mask, alive_mask,
                 )
 
