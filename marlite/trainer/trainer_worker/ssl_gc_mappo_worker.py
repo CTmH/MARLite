@@ -44,6 +44,7 @@ class SSLGroupConsensusMAPPOWorker(OnPolicyWorker):
         gamma: float,
         max_grad_norm: float,
         clip_epsilon: float,
+        # Reserved for future GAE support; GAE is not implemented.
         gae_lambda: float,
         entropy_coef: float,
         vf_coef: float,
@@ -62,6 +63,8 @@ class SSLGroupConsensusMAPPOWorker(OnPolicyWorker):
         self.gamma = gamma
         self.max_grad_norm = max_grad_norm
         self.clip_epsilon = clip_epsilon
+        # Reserved for future GAE support; current MAPPO uses one-step TD
+        # advantages and does not read this value during loss computation.
         self.gae_lambda = gae_lambda
         self.entropy_coef = entropy_coef
         self.vf_coef = vf_coef
@@ -142,8 +145,11 @@ class SSLGroupConsensusMAPPOWorker(OnPolicyWorker):
 
     def sync_params_from_main(self, params):
         # Delegate to OnPolicyWorker for bytes-deserialisation and
-        # standard eval_agent_group + eval_critic handling.  SSL
-        # auxiliary model is added here.
+        # standard eval_agent_group + eval_critic handling.  The agent-group
+        # state dict includes persistent runtime buffers such as
+        # ``rl_consensus_gate``, so rollout and PPO workers receive the same
+        # frozen gate for a trajectory batch.  SSL auxiliary model is added
+        # here.
         params = super().sync_params_from_main(params)
         if "ssl_model" in params and self.ssl_model is not None:
             self.ssl_model.load_state_dict(

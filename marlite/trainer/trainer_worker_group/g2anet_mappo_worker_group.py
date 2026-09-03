@@ -21,6 +21,7 @@ class G2ANetMAPPOWorkerGroup(OnPolicyWorkerGroup):
         agent_optimizer_config,
         gamma: float = 0.99,
         clip_epsilon: float = 0.2,
+        # Reserved for future GAE support; GAE is not implemented.
         gae_lambda: float = 0.95,
         entropy_coef: float = 0.01,
         vf_coef: float = 0.5,
@@ -33,6 +34,8 @@ class G2ANetMAPPOWorkerGroup(OnPolicyWorkerGroup):
         self.agent_optimizer_config = agent_optimizer_config
         self.gamma = gamma
         self.clip_epsilon = clip_epsilon
+        # Reserved for future GAE support; current MAPPO uses one-step TD
+        # advantages and does not read this value during loss computation.
         self.gae_lambda = gae_lambda
         self.entropy_coef = entropy_coef
         self.vf_coef = vf_coef

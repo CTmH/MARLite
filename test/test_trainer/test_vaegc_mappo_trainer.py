@@ -4,6 +4,7 @@ from copy import deepcopy
 import tempfile
 import torch
 import pygame
+from unittest.mock import Mock
 
 from marlite.trainer import TrainerConfig
 
@@ -133,12 +134,20 @@ trainer:
   kl_on_agent: true
   kl_on_group: false
   warmup_iterations: 99999
+  rl_consensus_gate_scheduler:
+    type: "logarithmic"
+    start_value: 0.0
+    end_value: 1.0
+    ramp_start_step: 2
+    ramp_steps: 4
+    curve_rate: 0.0
 
   sample_ratio_scheduler:
     type: "linear"
     start_value: 16
     end_value: 16
-    decay_steps: 10
+    ramp_start_step: 0
+    ramp_steps: 10
 
   train_args:
     iterations: 1
@@ -160,6 +169,43 @@ trainer:
             self.trainer = self._create_trainer(temp_dir)
             self.trainer.collect_experience(0.9)
             self.assertNotEqual(len(self.trainer.replaybuffer.buffer), 0)
+
+    def test_rl_consensus_gate_scheduler_is_injected_into_rollout_agent(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            trainer = self._create_trainer(temp_dir)
+            self.assertEqual(trainer.eval_agent_group.rl_consensus_gate.item(), 0.0)
+
+            trainer._prepare_rollout(4)
+            self.assertEqual(trainer.eval_agent_group.rl_consensus_gate.item(), 0.5)
+
+            trainer._prepare_rollout(6)
+            self.assertEqual(trainer.eval_agent_group.rl_consensus_gate.item(), 1.0)
+
+    def test_rollout_gate_schedule_updates_only_before_the_next_rollout(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            trainer = self._create_trainer(temp_dir)
+            gate_values = []
+            prepare_rollout = trainer._prepare_rollout
+
+            def record_gate(rollout_iteration):
+                prepare_rollout(rollout_iteration)
+                gate_values.append(
+                    trainer.eval_agent_group.rl_consensus_gate.item()
+                )
+
+            result = {
+                trainer.eval_metric_list[0]: {"mean": 0.0, "std": 0.0}
+            }
+            trainer._prepare_rollout = record_gate
+            trainer.evaluate = Mock(return_value=result)
+            trainer.learn = Mock(return_value=0.0)
+            trainer.save_intermediate_results = Mock()
+            trainer.save_best_model = Mock()
+
+            trainer.train(iterations=4, target_first_metric=1.0)
+
+            self.assertEqual(gate_values, [0.0, 0.0, 0.0, 0.25, 0.5])
+            self.assertEqual(trainer.evaluate.call_count, 5)
 
     def test_learn(self):
         with tempfile.TemporaryDirectory() as temp_dir:

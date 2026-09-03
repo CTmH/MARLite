@@ -6,6 +6,9 @@ import torch.nn.functional as F
 
 from marlite.algorithm.agents import AgentGroupConfig
 from marlite.algorithm.agents.group_consensus_agent_group import GroupConsensusAgentGroup
+from marlite.algorithm.agents.group_consensus_mappo_agent_group import (
+    GroupConsensusMAPPOAgentGroup,
+)
 
 
 class FakeAgentGroup:
@@ -169,6 +172,35 @@ agent_group:
     def test_group_consensus_mappo_registration(self):
         from marlite.algorithm.agents.agent_group_config import registered_agent_groups
         self.assertIn("GroupConsensusMAPPO", registered_agent_groups)
+
+    def test_rl_consensus_gate_is_saved_and_old_checkpoints_load(self):
+        self.agent_group.set_rl_consensus_gate(0.25)
+        state_dict = self.agent_group.state_dict()
+        self.assertIn("rl_consensus_gate", state_dict)
+        self.assertEqual(state_dict["rl_consensus_gate"].item(), 0.25)
+
+        restored = self.agent_group_config.get_agent_group()
+        restored.load_state_dict(state_dict)
+        self.assertEqual(restored.rl_consensus_gate.item(), 0.25)
+
+        legacy_state_dict = {
+            key: value.clone()
+            for key, value in state_dict.items()
+            if key != "rl_consensus_gate"
+        }
+        legacy_restored = self.agent_group_config.get_agent_group()
+        legacy_restored.load_state_dict(legacy_state_dict)
+        self.assertEqual(legacy_restored.rl_consensus_gate.item(), 1.0)
+
+    def test_mappo_rl_consensus_uses_vae_mean_not_sample(self):
+        sampled_consensus = torch.randn(2, 3, 4)
+        group_mu = torch.randn(2, 3, 4)
+
+        rl_consensus = GroupConsensusMAPPOAgentGroup._group_consensus_for_rl(
+            None, sampled_consensus, group_mu
+        )
+
+        self.assertIs(rl_consensus, group_mu)
 
 
 def _merge_group_mean_reference(agent_vectors, group_indices, device):

@@ -46,6 +46,14 @@ class GroupConsensusAgentGroup(AgentGroup):
                 f"consensus_mode must be 'vae' or 'ae', got '{consensus_mode}'"
             )
         self.consensus_mode = consensus_mode
+        # This is controller state rather than a learnable model parameter.
+        # Registering it as a persistent buffer makes its value part of every
+        # state-dict snapshot, so the Trainer → RolloutManager → rollout worker
+        # path and multi-GPU worker broadcasts use the same policy gate.
+        self.register_buffer(
+            "rl_consensus_gate", torch.tensor(1.0, dtype=torch.float32),
+            persistent=True,
+        )
 
         self.feature_extractors = nn.ModuleDict()
         for model_name, config in feature_extractor_configs.items():
@@ -101,6 +109,48 @@ class GroupConsensusAgentGroup(AgentGroup):
                 self.model_class_names[model_name] = "AttentionModel"
             else:
                 self.model_class_names[model_name] = model.__class__.__name__
+
+    def set_rl_consensus_gate(self, value: float) -> None:
+        """Set the non-trainable multiplier for the RL consensus input."""
+        value = float(value)
+        if not 0.0 <= value <= 1.0:
+            raise ValueError("rl_consensus_gate must be in [0, 1]")
+        self.rl_consensus_gate.fill_(value)
+
+    def _load_from_state_dict(
+        self,
+        state_dict,
+        prefix,
+        local_metadata,
+        strict,
+        missing_keys,
+        unexpected_keys,
+        error_msgs,
+    ):
+        """Load pre-gate checkpoints as fully enabled consensus policies."""
+        gate_key = prefix + "rl_consensus_gate"
+        if gate_key not in state_dict:
+            state_dict[gate_key] = self.rl_consensus_gate.detach().clone()
+        super()._load_from_state_dict(
+            state_dict,
+            prefix,
+            local_metadata,
+            strict,
+            missing_keys,
+            unexpected_keys,
+            error_msgs,
+        )
+
+    def _group_consensus_for_rl(
+        self, group_consensus: torch.Tensor, group_mu: torch.Tensor
+    ) -> torch.Tensor:
+        """Return the group representation consumed by the RL decoder.
+
+        Off-policy group-consensus agents preserve their existing sampled VAE
+        input.  The MAPPO subclass overrides this to use ``group_mu`` so PPO
+        rollout and update log-probabilities are conditioned on the same latent.
+        """
+        return group_consensus
 
     def _process_observations(self, observations, traj_padding_mask):
         """Process observations through dual-path pipeline.
@@ -525,8 +575,20 @@ class GroupConsensusAgentGroup(AgentGroup):
                 torch.cat([group_mu, group_log_var], dim=-1), deterministic
             )
 
-        # Scatter group-level (B,G,L) → per-agent (B,N,L) for RL path
-        consensus_per_agent = self._scatter(group_consensus, group_indices)
+        # The sampled consensus remains the SSL reconstruction input.  The
+        # policy path can select a deterministic representation and is then
+        # smoothly enabled by the Trainer-controlled persistent buffer.
+        rl_group_consensus = self._group_consensus_for_rl(
+            group_consensus, group_mu
+        )
+        gate = self.rl_consensus_gate.to(
+            dtype=rl_group_consensus.dtype,
+            device=rl_group_consensus.device,
+        )
+        # Scatter group-level (B,G,L) → per-agent (B,N,L) for RL path.
+        consensus_per_agent = self._scatter(
+            gate * rl_group_consensus, group_indices
+        )
         consensus_for_rl = consensus_per_agent
         if not self.enable_rl_grad_to_group_estimate:
             consensus_for_rl = consensus_for_rl.detach()

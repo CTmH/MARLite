@@ -8,6 +8,7 @@ from marlite.environment import EnvConfig
 from marlite.rollout import RolloutManagerConfig
 from marlite.replaybuffer import ReplayBufferConfig
 from marlite.util.scheduler import Scheduler
+from marlite.util.scheduler_config import SchedulerConfig
 from marlite.util.optimizer_config import OptimizerConfig
 from marlite.util.lr_scheduler_config import LRSchedulerConfig
 from marlite.util.loss_func import REGISTERED_RECONSTRUCTION_LOSS
@@ -78,10 +79,12 @@ class QMIXConfigProcessor(ConfigProcessor):
         trainer_type = trainer_config.pop("type")
 
         # Handle epsilon_scheduler and sample_ratio_scheduler as part of trainer_config
-        epsilon_scheduler = Scheduler(**trainer_config.pop("epsilon_scheduler"))
-        sample_ratio_scheduler = Scheduler(
+        epsilon_scheduler = SchedulerConfig(
+            **trainer_config.pop("epsilon_scheduler")
+        ).get_scheduler()
+        sample_ratio_scheduler = SchedulerConfig(
             **trainer_config.pop("sample_ratio_scheduler")
-        )
+        ).get_scheduler()
 
         return (
             epsilon_scheduler,

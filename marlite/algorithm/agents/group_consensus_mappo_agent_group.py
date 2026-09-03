@@ -30,6 +30,18 @@ class GroupConsensusMAPPOAgentGroup(GroupConsensusAgentGroup):
     :class:`GroupConsensusAgentGroup`.
     """
 
+    def _group_consensus_for_rl(
+        self, group_consensus: torch.Tensor, group_mu: torch.Tensor
+    ) -> torch.Tensor:
+        """Use the VAE mean for PPO's policy distribution.
+
+        Rollouts run in evaluation mode and use the mean latent.  Reusing the
+        mean during PPO updates keeps old and new action log-probabilities
+        conditioned on the same consensus representation.  The parent still
+        returns the sampled consensus for the SSL reconstruction objective.
+        """
+        return group_mu
+
     def forward(
         self,
         observations: torch.Tensor,

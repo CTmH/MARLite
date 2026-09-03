@@ -44,7 +44,8 @@ class MAPPOTrainer(OnPolicyTrainer):
     clip_epsilon : float
         PPO clip range for the importance sampling ratio.
     gae_lambda : float
-        GAE lambda parameter controlling bias-variance tradeoff.
+        Reserved for future GAE support. GAE is not implemented, so this
+        parameter currently has no effect.
     entropy_coef : float
         Coefficient for the entropy bonus (encourages exploration).
     vf_coef : float
@@ -67,6 +68,8 @@ class MAPPOTrainer(OnPolicyTrainer):
         # Must be set before super().__init__() because _create_worker_group()
         # is called during _setup_multi_gpu() in OnPolicyTrainer.__init__().
         self.clip_epsilon = clip_epsilon
+        # Reserved for future GAE support; current MAPPO uses one-step TD
+        # advantages and does not read this value during loss computation.
         self.gae_lambda = gae_lambda
         self.entropy_coef = entropy_coef
         self.vf_coef = vf_coef

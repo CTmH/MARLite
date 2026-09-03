@@ -18,7 +18,7 @@ dependencies = [
     "libsumo",
     "pyvirtualdisplay",
     "numba>=0.63.1",
-    "pygame",
+    "pygame-ce>=2.5.8",
     "cython",
 ]
 
@@ -43,6 +43,14 @@ rocm = [
     "torch>=2.8.0",
 ]
 
+mps = [
+    "torch>=2.8.0",
+]
+
+cpu = [
+    "torch>=2.8.0",
+]
+
 analysis = [
     "matplotlib>=3.10.3",
     "notebook>=7.4.2",
@@ -56,10 +64,12 @@ index-strategy = "unsafe-best-match"
 package = true
 conflicts = [
     [{ extra = "cuda" }, { extra = "rocm" }],
+    [{ extra = "cuda" }, { extra = "mps" }],
+    [{ extra = "cuda" }, { extra = "cpu" }],
+    [{ extra = "rocm" }, { extra = "mps" }],
+    [{ extra = "rocm" }, { extra = "cpu" }],
+    [{ extra = "mps" }, { extra = "cpu" }],
 ]
-
-[tool.uv.extra-build-dependencies]
-pygame = ["setuptools", "cython", "numpy"]
 
 [tool.uv.sources]
 smac-pettingzoo = { git = "https://github.com/CTmH/SMAC-PettingZoo.git" }
@@ -69,9 +79,10 @@ sumo-rl = { git = "https://github.com/LucasAlegre/sumo-rl.git" }
 torch = [
     { index = "pytorch-cu130", extra = "cuda" },
     { index = "pytorch-rocm", extra = "rocm" },
+    { index = "pypi", extra = "mps" },
+    { index = "pytorch-cpu", extra = "cpu" },
 ]
 mpe2 = {git = "https://github.com/Farama-Foundation/MPE2.git"}
-pygame = { git = "https://github.com/pygame/pygame.git", rev = "7357d445d7210c0b9309dac51f6229eb5e61a331" }
 
 [[tool.uv.index]]
 name = "pypi"
@@ -86,6 +97,11 @@ default = false
 [[tool.uv.index]]
 name = "pytorch-rocm"
 url = "https://download.pytorch.org/whl/nightly/rocm7.14"
+default = false
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
 default = false
 
 [tool.pytest.ini_options]

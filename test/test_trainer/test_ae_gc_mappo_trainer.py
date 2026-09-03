@@ -315,7 +315,8 @@ trainer:
     type: "linear"
     start_value: 16
     end_value: 16
-    decay_steps: 10
+    ramp_start_step: 0
+    ramp_steps: 10
 
   train_args:
     iterations: 1

@@ -67,7 +67,8 @@ class SelfSupervisedMAPPOTrainer(OnPolicyTrainer):
     clip_epsilon : float
         PPO clip range for the importance sampling ratio.
     gae_lambda : float
-        GAE lambda parameter controlling bias-variance tradeoff.
+        Reserved for future GAE support. GAE is not implemented, so this
+        parameter currently has no effect.
     entropy_coef : float
         Coefficient for the entropy bonus.
     vf_coef : float
@@ -99,6 +100,8 @@ class SelfSupervisedMAPPOTrainer(OnPolicyTrainer):
     ):
         # -- PPO params (must be set before super().__init__) ------------
         self.clip_epsilon = clip_epsilon
+        # Reserved for future GAE support; current MAPPO uses one-step TD
+        # advantages and does not read this value during loss computation.
         self.gae_lambda = gae_lambda
         self.entropy_coef = entropy_coef
         self.vf_coef = vf_coef
@@ -283,6 +286,16 @@ class SelfSupervisedMAPPOTrainer(OnPolicyTrainer):
     # On-policy training loop (extends MAPPO with SSL LR scheduler)
     # ------------------------------------------------------------------
 
+    def _prepare_rollout(self, rollout_iteration: int) -> None:
+        """Set per-rollout runtime state before collecting its trajectories.
+
+        Subclasses may override this hook.  It is intentionally called before
+        collection, never between collection and learning, so a PPO batch is
+        trained with exactly the policy runtime state that produced it.
+        """
+
+    # ------------------------------------------------------------------
+
     def train(
         self,
         iterations,
@@ -291,6 +304,7 @@ class SelfSupervisedMAPPOTrainer(OnPolicyTrainer):
         learning_times_per_iteration=1,
     ):
         self.eval_episodes_to_replay_ratio = 1.0
+        self._prepare_rollout(0)
         self.evaluate()
 
         for iteration in range(iterations):
@@ -324,6 +338,7 @@ class SelfSupervisedMAPPOTrainer(OnPolicyTrainer):
                 logging.info(f"Iteration {iteration}: Loss {loss:.4f}")
 
             self.replaybuffer = self.replaybuffer_config.create_replaybuffer()
+            self._prepare_rollout(iteration + 1)
             result = self.evaluate()
             metrics = {
                 key: result[key]["mean"] for key in self.eval_metric_list

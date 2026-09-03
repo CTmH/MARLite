@@ -48,7 +48,8 @@ class MAPPOWorkerGroup(OnPolicyWorkerGroup):
             agent_optimizer_config: Optimizer config for agent group.
             gamma: Discount factor.
             clip_epsilon: PPO clip range.
-            gae_lambda: GAE lambda parameter.
+            gae_lambda: Reserved for future GAE support; GAE is not
+                implemented and this parameter currently has no effect.
             entropy_coef: Entropy bonus coefficient.
             vf_coef: Value function loss coefficient.
             max_grad_norm: Maximum gradient norm for clipping.
@@ -60,6 +61,8 @@ class MAPPOWorkerGroup(OnPolicyWorkerGroup):
         self.agent_optimizer_config = agent_optimizer_config
         self.gamma = gamma
         self.clip_epsilon = clip_epsilon
+        # Reserved for future GAE support; current MAPPO uses one-step TD
+        # advantages and does not read this value during loss computation.
         self.gae_lambda = gae_lambda
         self.entropy_coef = entropy_coef
         self.vf_coef = vf_coef

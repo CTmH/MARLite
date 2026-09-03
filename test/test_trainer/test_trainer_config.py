@@ -83,13 +83,15 @@ trainer:
     type: "logarithmic"
     start_value: 1.0
     end_value: 0.05
-    decay_steps: 10
+    ramp_start_step: 0
+    ramp_steps: 10
 
   sample_ratio_scheduler:
     type: "linear"
     start_value: 16
     end_value: 16
-    decay_steps: 10
+    ramp_start_step: 0
+    ramp_steps: 10
 
   train_args:
     epochs: 1
@@ -246,13 +248,15 @@ trainer:
     type: "logarithmic"
     start_value: 1.0
     end_value: 0.05
-    decay_steps: 10
+    ramp_start_step: 0
+    ramp_steps: 10
 
   sample_ratio_scheduler:
     type: "linear"
     start_value: 16
     end_value: 16
-    decay_steps: 10
+    ramp_start_step: 0
+    ramp_steps: 10
 
   train_args:
     epochs: 1
@@ -521,13 +525,15 @@ trainer:
     type: "logarithmic"
     start_value: 1.0
     end_value: 0.05
-    decay_steps: 10
+    ramp_start_step: 0
+    ramp_steps: 10
 
   sample_ratio_scheduler:
     type: "linear"
     start_value: 16
     end_value: 16
-    decay_steps: 10
+    ramp_start_step: 0
+    ramp_steps: 10
 
   train_args:
     epochs: 1
@@ -793,13 +799,15 @@ trainer:
     type: "logarithmic"
     start_value: 1.0
     end_value: 0.05
-    decay_steps: 10
+    ramp_start_step: 0
+    ramp_steps: 10
 
   sample_ratio_scheduler:
     type: "linear"
     start_value: 16
     end_value: 16
-    decay_steps: 10
+    ramp_start_step: 0
+    ramp_steps: 10
 
   train_args:
     epochs: 1
@@ -1065,13 +1073,15 @@ trainer:
     type: "logarithmic"
     start_value: 1.0
     end_value: 0.05
-    decay_steps: 10
+    ramp_start_step: 0
+    ramp_steps: 10
 
   sample_ratio_scheduler:
     type: "linear"
     start_value: 16
     end_value: 16
-    decay_steps: 10
+    ramp_start_step: 0
+    ramp_steps: 10
 
   train_args:
     epochs: 1

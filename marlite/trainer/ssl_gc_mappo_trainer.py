@@ -23,6 +23,7 @@ from marlite.trainer.trainer_worker_group.ssl_gc_mappo_worker_group import (
     SSLGroupConsensusMAPPOWorkerGroup,
 )
 from marlite.util.serialization import get_state_dict, load_state_dict_into
+from marlite.util.scheduler import Scheduler
 from marlite.util.group_consensus import (
     validate_group_capacity,
     validate_group_reconstruction_shapes,
@@ -53,6 +54,10 @@ class SSLGroupConsensusMAPPOTrainer(SelfSupervisedMAPPOTrainer):
         Apply KL divergence on per-group (deduplicated) distributions.
     warmup_iterations : int
         Number of initial iterations with PPO-only (no SSL).
+    rl_consensus_gate_scheduler : Scheduler or None
+        Controls the non-trainable multiplier applied to the deterministic
+        group consensus consumed by the PPO policy.  ``None`` preserves a
+        fully enabled consensus input.
     **kwargs
         Forwarded to :class:`SelfSupervisedMAPPOTrainer`.
     """
@@ -65,6 +70,7 @@ class SSLGroupConsensusMAPPOTrainer(SelfSupervisedMAPPOTrainer):
         kl_on_group: bool = False,
         warmup_iterations: int = 0,
         consensus_mode: str = "vae",
+        rl_consensus_gate_scheduler: Scheduler | None = None,
         **kwargs,
     ):
         if recon_mode not in ("per_agent", "per_group"):
@@ -77,9 +83,32 @@ class SSLGroupConsensusMAPPOTrainer(SelfSupervisedMAPPOTrainer):
         self.kl_on_group = kl_on_group
         self.warmup_iterations = warmup_iterations
         self.consensus_mode = consensus_mode
+        self.rl_consensus_gate_scheduler = rl_consensus_gate_scheduler
 
         super().__init__(**kwargs)
         validate_group_capacity(self.eval_agent_group, self.data_constructor)
+        self._set_rl_consensus_gate_for_rollout(0)
+
+    def _set_rl_consensus_gate_for_rollout(self, rollout_iteration: int) -> None:
+        """Apply the scheduler value to the master agent-group state buffer."""
+        gate = (
+            1.0
+            if self.rl_consensus_gate_scheduler is None
+            else self.rl_consensus_gate_scheduler.get_value(rollout_iteration)
+        )
+        if not hasattr(self.eval_agent_group, "set_rl_consensus_gate"):
+            raise TypeError(
+                "SSLGroupConsensusMAPPOTrainer requires an agent group with "
+                "set_rl_consensus_gate()"
+            )
+        self.eval_agent_group.set_rl_consensus_gate(gate)
+        logging.info(
+            "Rollout %d: RL consensus gate %.6f", rollout_iteration, gate
+        )
+
+    def _prepare_rollout(self, rollout_iteration: int) -> None:
+        """Freeze the scheduled gate in the policy snapshot for this rollout."""
+        self._set_rl_consensus_gate_for_rollout(rollout_iteration)
 
     # ------------------------------------------------------------------
     # SSL reconstruction helpers

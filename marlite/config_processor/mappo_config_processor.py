@@ -4,6 +4,7 @@ from typing import Dict, Tuple
 from copy import deepcopy
 
 from marlite.util.scheduler import Scheduler
+from marlite.util.scheduler_config import SchedulerConfig
 from marlite.config_processor.qmix_config_processor import (
     QMIXConfigProcessor,
     SemiSupervisedQMIXConfigProcessor,
@@ -28,9 +29,9 @@ class MAPPOConfigProcessor(QMIXConfigProcessor):
         trainer_config.pop("epsilon_scheduler", None)
         trainer_config.pop("entropy_coef_scheduler", None)
 
-        sample_ratio_scheduler = Scheduler(
+        sample_ratio_scheduler = SchedulerConfig(
             **trainer_config.pop("sample_ratio_scheduler")
-        )
+        ).get_scheduler()
 
         return (
             None,
@@ -90,6 +91,14 @@ class SemiSupervisedMAPPOConfigProcessor(
         trainer_kwargs, train_args, checkpoint = MAPPOConfigProcessor.process(
             self, config
         )
+        gate_scheduler_config = trainer_kwargs.pop(
+            "rl_consensus_gate_scheduler", None
+        )
+        if gate_scheduler_config is not None:
+            gate_scheduler_config = deepcopy(gate_scheduler_config)
+            trainer_kwargs["rl_consensus_gate_scheduler"] = SchedulerConfig(
+                **gate_scheduler_config
+            ).get_scheduler()
         (
             ssl_model_config,
             ssl_optimizer_config,
