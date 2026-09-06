@@ -108,12 +108,16 @@ class QTRANTrainer(OffPolicyTrainer):
                 self.eval_v_net, eval_params["eval_v_net"]
             )
 
-    def learn(self, sample_size, batch_size: int, times: int = 1):
+    def learn(
+        self, sample_size, batch_size: int, times: int = 1
+    ) -> dict[str, float]:
         if not self.use_multi_gpu:
             return self._learn_single_gpu(sample_size, batch_size, times)
         return self._learn_multi_gpu(sample_size, batch_size, times)
 
-    def _learn_single_gpu(self, sample_size, batch_size: int, times: int = 1):
+    def _learn_single_gpu(
+        self, sample_size, batch_size: int, times: int = 1
+    ) -> dict[str, float]:
         total_loss = 0.0
         total_batches = 0
 
@@ -314,9 +318,11 @@ class QTRANTrainer(OffPolicyTrainer):
 
         torch.cuda.empty_cache()
 
-        return total_loss / max(total_batches, 1)
+        return {"loss": total_loss / max(total_batches, 1)}
 
-    def _learn_multi_gpu(self, sample_size, batch_size: int, times: int = 1):
+    def _learn_multi_gpu(
+        self, sample_size, batch_size: int, times: int = 1
+    ) -> dict[str, float]:
         """Multi-GPU learning via QTRANWorkerGroup.
 
         Each worker runs a copy of the QTRAN train step (TD + L_opt +
@@ -341,12 +347,12 @@ class QTRANTrainer(OffPolicyTrainer):
                 )
                 for batch in dataloader:
                     batch["epoch"] = self.current_epoch
-                    loss = self.worker_group.train_step(batch)
-                    total_loss += loss
+                    result = self.worker_group.train_step(batch)
+                    total_loss += result["loss"]
                     total_batches += 1
                     pbar.update(batch["states"].shape[0])
 
-        return total_loss / max(total_batches, 1)
+        return {"loss": total_loss / max(total_batches, 1)}
 
     def save_current_model(self, checkpoint: str):
         agent_path = os.path.join(self.checkpointdir, checkpoint, "agent")
@@ -486,12 +492,12 @@ class QTRANTrainer(OffPolicyTrainer):
                 f"Epoch {epoch}: Learning {learning_times_per_epoch} times per epoch ..."
             )
 
-            loss = self.learn(
+            train_result = self.learn(
                 sample_size=sample_size,
                 batch_size=batch_size,
                 times=learning_times_per_epoch,
             )
-            logging.info(f"Epoch {epoch}: Loss {loss:.4f}")
+            logging.info(f"Epoch {epoch}: Loss {train_result['loss']:.4f}")
 
             # Per-batch target updates are performed inside _learn_single_gpu
             # (see _update_target_after_batch).  In the multi-GPU path each

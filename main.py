@@ -1,51 +1,61 @@
-import argparse
 import yaml
+from absl import app, flags, logging
+
 from marlite.trainer.trainer_config import TrainerConfig
-from marlite.experiment_analyzer.experiment_analyzer_config import ExperimentAnalyzerConfig
+from marlite.experiment_analyzer.experiment_analyzer_config import (
+    ExperimentAnalyzerConfig,
+)
+
+
+_CONFIG = flags.DEFINE_string(
+    "config", None, "Path to the YAML configuration file."
+)
+_OUTPUT = flags.DEFINE_string(
+    "output", None, "Path to the analysis output YAML file."
+)
+_CHECKPOINT = flags.DEFINE_string(
+    "checkpoint", "best", "Checkpoint name used for analysis."
+)
+
+flags.mark_flag_as_required("config")
+flags.FLAGS.set_default("verbosity", logging.INFO)
+flags.FLAGS.set_default("stderrthreshold", "info")
+
 
 def train(config_path):
-    with open(config_path, 'r') as file:
-            config = yaml.safe_load(file)
-    trainer_config = TrainerConfig(config)
-    results = trainer_config.run()
+    with open(config_path, encoding="utf-8") as file:
+        config = yaml.safe_load(file)
+
+    TrainerConfig(config).run()
     print("Training completed.")
 
+
 def analyze(config_path, output_path, checkpoint="best"):
-    with open(config_path, 'r') as f:
-        config_data = yaml.safe_load(f)
+    with open(config_path, encoding="utf-8") as file:
+        config = yaml.safe_load(file)
 
-    # Create configuration objects
-    analyzer_config = ExperimentAnalyzerConfig(config_data)
-    analyzer = analyzer_config.create_analyzer(checkpoint=checkpoint)
-    analysis_results = analyzer.comprehensive_analysis()
+    analyzer = ExperimentAnalyzerConfig(config).create_analyzer(
+        checkpoint=checkpoint
+    )
+    results = analyzer.comprehensive_analysis()
 
-    # Save results to YAML file
-    with open(output_path, 'w') as f:
-        yaml.safe_dump(analysis_results, f, default_flow_style=False)
+    with open(output_path, "w", encoding="utf-8") as file:
+        yaml.safe_dump(results, file, default_flow_style=False)
+
+
+def main(argv):
+    if len(argv) != 2 or argv[1] not in ("train", "analyze"):
+        raise app.UsageError("Expected command: train or analyze")
+
+    command = argv[1]
+    if command == "train":
+        train(_CONFIG.value)
+        return
+
+    if _OUTPUT.value is None:
+        raise app.UsageError("--output is required for analyze")
+    analyze(_CONFIG.value, _OUTPUT.value, _CHECKPOINT.value)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run the training or analysis process based on a configuration file.")
-    subparsers = parser.add_subparsers(dest='command', help='Sub-command help')
-
-    # Train command
-    train_parser = subparsers.add_parser('train', help='Train the model using a configuration file')
-    train_parser.add_argument('--config', type=str, required=True, help='Path to the YAML training configuration file')
-
-    # Analyze command
-    analyze_parser = subparsers.add_parser('analyze', help='Analyze the model and output results to a YAML file')
-    analyze_parser.add_argument('--config', type=str, required=True, help='Path to the YAML analysis configuration file')
-    analyze_parser.add_argument('--output', type=str, required=True, help='Path to the output YAML file')
-    analyze_parser.add_argument(
-        '--checkpoint',
-        type=str,
-        default='best',
-        help='Name of the checkpoint to load (e.g., best, 1, 2). Default: best'
-    )
-
-    args = parser.parse_args()
-
-    if args.command == 'train':
-        train(args.config)
-    elif args.command == 'analyze':
-        analyze(args.config, args.output, args.checkpoint)
+    app.run(main)

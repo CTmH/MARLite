@@ -41,7 +41,9 @@ class QPLEXTrainer(OffPolicyTrainer):
         """Create multi-GPU worker group (placeholder; not yet implemented)."""
         return None
 
-    def learn(self, sample_size, batch_size: int, times: int = 1):
+    def learn(
+        self, sample_size, batch_size: int, times: int = 1
+    ) -> dict[str, float]:
         """Perform one or more passes of gradient-based learning.
 
         Delegates to the single- or multi-GPU implementation depending
@@ -51,7 +53,9 @@ class QPLEXTrainer(OffPolicyTrainer):
             return self._learn_single_gpu(sample_size, batch_size, times)
         return self._learn_multi_gpu(sample_size, batch_size, times)
 
-    def _learn_single_gpu(self, sample_size, batch_size: int, times: int = 1):
+    def _learn_single_gpu(
+        self, sample_size, batch_size: int, times: int = 1
+    ) -> dict[str, float]:
         """Single-GPU QPLEX learning loop.
 
         Args:
@@ -61,8 +65,7 @@ class QPLEXTrainer(OffPolicyTrainer):
             times: Number of passes over the sampled data.
 
         Returns:
-            Average total loss (MSE + optional att_reg) over all
-            batches in this call.
+            Dictionary containing the average ``loss`` over all batches.
         """
         total_loss = 0.0
         total_batches = 0
@@ -276,9 +279,11 @@ class QPLEXTrainer(OffPolicyTrainer):
 
         torch.cuda.empty_cache()
 
-        return total_loss / total_batches
+        return {"loss": total_loss / total_batches}
 
-    def _learn_multi_gpu(self, sample_size, batch_size: int, times: int = 1):
+    def _learn_multi_gpu(
+        self, sample_size, batch_size: int, times: int = 1
+    ) -> dict[str, float]:
         """Multi-GPU placeholder.  Raise a clear error."""
         raise NotImplementedError(
             "QPLEX multi-GPU training is not yet implemented. "

@@ -86,7 +86,9 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
             warmup_epochs=self.warmup_epochs,
         )
 
-    def learn(self, sample_size, batch_size: int, times: int = 1):
+    def learn(
+        self, sample_size, batch_size: int, times: int = 1
+    ) -> dict[str, float]:
         """
         Joint RL+SSL learning.
 
@@ -96,13 +98,15 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
             times: Number of times to iterate over the sampled data
 
         Returns:
-            Combined loss (avg across batches)
+            Average ``loss``, ``critic_loss``, and ``ssl_loss`` metrics.
         """
         if not self.use_multi_gpu:
             return self._joint_learn_single_gpu(sample_size, batch_size, times)
         return self._joint_learn_multi_gpu(sample_size, batch_size, times)
 
-    def _joint_learn_single_gpu(self, sample_size, batch_size: int, times: int = 1):
+    def _joint_learn_single_gpu(
+        self, sample_size, batch_size: int, times: int = 1
+    ) -> dict[str, float]:
         """
         Joint RL+SSL learning on single GPU.
 
@@ -120,7 +124,7 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
             times: Number of times to iterate over the sampled data
 
         Returns:
-            Combined loss (avg across batches)
+            Average ``loss``, ``critic_loss``, and ``ssl_loss`` metrics.
         """
         total_combined = 0.0
         total_critic = 0.0
@@ -212,9 +216,15 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
             f"  Combined Loss: {avg_combined:.4f}, RL Loss: {avg_critic:.4f}, VAE Loss: {avg_vae:.4f}"
         )
 
-        return avg_combined
+        return {
+            "loss": avg_combined,
+            "critic_loss": avg_critic,
+            "ssl_loss": avg_vae,
+        }
 
-    def _joint_learn_multi_gpu(self, sample_size, batch_size: int, times: int = 1):
+    def _joint_learn_multi_gpu(
+        self, sample_size, batch_size: int, times: int = 1
+    ) -> dict[str, float]:
         """
         Joint RL+SSL learning on multiple GPUs.
 
@@ -229,7 +239,7 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
             times: Number of times to iterate over the sampled data
 
         Returns:
-            Combined loss (avg across batches)
+            Average ``loss``, ``critic_loss``, and ``ssl_loss`` metrics.
         """
         total_combined = 0.0
         total_critic = 0.0
@@ -255,11 +265,11 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
             ) as pbar:
                 for batch in dataloader:
                     batch["epoch"] = self.current_epoch
-                    combined, critic, vae = self.worker_group.train_step(batch)
+                    result = self.worker_group.train_step(batch)
 
-                    total_combined += combined
-                    total_critic += critic
-                    total_vae += vae
+                    total_combined += result["loss"]
+                    total_critic += result["critic_loss"]
+                    total_vae += result["ssl_loss"]
                     total_batches += 1
 
                     bs = batch["states"].shape[0]
@@ -272,7 +282,11 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
             f"  Combined Loss: {avg_combined:.4f}, Critic Loss: {avg_critic:.4f}, VAE Loss: {avg_vae:.4f}"
         )
 
-        return avg_combined
+        return {
+            "loss": avg_combined,
+            "critic_loss": avg_critic,
+            "ssl_loss": avg_vae,
+        }
 
     def _compute_loss(self, batch, is_warmup: bool):
         """

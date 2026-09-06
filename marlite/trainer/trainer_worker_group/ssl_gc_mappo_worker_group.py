@@ -106,29 +106,47 @@ class SSLGroupConsensusMAPPOWorkerGroup(OnPolicyWorkerGroup):
         kwargs["consensus_mode"] = self.consensus_mode
         return kwargs
 
-    def train_step(self, batch: Dict[str, Any]) -> tuple:
+    def train_step(self, batch: Dict[str, Any]) -> Dict[str, float]:
+        """Run the legacy joint PPO+SSL update command."""
+        return self._run_train_command("TRAIN_STEP", batch)
+
+    def ppo_train_step(self, batch: Dict[str, Any]) -> Dict[str, float]:
+        """Run one PPO-only update on every worker."""
+        return self._run_train_command("PPO_TRAIN_STEP", batch)
+
+    def ssl_train_step(self, batch: Dict[str, Any]) -> Dict[str, float]:
+        """Run one SSL-only update on every worker."""
+        return self._run_train_command("SSL_TRAIN_STEP", batch)
+
+    def set_training_epoch(self, epoch: int) -> None:
+        """Send joint-update warmup state separately from training data."""
+        for command_queue, param_queue in zip(
+            self.cmd_queues, self.param_queues
+        ):
+            command_queue.put("SET_TRAINING_EPOCH")
+            param_queue.put(epoch)
+        for ack_queue in self.ack_queues:
+            if ack_queue.get() != "ACK":
+                raise RuntimeError("Worker failed to acknowledge training epoch")
+
+    def _run_train_command(
+        self, command: str, batch: Dict[str, Any]
+    ) -> Dict[str, float]:
         batch_slices = _slice_batch(batch, self.world_size)
         for i in range(self.world_size):
-            self.cmd_queues[i].put("TRAIN_STEP")
+            self.cmd_queues[i].put(command)
             self.data_queues[i].put(batch_slices[i])
 
-        combined_losses = []
-        critic_losses = []
-        ssl_losses = []
+        results = []
         for _ in range(self.world_size):
-            result = self.loss_queue.get()
-            if isinstance(result, tuple):
-                combined, critic, ssl = result
-                combined_losses.append(combined)
-                critic_losses.append(critic)
-                ssl_losses.append(ssl)
-            else:
-                combined_losses.append(result)
-                critic_losses.append(result)
-                ssl_losses.append(0.0)
+            results.append(self.loss_queue.get())
 
-        return (
-            sum(combined_losses) / len(combined_losses),
-            sum(critic_losses) / len(critic_losses),
-            sum(ssl_losses) / len(ssl_losses),
-        )
+        if any(not isinstance(result, dict) for result in results):
+            raise TypeError("Worker train_step must return a dict")
+        keys = results[0].keys()
+        if any(result.keys() != keys for result in results[1:]):
+            raise ValueError("Workers returned different training metric keys")
+        return {
+            key: sum(result[key] for result in results) / len(results)
+            for key in keys
+        }

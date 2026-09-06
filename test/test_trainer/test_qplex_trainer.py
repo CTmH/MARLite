@@ -209,8 +209,9 @@ class TestQPLEXTrainer(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             trainer = self._create_trainer(temp_dir)
             trainer.collect_experience(0.9)
-            loss = trainer.learn(sample_size=8, batch_size=4, times=1)
-            self.assertIsInstance(loss, float)
+            result = trainer.learn(sample_size=8, batch_size=4, times=1)
+            self.assertIsInstance(result, dict)
+            self.assertIsInstance(result["loss"], float)
 
     def test_learn_updates_parameters(self):
         with tempfile.TemporaryDirectory() as temp_dir:

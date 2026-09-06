@@ -10,7 +10,6 @@ from marlite.algorithm.model import ModelConfig
 from marlite.util.optimizer_config import OptimizerConfig
 from marlite.trainer.trainer_worker_group.base_worker_group import (
     OffPolicyWorkerGroup,
-    _slice_batch,
 )
 
 
@@ -26,7 +25,7 @@ class VAEGraphQMIXWorkerGroup(OffPolicyWorkerGroup):
     Workers execute train_step() that computes:
     combined_loss = critic_loss + self_supervised_learning_loss_weight * vae_loss
 
-    Returns (combined_loss, critic_loss, vae_loss) aggregated across workers.
+    Returns a dictionary of averaged loss metrics across workers.
     """
 
     def __init__(
@@ -121,36 +120,3 @@ class VAEGraphQMIXWorkerGroup(OffPolicyWorkerGroup):
         kwargs["data_constructor"] = self.data_constructor
         kwargs["warmup_epochs"] = self.warmup_epochs
         return kwargs
-
-    def train_step(self, batch: Dict[str, Any]) -> tuple:
-        """
-        Execute one training step across all workers.
-
-        Distributes the batch slices to workers, each computes gradients on
-        its data slice, then synchronizes via all_reduce.
-
-        Args:
-            batch: Full batch from DataLoader
-
-        Returns:
-            Tuple of (avg_combined_loss, avg_critic_loss, avg_vae_loss)
-        """
-        batch_slices = _slice_batch(batch, self.world_size)
-        for i in range(self.world_size):
-            self.cmd_queues[i].put("TRAIN_STEP")
-            self.data_queues[i].put(batch_slices[i])
-
-        combined_losses = []
-        critic_losses = []
-        vae_losses = []
-        for _ in range(self.world_size):
-            combined, critic, vae = self.loss_queue.get()
-            combined_losses.append(combined)
-            critic_losses.append(critic)
-            vae_losses.append(vae)
-
-        return (
-            sum(combined_losses) / len(combined_losses),
-            sum(critic_losses) / len(critic_losses),
-            sum(vae_losses) / len(vae_losses),
-        )

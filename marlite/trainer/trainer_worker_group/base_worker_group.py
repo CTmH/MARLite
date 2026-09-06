@@ -418,7 +418,7 @@ class BaseWorkerGroup(ABC):
             if ack != "ACK":
                 raise RuntimeError(f"Worker {i}: Expected ACK, got {ack}")
 
-    def train_step(self, batch: Dict[str, Any]) -> float:
+    def train_step(self, batch: Dict[str, Any]) -> Dict[str, float]:
         """
         Execute one training step across all workers.
 
@@ -429,24 +429,35 @@ class BaseWorkerGroup(ABC):
             batch: Full batch from DataLoader
 
         Returns:
-            Average loss across all workers
+            Per-metric averages across all workers.
         """
         batch_slices = _slice_batch(batch, self.world_size)
         for i in range(self.world_size):
             self.cmd_queues[i].put("TRAIN_STEP")
             self.data_queues[i].put(batch_slices[i])
 
-        losses = []
+        results = []
         for _ in range(self.world_size):
-            loss = self.loss_queue.get()
-            losses.append(loss)
+            result = self.loss_queue.get()
+            if not isinstance(result, dict):
+                raise TypeError(
+                    "Worker train_step must return a dict, got "
+                    f"{type(result).__name__}"
+                )
+            results.append(result)
 
         # No need to sync parameters after each batch because:
         # 1. Gradients are already synchronized via all_reduce in reduce_gradients()
         # 2. All workers use the same optimizer, so parameter updates should be identical
         # 3. Parameters are synced at the beginning of each epoch via broadcast_params()
 
-        return sum(losses) / len(losses)
+        keys = results[0].keys()
+        if any(result.keys() != keys for result in results[1:]):
+            raise ValueError("Workers returned different training metric keys")
+        return {
+            key: sum(result[key] for result in results) / len(results)
+            for key in keys
+        }
 
     def move_models_to_gpu(self):
         """

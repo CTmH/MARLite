@@ -361,7 +361,25 @@ trainer:
                 self.trainer.target_agent_group.state_dict()
             )
             self.trainer.collect_experience(0.9)
-            self.trainer.learn(sample_size=32, batch_size=8, times=1)
+            result = self.trainer.learn(sample_size=32, batch_size=8, times=1)
+            expected_metrics = {
+                "loss",
+                "critic_loss",
+                "ssl_loss",
+                "reconstruction_loss",
+                "kl_loss",
+                "q_tot_mean",
+                "target_q_mean",
+                "td_error_abs_mean",
+                "agent_grad_norm",
+                "critic_grad_norm",
+                "ssl_model_grad_norm",
+            }
+            self.assertEqual(result.keys(), expected_metrics)
+            self.assertTrue(
+                all(isinstance(value, float) for value in result.values())
+            )
+            self.assertTrue(torch.isfinite(torch.tensor(list(result.values()))).all())
             self.trainer._update_target_after_batch()
             critic_params = self.trainer.target_critic.state_dict()
             agent_group_params = self.trainer.target_agent_group.state_dict()

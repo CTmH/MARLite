@@ -90,7 +90,7 @@ class GroupConsensusWorker(OffPolicyWorker):
         # standard target / target_update_* handling.
         super().sync_params_from_main(params)
 
-    def train_step(self, batch: Dict[str, Any]) -> float:
+    def train_step(self, batch: Dict[str, Any]) -> Dict[str, float]:
         alive_mask = batch["alive_mask"].to(dtype=torch.bool)
         observations = batch["observations"].to(dtype=torch.float32)
         timestep_padding_mask = batch["timestep_padding_mask"].to(dtype=torch.bool)
@@ -247,7 +247,8 @@ class GroupConsensusWorker(OffPolicyWorker):
         # Per-batch target update (hard / ema)
         self._update_target_after_batch()
 
-        return critic_loss.detach().cpu().item()
+        loss = critic_loss.detach().cpu().item()
+        return {"loss": loss, "critic_loss": loss}
 
 
 

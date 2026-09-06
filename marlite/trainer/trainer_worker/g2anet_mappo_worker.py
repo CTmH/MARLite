@@ -73,7 +73,7 @@ class G2ANetMAPPOWorker(OnPolicyWorker):
             self.eval_critic.to(device)
         self.device = device
 
-    def train_step(self, batch: Dict[str, Any]) -> float:
+    def train_step(self, batch: Dict[str, Any]) -> Dict[str, float]:
         alive_mask = batch["alive_mask"].to(dtype=torch.bool)
         observations = batch["observations"].to(dtype=torch.float32)
         timestep_padding_mask = batch["timestep_padding_mask"].to(
@@ -200,4 +200,8 @@ class G2ANetMAPPOWorker(OnPolicyWorker):
         self.agent_optimizer.step()
         self.critic_optimizer.step()
 
-        return combined_loss.detach().cpu().item()
+        return {
+            "loss": combined_loss.detach().cpu().item(),
+            "actor_loss": actor_loss.detach().cpu().item(),
+            "critic_loss": critic_loss.detach().cpu().item(),
+        }

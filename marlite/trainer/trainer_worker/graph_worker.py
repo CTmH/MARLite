@@ -132,7 +132,7 @@ class GraphWorker(OffPolicyWorker):
         """
         super().sync_params_from_main(params)
 
-    def train_step(self, batch: Dict[str, Any]) -> float:
+    def train_step(self, batch: Dict[str, Any]) -> Dict[str, float]:
         """
         Execute one training step on the given batch.
 
@@ -154,7 +154,7 @@ class GraphWorker(OffPolicyWorker):
                 - terminations: Termination flags
 
         Returns:
-            Critic loss (TD error)
+            Dictionary containing ``loss`` and ``critic_loss``.
         """
         # Extract batch data
         alive_mask = batch["alive_mask"].to(dtype=torch.bool)
@@ -307,7 +307,8 @@ class GraphWorker(OffPolicyWorker):
         # Per-batch target update (hard / ema)
         self._update_target_after_batch()
 
-        return critic_loss.detach().cpu().item()
+        loss = critic_loss.detach().cpu().item()
+        return {"loss": loss, "critic_loss": loss}
 
 
 

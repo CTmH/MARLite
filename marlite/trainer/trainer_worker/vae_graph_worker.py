@@ -211,13 +211,13 @@ class VAEGraphQMIXWorker(OffPolicyWorker):
                 {k: v.clone() for k, v in params["ssl_model"].items()}
             )
 
-    def train_step(self, batch: Dict[str, Any]) -> tuple:
+    def train_step(self, batch: Dict[str, Any]) -> Dict[str, float]:
         """
         Execute one training step on the given batch.
 
         When SSL is enabled, computes combined_loss = critic_loss + weight * vae_loss
         using local_state_estimates, mu, log_var from forward pass.
-        Returns (combined_loss, critic_loss, vae_loss).
+        Returns total, critic, and SSL losses in a metric dictionary.
 
         Args:
             batch: Dictionary containing:
@@ -239,7 +239,7 @@ class VAEGraphQMIXWorker(OffPolicyWorker):
                 - construct_padding_mask: Padding mask for SSL (B, T, N)
 
         Returns:
-            Tuple of (combined_loss, critic_loss, vae_loss) or single critic_loss if SSL disabled
+            Dictionary containing ``loss``, ``critic_loss``, and ``ssl_loss``.
         """
         # Get current epoch from batch to determine warmup status
         current_epoch = batch.get("epoch", 0)
@@ -446,11 +446,11 @@ class VAEGraphQMIXWorker(OffPolicyWorker):
             if isinstance(vae_loss, torch.Tensor)
             else vae_loss
         )
-        return (
-            combined_loss.detach().cpu().item(),
-            critic_loss.detach().cpu().item(),
-            vae_loss_value,
-        )
+        return {
+            "loss": combined_loss.detach().cpu().item(),
+            "critic_loss": critic_loss.detach().cpu().item(),
+            "ssl_loss": vae_loss_value,
+        }
 
     def _compute_ssl_loss(self, pred_set, target_set, mask=None):
         """
@@ -511,8 +511,7 @@ class VAEGraphQMIXWorker(OffPolicyWorker):
             batch = data_queue.get()
             result = self.train_step(batch)
             del batch
-            combined, critic, vae = result
-            loss_queue.put((combined, critic, vae))
+            loss_queue.put(result)
             return True
 
         if cmd == "SYNC_LR":

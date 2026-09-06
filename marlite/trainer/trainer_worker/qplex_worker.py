@@ -76,7 +76,7 @@ class QPLEXWorker(OffPolicyWorker):
             self.eval_agent_group.parameters()
         )
 
-    def train_step(self, batch: Dict[str, Any]) -> float:
+    def train_step(self, batch: Dict[str, Any]) -> Dict[str, float]:
         """Execute one QPLEX training step on a mini-batch.
 
         Args:
@@ -88,8 +88,8 @@ class QPLEXWorker(OffPolicyWorker):
                 ``next_alive_mask``, ``terminations``.
 
         Returns:
-            The scalar loss (detached, on CPU) after backpropagation
-            and gradient synchronisation.
+            Dictionary containing ``loss`` and ``critic_loss`` after
+            backpropagation and gradient synchronisation.
         """
         # ------------------------------------------------------------------
         # 1. Load batch.
@@ -221,4 +221,5 @@ class QPLEXWorker(OffPolicyWorker):
         # Per-batch target update (hard / ema)
         self._update_target_after_batch()
 
-        return total_loss.detach().cpu().item()
+        loss = total_loss.detach().cpu().item()
+        return {"loss": loss, "critic_loss": loss}

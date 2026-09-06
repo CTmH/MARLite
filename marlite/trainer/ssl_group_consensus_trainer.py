@@ -148,15 +148,20 @@ class SSLGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
 
     # ── Training loop ────────────────────────────────────────────────────
 
-    def learn(self, sample_size, batch_size: int, times: int = 1):
+    def learn(
+        self, sample_size, batch_size: int, times: int = 1
+    ) -> dict[str, float]:
         if not self.use_multi_gpu:
             return self._joint_learn_single_gpu(sample_size, batch_size, times)
         return self._joint_learn_multi_gpu(sample_size, batch_size, times)
 
-    def _joint_learn_single_gpu(self, sample_size, batch_size: int, times: int = 1):
+    def _joint_learn_single_gpu(
+        self, sample_size, batch_size: int, times: int = 1
+    ) -> dict[str, float]:
         total_combined = 0.0
         total_critic = 0.0
         total_ssl = 0.0
+        metric_totals = {}
         total_batches = 0
 
         self.eval_agent_group.to(self.train_device)
@@ -194,9 +199,12 @@ class SSLGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
                 total=sample_size, desc=f"Times {t + 1}/{times}", unit="batch"
             ) as pbar:
                 for batch in dataloader:
-                    combined_loss, critic_loss, ssl_loss = self._compute_loss(
-                        batch, is_warmup
-                    )
+                    (
+                        combined_loss,
+                        critic_loss,
+                        ssl_loss,
+                        metrics,
+                    ) = self._compute_loss(batch, is_warmup)
 
                     self.critic_optimizer.zero_grad()
                     self.agent_optimizer.zero_grad()
@@ -204,13 +212,13 @@ class SSLGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
 
                     combined_loss.backward()
 
-                    torch.nn.utils.clip_grad_norm_(
+                    critic_grad_norm = torch.nn.utils.clip_grad_norm_(
                         self.eval_critic.parameters(), max_norm=self.max_grad_norm
                     )
-                    torch.nn.utils.clip_grad_norm_(
+                    agent_grad_norm = torch.nn.utils.clip_grad_norm_(
                         self.eval_agent_group.parameters(), max_norm=self.max_grad_norm
                     )
-                    torch.nn.utils.clip_grad_norm_(
+                    ssl_grad_norm = torch.nn.utils.clip_grad_norm_(
                         self.ssl_model.parameters(), max_norm=self.max_grad_norm
                     )
 
@@ -222,6 +230,16 @@ class SSLGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
                     total_critic += critic_loss.detach().cpu().item()
                     if isinstance(ssl_loss, torch.Tensor):
                         total_ssl += ssl_loss.detach().cpu().item()
+                    metrics.update(
+                        agent_grad_norm=agent_grad_norm,
+                        critic_grad_norm=critic_grad_norm,
+                        ssl_model_grad_norm=ssl_grad_norm,
+                    )
+                    for key, value in metrics.items():
+                        value = value.detach().cpu().item() if isinstance(
+                            value, torch.Tensor
+                        ) else float(value)
+                        metric_totals[key] = metric_totals.get(key, 0.0) + value
                     total_batches += 1
 
                     # Per-batch target update (hard / ema)
@@ -241,16 +259,39 @@ class SSLGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
         avg_combined = total_combined / total_batches
         avg_critic = total_critic / total_batches
         avg_ssl = total_ssl / total_batches
+        metrics = {
+            key: value / total_batches for key, value in metric_totals.items()
+        }
         logging.info(
             f"  Combined Loss: {avg_combined:.4f}, RL Loss: {avg_critic:.4f}, SSL Loss: {avg_ssl:.4f}"
         )
+        logging.info(
+            "  Recon %.4f, KL %.6f, |TD error| %.4f, Q/target Q %.4f/%.4f, "
+            "Agent/critic/SSL grad norms %.4f/%.4f/%.4f",
+            metrics["reconstruction_loss"],
+            metrics["kl_loss"],
+            metrics["td_error_abs_mean"],
+            metrics["q_tot_mean"],
+            metrics["target_q_mean"],
+            metrics["agent_grad_norm"],
+            metrics["critic_grad_norm"],
+            metrics["ssl_model_grad_norm"],
+        )
 
-        return avg_combined
+        return {
+            "loss": avg_combined,
+            "critic_loss": avg_critic,
+            "ssl_loss": avg_ssl,
+            **metrics,
+        }
 
-    def _joint_learn_multi_gpu(self, sample_size, batch_size: int, times: int = 1):
+    def _joint_learn_multi_gpu(
+        self, sample_size, batch_size: int, times: int = 1
+    ) -> dict[str, float]:
         total_combined = 0.0
         total_critic = 0.0
         total_ssl = 0.0
+        metric_totals = {}
         total_batches = 0
 
         is_warmup = self.current_epoch < self.warmup_epochs
@@ -283,11 +324,16 @@ class SSLGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
             ) as pbar:
                 for batch in dataloader:
                     batch["epoch"] = self.current_epoch
-                    combined, critic, ssl = self.worker_group.train_step(batch)
+                    result = self.worker_group.train_step(batch)
 
-                    total_combined += combined
-                    total_critic += critic
-                    total_ssl += ssl
+                    total_combined += result["loss"]
+                    total_critic += result["critic_loss"]
+                    total_ssl += result["ssl_loss"]
+                    for key, value in result.items():
+                        if key not in ("loss", "critic_loss", "ssl_loss"):
+                            metric_totals[key] = (
+                                metric_totals.get(key, 0.0) + value
+                            )
                     total_batches += 1
 
                     bs = batch["states"].shape[0]
@@ -296,11 +342,31 @@ class SSLGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
         avg_combined = total_combined / total_batches
         avg_critic = total_critic / total_batches
         avg_ssl = total_ssl / total_batches
+        metrics = {
+            key: value / total_batches for key, value in metric_totals.items()
+        }
         logging.info(
             f"  Combined Loss: {avg_combined:.4f}, RL Loss: {avg_critic:.4f}, SSL Loss: {avg_ssl:.4f}"
         )
+        logging.info(
+            "  Recon %.4f, KL %.6f, |TD error| %.4f, Q/target Q %.4f/%.4f, "
+            "Agent/critic/SSL grad norms %.4f/%.4f/%.4f",
+            metrics["reconstruction_loss"],
+            metrics["kl_loss"],
+            metrics["td_error_abs_mean"],
+            metrics["q_tot_mean"],
+            metrics["target_q_mean"],
+            metrics["agent_grad_norm"],
+            metrics["critic_grad_norm"],
+            metrics["ssl_model_grad_norm"],
+        )
 
-        return avg_combined
+        return {
+            "loss": avg_combined,
+            "critic_loss": avg_critic,
+            "ssl_loss": avg_ssl,
+            **metrics,
+        }
 
     # ── Core loss computation ────────────────────────────────────────────
     #
@@ -542,6 +608,8 @@ class SSLGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
         # ═══════════════════════════════════════════════════════════════════
 
         if is_warmup:
+            reconstruction_loss = torch.tensor(0.0, device=self.train_device)
+            kl_divergence = torch.tensor(0.0, device=self.train_device)
             ssl_loss = torch.tensor(0.0, device=self.train_device)
         else:
             # ── 3a. Obtain reconstruction targets ──────────────────────
@@ -592,7 +660,9 @@ class SSLGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
             if self.consensus_mode == "ae":
                 kl_divergence = torch.tensor(0.0, device=self.train_device)
             else:
-                kl_divergence = 0.0
+                kl_divergence = torch.tensor(
+                    0.0, device=self.train_device
+                )
                 if self.kl_on_agent:
                     kl_mu = agent_mu
                     kl_log_var = agent_log_var
@@ -630,7 +700,13 @@ class SSLGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
                 f"critic={critic_loss.item() if isinstance(critic_loss, torch.Tensor) else critic_loss}, "
                 f"ssl={ssl_loss.item() if isinstance(ssl_loss, torch.Tensor) else ssl_loss}"
             )
-        return combined_loss, critic_loss, ssl_loss
+        return combined_loss, critic_loss, ssl_loss, {
+            "reconstruction_loss": reconstruction_loss,
+            "kl_loss": kl_divergence,
+            "q_tot_mean": q_tot.detach().mean(),
+            "target_q_mean": y_tot.detach().mean(),
+            "td_error_abs_mean": (q_tot.detach() - y_tot.detach()).abs().mean(),
+        }
 
     # ── Reconstruction target builder ────────────────────────────────────
 

@@ -39,12 +39,16 @@ class GroupConsensusTrainer(OffPolicyTrainer):
             consensus_mode=self.consensus_mode,
         )
 
-    def learn(self, sample_size, batch_size: int, times: int = 1):
+    def learn(
+        self, sample_size, batch_size: int, times: int = 1
+    ) -> dict[str, float]:
         if not self.use_multi_gpu:
             return self._learn_single_gpu(sample_size, batch_size, times)
         return self._learn_multi_gpu(sample_size, batch_size, times)
 
-    def _learn_single_gpu(self, sample_size, batch_size: int, times: int = 1):
+    def _learn_single_gpu(
+        self, sample_size, batch_size: int, times: int = 1
+    ) -> dict[str, float]:
         total_loss = 0.0
         total_batches = 0
         total_td = 0.0
@@ -250,9 +254,11 @@ class GroupConsensusTrainer(OffPolicyTrainer):
         avg_td = total_td / total_batches
         avg_kl = total_kl / total_batches
 
-        return avg_loss
+        return {"loss": avg_loss, "td_loss": avg_td, "kl_loss": avg_kl}
 
-    def _learn_multi_gpu(self, sample_size, batch_size: int, times: int = 1):
+    def _learn_multi_gpu(
+        self, sample_size, batch_size: int, times: int = 1
+    ) -> dict[str, float]:
         total_loss = 0.0
         total_batches = 0
 
@@ -269,10 +275,10 @@ class GroupConsensusTrainer(OffPolicyTrainer):
                 )
                 for batch in dataloader:
                     batch["epoch"] = self.current_epoch
-                    loss = self.worker_group.train_step(batch)
-                    total_loss += loss
+                    result = self.worker_group.train_step(batch)
+                    total_loss += result["loss"]
                     total_batches += 1
                     bs = batch["states"].shape[0]
                     pbar.update(bs)
 
-        return total_loss / total_batches
+        return {"loss": total_loss / total_batches}

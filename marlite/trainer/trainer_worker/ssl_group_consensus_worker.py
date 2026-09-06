@@ -172,7 +172,7 @@ class SSLGroupConsensusWorker(OffPolicyWorker):
                 f"max={t.max().item() if torch.isfinite(t).any() else 'N/A'})"
             )
 
-    def train_step(self, batch: Dict[str, Any]) -> tuple:
+    def train_step(self, batch: Dict[str, Any]) -> Dict[str, float]:
         current_epoch = batch.get("epoch", 0)
         is_warmup = current_epoch < self.warmup_epochs
 
@@ -325,6 +325,8 @@ class SSLGroupConsensusWorker(OffPolicyWorker):
 
         # === SSL Reconstruction Loss ===
         if is_warmup:
+            reconstruction_loss = torch.tensor(0.0, device=self.device)
+            kl_divergence = torch.tensor(0.0, device=self.device)
             ssl_loss = torch.tensor(0.0, device=self.device)
         else:
             # Pre-generated targets provided by trainer via
@@ -351,7 +353,7 @@ class SSLGroupConsensusWorker(OffPolicyWorker):
             if self.consensus_mode == "ae":
                 kl_divergence = torch.tensor(0.0, device=self.device)
             else:
-                kl_divergence = 0.0
+                kl_divergence = torch.tensor(0.0, device=self.device)
                 if self.kl_on_agent:
                     kl_mu = agent_mu
                     kl_log_var = agent_log_var
@@ -388,10 +390,18 @@ class SSLGroupConsensusWorker(OffPolicyWorker):
 
         self.reduce_gradients()
 
-        torch.nn.utils.clip_grad_norm_(self.eval_critic.parameters(), max_norm=self.max_grad_norm)
-        torch.nn.utils.clip_grad_norm_(self.eval_agent_group.parameters(), max_norm=self.max_grad_norm)
+        critic_grad_norm = torch.nn.utils.clip_grad_norm_(
+            self.eval_critic.parameters(), max_norm=self.max_grad_norm
+        )
+        agent_grad_norm = torch.nn.utils.clip_grad_norm_(
+            self.eval_agent_group.parameters(), max_norm=self.max_grad_norm
+        )
         if not is_warmup:
-            torch.nn.utils.clip_grad_norm_(self.ssl_model.parameters(), max_norm=self.max_grad_norm)
+            ssl_grad_norm = torch.nn.utils.clip_grad_norm_(
+                self.ssl_model.parameters(), max_norm=self.max_grad_norm
+            )
+        else:
+            ssl_grad_norm = 0.0
 
         self.critic_optimizer.step()
         self.agent_optimizer.step()
@@ -406,11 +416,21 @@ class SSLGroupConsensusWorker(OffPolicyWorker):
             if isinstance(ssl_loss, torch.Tensor)
             else ssl_loss
         )
-        return (
-            combined_loss.detach().cpu().item(),
-            critic_loss.detach().cpu().item(),
-            ssl_loss_value,
-        )
+        return {
+            "loss": combined_loss.detach().cpu().item(),
+            "critic_loss": critic_loss.detach().cpu().item(),
+            "ssl_loss": ssl_loss_value,
+            "reconstruction_loss": reconstruction_loss.detach().cpu().item(),
+            "kl_loss": kl_divergence.detach().cpu().item(),
+            "q_tot_mean": q_tot.detach().mean().cpu().item(),
+            "target_q_mean": y_tot.detach().mean().cpu().item(),
+            "td_error_abs_mean": (
+                q_tot.detach() - y_tot.detach()
+            ).abs().mean().cpu().item(),
+            "agent_grad_norm": float(agent_grad_norm),
+            "critic_grad_norm": float(critic_grad_norm),
+            "ssl_model_grad_norm": float(ssl_grad_norm),
+        }
 
     def _build_recon_targets(self, observations, states, group_indices, alive_mask):
         obs_np = observations.detach().cpu().numpy()
@@ -487,8 +507,7 @@ class SSLGroupConsensusWorker(OffPolicyWorker):
             batch = data_queue.get()
             result = self.train_step(batch)
             del batch
-            combined, critic, ssl = result
-            loss_queue.put((combined, critic, ssl))
+            loss_queue.put(result)
             return True
         if cmd == "SYNC_LR":
             lr_data = param_queue.get()

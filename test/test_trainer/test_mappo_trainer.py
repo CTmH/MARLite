@@ -129,7 +129,9 @@ trainer:
             origin_actor_params = deepcopy(self.trainer.eval_agent_group.state_dict())
             origin_critic_params = deepcopy(self.trainer.eval_critic.state_dict())
             self.trainer.collect_experience(0.9)
-            self.trainer.learn(sample_size=32, batch_size=8, times=1)
+            result = self.trainer.learn(sample_size=32, batch_size=8, times=1)
+            self.assertIsInstance(result, dict)
+            self.assertIsInstance(result["loss"], float)
 
             actor_params = self.trainer.eval_agent_group.state_dict()
             for key in actor_params:

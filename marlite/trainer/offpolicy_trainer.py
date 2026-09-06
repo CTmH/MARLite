@@ -362,12 +362,14 @@ class OffPolicyTrainer(Trainer):
 
             self._sync_params_to_workers()
 
-            loss = self.learn(
+            train_result = self.learn(
                 sample_size=sample_size,
                 batch_size=batch_size,
                 times=learning_times_per_epoch,
             )
-            logging.info(f"Epoch {epoch}: Loss {loss:.4f}")
+            logging.info(
+                f"Epoch {epoch}: Loss {train_result['loss']:.4f}"
+            )
 
             # Average parameters across workers before reading from worker 0,
             # ensuring the master receives the consensus state.

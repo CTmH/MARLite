@@ -3,7 +3,6 @@ from marlite.algorithm.model import ModelConfig
 from marlite.util.optimizer_config import OptimizerConfig
 from marlite.trainer.trainer_worker_group.base_worker_group import (
     OffPolicyWorkerGroup,
-    _slice_batch,
 )
 
 
@@ -89,24 +88,3 @@ class SSLGroupConsensusWorkerGroup(OffPolicyWorkerGroup):
         kwargs["kl_on_agent"] = self.kl_on_agent
         kwargs["consensus_mode"] = self.consensus_mode
         return kwargs
-
-    def train_step(self, batch: Dict[str, Any]) -> tuple:
-        batch_slices = _slice_batch(batch, self.world_size)
-        for i in range(self.world_size):
-            self.cmd_queues[i].put("TRAIN_STEP")
-            self.data_queues[i].put(batch_slices[i])
-
-        combined_losses = []
-        critic_losses = []
-        ssl_losses = []
-        for _ in range(self.world_size):
-            combined, critic, ssl = self.loss_queue.get()
-            combined_losses.append(combined)
-            critic_losses.append(critic)
-            ssl_losses.append(ssl)
-
-        return (
-            sum(combined_losses) / len(combined_losses),
-            sum(critic_losses) / len(critic_losses),
-            sum(ssl_losses) / len(ssl_losses),
-        )

@@ -193,7 +193,7 @@ class QTRANWorker(OffPolicyWorker):
     # QTRAN train step
     # ------------------------------------------------------------------
 
-    def train_step(self, batch: Dict[str, Any]) -> float:
+    def train_step(self, batch: Dict[str, Any]) -> Dict[str, float]:
         """Execute one QTRAN training step on the given batch.
 
         Mirrors ``QTRANTrainer._learn_single_gpu`` line-for-line, with
@@ -362,4 +362,5 @@ class QTRANWorker(OffPolicyWorker):
         # Per-batch target update (hard / ema) — V has no target
         self._update_target_after_batch()
 
-        return total_loss_batch.detach().cpu().item()
+        loss = total_loss_batch.detach().cpu().item()
+        return {"loss": loss, "critic_loss": loss}

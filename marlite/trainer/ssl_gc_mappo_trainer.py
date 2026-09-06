@@ -87,6 +87,14 @@ class SSLGroupConsensusMAPPOTrainer(SelfSupervisedMAPPOTrainer):
 
         super().__init__(**kwargs)
         validate_group_capacity(self.eval_agent_group, self.data_constructor)
+        if (
+            self.ssl_update_mode == "sequential"
+            and self.loss_combination_method == "pit_loss"
+        ):
+            logging.warning(
+                "loss_combination_method='pit_loss' is ignored when "
+                "ssl_update_mode='sequential'"
+            )
         self._set_rl_consensus_gate_for_rollout(0)
 
     def _set_rl_consensus_gate_for_rollout(self, rollout_iteration: int) -> None:
@@ -208,7 +216,18 @@ class SSLGroupConsensusMAPPOTrainer(SelfSupervisedMAPPOTrainer):
     # PPO + SSL learning (multi-GPU)
     # ------------------------------------------------------------------
 
-    def _learn_multi_gpu(self, sample_size, batch_size: int, times: int = 1):
+    def _learn_multi_gpu(
+        self, sample_size, batch_size: int, times: int = 1, ssl_times: int = 1
+    ) -> dict[str, float]:
+        if self.ssl_update_mode == "joint":
+            return self._learn_joint_multi_gpu(sample_size, batch_size, times)
+        return self._learn_sequential_multi_gpu(
+            sample_size, batch_size, times, ssl_times
+        )
+
+    def _learn_joint_multi_gpu(
+        self, sample_size, batch_size: int, times: int = 1
+    ) -> dict[str, float]:
         """Multi-GPU PPO + SSL learning via worker processes.
 
         Reconstruction targets are pre-generated **once** on the trainer
@@ -221,6 +240,7 @@ class SSLGroupConsensusMAPPOTrainer(SelfSupervisedMAPPOTrainer):
         total_batches = 0
 
         is_warmup = self.current_epoch < self.warmup_iterations
+        self.worker_group.set_training_epoch(self.current_epoch)
 
         for epoch in range(times):
             dataset = self.replaybuffer.sample(sample_size)
@@ -245,15 +265,10 @@ class SSLGroupConsensusMAPPOTrainer(SelfSupervisedMAPPOTrainer):
                 total=sample_size, desc=f"Times {epoch + 1}/{times}", unit="batch"
             ) as pbar:
                 for batch in dataloader:
-                    batch["epoch"] = self.current_epoch
                     result = self.worker_group.train_step(batch)
-                    if isinstance(result, tuple):
-                        combined, critic, ssl = result
-                        total_combined += combined
-                        total_critic += critic
-                        total_ssl += ssl
-                    else:
-                        total_combined += result
+                    total_combined += result["loss"]
+                    total_critic += result["critic_loss"]
+                    total_ssl += result["ssl_loss"]
                     total_batches += 1
 
                     bs = batch["states"].shape[0]
@@ -263,13 +278,28 @@ class SSLGroupConsensusMAPPOTrainer(SelfSupervisedMAPPOTrainer):
         avg_rl = total_critic / max(total_batches, 1)
         avg_ssl = total_ssl / max(total_batches, 1)
         logging.info(f"  Iter {self.current_epoch}: RL Loss {avg_rl:.4f}, SSL Loss {avg_ssl:.4f}")
-        return total_combined / max(total_batches, 1)
+        return {
+            "loss": total_combined / max(total_batches, 1),
+            "critic_loss": avg_rl,
+            "ssl_loss": avg_ssl,
+        }
 
     # ------------------------------------------------------------------
     # PPO + SSL learning (single-GPU)
     # ------------------------------------------------------------------
 
-    def _learn_single_gpu(self, sample_size, batch_size: int, times: int = 4):
+    def _learn_single_gpu(
+        self, sample_size, batch_size: int, times: int = 4, ssl_times: int = 1
+    ) -> dict[str, float]:
+        if self.ssl_update_mode == "joint":
+            return self._learn_joint_single_gpu(sample_size, batch_size, times)
+        return self._learn_sequential_single_gpu(
+            sample_size, batch_size, times, ssl_times
+        )
+
+    def _learn_joint_single_gpu(
+        self, sample_size, batch_size: int, times: int = 4
+    ) -> dict[str, float]:
         """Single-GPU PPO + SSL joint learning loop.
 
         Reconstruction targets are pre-generated **once** for the entire
@@ -453,9 +483,9 @@ class SSLGroupConsensusMAPPOTrainer(SelfSupervisedMAPPOTrainer):
                         combined_loss = self._combine_rl_ssl_loss(rl_loss, ssl_loss)
 
                     # ── Backward ──
-                    self.agent_optimizer.zero_grad()
-                    self.critic_optimizer.zero_grad()
-                    self.ssl_optimizer.zero_grad()
+                    self.agent_optimizer.zero_grad(set_to_none=True)
+                    self.critic_optimizer.zero_grad(set_to_none=True)
+                    self.ssl_optimizer.zero_grad(set_to_none=True)
 
                     combined_loss.backward()
 
@@ -495,4 +525,405 @@ class SSLGroupConsensusMAPPOTrainer(SelfSupervisedMAPPOTrainer):
         logging.info(
             f"  Iter {self.current_epoch}: RL Loss {avg_rl:.4f}, SSL Loss {avg_ssl:.4f}"
         )
-        return avg_rl + avg_ssl
+        return {
+            "loss": avg_rl + avg_ssl,
+            "rl_loss": avg_rl,
+            "critic_loss": total_critic_loss / max(total_batches, 1),
+            "ssl_loss": avg_ssl,
+        }
+
+    # ------------------------------------------------------------------
+    # Sequential PPO then SSL learning
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _accumulate_metrics(totals, metrics):
+        for key, value in metrics.items():
+            totals[key] = totals.get(key, 0.0) + value
+
+    @staticmethod
+    def _average_metrics(totals, count):
+        return {key: value / max(count, 1) for key, value in totals.items()}
+
+    def _group_estimator(self):
+        estimator = getattr(
+            self.eval_agent_group, "group_estimate_feature_extractors", None
+        )
+        if estimator is None:
+            raise TypeError(
+                "Sequential SSL updates require group_estimate_feature_extractors"
+            )
+        return estimator
+
+    def _prepare_group_batch(self, batch):
+        device = self.train_device
+        alive_mask = batch["alive_mask"].to(dtype=torch.bool, device=device)
+        observations = batch["observations"].to(
+            dtype=torch.float32, device=device
+        )
+        timestep_padding_mask = batch["timestep_padding_mask"].to(
+            dtype=torch.bool, device=device
+        )
+        states = batch["states"].to(dtype=torch.float32, device=device)
+        rewards = batch["rewards"].to(dtype=torch.float32)
+        n_agents = rewards.shape[2]
+
+        group_indices_batch = batch.get("group_indices")
+        if group_indices_batch is None:
+            group_indices = torch.full(
+                (states.shape[0], n_agents),
+                -1,
+                dtype=torch.long,
+                device=device,
+            )
+        else:
+            group_indices = group_indices_batch[:, -1, :].to(
+                dtype=torch.long, device=device
+            )
+
+        return {
+            "alive_mask": alive_mask,
+            "observations": observations,
+            "timestep_padding_mask": timestep_padding_mask,
+            "states": states,
+            "rewards": rewards,
+            "n_agents": n_agents,
+            "group_indices": group_indices,
+        }
+
+    def _forward_agent_for_phase(self, prepared, phase):
+        self.eval_agent_group.reset().train()
+        estimator = self._group_estimator()
+        if phase == "ppo":
+            estimator.eval()
+        else:
+            for name in ("feature_extractors", "encoders", "decoders"):
+                module = getattr(self.eval_agent_group, name, None)
+                if module is not None:
+                    module.eval()
+            estimator.train()
+
+        n_agents = prepared["n_agents"]
+        padding_mask = torch.stack(
+            [prepared["timestep_padding_mask"]] * n_agents, dim=1
+        )
+        return self.eval_agent_group(
+            torch.transpose(prepared["observations"], 1, 2),
+            prepared["states"][:, -1],
+            padding_mask,
+            prepared["alive_mask"][:, -1, :],
+            prepared["group_indices"],
+        )
+
+    def _ppo_step_single_gpu(self, batch) -> dict[str, float]:
+        prepared = self._prepare_group_batch(batch)
+        device = self.train_device
+        alive_mask = prepared["alive_mask"]
+        states = prepared["states"]
+        rewards = prepared["rewards"]
+        n_agents = prepared["n_agents"]
+        timestep_padding_mask = prepared["timestep_padding_mask"]
+
+        self.eval_critic.train()
+        v_last = self.eval_critic(
+            states, alive_mask, timestep_padding_mask
+        )["v"][:, 0]
+        with torch.no_grad():
+            v_next = self.eval_critic(
+                batch["next_states"][:, -1:, ...].to(
+                    dtype=torch.float32, device=device
+                ),
+                batch["next_alive_mask"][:, -1:, ...].to(
+                    dtype=torch.bool, device=device
+                ),
+                batch["next_timestep_padding_mask"][:, -1:].to(
+                    dtype=torch.bool, device=device
+                ),
+            )["v"][:, 0]
+
+        r_last = self._aggregate_rewards(rewards[:, -1]).to(device)
+        termination_last = batch["terminations"][:, -1].prod(dim=-1).to(
+            dtype=torch.float32, device=device
+        )
+        advantage = (
+            r_last + self.gamma * v_next * (1.0 - termination_last) - v_last
+        )
+        returns = advantage + v_last
+
+        action_logits = self._forward_agent_for_phase(prepared, "ppo")[
+            "action_logits"
+        ]
+        actions = batch["actions"][:, -1].to(
+            dtype=torch.int64, device=device
+        )
+        old_log_probs = batch["all_log_probs"][:, -1, :].to(
+            dtype=torch.float32, device=device
+        )
+        dist = Categorical(logits=action_logits)
+        new_log_probs = dist.log_prob(actions)
+        entropy = dist.entropy()
+
+        alive = alive_mask[:, -1, :].to(dtype=torch.float32)
+        alive_count = alive.sum().clamp(min=1.0)
+        log_ratio = new_log_probs - old_log_probs
+        ratio = torch.exp(log_ratio)
+        expanded_advantage = advantage.unsqueeze(-1).expand(-1, n_agents)
+        unclipped = ratio * expanded_advantage
+        clipped = torch.clamp(
+            ratio, 1.0 - self.clip_epsilon, 1.0 + self.clip_epsilon
+        ) * expanded_advantage
+        actor_loss = -(torch.min(unclipped, clipped) * alive).sum() / alive_count
+        entropy_mean = (entropy * alive).sum() / alive_count
+        actor_loss = actor_loss - self.entropy_coef * entropy_mean
+        critic_loss = F.mse_loss(v_last, returns.detach())
+        rl_loss = actor_loss + self.vf_coef * critic_loss
+
+        self.agent_optimizer.zero_grad(set_to_none=True)
+        self.critic_optimizer.zero_grad(set_to_none=True)
+        self.ssl_optimizer.zero_grad(set_to_none=True)
+        rl_loss.backward()
+        policy_grad_norm = torch.nn.utils.clip_grad_norm_(
+            self.eval_agent_group.parameters(), self.max_grad_norm
+        )
+        critic_grad_norm = torch.nn.utils.clip_grad_norm_(
+            self.eval_critic.parameters(), self.max_grad_norm
+        )
+        self.agent_optimizer.step()
+        self.critic_optimizer.step()
+
+        with torch.no_grad():
+            approx_kl = ((((ratio - 1.0) - log_ratio) * alive).sum() / alive_count)
+            clip_fraction = (
+                ((torch.abs(ratio - 1.0) > self.clip_epsilon).float() * alive).sum()
+                / alive_count
+            )
+        return {
+            "loss": rl_loss.item(),
+            "actor_loss": actor_loss.item(),
+            "critic_loss": critic_loss.item(),
+            "rl_loss": rl_loss.item(),
+            "entropy": entropy_mean.item(),
+            "approx_kl": approx_kl.item(),
+            "clip_fraction": clip_fraction.item(),
+            "advantage_mean": advantage.detach().mean().item(),
+            "advantage_std": advantage.detach().std(unbiased=False).item(),
+            "policy_grad_norm": float(policy_grad_norm),
+            "critic_grad_norm": float(critic_grad_norm),
+        }
+
+    def _ssl_step_single_gpu(self, batch) -> dict[str, float]:
+        prepared = self._prepare_group_batch(batch)
+        self.ssl_model.train()
+        ret_agent = self._forward_agent_for_phase(prepared, "ssl")
+        targets = batch["formatted_obs"].to(
+            dtype=torch.float32, device=self.train_device
+        )
+        construct_mask = batch["construct_padding_mask"].to(
+            dtype=torch.bool, device=self.train_device
+        )
+        if self.recon_mode == "per_group":
+            reconstruction_loss = self._recon_loss_per_group(
+                ret_agent["group_consensus"], targets, construct_mask
+            )
+        else:
+            reconstruction_loss = self._recon_loss_per_agent(
+                ret_agent["group_consensus"],
+                prepared["group_indices"],
+                targets,
+                construct_mask,
+                prepared["alive_mask"],
+            )
+        kl = self._compute_kl_divergence(
+            ret_agent["agent_mu"],
+            ret_agent["agent_log_var"],
+            prepared["alive_mask"],
+            ret_agent["group_mu"],
+            ret_agent["group_log_var"],
+            construct_mask,
+        )
+        ssl_loss = reconstruction_loss + self.kl_divergence_weight * kl
+
+        self.agent_optimizer.zero_grad(set_to_none=True)
+        self.critic_optimizer.zero_grad(set_to_none=True)
+        self.ssl_optimizer.zero_grad(set_to_none=True)
+        (self.self_supervised_learning_loss_weight * ssl_loss).backward()
+        group_parameters = [
+            parameter
+            for parameter in self._group_estimator().parameters()
+            if parameter.grad is not None
+        ]
+        group_grad_norm = (
+            torch.nn.utils.clip_grad_norm_(group_parameters, self.max_grad_norm)
+            if group_parameters
+            else 0.0
+        )
+        ssl_grad_norm = torch.nn.utils.clip_grad_norm_(
+            self.ssl_model.parameters(), self.max_grad_norm
+        )
+        self.agent_optimizer.step()
+        self.ssl_optimizer.step()
+        return {
+            "loss": ssl_loss.item(),
+            "reconstruction_loss": reconstruction_loss.item(),
+            "kl_loss": float(kl.detach()),
+            "ssl_loss": ssl_loss.item(),
+            "group_estimator_grad_norm": float(group_grad_norm),
+            "ssl_model_grad_norm": float(ssl_grad_norm),
+        }
+
+    def _learn_sequential_single_gpu(
+        self, sample_size, batch_size: int, times: int, ssl_times: int
+    ) -> dict[str, float]:
+        self.eval_agent_group.to(self.train_device)
+        self.eval_critic.to(self.train_device)
+        self.ssl_model.to(self.train_device)
+        dataset = self.replaybuffer.sample(sample_size)
+        ppo_totals = {}
+        ppo_batches = 0
+
+        estimator = self._group_estimator()
+        original_requires_grad = [
+            parameter.requires_grad for parameter in estimator.parameters()
+        ]
+        for parameter in estimator.parameters():
+            parameter.requires_grad_(False)
+        try:
+            for epoch in range(times):
+                dataloader = TrajectoryDataLoader(
+                    dataset,
+                    batch_size=batch_size,
+                    shuffle=True,
+                    num_workers=self.n_workers,
+                )
+                for batch in dataloader:
+                    self._accumulate_metrics(
+                        ppo_totals, self._ppo_step_single_gpu(batch)
+                    )
+                    ppo_batches += 1
+        finally:
+            for parameter, requires_grad in zip(
+                estimator.parameters(), original_requires_grad
+            ):
+                parameter.requires_grad_(requires_grad)
+
+        ssl_totals = {}
+        ssl_batches = 0
+        if self.current_epoch >= self.warmup_iterations and ssl_times > 0:
+            t0 = time.time()
+            ssl_dataset = GroupSSLEnrichedTrajectoryDataset(
+                dataset, self.data_constructor
+            )
+            logging.info(
+                f"  SSL enrichment done in {time.time() - t0:.2f}s "
+                f"({len(dataset)} samples)"
+            )
+            for _ in range(ssl_times):
+                dataloader = TrajectoryDataLoader(
+                    ssl_dataset,
+                    batch_size=batch_size,
+                    shuffle=True,
+                    num_workers=self.n_workers,
+                )
+                for batch in dataloader:
+                    self._accumulate_metrics(
+                        ssl_totals, self._ssl_step_single_gpu(batch)
+                    )
+                    ssl_batches += 1
+
+        ppo_metrics = self._average_metrics(ppo_totals, ppo_batches)
+        ssl_metrics = self._average_metrics(ssl_totals, ssl_batches)
+        logging.info(
+            "  Iter %d [%s]: RL Loss %.4f, SSL Loss %.4f, KL %.6f, "
+            "Entropy %.4f, Approx KL %.6f, Clip Fraction %.4f, "
+            "Policy/critic/group/SSL grad norms %.4f/%.4f/%.4f/%.4f, "
+            "PPO/SSL updates %d/%d",
+            self.current_epoch,
+            self.ssl_update_mode,
+            ppo_metrics.get("rl_loss", 0.0),
+            ssl_metrics.get("ssl_loss", 0.0),
+            ssl_metrics.get("kl_loss", 0.0),
+            ppo_metrics.get("entropy", 0.0),
+            ppo_metrics.get("approx_kl", 0.0),
+            ppo_metrics.get("clip_fraction", 0.0),
+            ppo_metrics.get("policy_grad_norm", 0.0),
+            ppo_metrics.get("critic_grad_norm", 0.0),
+            ssl_metrics.get("group_estimator_grad_norm", 0.0),
+            ssl_metrics.get("ssl_model_grad_norm", 0.0),
+            ppo_batches,
+            ssl_batches,
+        )
+
+        self.eval_agent_group.to("cpu")
+        self.eval_critic.to("cpu")
+        self.ssl_model.to("cpu")
+        torch.cuda.empty_cache()
+        return {
+            **ppo_metrics,
+            **ssl_metrics,
+            "loss": ppo_metrics.get("rl_loss", 0.0)
+            + ssl_metrics.get("ssl_loss", 0.0),
+        }
+
+    def _learn_sequential_multi_gpu(
+        self, sample_size, batch_size: int, times: int, ssl_times: int
+    ) -> dict[str, float]:
+        dataset = self.replaybuffer.sample(sample_size)
+        ppo_totals = {}
+        ppo_batches = 0
+        for _ in range(times):
+            dataloader = TrajectoryDataLoader(
+                dataset,
+                batch_size=batch_size,
+                shuffle=True,
+                num_workers=self.n_workers,
+            )
+            for batch in dataloader:
+                self._accumulate_metrics(
+                    ppo_totals, self.worker_group.ppo_train_step(batch)
+                )
+                ppo_batches += 1
+
+        ssl_totals = {}
+        ssl_batches = 0
+        if self.current_epoch >= self.warmup_iterations and ssl_times > 0:
+            t0 = time.time()
+            ssl_dataset = GroupSSLEnrichedTrajectoryDataset(
+                dataset, self.data_constructor
+            )
+            logging.info(
+                f"  SSL enrichment done in {time.time() - t0:.2f}s "
+                f"({len(dataset)} samples)"
+            )
+            for _ in range(ssl_times):
+                dataloader = TrajectoryDataLoader(
+                    ssl_dataset,
+                    batch_size=batch_size,
+                    shuffle=True,
+                    num_workers=self.n_workers,
+                )
+                for batch in dataloader:
+                    self._accumulate_metrics(
+                        ssl_totals, self.worker_group.ssl_train_step(batch)
+                    )
+                    ssl_batches += 1
+
+        ppo_metrics = self._average_metrics(ppo_totals, ppo_batches)
+        ssl_metrics = self._average_metrics(ssl_totals, ssl_batches)
+        logging.info(
+            "  Iter %d [%s]: RL Loss %.4f, SSL Loss %.4f, Approx KL %.6f, "
+            "Clip Fraction %.4f, PPO/SSL updates %d/%d",
+            self.current_epoch,
+            self.ssl_update_mode,
+            ppo_metrics.get("rl_loss", 0.0),
+            ssl_metrics.get("ssl_loss", 0.0),
+            ppo_metrics.get("approx_kl", 0.0),
+            ppo_metrics.get("clip_fraction", 0.0),
+            ppo_batches,
+            ssl_batches,
+        )
+        return {
+            **ppo_metrics,
+            **ssl_metrics,
+            "loss": ppo_metrics.get("rl_loss", 0.0)
+            + ssl_metrics.get("ssl_loss", 0.0),
+        }

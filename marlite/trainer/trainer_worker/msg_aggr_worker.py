@@ -83,7 +83,7 @@ class MsgAggrWorker(OffPolicyWorker):
             self.eval_agent_group.parameters()
         )
 
-    def train_step(self, batch: Dict[str, Any]) -> float:
+    def train_step(self, batch: Dict[str, Any]) -> Dict[str, float]:
         """
         Execute one training step on the given batch.
 
@@ -93,7 +93,7 @@ class MsgAggrWorker(OffPolicyWorker):
             batch: Dictionary containing batch data
 
         Returns:
-            loss: Computed critic loss value
+            Dictionary containing ``loss`` and ``critic_loss``.
         """
         # Extract batch data
         alive_mask = batch["alive_mask"].to(dtype=torch.bool)
@@ -240,7 +240,8 @@ class MsgAggrWorker(OffPolicyWorker):
         # Per-batch target update (hard / ema)
         self._update_target_after_batch()
 
-        return critic_loss.detach().cpu().item()
+        loss = critic_loss.detach().cpu().item()
+        return {"loss": loss, "critic_loss": loss}
 
 
 class ProbMsgAggrWorker(MsgAggrWorker):
@@ -306,7 +307,7 @@ class ProbMsgAggrWorker(MsgAggrWorker):
         self.Normal = Normal
         self.kl_divergence = kl_divergence
 
-    def train_step(self, batch: Dict[str, Any]) -> float:
+    def train_step(self, batch: Dict[str, Any]) -> Dict[str, float]:
         """
         Execute one training step with probabilistic message aggregation.
 
@@ -314,7 +315,7 @@ class ProbMsgAggrWorker(MsgAggrWorker):
             batch: Dictionary containing batch data
 
         Returns:
-            loss: Computed critic loss value
+            Dictionary containing ``loss`` and ``critic_loss``.
         """
         # Extract batch data
         alive_mask = batch["alive_mask"].to(dtype=torch.bool)
@@ -461,4 +462,5 @@ class ProbMsgAggrWorker(MsgAggrWorker):
         # Per-batch target update (hard / ema)
         self._update_target_after_batch()
 
-        return critic_loss.detach().cpu().item()
+        loss = critic_loss.detach().cpu().item()
+        return {"loss": loss, "critic_loss": loss}

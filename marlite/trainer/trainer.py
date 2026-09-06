@@ -1,5 +1,4 @@
 import os
-import sys
 import yaml
 import torch
 import datetime
@@ -129,8 +128,6 @@ class Trainer:
 
         os.makedirs(self.logdir, exist_ok=True)
         logging.get_absl_handler().use_absl_log_file("training", self.logdir)
-        logging.set_verbosity(logging.INFO)
-        logging.get_absl_handler().python_handler.stream = sys.stdout
 
         self.train_device_config = train_device
         self.device_list, self.use_multi_gpu = get_device_list(train_device)
@@ -223,7 +220,9 @@ class Trainer:
         load_state_dict_into(self.eval_critic, eval_params["eval_critic"])
 
     @abstractmethod
-    def learn(self, sample_size, batch_size: int, times: int):
+    def learn(
+        self, sample_size, batch_size: int, times: int
+    ) -> dict[str, float]:
         raise NotImplementedError
 
     def save_current_model(self, checkpoint: str):

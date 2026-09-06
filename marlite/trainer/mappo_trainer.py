@@ -133,7 +133,9 @@ class MAPPOTrainer(OnPolicyTrainer):
     # PPO learning (single- and multi-GPU)
     # ------------------------------------------------------------------
 
-    def learn(self, sample_size, batch_size: int, times: int = 4):
+    def learn(
+        self, sample_size, batch_size: int, times: int = 4
+    ) -> dict[str, float]:
         """Run PPO updates on data sampled from the replay buffer.
 
         Parameters
@@ -147,14 +149,16 @@ class MAPPOTrainer(OnPolicyTrainer):
 
         Returns
         -------
-        float
-            Combined loss (actor + vf_coef * critic) averaged over batches.
+        dict[str, float]
+            Averaged total, actor, and critic losses.
         """
         if not self.use_multi_gpu:
             return self._learn_single_gpu(sample_size, batch_size, times)
         return self._learn_multi_gpu(sample_size, batch_size, times)
 
-    def _learn_single_gpu(self, sample_size, batch_size: int, times: int = 4):
+    def _learn_single_gpu(
+        self, sample_size, batch_size: int, times: int = 4
+    ) -> dict[str, float]:
         """Single-GPU PPO learning loop.
 
         For each PPO epoch (``times``), the full sampled dataset is
@@ -320,9 +324,15 @@ class MAPPOTrainer(OnPolicyTrainer):
 
         avg_actor = total_actor_loss / max(total_batches, 1)
         avg_critic = total_critic_loss / max(total_batches, 1)
-        return avg_actor + avg_critic * self.vf_coef
+        return {
+            "loss": avg_actor + avg_critic * self.vf_coef,
+            "actor_loss": avg_actor,
+            "critic_loss": avg_critic,
+        }
 
-    def _learn_multi_gpu(self, sample_size, batch_size: int, times: int = 4):
+    def _learn_multi_gpu(
+        self, sample_size, batch_size: int, times: int = 4
+    ) -> dict[str, float]:
         """Multi-GPU PPO learning via worker processes.
 
         Each worker holds a full copy of the eval models and optimizers.
@@ -346,14 +356,14 @@ class MAPPOTrainer(OnPolicyTrainer):
                 total=sample_size, desc=f"Times {epoch + 1}/{times}", unit="batch"
             ) as pbar:
                 for batch in dataloader:
-                    loss = self.worker_group.train_step(batch)
-                    total_combined += loss
+                    result = self.worker_group.train_step(batch)
+                    total_combined += result["loss"]
                     total_batches += 1
 
                     bs = batch["states"].shape[0]
                     pbar.update(bs)
 
-        return total_combined / max(total_batches, 1)
+        return {"loss": total_combined / max(total_batches, 1)}
 
     # ------------------------------------------------------------------
     # On-policy training loop
@@ -417,7 +427,7 @@ class MAPPOTrainer(OnPolicyTrainer):
                     f"Critic lr: {critic_lr:.8f}, Agent lr: {agent_group_lr:.8f}"
                 )
                 self._sync_params_to_workers()
-                loss = self.learn(
+                train_result = self.learn(
                     sample_size=sample_size,
                     batch_size=batch_size,
                     times=learning_times_per_iteration,
@@ -425,7 +435,9 @@ class MAPPOTrainer(OnPolicyTrainer):
                 if self.worker_group is not None:
                     self.worker_group.average_eval_params()
                 self._sync_eval_params_from_workers()
-                logging.info(f"Iteration {iteration}: Loss {loss:.4f}")
+                logging.info(
+                    f"Iteration {iteration}: Loss {train_result['loss']:.4f}"
+                )
 
             # Clear buffer (on-policy: discard old data)
             self.replaybuffer = self.replaybuffer_config.create_replaybuffer()

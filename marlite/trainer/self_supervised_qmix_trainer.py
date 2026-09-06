@@ -43,6 +43,7 @@ class SelfSupervisedQMIXTrainer(OffPolicyTrainer):
         reconstruction_loss: _Loss,
         self_supervised_learning_loss_weight=1.0,
         loss_combination_method="weighted_sum",
+        ssl_update_mode="joint",
         pit_loss_alpha=0.9,
         **kwargs,
     ):
@@ -59,6 +60,9 @@ class SelfSupervisedQMIXTrainer(OffPolicyTrainer):
             loss_combination_method: Method to combine RL and SSL losses
                 - "weighted_sum": combined_loss = critic_loss + weight * vae_loss
                 - "pit_loss": use PITLoss to combine critic_loss and vae_loss
+            ssl_update_mode: Requested SSL update behaviour.  Stored at this
+                base level for shared configuration; current QMIX subclasses
+                retain their existing update implementation.
             pit_loss_alpha: Alpha parameter for PITLoss (exponential decay rate)
         """
         self.ssl_model_config = ssl_model_config
@@ -73,6 +77,12 @@ class SelfSupervisedQMIXTrainer(OffPolicyTrainer):
             )
         self.self_supervised_learning_loss_weight = self_supervised_learning_loss_weight
         self.loss_combination_method = loss_combination_method
+        if ssl_update_mode not in {"joint", "sequential"}:
+            raise ValueError(
+                "ssl_update_mode must be 'joint' or 'sequential', got "
+                f"'{ssl_update_mode}'"
+            )
+        self.ssl_update_mode = ssl_update_mode
         self.pit_loss_alpha = pit_loss_alpha
 
         # Create data_constructor before super().__init__ because _create_worker_group needs it
@@ -262,12 +272,14 @@ class SelfSupervisedQMIXTrainer(OffPolicyTrainer):
             # Sync RL params from trainer to workers before RL learning
             self._sync_params_to_workers()
 
-            loss = self.learn(
+            train_result = self.learn(
                 sample_size=sample_size,
                 batch_size=batch_size,
                 times=learning_times_per_epoch,
             )
-            logging.info(f"Epoch {epoch}: Combined Loss {loss:.4f}")
+            logging.info(
+                f"Epoch {epoch}: Combined Loss {train_result['loss']:.4f}"
+            )
 
             # Sync eval params from workers before evaluation
             if self.worker_group is not None:

@@ -25,12 +25,16 @@ class GraphQMIXTrainer(OffPolicyTrainer):
             max_grad_norm=self.max_grad_norm,
         )
 
-    def learn(self, sample_size, batch_size: int, times: int = 1):
+    def learn(
+        self, sample_size, batch_size: int, times: int = 1
+    ) -> dict[str, float]:
         if not self.use_multi_gpu:
             return self._learn_single_gpu(sample_size, batch_size, times)
         return self._learn_multi_gpu(sample_size, batch_size, times)
 
-    def _learn_single_gpu(self, sample_size, batch_size: int, times: int = 1):
+    def _learn_single_gpu(
+        self, sample_size, batch_size: int, times: int = 1
+    ) -> dict[str, float]:
         """Single GPU learning."""
         total_loss = 0.0
         total_batches = 0
@@ -199,9 +203,11 @@ class GraphQMIXTrainer(OffPolicyTrainer):
 
         torch.cuda.empty_cache()
 
-        return total_loss / total_batches
+        return {"loss": total_loss / total_batches}
 
-    def _learn_multi_gpu(self, sample_size, batch_size: int, times: int = 1):
+    def _learn_multi_gpu(
+        self, sample_size, batch_size: int, times: int = 1
+    ) -> dict[str, float]:
         """Multi-GPU learning via worker processes."""
         total_loss = 0.0
         total_batches = 0
@@ -220,12 +226,12 @@ class GraphQMIXTrainer(OffPolicyTrainer):
                 for batch in dataloader:
                     batch["epoch"] = self.current_epoch
 
-                    loss = self.worker_group.train_step(batch)
+                    result = self.worker_group.train_step(batch)
 
-                    total_loss += loss
+                    total_loss += result["loss"]
                     total_batches += 1
 
                     bs = batch["states"].shape[0]
                     pbar.update(bs)
 
-        return total_loss / total_batches
+        return {"loss": total_loss / total_batches}

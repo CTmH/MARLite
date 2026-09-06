@@ -59,12 +59,16 @@ class MsgAggrQMIXTrainer(OffPolicyTrainer):
         """Compute loss using weighted sum of individual losses."""
         return td_error + self.msg_aggr_weight * msg_aggr_loss
 
-    def learn(self, sample_size, batch_size: int, times: int = 1):
+    def learn(
+        self, sample_size, batch_size: int, times: int = 1
+    ) -> dict[str, float]:
         if not self.use_multi_gpu:
             return self._learn_single_gpu(sample_size, batch_size, times)
         return self._learn_multi_gpu(sample_size, batch_size, times)
 
-    def _learn_single_gpu(self, sample_size, batch_size: int, times: int = 1):
+    def _learn_single_gpu(
+        self, sample_size, batch_size: int, times: int = 1
+    ) -> dict[str, float]:
         total_loss = 0.0
         total_batches = 0
 
@@ -239,9 +243,11 @@ class MsgAggrQMIXTrainer(OffPolicyTrainer):
         self.target_critic.to("cpu")
         torch.cuda.empty_cache()
 
-        return total_loss / total_batches
+        return {"loss": total_loss / total_batches}
 
-    def _learn_multi_gpu(self, sample_size, batch_size: int, times: int = 1):
+    def _learn_multi_gpu(
+        self, sample_size, batch_size: int, times: int = 1
+    ) -> dict[str, float]:
         total_loss = 0.0
         total_batches = 0
 
@@ -258,13 +264,13 @@ class MsgAggrQMIXTrainer(OffPolicyTrainer):
                 )
                 for batch in dataloader:
                     batch["epoch"] = self.current_epoch
-                    loss = self.worker_group.train_step(batch)
-                    total_loss += loss
+                    result = self.worker_group.train_step(batch)
+                    total_loss += result["loss"]
                     total_batches += 1
                     bs = batch["states"].shape[0]
                     pbar.update(bs)
 
-        return total_loss / total_batches
+        return {"loss": total_loss / total_batches}
 
 
 class ProbMsgAggrQMIXTrainer(OffPolicyTrainer):
@@ -309,12 +315,16 @@ class ProbMsgAggrQMIXTrainer(OffPolicyTrainer):
     def _compute_weighted_sum_loss(self, td_error, msg_aggr_loss):
         return td_error + self.msg_aggr_weight * msg_aggr_loss
 
-    def learn(self, sample_size, batch_size: int, times: int = 1):
+    def learn(
+        self, sample_size, batch_size: int, times: int = 1
+    ) -> dict[str, float]:
         if not self.use_multi_gpu:
             return self._learn_single_gpu(sample_size, batch_size, times)
         return self._learn_multi_gpu(sample_size, batch_size, times)
 
-    def _learn_single_gpu(self, sample_size, batch_size: int, times: int = 1):
+    def _learn_single_gpu(
+        self, sample_size, batch_size: int, times: int = 1
+    ) -> dict[str, float]:
         total_loss = 0.0
         total_batches = 0
 
@@ -489,9 +499,11 @@ class ProbMsgAggrQMIXTrainer(OffPolicyTrainer):
         self.target_critic.to("cpu")
         torch.cuda.empty_cache()
 
-        return total_loss / total_batches
+        return {"loss": total_loss / total_batches}
 
-    def _learn_multi_gpu(self, sample_size, batch_size: int, times: int = 1):
+    def _learn_multi_gpu(
+        self, sample_size, batch_size: int, times: int = 1
+    ) -> dict[str, float]:
         total_loss = 0.0
         total_batches = 0
 
@@ -508,10 +520,10 @@ class ProbMsgAggrQMIXTrainer(OffPolicyTrainer):
                 )
                 for batch in dataloader:
                     batch["epoch"] = self.current_epoch
-                    loss = self.worker_group.train_step(batch)
-                    total_loss += loss
+                    result = self.worker_group.train_step(batch)
+                    total_loss += result["loss"]
                     total_batches += 1
                     bs = batch["states"].shape[0]
                     pbar.update(bs)
 
-        return total_loss / total_batches
+        return {"loss": total_loss / total_batches}

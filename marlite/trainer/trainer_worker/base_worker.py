@@ -183,7 +183,7 @@ class BaseWorker:
         """All-reduce gradients across all workers.  Subclasses override."""
         raise NotImplementedError("subclass must implement reduce_gradients")
 
-    def train_step(self, batch: Dict[str, Any]) -> float:
+    def train_step(self, batch: Dict[str, Any]) -> Dict[str, float]:
         raise NotImplementedError("subclasses must implement train_step()")
 
     def handle_command(

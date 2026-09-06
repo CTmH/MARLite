@@ -111,7 +111,7 @@ class MAPPOWorker(OnPolicyWorker):
                 dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
                 param.grad.data /= self.world_size
 
-    def train_step(self, batch: Dict[str, Any]) -> float:
+    def train_step(self, batch: Dict[str, Any]) -> Dict[str, float]:
         """
         Execute one MAPPO training step on the given batch.
 
@@ -130,7 +130,8 @@ class MAPPOWorker(OnPolicyWorker):
                 next_alive_mask, all_log_probs, terminations.
 
         Returns:
-            Combined loss value (actor + vf_coef * critic).
+            Dictionary containing ``loss``, ``actor_loss``, and
+            ``critic_loss``.
         """
         alive_mask = batch["alive_mask"].to(dtype=torch.bool)
         observations = batch["observations"].to(dtype=torch.float32)
@@ -242,5 +243,10 @@ class MAPPOWorker(OnPolicyWorker):
         self.agent_optimizer.step()
         self.critic_optimizer.step()
 
-        combined_loss = actor_loss.detach().cpu().item() + self.vf_coef * critic_loss.detach().cpu().item()
-        return combined_loss
+        actor_loss_value = actor_loss.detach().cpu().item()
+        critic_loss_value = critic_loss.detach().cpu().item()
+        return {
+            "loss": actor_loss_value + self.vf_coef * critic_loss_value,
+            "actor_loss": actor_loss_value,
+            "critic_loss": critic_loss_value,
+        }

@@ -123,7 +123,9 @@ trainer:
             self.trainer = self._create_trainer(temp_dir)
             origin_critic_params = deepcopy(self.trainer.target_critic.state_dict())
             self.trainer.collect_experience(0.9)
-            self.trainer.learn(sample_size=32, batch_size=8, times=1)
+            result = self.trainer.learn(sample_size=32, batch_size=8, times=1)
+            self.assertIsInstance(result, dict)
+            self.assertIsInstance(result["loss"], float)
             self.trainer._update_target_after_batch()
             critic_params = self.trainer.target_critic.state_dict()
 
