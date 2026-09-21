@@ -7,7 +7,6 @@ from marlite.algorithm.model import ModelConfig
 from marlite.util.optimizer_config import OptimizerConfig
 from marlite.trainer.trainer_worker_group.base_worker_group import (
     OnPolicyWorkerGroup,
-    _slice_batch,
 )
 
 
@@ -106,18 +105,6 @@ class SSLGroupConsensusMAPPOWorkerGroup(OnPolicyWorkerGroup):
         kwargs["consensus_mode"] = self.consensus_mode
         return kwargs
 
-    def train_step(self, batch: Dict[str, Any]) -> Dict[str, float]:
-        """Run the legacy joint PPO+SSL update command."""
-        return self._run_train_command("TRAIN_STEP", batch)
-
-    def ppo_train_step(self, batch: Dict[str, Any]) -> Dict[str, float]:
-        """Run one PPO-only update on every worker."""
-        return self._run_train_command("PPO_TRAIN_STEP", batch)
-
-    def ssl_train_step(self, batch: Dict[str, Any]) -> Dict[str, float]:
-        """Run one SSL-only update on every worker."""
-        return self._run_train_command("SSL_TRAIN_STEP", batch)
-
     def set_training_epoch(self, epoch: int) -> None:
         """Send joint-update warmup state separately from training data."""
         for command_queue, param_queue in zip(
@@ -128,25 +115,3 @@ class SSLGroupConsensusMAPPOWorkerGroup(OnPolicyWorkerGroup):
         for ack_queue in self.ack_queues:
             if ack_queue.get() != "ACK":
                 raise RuntimeError("Worker failed to acknowledge training epoch")
-
-    def _run_train_command(
-        self, command: str, batch: Dict[str, Any]
-    ) -> Dict[str, float]:
-        batch_slices = _slice_batch(batch, self.world_size)
-        for i in range(self.world_size):
-            self.cmd_queues[i].put(command)
-            self.data_queues[i].put(batch_slices[i])
-
-        results = []
-        for _ in range(self.world_size):
-            results.append(self.loss_queue.get())
-
-        if any(not isinstance(result, dict) for result in results):
-            raise TypeError("Worker train_step must return a dict")
-        keys = results[0].keys()
-        if any(result.keys() != keys for result in results[1:]):
-            raise ValueError("Workers returned different training metric keys")
-        return {
-            key: sum(result[key] for result in results) / len(results)
-            for key in keys
-        }

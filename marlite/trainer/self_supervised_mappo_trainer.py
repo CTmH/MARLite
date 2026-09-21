@@ -62,9 +62,6 @@ class SelfSupervisedMAPPOTrainer(OnPolicyTrainer):
         Weight ``w_ssl`` for VAE loss in ``weighted_sum`` mode.
     loss_combination_method : str
         ``"weighted_sum"`` or ``"pit_loss"``.
-    ssl_update_mode : str
-        ``"joint"`` preserves combined PPO+SSL minibatch updates;
-        ``"sequential"`` runs all PPO updates before SSL updates.
     pit_loss_alpha : float
         Alpha parameter for ``PITLoss``.
     clip_epsilon : float
@@ -92,7 +89,6 @@ class SelfSupervisedMAPPOTrainer(OnPolicyTrainer):
         reconstruction_loss: _Loss,
         self_supervised_learning_loss_weight: float = 1.0,
         loss_combination_method: str = "weighted_sum",
-        ssl_update_mode: str = "joint",
         pit_loss_alpha: float = 0.9,
         # PPO params
         clip_epsilon: float = 0.2,
@@ -126,12 +122,6 @@ class SelfSupervisedMAPPOTrainer(OnPolicyTrainer):
             self_supervised_learning_loss_weight
         )
         self.loss_combination_method = loss_combination_method
-        if ssl_update_mode not in {"joint", "sequential"}:
-            raise ValueError(
-                "ssl_update_mode must be 'joint' or 'sequential', got "
-                f"'{ssl_update_mode}'"
-            )
-        self.ssl_update_mode = ssl_update_mode
         self.pit_loss_alpha = pit_loss_alpha
 
         # -- Data constructor (always created) -----------------------------
@@ -209,13 +199,10 @@ class SelfSupervisedMAPPOTrainer(OnPolicyTrainer):
         sample_size,
         batch_size: int,
         times: int = 4,
-        ssl_times: int = 1,
     ) -> dict[str, float]:
         if not self.use_multi_gpu:
-            return self._learn_single_gpu(
-                sample_size, batch_size, times, ssl_times
-            )
-        return self._learn_multi_gpu(sample_size, batch_size, times, ssl_times)
+            return self._learn_single_gpu(sample_size, batch_size, times)
+        return self._learn_multi_gpu(sample_size, batch_size, times)
 
     # ------------------------------------------------------------------
     # Multi-GPU parameter sync (extended with ssl_model)
@@ -320,7 +307,6 @@ class SelfSupervisedMAPPOTrainer(OnPolicyTrainer):
         target_first_metric,
         batch_size=64,
         learning_times_per_iteration=1,
-        ssl_learning_times_per_iteration=1,
     ):
         self.eval_episodes_to_replay_ratio = 1.0
         self._prepare_rollout(0)
@@ -343,15 +329,13 @@ class SelfSupervisedMAPPOTrainer(OnPolicyTrainer):
                 logging.info(
                     f"Iteration {iteration}: Batch size: {batch_size}, "
                     f"Critic lr: {critic_lr:.8f}, Agent lr: {agent_lr:.8f}, "
-                    f"SSL lr: {ssl_lr:.8f}, SSL update mode: "
-                    f"{self.ssl_update_mode}"
+                    f"SSL lr: {ssl_lr:.8f}"
                 )
                 self._sync_params_to_workers()
                 train_result = self.learn(
                     sample_size=sample_size,
                     batch_size=batch_size,
                     times=learning_times_per_iteration,
-                    ssl_times=ssl_learning_times_per_iteration,
                 )
                 if self.worker_group is not None:
                     self.worker_group.average_eval_params()

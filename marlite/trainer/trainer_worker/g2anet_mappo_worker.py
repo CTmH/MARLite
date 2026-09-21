@@ -161,7 +161,9 @@ class G2ANetMAPPOWorker(OnPolicyWorker):
         alive_last_count = alive_last_flag.sum()
 
         ratio = torch.exp(new_log_probs - log_probs_old)
-        adv_expanded = advantages_last.unsqueeze(-1).expand(-1, n_agents)
+        adv_expanded = advantages_last.detach().unsqueeze(-1).expand(
+            -1, n_agents
+        )
         surr1 = ratio * adv_expanded
         surr2 = (
             torch.clamp(

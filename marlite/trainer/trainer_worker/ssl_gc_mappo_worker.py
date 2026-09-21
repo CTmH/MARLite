@@ -323,8 +323,11 @@ class SSLGroupConsensusMAPPOWorker(OnPolicyWorker):
         )
         alive_last_count = alive_last_flag.sum()
 
-        ratio = torch.exp(new_log_probs - log_probs_old)
-        adv_expanded = advantages_last.unsqueeze(-1).expand(-1, n_agents)
+        log_ratio = new_log_probs - log_probs_old
+        ratio = torch.exp(log_ratio)
+        adv_expanded = advantages_last.detach().unsqueeze(-1).expand(
+            -1, n_agents
+        )
         surr1 = ratio * adv_expanded
         surr2 = (
             torch.clamp(ratio, 1.0 - self.clip_epsilon, 1.0 + self.clip_epsilon)
@@ -420,6 +423,19 @@ class SSLGroupConsensusMAPPOWorker(OnPolicyWorker):
         if not is_warmup:
             self.ssl_optimizer.step()
 
+        with torch.no_grad():
+            approx_kl = (
+                (((ratio - 1.0) - log_ratio) * alive_last_flag).sum()
+                / alive_last_count.clamp(min=1.0)
+            )
+            clip_fraction = (
+                (
+                    (torch.abs(ratio - 1.0) > self.clip_epsilon).float()
+                    * alive_last_flag
+                ).sum()
+                / alive_last_count.clamp(min=1.0)
+            )
+
         ssl_loss_value = (
             ssl_loss.detach().cpu().item()
             if isinstance(ssl_loss, torch.Tensor)
@@ -427,262 +443,17 @@ class SSLGroupConsensusMAPPOWorker(OnPolicyWorker):
         )
         return {
             "loss": combined_loss.detach().cpu().item(),
+            "actor_loss": actor_loss.detach().cpu().item(),
             "critic_loss": critic_loss.detach().cpu().item(),
+            "rl_loss": rl_loss.detach().cpu().item(),
             "ssl_loss": ssl_loss_value,
-        }
-
-    def _group_estimator(self):
-        estimator = getattr(
-            self.eval_agent_group, "group_estimate_feature_extractors", None
-        )
-        if estimator is None:
-            raise TypeError(
-                "Sequential SSL updates require group_estimate_feature_extractors"
-            )
-        return estimator
-
-    def _prepare_phase_batch(self, batch):
-        alive_mask = batch["alive_mask"].to(dtype=torch.bool, device=self.device)
-        observations = batch["observations"].to(
-            dtype=torch.float32, device=self.device
-        )
-        timestep_padding_mask = batch["timestep_padding_mask"].to(
-            dtype=torch.bool, device=self.device
-        )
-        states = batch["states"].to(dtype=torch.float32, device=self.device)
-        rewards = batch["rewards"].to(dtype=torch.float32)
-        n_agents = rewards.shape[2]
-        group_indices_batch = batch.get("group_indices")
-        if group_indices_batch is None:
-            group_indices = torch.full(
-                (states.shape[0], n_agents),
-                -1,
-                dtype=torch.long,
-                device=self.device,
-            )
-        else:
-            group_indices = group_indices_batch[:, -1, :].to(
-                dtype=torch.long, device=self.device
-            )
-        return {
-            "alive_mask": alive_mask,
-            "observations": observations,
-            "timestep_padding_mask": timestep_padding_mask,
-            "states": states,
-            "rewards": rewards,
-            "n_agents": n_agents,
-            "group_indices": group_indices,
-        }
-
-    def _forward_agent_for_phase(self, prepared, phase):
-        self.eval_agent_group.reset().train()
-        estimator = self._group_estimator()
-        if phase == "ppo":
-            estimator.eval()
-        else:
-            for name in ("feature_extractors", "encoders", "decoders"):
-                module = getattr(self.eval_agent_group, name, None)
-                if module is not None:
-                    module.eval()
-            estimator.train()
-        padding_mask = torch.stack(
-            [prepared["timestep_padding_mask"]] * prepared["n_agents"], dim=1
-        )
-        return self.eval_agent_group(
-            torch.transpose(prepared["observations"], 1, 2),
-            prepared["states"][:, -1],
-            padding_mask,
-            prepared["alive_mask"][:, -1, :],
-            prepared["group_indices"],
-        )
-
-    def _ppo_train_step(self, batch) -> Dict[str, float]:
-        prepared = self._prepare_phase_batch(batch)
-        alive_mask = prepared["alive_mask"]
-        states = prepared["states"]
-        rewards = prepared["rewards"]
-        n_agents = prepared["n_agents"]
-
-        estimator = self._group_estimator()
-        original_requires_grad = [
-            parameter.requires_grad for parameter in estimator.parameters()
-        ]
-        for parameter in estimator.parameters():
-            parameter.requires_grad_(False)
-        try:
-            self.eval_critic.train()
-            v_last = self.eval_critic(
-                states, alive_mask, prepared["timestep_padding_mask"]
-            )["v"][:, 0]
-            with torch.no_grad():
-                v_next = self.eval_critic(
-                    batch["next_states"][:, -1:, ...].to(
-                        dtype=torch.float32, device=self.device
-                    ),
-                    batch["next_alive_mask"][:, -1:, ...].to(
-                        dtype=torch.bool, device=self.device
-                    ),
-                    batch["next_timestep_padding_mask"][:, -1:].to(
-                        dtype=torch.bool, device=self.device
-                    ),
-                )["v"][:, 0]
-
-            r_last = self._aggregate_rewards(rewards[:, -1]).to(self.device)
-            termination_last = batch["terminations"][:, -1].prod(dim=-1).to(
-                dtype=torch.float32, device=self.device
-            )
-            advantage = (
-                r_last
-                + self.gamma * v_next * (1.0 - termination_last)
-                - v_last
-            )
-            returns = advantage + v_last
-            action_logits = self._forward_agent_for_phase(prepared, "ppo")[
-                "action_logits"
-            ]
-            actions = batch["actions"][:, -1].to(
-                dtype=torch.int64, device=self.device
-            )
-            old_log_probs = batch["all_log_probs"][:, -1, :].to(
-                dtype=torch.float32, device=self.device
-            )
-            dist_policy = Categorical(logits=action_logits)
-            new_log_probs = dist_policy.log_prob(actions)
-            entropy = dist_policy.entropy()
-            alive = alive_mask[:, -1, :].to(dtype=torch.float32)
-            alive_count = alive.sum().clamp(min=1.0)
-            log_ratio = new_log_probs - old_log_probs
-            ratio = torch.exp(log_ratio)
-            expanded_advantage = advantage.unsqueeze(-1).expand(-1, n_agents)
-            unclipped = ratio * expanded_advantage
-            clipped = torch.clamp(
-                ratio, 1.0 - self.clip_epsilon, 1.0 + self.clip_epsilon
-            ) * expanded_advantage
-            actor_loss = -(
-                torch.min(unclipped, clipped) * alive
-            ).sum() / alive_count
-            entropy_mean = (entropy * alive).sum() / alive_count
-            actor_loss = actor_loss - self.entropy_coef * entropy_mean
-            critic_loss = F.mse_loss(v_last, returns.detach())
-            rl_loss = actor_loss + self.vf_coef * critic_loss
-
-            self.agent_optimizer.zero_grad(set_to_none=True)
-            self.critic_optimizer.zero_grad(set_to_none=True)
-            self.ssl_optimizer.zero_grad(set_to_none=True)
-            rl_loss.backward()
-            self.reduce_gradients()
-            policy_grad_norm = torch.nn.utils.clip_grad_norm_(
-                self.eval_agent_group.parameters(), self.max_grad_norm
-            )
-            critic_grad_norm = torch.nn.utils.clip_grad_norm_(
-                self.eval_critic.parameters(), self.max_grad_norm
-            )
-            self.agent_optimizer.step()
-            self.critic_optimizer.step()
-        finally:
-            for parameter, requires_grad in zip(
-                estimator.parameters(), original_requires_grad
-            ):
-                parameter.requires_grad_(requires_grad)
-
-        with torch.no_grad():
-            approx_kl = ((((ratio - 1.0) - log_ratio) * alive).sum() / alive_count)
-            clip_fraction = (
-                ((torch.abs(ratio - 1.0) > self.clip_epsilon).float() * alive).sum()
-                / alive_count
-            )
-        return {
-            "loss": rl_loss.detach().item(),
-            "actor_loss": actor_loss.detach().item(),
-            "critic_loss": critic_loss.detach().item(),
-            "rl_loss": rl_loss.detach().item(),
-            "entropy": entropy_mean.detach().item(),
-            "approx_kl": approx_kl.item(),
-            "clip_fraction": clip_fraction.item(),
-            "advantage_mean": advantage.detach().mean().item(),
-            "advantage_std": advantage.detach().std(unbiased=False).item(),
-            "policy_grad_norm": float(policy_grad_norm),
-            "critic_grad_norm": float(critic_grad_norm),
-        }
-
-    def _ssl_train_step(self, batch) -> Dict[str, float]:
-        prepared = self._prepare_phase_batch(batch)
-        self.ssl_model.train()
-        ret_agent = self._forward_agent_for_phase(prepared, "ssl")
-        targets = batch["formatted_obs"].to(
-            dtype=torch.float32, device=self.device
-        )
-        construct_mask = batch["construct_padding_mask"].to(
-            dtype=torch.bool, device=self.device
-        )
-        if self.recon_mode == "per_group":
-            reconstruction_loss = self._recon_loss_per_group(
-                ret_agent["group_consensus"], targets, construct_mask
-            )
-        else:
-            reconstruction_loss = self._recon_loss_per_agent(
-                ret_agent["group_consensus"],
-                prepared["group_indices"],
-                targets,
-                construct_mask,
-                prepared["alive_mask"],
-            )
-
-        if self.consensus_mode == "ae":
-            kl = torch.tensor(0.0, device=self.device)
-        else:
-            kl = torch.tensor(0.0, device=self.device)
-            if self.kl_on_agent:
-                mask = prepared["alive_mask"][:, -1, :].unsqueeze(-1).expand_as(
-                    ret_agent["agent_mu"]
-                )
-                kl_per_dim = (
-                    1
-                    + ret_agent["agent_log_var"]
-                    - ret_agent["agent_mu"].pow(2)
-                    - torch.exp(ret_agent["agent_log_var"])
-                )
-                kl = kl - 0.5 * (kl_per_dim * mask).sum() / mask.sum().clamp(min=1)
-            if self.kl_on_group:
-                mask = construct_mask.unsqueeze(-1).expand_as(
-                    ret_agent["group_mu"]
-                )
-                kl_per_dim = (
-                    1
-                    + ret_agent["group_log_var"]
-                    - ret_agent["group_mu"].pow(2)
-                    - torch.exp(ret_agent["group_log_var"])
-                )
-                kl = kl - 0.5 * (kl_per_dim * mask).sum() / mask.sum().clamp(min=1)
-
-        ssl_loss = reconstruction_loss + self.kl_divergence_weight * kl
-        self.agent_optimizer.zero_grad(set_to_none=True)
-        self.critic_optimizer.zero_grad(set_to_none=True)
-        self.ssl_optimizer.zero_grad(set_to_none=True)
-        (self.self_supervised_learning_loss_weight * ssl_loss).backward()
-        self.reduce_gradients()
-        group_parameters = [
-            parameter
-            for parameter in self._group_estimator().parameters()
-            if parameter.grad is not None
-        ]
-        group_grad_norm = (
-            torch.nn.utils.clip_grad_norm_(group_parameters, self.max_grad_norm)
-            if group_parameters
-            else 0.0
-        )
-        ssl_grad_norm = torch.nn.utils.clip_grad_norm_(
-            self.ssl_model.parameters(), self.max_grad_norm
-        )
-        self.agent_optimizer.step()
-        self.ssl_optimizer.step()
-        return {
-            "loss": ssl_loss.detach().item(),
-            "reconstruction_loss": reconstruction_loss.detach().item(),
-            "kl_loss": kl.detach().item(),
-            "ssl_loss": ssl_loss.detach().item(),
-            "group_estimator_grad_norm": float(group_grad_norm),
-            "ssl_model_grad_norm": float(ssl_grad_norm),
+            "entropy": (-entropy_loss).detach().cpu().item(),
+            "approx_kl": approx_kl.detach().cpu().item(),
+            "clip_fraction": clip_fraction.detach().cpu().item(),
+            "advantage_mean": advantages_last.detach().mean().cpu().item(),
+            "advantage_std": (
+                advantages_last.detach().std(unbiased=False).cpu().item()
+            ),
         }
 
     # ── command protocol ──────────────────────────────────────────────────
@@ -695,27 +466,6 @@ class SSLGroupConsensusMAPPOWorker(OnPolicyWorker):
         loss_queue,
         ack_queue=None,
     ) -> bool:
-        if cmd == "TRAIN_STEP":
-            batch = data_queue.get()
-            result = self.train_step(batch)
-            del batch
-            loss_queue.put(result)
-            return True
-
-        if cmd == "PPO_TRAIN_STEP":
-            batch = data_queue.get()
-            result = self._ppo_train_step(batch)
-            del batch
-            loss_queue.put(result)
-            return True
-
-        if cmd == "SSL_TRAIN_STEP":
-            batch = data_queue.get()
-            result = self._ssl_train_step(batch)
-            del batch
-            loss_queue.put(result)
-            return True
-
         if cmd == "SET_TRAINING_EPOCH":
             self.current_training_epoch = int(param_queue.get())
             if ack_queue:

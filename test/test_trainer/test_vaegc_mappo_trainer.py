@@ -182,15 +182,6 @@ trainer:
             trainer._prepare_rollout(6)
             self.assertEqual(trainer.eval_agent_group.rl_consensus_gate.item(), 1.0)
 
-    def test_ssl_update_mode_defaults_to_joint_and_accepts_sequential(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            trainer = self._create_trainer(temp_dir)
-            self.assertEqual(trainer.ssl_update_mode, "joint")
-
-        self.config["trainer"]["ssl_update_mode"] = "sequential"
-        with tempfile.TemporaryDirectory() as temp_dir:
-            trainer = self._create_trainer(temp_dir)
-            self.assertEqual(trainer.ssl_update_mode, "sequential")
 
     def test_rollout_gate_schedule_updates_only_before_the_next_rollout(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -252,110 +243,23 @@ trainer:
                         f"Critic param {key} did not change after learning",
                     )
 
-    def test_sequential_learning_orders_and_isolates_updates(self):
-        self.config["trainer"]["ssl_update_mode"] = "sequential"
-        self.config["trainer"]["warmup_iterations"] = 0
-        self.config["agent_group"]["models"]["model1"][
-            "group_estimate_feature_extractor"
-        ] = {
-            "model_type": "Custom",
-            "layers": [
-                {
-                    "type": "Linear",
-                    "in_features": 18,
-                    "out_features": 18,
-                }
-            ],
-        }
+    def test_joint_actor_advantage_does_not_backpropagate_to_critic(self):
+        self.config["trainer"]["vf_coef"] = 0.0
         with tempfile.TemporaryDirectory() as temp_dir:
             trainer = self._create_trainer(temp_dir)
             trainer.collect_experience(0.9)
-            trainer.data_constructor = Mock()
-            trainer.data_constructor.process.side_effect = (
-                lambda observations, states, grouping, alive_mask: (
-                    observations[:, -1].mean(axis=1)[:, None, :],
-                    np.ones((observations.shape[0], 1), dtype=bool),
-                )
-            )
-            trainer.n_workers = 0
 
-            estimator_params = list(
-                trainer.eval_agent_group.group_estimate_feature_extractors.parameters()
-            )
-            estimator_ids = {id(parameter) for parameter in estimator_params}
-            policy_params = [
-                parameter
-                for parameter in trainer.eval_agent_group.parameters()
-                if id(parameter) not in estimator_ids
+            trainer.critic_optimizer.step = Mock()
+            trainer._learn_single_gpu(sample_size=8, batch_size=8, times=1)
+
+            critic_grads = [
+                parameter.grad
+                for parameter in trainer.eval_critic.parameters()
+                if parameter.grad is not None
             ]
-            critic_params = list(trainer.eval_critic.parameters())
-            initial_estimator = [
-                parameter.detach().clone() for parameter in estimator_params
-            ]
-            initial_policy = [
-                parameter.detach().clone() for parameter in policy_params
-            ]
-            phases = []
-            original_ppo_step = trainer._ppo_step_single_gpu
-            original_ssl_step = trainer._ssl_step_single_gpu
-
-            def checked_ppo_step(batch):
-                before = [parameter.detach().clone() for parameter in estimator_params]
-                result = original_ppo_step(batch)
-                self.assertTrue(
-                    all(
-                        torch.equal(parameter, old)
-                        for parameter, old in zip(estimator_params, before)
-                    )
-                )
-                phases.append("ppo")
-                return result
-
-            def checked_ssl_step(batch):
-                before_policy = [
-                    parameter.detach().clone() for parameter in policy_params
-                ]
-                before_critic = [
-                    parameter.detach().clone() for parameter in critic_params
-                ]
-                result = original_ssl_step(batch)
-                self.assertTrue(
-                    all(
-                        torch.equal(parameter, old)
-                        for parameter, old in zip(policy_params, before_policy)
-                    )
-                )
-                self.assertTrue(
-                    all(
-                        torch.equal(parameter, old)
-                        for parameter, old in zip(critic_params, before_critic)
-                    )
-                )
-                phases.append("ssl")
-                return result
-
-            trainer._ppo_step_single_gpu = checked_ppo_step
-            trainer._ssl_step_single_gpu = checked_ssl_step
-            result = trainer.learn(
-                sample_size=16, batch_size=8, times=2, ssl_times=1
-            )
-            self.assertIsInstance(result, dict)
-            self.assertIsInstance(result["loss"], float)
-
-            first_ssl = phases.index("ssl")
-            self.assertTrue(all(phase == "ppo" for phase in phases[:first_ssl]))
-            self.assertTrue(all(phase == "ssl" for phase in phases[first_ssl:]))
+            self.assertTrue(critic_grads)
             self.assertTrue(
-                any(
-                    not torch.equal(parameter, old)
-                    for parameter, old in zip(estimator_params, initial_estimator)
-                )
-            )
-            self.assertTrue(
-                any(
-                    not torch.equal(parameter, old)
-                    for parameter, old in zip(policy_params, initial_policy)
-                )
+                all(torch.count_nonzero(grad) == 0 for grad in critic_grads)
             )
 
     def test_save_load_checkpoint(self):
