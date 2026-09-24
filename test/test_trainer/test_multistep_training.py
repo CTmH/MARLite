@@ -41,7 +41,6 @@ def small_episode(matrix=False, terminal=False):
         "terminations": [{a: not alive[t+1][a] for a in agents} for t in range(5)],
         "truncations": [{a: not alive[t+1][a] or t == 4 for a in agents} for t in range(5)],
         "all_log_probs": [{a: -np.log(2.) for a in agents} for _ in range(5)],
-        "log_probs": [{a: -np.log(2.) for a in agents} for _ in range(5)],
         "all_agents_sum_rewards": [3., 2., 2., 2., 2.],
         "infos": [{} for _ in range(5)],
         "episode_length": 5, "episode_reward": 11., "win_tag": terminal,

@@ -59,7 +59,6 @@ ATTR_REGISTRY: Dict[str, Dict] = {
     "truncations":         {"storage": StorageType.DICT, "essential": True,  "collate": CollateType.NUMERIC},
     "infos":               {"storage": StorageType.DICT, "essential": True,  "collate": CollateType.SKIP},
     "all_log_probs":       {"storage": StorageType.DICT, "essential": False, "collate": CollateType.NUMERIC},
-    "log_probs":           {"storage": StorageType.DICT, "essential": False, "collate": CollateType.NUMERIC},
     "group_indices":       {"storage": StorageType.DICT, "essential": False, "collate": CollateType.NUMERIC},
     "next_group_indices":  {"storage": StorageType.DICT, "essential": False, "collate": CollateType.NUMERIC},
 
@@ -85,7 +84,7 @@ SSL_ATTRS: List[str] = ["formatted_obs", "construct_padding_mask"]
 # ---------------------------------------------------------------------------
 
 OPTIONAL_ATTR_GROUPS: Dict[str, Set[str]] = {
-    "mappo": {"all_log_probs", "log_probs"},
+    "mappo": {"all_log_probs"},
     "graph": {"edge_indices", "next_edge_indices"},
     "group": {"group_indices", "next_group_indices"},
 }

@@ -32,7 +32,8 @@ class TestActionDistribution(unittest.TestCase):
                     traj_padding_mask=np.zeros(2, dtype=bool), alive_agents=["a"])
                 action = torch.tensor(result["actions"]["a"])
                 trained = masked_categorical(torch.zeros(56), torch.from_numpy(mask))
-                self.assertAlmostEqual(trained.log_prob(action).item(), result["log_probs"]["a"])
+                self.assertAlmostEqual(trained.log_prob(action).item(), result["all_log_probs"]["a"])
+                self.assertNotIn("log_probs", result)
                 self.assertLess(action.item(), 6)
                 self.assertEqual(result["all_log_probs"]["b"], 0)
 

@@ -83,11 +83,11 @@ class TestResolveRequiredAttrs(unittest.TestCase):
             self.assertNotIn(attr, optional_union,
                              f"qmix profile includes optional attr {attr}")
 
-    def test_mappo_profile_includes_log_probs(self):
-        """MAPPO profile adds all_log_probs and log_probs."""
+    def test_mappo_profile_includes_only_fixed_size_log_probs(self):
+        """MAPPO stores fixed-size all_log_probs, not live-agent subsets."""
         result = resolve_required_attrs("mappo")
         self.assertIn("all_log_probs", result)
-        self.assertIn("log_probs", result)
+        self.assertNotIn("log_probs", result)
         self.assertNotIn("edge_indices", result)
 
     def test_graph_qmix_profile_includes_edge_indices(self):
@@ -219,7 +219,7 @@ class TestCollateHelpers(unittest.TestCase):
         self.assertIn("terminations", numeric)
         self.assertIn("truncations", numeric)
         self.assertIn("all_log_probs", numeric)
-        self.assertIn("log_probs", numeric)
+        self.assertNotIn("log_probs", numeric)
         self.assertIn("group_indices", numeric)
         self.assertIn("next_group_indices", numeric)
         self.assertIn("all_agents_sum_rewards", numeric)

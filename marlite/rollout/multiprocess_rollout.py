@@ -103,7 +103,6 @@ def multiprocess_rollout(
     default_terminations = {agent: True for agent in possible_agents}
     default_truncations = {agent: True for agent in possible_agents}
     default_all_log_probs = {agent: 0.0 for agent in possible_agents}
-    default_log_probs = {agent: 0.0 for agent in possible_agents}
     use_action_mask = False
 
     # Variables set in the loop — initialise to None to satisfy the type checker
@@ -114,7 +113,6 @@ def multiprocess_rollout(
     edge_indices: Any = None
     all_group_indices: Any = None
     all_log_probs: Any = None
-    log_probs: Any = None
     avail_actions: Any = None
     infos: Any = None
 
@@ -183,7 +181,6 @@ def multiprocess_rollout(
                 "group_indices": all_group_indices,
                 "actions": all_actions,
                 "all_log_probs": all_log_probs,
-                "log_probs": log_probs,
                 "avail_actions": avail_actions,
                 "infos": infos,
             }
@@ -301,7 +298,6 @@ def multiprocess_rollout(
             "all_group_indices", {agent: -1 for agent in possible_agents}
         )
         all_log_probs = ret.get("all_log_probs", default_all_log_probs)
-        log_probs = ret.get("log_probs", default_log_probs)
 
         # ===========================================================
         # [NEXT] — next-* attrs after agent.act()  (i > 0)

@@ -37,7 +37,6 @@ def _make_full_context():
         "group_indices": {"a": 0, "b": 1},
         "actions": {"a": 1, "b": 2},
         "all_log_probs": {"a": -0.5, "b": -0.3},
-        "log_probs": {"a": -0.5, "b": -0.3},
         "avail_actions": {"a": np.ones(5), "b": np.ones(5)},
         "infos": {"a": {}, "b": {}},
     }
@@ -57,7 +56,7 @@ _EPISODE_SCALAR_ATTRS = {"win_tag", "episode_length", "episode_reward"}
 # All possible timestep attributes the full profile might touch
 _ALL_TIMESTEP_ATTRS = [
     "alive_mask", "observations", "states", "edge_indices", "group_indices",
-    "actions", "all_log_probs", "log_probs", "avail_actions", "infos",
+    "actions", "all_log_probs", "avail_actions", "infos",
     "next_alive_mask", "next_avail_actions", "next_edge_indices",
     "next_group_indices", "next_states", "next_observations",
     "rewards", "terminations", "truncations", "all_agents_sum_rewards",
@@ -125,7 +124,6 @@ class TestPreStepPhase(unittest.TestCase):
         self.assertEqual(len(ep["edge_indices"]), 1)
         self.assertEqual(len(ep["group_indices"]), 1)
         self.assertEqual(len(ep["all_log_probs"]), 1)
-        self.assertEqual(len(ep["log_probs"]), 1)
 
     def test_qmix_profile_skips_optionals(self):
         """QMIX_PHASES.pre_step does NOT collect edge, group, or log probs."""
@@ -139,15 +137,13 @@ class TestPreStepPhase(unittest.TestCase):
         self.assertEqual(len(ep["edge_indices"]), 0)
         self.assertEqual(len(ep["group_indices"]), 0)
         self.assertEqual(len(ep["all_log_probs"]), 0)
-        self.assertEqual(len(ep["log_probs"]), 0)
 
-    def test_mappo_profile_collects_log_probs_skips_graph(self):
-        """MAPPO_PHASES.pre_step collects log_probs but not edge_indices."""
+    def test_mappo_profile_collects_all_log_probs_skips_graph(self):
+        """MAPPO_PHASES stores all-agent log probabilities, not graph data."""
         ep = _make_episode_with_lists(*_ALL_TIMESTEP_ATTRS)
         MAPPO_PHASES.pre_step(ep, self.ctx)
 
         self.assertEqual(len(ep["all_log_probs"]), 1)
-        self.assertEqual(len(ep["log_probs"]), 1)
         self.assertEqual(len(ep["edge_indices"]), 0)
         self.assertEqual(len(ep["group_indices"]), 0)
 
@@ -160,14 +156,13 @@ class TestPreStepPhase(unittest.TestCase):
         self.assertEqual(len(ep["all_log_probs"]), 0)
         self.assertEqual(len(ep["group_indices"]), 0)
 
-    def test_graph_mappo_profile_collects_both(self):
-        """GRAPH_MAPPO_PHASES collects edge_indices AND log_probs."""
+    def test_graph_mappo_profile_collects_edges_and_all_log_probs(self):
+        """GRAPH_MAPPO_PHASES collects edges and all-agent log probabilities."""
         ep = _make_episode_with_lists(*_ALL_TIMESTEP_ATTRS)
         GRAPH_MAPPO_PHASES.pre_step(ep, self.ctx)
 
         self.assertEqual(len(ep["edge_indices"]), 1)
         self.assertEqual(len(ep["all_log_probs"]), 1)
-        self.assertEqual(len(ep["log_probs"]), 1)
         self.assertEqual(len(ep["group_indices"]), 0)
 
 
@@ -466,7 +461,7 @@ class TestCustomListPhases(unittest.TestCase):
         self.assertEqual(len(ep["edge_indices"]), 1)
         self.assertEqual(len(ep["group_indices"]), 1)
         self.assertEqual(len(ep["all_log_probs"]), 0,
-                         "log_probs not in list — should be skipped")
+                         "all_log_probs not in list — should be skipped")
 
     def test_custom_phases_are_pickle_safe(self):
         """Custom phases built from a list are pickle-safe for multiprocessing."""

@@ -97,11 +97,9 @@ class MAPPOAgentGroup(QMIXAgentGroup):
                 all_log_probs[agent] = 0.0
 
         actual_actions = {agent: all_actions[agent] for agent in alive_agents}
-        log_probs = {agent: all_log_probs[agent] for agent in alive_agents}
 
         return {
             "actions": actual_actions,
             "all_actions": all_actions,
-            "log_probs": log_probs,
             "all_log_probs": all_log_probs,
         }

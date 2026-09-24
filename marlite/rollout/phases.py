@@ -54,7 +54,6 @@ def _pre_essential(ep: Dict, ctx: Dict) -> None:
 
 def _pre_mappo(ep: Dict, ctx: Dict) -> None:
     ep["all_log_probs"].append(ctx["all_log_probs"])
-    ep["log_probs"].append(ctx["log_probs"])
 
 
 def _pre_graph(ep: Dict, ctx: Dict) -> None:
@@ -232,8 +231,6 @@ def _pre_step_filtered(ep: Dict, ctx: Dict, attrs_set: FrozenSet[str]) -> None:
         ep["group_indices"].append(ctx["group_indices"])
     if "all_log_probs" in attrs_set:
         ep["all_log_probs"].append(ctx["all_log_probs"])
-    if "log_probs" in attrs_set:
-        ep["log_probs"].append(ctx["log_probs"])
 
 
 def _post_step_filtered(ep: Dict, ctx: Dict, attrs_set: FrozenSet[str]) -> None:

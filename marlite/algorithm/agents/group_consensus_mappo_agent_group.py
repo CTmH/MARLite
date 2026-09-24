@@ -135,9 +135,6 @@ class GroupConsensusMAPPOAgentGroup(GroupConsensusAgentGroup):
         actual_actions = {
             agent: all_actions[agent] for agent in alive_agents
         }
-        log_probs = {
-            agent: all_log_probs[agent] for agent in alive_agents
-        }
 
         all_group_indices = {
             agent: int(gid)
@@ -152,7 +149,6 @@ class GroupConsensusMAPPOAgentGroup(GroupConsensusAgentGroup):
         return {
             "actions": actual_actions,
             "all_actions": all_actions,
-            "log_probs": log_probs,
             "all_log_probs": all_log_probs,
             "group_indices": actual_group_indices,
             "all_group_indices": all_group_indices,

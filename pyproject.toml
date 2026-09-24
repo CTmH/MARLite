@@ -60,6 +60,9 @@ analysis = [
 ]
 
 [tool.uv]
+# Both distributions install into pygame/; use pygame-ce exclusively to avoid
+# mixing incompatible extension modules from transitive pygame dependencies.
+exclude-dependencies = ["pygame"]
 index-strategy = "unsafe-best-match"
 package = true
 conflicts = [
