@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from absl import logging
+from marlite.util.initialization import initialize_model
 from marlite.algorithm.model.gnn import (
     GCNModel,
     GATModel,
@@ -66,6 +67,7 @@ class ModelConfig:
     def __init__(self, **kwargs):
         self.model_type = kwargs.pop("model_type")
         self.pretrained_params_path = kwargs.pop("pretrained_params_path", None)
+        self.initialization = kwargs.pop("initialization", None)
         self.model_config = kwargs
         if self.model_type not in registered_models:
             raise ValueError(f"Model type {self.model_type} not registered.")
@@ -80,10 +82,11 @@ class ModelConfig:
         if self.model_type in registered_models:
             model_class = registered_models[self.model_type]
             model = model_class(**self.model_config)
+            initialize_model(model, self.initialization)
             if self.pretrained_params_path is not None:
                 try:
                     model.load_state_dict(
-                        torch.load(self.pretrained_params_path, weights_only=True)
+                        torch.load(self.pretrained_params_path, weights_only=True, map_location="cpu")
                     )
                 except FileNotFoundError as e:
                     logging.error(
@@ -92,4 +95,8 @@ class ModelConfig:
                     raise e
         else:
             raise ValueError(f"Model type {self.model_type} not registered.")
+        # An outer ModelConfig must not overwrite an explicit child policy or
+        # checkpoint (QPLEX, for example, constructs nested ModelConfigs).
+        if self.initialization is not None or self.pretrained_params_path is not None:
+            model._initialization_boundary = True
         return model

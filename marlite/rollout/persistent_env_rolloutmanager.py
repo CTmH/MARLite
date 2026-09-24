@@ -23,6 +23,8 @@ class PersistentEnvRolloutManager(RolloutManager):
         device: Union[str, List[str]],
         check_victory: Callable,
         required_attrs: Optional[Union[str, List[str]]] = None,
+        seed: int | None = None,
+        deterministic: bool = False,
     ):
 
         self.worker_func = worker_func
@@ -37,6 +39,9 @@ class PersistentEnvRolloutManager(RolloutManager):
         self.device = device
         self.check_victory = check_victory
         self.required_attrs = required_attrs
+        self.seed = seed
+        self.deterministic = deterministic
+        self._generation = 0
 
     def generate_episodes(self) -> List[Any]:
         mp.set_start_method("spawn", force=True)
@@ -72,7 +77,15 @@ class PersistentEnvRolloutManager(RolloutManager):
 
         shm_info = (shm_name, shm_size)
 
-        episodes = []
+        episode_seeds = self._episode_seeds()
+        # Assign global episode IDs before scheduling; changing process timing
+        # must not change seeds or the order inserted into replay.
+        seed_batches = []
+        offset = 0
+        for _, count in workers_with_episodes:
+            seed_batches.append(episode_seeds[offset:offset + count])
+            offset += count
+        episode_batches = {}
         try:
             with ProcessPoolExecutor(max_workers=n_workers) as executor:
                 futures = [
@@ -88,6 +101,8 @@ class PersistentEnvRolloutManager(RolloutManager):
                         devices[i],
                         self.check_victory,
                         self.required_attrs,
+                        seed_batches[i],
+                        self.deterministic,
                     )
                     for i, (worker_idx, n_episodes) in enumerate(
                         workers_with_episodes[:n_workers]
@@ -95,12 +110,17 @@ class PersistentEnvRolloutManager(RolloutManager):
                 ]
 
                 pbar = tqdm(total=self.n_episodes, desc="Generating Episodes")
+                future_indices = {future: i for i, future in enumerate(futures)}
                 for future in as_completed(futures):
                     try:
                         worker_episodes = future.result()
-                        episodes.extend(worker_episodes)
+                        # Keep legacy completion ordering when seeding is off.
+                        index = future_indices[future] if self.seed is not None else len(episode_batches)
+                        episode_batches[index] = worker_episodes
                         pbar.update(len(worker_episodes))
                     except Exception as e:
+                        if self.seed is not None or self.deterministic:
+                            raise RuntimeError("Seeded rollout failed; refusing partial collection") from e
                         print(f"Worker failed with error: {e}")
                         continue
                 pbar.close()
@@ -108,4 +128,4 @@ class PersistentEnvRolloutManager(RolloutManager):
             shm.close()
             shm.unlink()
 
-        return episodes
+        return [episode for i in sorted(episode_batches) for episode in episode_batches[i]]

@@ -1,4 +1,5 @@
 import torch
+from marlite.util.return_estimation import td_target
 from tqdm import tqdm
 
 from marlite.trainer.offpolicy_trainer import OffPolicyTrainer
@@ -48,7 +49,7 @@ class GraphQMIXTrainer(OffPolicyTrainer):
             with tqdm(
                 total=sample_size, desc=f"Times {t + 1}/{times}", unit="batch"
             ) as pbar:
-                dataset = self.replaybuffer.sample(sample_size)
+                dataset = self._sample_training_data(sample_size)
                 dataloader = TrajectoryDataLoader(
                     dataset,
                     batch_size=batch_size,
@@ -172,7 +173,7 @@ class GraphQMIXTrainer(OffPolicyTrainer):
                         )
                         q_tot_next = ret_next["q_tot"]
 
-                    y_tot = r_last + (1 - termination_last) * self.gamma * q_tot_next
+                    y_tot = td_target(batch, r_last, q_tot_next, self.gamma, termination_last)
                     critic_loss = torch.nn.functional.mse_loss(q_tot, y_tot.detach())
 
                     self.agent_optimizer.zero_grad()
@@ -216,7 +217,7 @@ class GraphQMIXTrainer(OffPolicyTrainer):
             with tqdm(
                 total=sample_size, desc=f"Times {t + 1}/{times}", unit="batch"
             ) as pbar:
-                dataset = self.replaybuffer.sample(sample_size)
+                dataset = self._sample_training_data(sample_size)
                 dataloader = TrajectoryDataLoader(
                     dataset,
                     batch_size=batch_size,

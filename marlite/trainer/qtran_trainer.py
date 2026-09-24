@@ -1,5 +1,7 @@
 import os
+from marlite.util.randomness import configure_randomness, VALUE_MODEL_STREAM
 import torch
+from marlite.util.return_estimation import td_target
 import torch.nn.functional as F
 import datetime
 import yaml
@@ -39,6 +41,7 @@ class QTRANTrainer(OffPolicyTrainer):
         self.v_optimizer_config = v_optimizer_config
         self.v_lr_scheduler_conf = v_lr_scheduler_conf
 
+        configure_randomness(kwargs.get("seed"), kwargs.get("deterministic", False), VALUE_MODEL_STREAM)
         self.eval_v_net = v_net_config.get_v_net()
 
         # Build the V optimizer + scheduler BEFORE super().__init__ so
@@ -131,7 +134,7 @@ class QTRANTrainer(OffPolicyTrainer):
             with tqdm(
                 total=sample_size, desc=f"Times {1}/{times}", unit="batch"
             ) as pbar:
-                dataset = self.replaybuffer.sample(sample_size)
+                dataset = self._sample_training_data(sample_size)
                 dataloader = TrajectoryDataLoader(
                     dataset,
                     batch_size=batch_size,
@@ -245,7 +248,7 @@ class QTRANTrainer(OffPolicyTrainer):
                             .mean(dim=1)
                         )
 
-                    y = r_last + (1 - termination_last) * self.gamma * q_jt_next_at_best
+                    y = td_target(batch, r_last, q_jt_next_at_best, self.gamma, termination_last)
                     td_loss = F.mse_loss(q_jt_scalar, y.detach())
 
                     current_best_actions = q_val.argmax(dim=-1)
@@ -338,7 +341,7 @@ class QTRANTrainer(OffPolicyTrainer):
             with tqdm(
                 total=sample_size, desc=f"Times {t + 1}/{times}", unit="batch"
             ) as pbar:
-                dataset = self.replaybuffer.sample(sample_size)
+                dataset = self._sample_training_data(sample_size)
                 dataloader = TrajectoryDataLoader(
                     dataset,
                     batch_size=batch_size,

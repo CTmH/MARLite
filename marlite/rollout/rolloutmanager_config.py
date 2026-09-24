@@ -8,6 +8,7 @@ from marlite.rollout.multiprocess_rollout import multiprocess_rollout
 from marlite.util.victory_checker import *
 from marlite.environment import EnvConfig
 from marlite.algorithm.agents import AgentGroupConfig
+from marlite.util.randomness import derive_seed, ROLLOUT_STREAM, EVALUATION_STREAM
 
 
 _MANAGER_REGISTRY = {
@@ -34,6 +35,7 @@ class RolloutManagerConfig:
         self.worker_type = self.config.pop("worker_type")
         self.n_episodes = self.config.pop("n_episodes")
         self.n_eval_episodes = self.config.pop("n_eval_episodes", 10)
+        self.set_randomness()
 
         # Store the raw profile name (None or str) — the rollout worker
         # resolves it via resolve_required_attrs and resolve_phases.
@@ -62,6 +64,23 @@ class RolloutManagerConfig:
                 f"Available options: {list(_VICTORY_CHECKER_REGISTRY.keys())}"
             )
 
+    def set_randomness(self, seed=None, deterministic=False):
+        """Trainer-owned streams, reset once at the start of an experiment."""
+        self.seed = seed
+        self.deterministic = deterministic
+        self._collection_round = 0
+        self._evaluation_round = 0
+
+    def _randomness_kwargs(self, evaluation=False):
+        round_index = self._evaluation_round if evaluation else self._collection_round
+        stream = EVALUATION_STREAM if evaluation else ROLLOUT_STREAM
+        seed = derive_seed(self.seed, stream, round_index)
+        if evaluation:
+            self._evaluation_round += 1
+        else:
+            self._collection_round += 1
+        return {"seed": seed, "deterministic": self.deterministic}
+
     def create_manager(
         self,
         agent_group_config: AgentGroupConfig,
@@ -78,6 +97,7 @@ class RolloutManagerConfig:
             epsilon=epsilon,
             check_victory=_VICTORY_CHECKER_REGISTRY[self.victory_checker_name],
             required_attrs=self.required_attrs,
+            **self._randomness_kwargs(),
             **self.config,
         )
         return manager
@@ -98,6 +118,7 @@ class RolloutManagerConfig:
             epsilon=epsilon,
             check_victory=_VICTORY_CHECKER_REGISTRY[self.victory_checker_name],
             required_attrs=self.required_attrs,
+            **self._randomness_kwargs(evaluation=True),
             **self.config,
         )
         return manager

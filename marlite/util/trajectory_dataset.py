@@ -44,6 +44,7 @@ NUMERIC_ATTR = (
     get_numeric_attrs(ALL_ATTRS)
     + list(PADDING_ATTRS)
     + list(SSL_ATTRS)
+    + ["td_rewards", "td_discount", "advantages", "value_targets"]
 )
 
 # Variable-length attributes → kept as Python list
@@ -81,6 +82,12 @@ class TrajectoryDataset(Dataset):
         self.sample_id_list = sample_id_list
         self.episode_buffer = episode_buffer
         self.traj_len = traj_len
+        if isinstance(traj_len, bool) or not isinstance(traj_len, int) or traj_len < 1:
+            raise ValueError("traj_len must be a positive integer")
+        self.n_steps = 1
+        self.gamma = None
+        self.reward_aggr_mode = "sum"
+        self.training_targets = {}
         self.padding_attr = PADDING_ATTR
 
         if required_attrs is None:
@@ -139,7 +146,64 @@ class TrajectoryDataset(Dataset):
         for key in self.padding_attr:
             sample[key] += [False] * (pos - start + 1)
 
+        episode = self.episode_buffer[episode_id]
+        last_transition = pos
+        discounted_reward = 0.0
+        if self.gamma is not None:
+            for t in range(pos, min(pos + self.n_steps, len(episode["rewards"]))):
+                agent_rewards = np.asarray(list(episode["rewards"][t].values()), dtype=np.float32)
+                discounted_reward += self.gamma ** (t - pos) * (
+                    agent_rewards.sum() if self.reward_aggr_mode == "sum" else agent_rewards.mean()
+                )
+                last_transition = t
+                if self.is_episode_boundary(episode, t):
+                    break
+            terminated = all(episode["terminations"][last_transition].values())
+            alive = any(episode["next_alive_mask"][last_transition].values())
+            effective_steps = last_transition - pos + 1
+            sample["td_rewards"] = discounted_reward
+            sample["td_discount"] = (
+                self.gamma ** effective_steps if not terminated and alive else 0.0
+            )
+
+        # A next window ends one step after the last transition and includes the reset
+        # observation/state, not just left-padded next_* entries starting at o1.
+        next_position = last_transition + 1
+        for key in self.array_attr + self.dict_attr:
+            if key.startswith("next_"):
+                sample[key] = self._next_window(episode, key, last_transition)
+        sample["next_timestep_padding_mask"] = [
+            t < 0 for t in range(next_position + 1 - self.traj_len, next_position + 1)
+        ]
+        sample.update(self.training_targets.get((episode_id, pos), {}))
         return sample
+
+    @staticmethod
+    def is_episode_boundary(episode, pos):
+        """Individual deaths end a trace only when every agent is done."""
+        return all(
+            terminated or episode["truncations"][pos][agent]
+            for agent, terminated in episode["terminations"][pos].items()
+        )
+
+    def _next_window(self, episode, key, last_transition):
+        base = key.removeprefix("next_")
+        is_dict = key in self.dict_attr
+
+        def convert(value):
+            return np.stack(list(value.values())) if is_dict else value
+
+        zero = np.zeros_like(convert(episode[base][0]))
+        next_position = last_transition + 1
+        window = []
+        for t in range(next_position + 1 - self.traj_len, next_position + 1):
+            if t < 0:
+                window.append(zero.copy())
+            elif t == next_position:
+                window.append(convert(episode[key][last_transition]))
+            else:
+                window.append(convert(episode[base][t]))
+        return window
 
     def __iter__(self):
         for i in range(len(self)):

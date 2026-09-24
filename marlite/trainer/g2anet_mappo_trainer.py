@@ -12,6 +12,7 @@ import os
 import yaml
 import numpy as np
 import torch
+from marlite.util.return_estimation import ppo_targets
 import torch.nn.functional as F
 from marlite.util.action_distribution import masked_categorical
 from tqdm import tqdm
@@ -43,8 +44,8 @@ class GraphMAPPOTrainer(OnPolicyTrainer):
     clip_epsilon : float
         PPO clip range for the importance sampling ratio.
     gae_lambda : float
-        Reserved for future GAE support. GAE is not implemented, so this
-        parameter currently has no effect.
+        Trace coefficient in [0, 1], used when advantage_estimator='gae'.
+        The default one_step estimator is equivalent to lambda=0.
     entropy_coef : float
         Coefficient for the entropy bonus.
     vf_coef : float
@@ -65,8 +66,7 @@ class GraphMAPPOTrainer(OnPolicyTrainer):
         **kwargs,
     ):
         self.clip_epsilon = clip_epsilon
-        # Reserved for future GAE support; current MAPPO uses one-step TD
-        # advantages and does not read this value during loss computation.
+        # OnPolicyTrainer precomputes fixed GAE labels before PPO updates.
         self.gae_lambda = gae_lambda
         self.entropy_coef = entropy_coef
         self.vf_coef = vf_coef
@@ -153,7 +153,7 @@ class GraphMAPPOTrainer(OnPolicyTrainer):
         self.eval_agent_group.to(self.train_device)
         self.eval_critic.to(self.train_device)
 
-        dataset = self.replaybuffer.sample(sample_size)
+        dataset = self._prepare_ppo_dataset(sample_size, batch_size)
 
         for epoch in range(times):
             dataloader = TrajectoryDataLoader(
@@ -172,22 +172,14 @@ class GraphMAPPOTrainer(OnPolicyTrainer):
                     states = batch["states"].to(dtype=torch.float32)
                     actions = batch["actions"].to(dtype=torch.int)
                     rewards = batch["rewards"].to(dtype=torch.float32)
-                    next_states = batch["next_states"].to(dtype=torch.float32)
-                    next_timestep_padding_mask = batch[
-                        "next_timestep_padding_mask"
-                    ].to(dtype=torch.bool, device=self.train_device)
-                    next_alive_mask = batch["next_alive_mask"].to(dtype=torch.bool)
                     all_log_probs = batch["all_log_probs"].to(dtype=torch.float32)
-                    terminations = batch["terminations"].to(dtype=torch.bool)
 
                     bs = states.shape[0]
                     n_agents = rewards.shape[2]
                     device = self.train_device
 
                     alive_mask_d = alive_mask.to(device)
-                    next_alive_mask_d = next_alive_mask.to(device)
                     states_dev = states.to(device)
-                    next_states_dev = next_states.to(device)
 
                     # -- edge indices --
                     edge_inds = batch.get("edge_indices", [])
@@ -203,22 +195,9 @@ class GraphMAPPOTrainer(OnPolicyTrainer):
                     )["v"]
                     v_last = v[:, 0]
 
-                    with torch.no_grad():
-                        v_next = self.eval_critic(
-                            next_states_dev[:, -1:, ...],
-                            next_alive_mask_d[:, -1:, ...],
-                            next_timestep_padding_mask[:, -1:],
-                        )["v"][:, 0]
-
-                    r_last = self._aggregate_rewards(rewards[:, -1]).to(device)
-                    termination_last = terminations[:, -1].prod(dim=-1).to(
-                        dtype=torch.float32, device=device
+                    advantages_last, returns = ppo_targets(
+                        batch, v_last, self.eval_critic, self.gamma, self._aggregate_rewards
                     )
-                    delta = (
-                        r_last + self.gamma * v_next * (1.0 - termination_last) - v_last
-                    )
-                    advantages_last = delta
-                    returns = delta + v_last
 
                     # -- agent forward (G2ANet: 5 args) --
                     timestep_padding_mask_expanded = torch.stack(
@@ -334,8 +313,8 @@ class GraphMAPPOTrainer(OnPolicyTrainer):
         total_combined = 0.0
         total_batches = 0
 
+        dataset = self._prepare_ppo_dataset(sample_size, batch_size)
         for epoch in range(times):
-            dataset = self.replaybuffer.sample(sample_size)
             dataloader = TrajectoryDataLoader(
                 dataset, batch_size=batch_size, shuffle=True,
                 num_workers=self.n_workers,

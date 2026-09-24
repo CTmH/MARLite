@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 
 import torch
 import torch.multiprocessing as mp
+from marlite.util.randomness import configure_randomness, derive_seed, seed_everything, WORKER_STREAM
 
 
 def is_port_available(port: int) -> bool:
@@ -120,6 +121,8 @@ def worker_loop(
     cmd_queue,
     ack_queue,
     ready_event,
+    seed=None,
+    deterministic=False,
 ):
     """
     Main loop function that runs in each worker process.
@@ -147,7 +150,12 @@ def worker_loop(
         ready_event: Event to signal worker is ready
     """
     # Create worker instance
+    worker_seed = derive_seed(seed, WORKER_STREAM, rank)
+    configure_randomness(worker_seed, deterministic)
     worker = worker_class(**worker_kwargs)
+    # Parameters are still synchronized from the trainer; stochastic training
+    # uses a separate rank-specific stream, independent of construction draws.
+    seed_everything(worker_seed)
 
     # Signal that worker is ready
     ready_event.set()
@@ -301,6 +309,8 @@ class BaseWorkerGroup(ABC):
                     self.cmd_queues[i],
                     self.ack_queues[i],
                     ready_event,
+                    getattr(self, "seed", None),
+                    getattr(self, "deterministic", False),
                 ),
             )
             p.start()

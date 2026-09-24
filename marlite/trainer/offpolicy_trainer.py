@@ -1,4 +1,5 @@
 import os
+from marlite.util.randomness import derive_seed, seed_everything, TRAIN_STREAM
 import yaml
 import torch
 import datetime
@@ -36,6 +37,7 @@ class OffPolicyTrainer(Trainer):
         target_update_mode: str = "hard",
         target_update_tau: float = 0.005,
         target_update_interval: int = 1,
+        n_steps: int = 1,
         **kwargs,
     ):
         """Initialize the off-policy trainer.
@@ -58,9 +60,15 @@ class OffPolicyTrainer(Trainer):
                 update modes: hard copies the eval weights every interval;
                 ema applies one averaging step every interval.
                 ``1`` (default) updates every batch.
+            n_steps: Number of future rewards in the TD target. History-window
+                length is independent. Traces stop at episode boundaries; time
+                truncations bootstrap from the actual final window.
             **kwargs: Forwarded to ``Trainer.__init__``.
         """
         self.epsilon = epsilon_scheduler
+        if isinstance(n_steps, bool) or not isinstance(n_steps, int) or n_steps < 1:
+            raise ValueError("n_steps must be a positive integer")
+        self.n_steps = n_steps
         self.eval_epsilon = eval_epsilon
         self.update_cache_threshold = update_cache_threshold
         self.eval_episodes_to_replay_ratio = eval_episodes_to_replay_ratio
@@ -109,6 +117,17 @@ class OffPolicyTrainer(Trainer):
             self.target_critic = torch.compile(
                 self.target_critic.to(self.train_device)
             ).to("cpu")
+
+        # Target-network construction consumes randomness but must not shift
+        # replay sampling and stochastic training relative to the experiment seed.
+        seed_everything(derive_seed(self.seed, TRAIN_STREAM))
+
+    def _sample_training_data(self, sample_size):
+        dataset = self.replaybuffer.sample(sample_size)
+        dataset.n_steps = self.n_steps
+        dataset.gamma = self.gamma
+        dataset.reward_aggr_mode = self.reward_aggr_mode
+        return dataset
 
     def _add_target_params_for_sync(self, trainable_params):
         trainable_params["target_agent_group"] = get_state_dict(self.target_agent_group)

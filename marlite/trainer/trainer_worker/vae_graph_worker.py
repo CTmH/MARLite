@@ -11,6 +11,7 @@ mu, and log_var returned directly from eval_agent_group.forward().
 
 import io
 import torch
+from marlite.util.return_estimation import td_target
 import torch.distributed as dist
 from typing import Any, Dict, List, Optional
 
@@ -380,7 +381,7 @@ class VAEGraphQMIXWorker(OffPolicyWorker):
             # q_tot_next: (B,)
 
         # Compute TD target: y_tot = r + gamma * (1 - terminations) * q_tot_next
-        y_tot = r_last + (1 - termination_last) * self.gamma * q_tot_next
+        y_tot = td_target(batch, r_last, q_tot_next, self.gamma, termination_last)
 
         # Compute critic loss (TD error)
         critic_loss = torch.nn.functional.mse_loss(q_tot, y_tot.detach())
@@ -403,10 +404,11 @@ class VAEGraphQMIXWorker(OffPolicyWorker):
 
             # Compute KL divergence loss
             # KL(q(z|x) || p(z)) = -0.5 * sum(1 + log_var - mu^2 - exp(log_var))
-            # mu/log_var: (B, N, T, E), alive_mask: (B, T+1, N)
+            # The sequence encoder emits one latent per agent: (B, N, E).
+            # Match the trainer: only current survivors contribute to KL.
             kl_per_dim = 1 + log_var - mu.pow(2) - torch.exp(log_var)
-            kl_per_agent_t = -0.5 * kl_per_dim.sum(dim=-1)  # (B, N, T)
-            mask = alive_mask[:, :mu.shape[2], :].transpose(1, 2)  # (B, N, T)
+            kl_per_agent_t = -0.5 * kl_per_dim.sum(dim=-1)  # (B, N)
+            mask = alive_mask[:, -1, :]  # (B, N)
             kl_divergence = (kl_per_agent_t * mask).sum() / mask.sum().clamp(min=1)
 
             vae_loss = reconstruction_loss + self.kl_divergence_weight * kl_divergence

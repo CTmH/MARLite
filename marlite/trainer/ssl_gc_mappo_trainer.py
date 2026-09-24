@@ -13,6 +13,7 @@ adds SSL-specific logic (KL divergence, reconstruction modes, warmup).
 import time
 import numpy as np
 import torch
+from marlite.util.return_estimation import ppo_targets
 import torch.nn.functional as F
 from marlite.util.action_distribution import masked_categorical
 from tqdm import tqdm
@@ -223,8 +224,8 @@ class SSLGroupConsensusMAPPOTrainer(SelfSupervisedMAPPOTrainer):
         is_warmup = self.current_epoch < self.warmup_iterations
         self.worker_group.set_training_epoch(self.current_epoch)
 
+        dataset = self._prepare_ppo_dataset(sample_size, batch_size)
         for epoch in range(times):
-            dataset = self.replaybuffer.sample(sample_size)
 
             if not is_warmup:
                 t0 = time.time()
@@ -291,7 +292,7 @@ class SSLGroupConsensusMAPPOTrainer(SelfSupervisedMAPPOTrainer):
 
         is_warmup = self.current_epoch < self.warmup_iterations
 
-        dataset = self.replaybuffer.sample(sample_size)
+        dataset = self._prepare_ppo_dataset(sample_size, batch_size)
 
         # ── Pre-generate all reconstruction targets once ──
         if not is_warmup:
@@ -323,22 +324,14 @@ class SSLGroupConsensusMAPPOTrainer(SelfSupervisedMAPPOTrainer):
                     states = batch["states"].to(dtype=torch.float32)
                     actions = batch["actions"].to(dtype=torch.int)
                     rewards = batch["rewards"].to(dtype=torch.float32)
-                    next_states = batch["next_states"].to(dtype=torch.float32)
-                    next_timestep_padding_mask = batch[
-                        "next_timestep_padding_mask"
-                    ].to(dtype=torch.bool, device=self.train_device)
-                    next_alive_mask = batch["next_alive_mask"].to(dtype=torch.bool)
                     all_log_probs = batch["all_log_probs"].to(dtype=torch.float32)
-                    terminations = batch["terminations"].to(dtype=torch.bool)
 
                     bs = states.shape[0]
                     n_agents = rewards.shape[2]
                     device = self.train_device
 
                     alive_mask_d = alive_mask.to(device)
-                    next_alive_mask_d = next_alive_mask.to(device)
                     states_dev = states.to(device)
-                    next_states_dev = next_states.to(device)
 
                     # ── Precompute group_indices from batch ──
                     group_indices_batch = batch.get("group_indices")
@@ -356,21 +349,9 @@ class SSLGroupConsensusMAPPOTrainer(SelfSupervisedMAPPOTrainer):
                     v = self.eval_critic(states_dev, alive_mask_d, timestep_padding_mask)["v"]
                     v_last = v[:, 0]
 
-                    with torch.no_grad():
-                        v_next = self.eval_critic(
-                            next_states_dev[:, -1:, ...],
-                            next_alive_mask_d[:, -1:, ...],
-                            next_timestep_padding_mask[:, -1:],
-                        )["v"][:, 0]
-
-                    # ── Single-step TD residual as advantage ──
-                    r_last = self._aggregate_rewards(rewards[:, -1]).to(device)
-                    termination_last = terminations[:, -1].prod(dim=-1).to(
-                        dtype=torch.float32, device=device
+                    advantages_last, returns = ppo_targets(
+                        batch, v_last, self.eval_critic, self.gamma, self._aggregate_rewards
                     )
-                    delta = r_last + self.gamma * v_next * (1.0 - termination_last) - v_last
-                    advantages_last = delta
-                    returns = delta + v_last
 
                     # ── Agent forward: action_logits + consensus ──
                     states_last = states_dev[:, -1]

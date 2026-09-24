@@ -1,4 +1,5 @@
 import torch
+from marlite.util.return_estimation import td_target
 import numpy as np
 import time
 import absl.logging as logging
@@ -141,7 +142,7 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
         is_warmup = self.current_epoch < self.warmup_epochs
 
         for t in range(times):
-            dataset = self.replaybuffer.sample(sample_size)
+            dataset = self._sample_training_data(sample_size)
             ssl_start = time.time()
             ssl_dataset = GraphSSLEnrichedTrajectoryDataset(dataset, self.data_constructor)
             dataloader = TrajectoryDataLoader(
@@ -247,7 +248,7 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
         total_batches = 0
 
         for t in range(times):
-            dataset = self.replaybuffer.sample(sample_size)
+            dataset = self._sample_training_data(sample_size)
             ssl_start = time.time()
             ssl_dataset = GraphSSLEnrichedTrajectoryDataset(dataset, self.data_constructor)
             dataloader = TrajectoryDataLoader(
@@ -439,7 +440,7 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
             # q_tot_next: (B,)
 
         # Compute TD target: y_tot = r + gamma * (1 - terminations) * q_tot_next
-        y_tot = r_last + (1 - termination_last) * self.gamma * q_tot_next
+        y_tot = td_target(batch, r_last, q_tot_next, self.gamma, termination_last)
 
         # Compute critic loss (TD error)
         critic_loss = torch.nn.functional.mse_loss(q_tot, y_tot.detach())

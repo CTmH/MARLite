@@ -7,6 +7,7 @@ for GraphQMIX algorithm in a multi-GPU setting.
 
 import io
 import torch
+from marlite.util.return_estimation import td_target
 import torch.distributed as dist
 from typing import Any, Dict
 
@@ -282,7 +283,7 @@ class GraphWorker(OffPolicyWorker):
             # q_tot_next: (B,)
 
         # Compute TD target: y_tot = r + gamma * (1 - terminations) * q_tot_next
-        y_tot = r_last + (1 - termination_last) * self.gamma * q_tot_next
+        y_tot = td_target(batch, r_last, q_tot_next, self.gamma, termination_last)
 
         # Compute critic loss (TD error)
         critic_loss = torch.nn.functional.mse_loss(q_tot, y_tot.detach())

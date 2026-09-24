@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+from marlite.util.return_estimation import td_target
 from tqdm import tqdm
 from torch.distributions import Normal, kl_divergence
 
@@ -81,7 +82,7 @@ class MsgAggrQMIXTrainer(OffPolicyTrainer):
             with tqdm(
                 total=sample_size, desc=f"Times {t + 1}/{times}", unit="batch"
             ) as pbar:
-                dataset = self.replaybuffer.sample(sample_size)
+                dataset = self._sample_training_data(sample_size)
                 dataloader = TrajectoryDataLoader(
                     dataset,
                     batch_size=batch_size,
@@ -111,12 +112,9 @@ class MsgAggrQMIXTrainer(OffPolicyTrainer):
                     n_agents = rewards.shape[2]
 
                     done_flags = terminations[:, -1]
-                    truncations = truncations[:, -1]
-                    next_alive_mask = ~(done_flags | truncations)
-                    next_alive_mask = next_alive_mask.unsqueeze(dim=1)
-                    next_alive_mask = torch.cat(
-                        [alive_mask[:, 1:, :], next_alive_mask], dim=1
-                    )
+                    # The dataset supplies the actual n-step endpoint window.
+                    # Truncation is not death and must not clear survivors.
+                    next_alive_mask = batch["next_alive_mask"].to(dtype=torch.bool)
                     next_alive_mask = next_alive_mask.to(self.train_device)
                     alive_mask = alive_mask.to(self.train_device)
 
@@ -205,7 +203,7 @@ class MsgAggrQMIXTrainer(OffPolicyTrainer):
                         )
                         q_tot_next = ret_next["q_tot"]
 
-                    y_tot = r_last + (1 - termination_last) * self.gamma * q_tot_next
+                    y_tot = td_target(batch, r_last, q_tot_next, self.gamma, termination_last)
                     td_error = torch.nn.functional.mse_loss(q_tot, y_tot.detach())
 
                     if self.current_epoch >= self.warmup_epochs:
@@ -255,7 +253,7 @@ class MsgAggrQMIXTrainer(OffPolicyTrainer):
             with tqdm(
                 total=sample_size, desc=f"Times {t + 1}/{times}", unit="batch"
             ) as pbar:
-                dataset = self.replaybuffer.sample(sample_size)
+                dataset = self._sample_training_data(sample_size)
                 dataloader = TrajectoryDataLoader(
                     dataset,
                     batch_size=batch_size,
@@ -337,7 +335,7 @@ class ProbMsgAggrQMIXTrainer(OffPolicyTrainer):
             with tqdm(
                 total=sample_size, desc=f"Times {t + 1}/{times}", unit="batch"
             ) as pbar:
-                dataset = self.replaybuffer.sample(sample_size)
+                dataset = self._sample_training_data(sample_size)
                 dataloader = TrajectoryDataLoader(
                     dataset,
                     batch_size=batch_size,
@@ -457,7 +455,7 @@ class ProbMsgAggrQMIXTrainer(OffPolicyTrainer):
                         )
                         q_tot_next = ret_next["q_tot"]
 
-                    y_tot = r_last + (1 - termination_last) * self.gamma * q_tot_next
+                    y_tot = td_target(batch, r_last, q_tot_next, self.gamma, termination_last)
                     td_error = torch.nn.functional.mse_loss(q_tot, y_tot.detach())
                     ag_distribution = Normal(ag_mu, ag_std)
                     critic_distribution = Normal(
@@ -511,7 +509,7 @@ class ProbMsgAggrQMIXTrainer(OffPolicyTrainer):
             with tqdm(
                 total=sample_size, desc=f"Times {t + 1}/{times}", unit="batch"
             ) as pbar:
-                dataset = self.replaybuffer.sample(sample_size)
+                dataset = self._sample_training_data(sample_size)
                 dataloader = TrajectoryDataLoader(
                     dataset,
                     batch_size=batch_size,

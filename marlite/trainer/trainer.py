@@ -1,4 +1,5 @@
 import os
+from marlite.util.randomness import configure_randomness, derive_seed, seed_everything, TRAIN_STREAM
 import yaml
 import torch
 import datetime
@@ -68,17 +69,27 @@ class Trainer:
         sample_mode: str = "ratio",
         max_grad_norm: float = 5.0,
         reward_aggr_mode: str = "sum",
+        seed: int | None = None,
+        deterministic: bool = False,
     ):
+        # Seed before constructing the replay buffer and online networks.
+        configure_randomness(seed, deterministic)
+        self.seed = seed
+        self.deterministic = deterministic
         self.env_config = env_config
         self.critic_config = critic_config
         self.agent_optimizer_config = agent_optimizer_config
         self.sample_ratio = sample_ratio_scheduler
         self.gamma = gamma
+        if not 0 <= gamma <= 1:
+            raise ValueError("gamma must be in [0, 1]")
         self.n_workers = n_workers
         self.eval_metric_list = eval_metric_list
         self.sample_mode = sample_mode
         self.max_grad_norm = max_grad_norm
         self.reward_aggr_mode = reward_aggr_mode
+        if reward_aggr_mode not in ("sum", "mean"):
+            raise ValueError("reward_aggr_mode must be 'sum' or 'mean'")
 
         if self.sample_mode not in ["ratio", "direct"]:
             raise ValueError(
@@ -88,6 +99,7 @@ class Trainer:
         self.replaybuffer = replaybuffer_config.create_replaybuffer()
         self.replaybuffer_config = replaybuffer_config
         self.rolloutmanager_config = rolloutmanager_config
+        self.rolloutmanager_config.set_randomness(seed, deterministic)
         self.analyzer = analyzer_config.create_analyzer()
 
         self.agent_group_config = agent_group_config
@@ -128,6 +140,8 @@ class Trainer:
 
         os.makedirs(self.logdir, exist_ok=True)
         logging.get_absl_handler().use_absl_log_file("training", self.logdir)
+        if seed is not None or deterministic:
+            logging.info("Randomness configuration: seed=%s, deterministic=%s", seed, deterministic)
 
         self.train_device_config = train_device
         self.device_list, self.use_multi_gpu = get_device_list(train_device)
@@ -148,6 +162,8 @@ class Trainer:
             self.train_device = self.device_list[0]
             self.worker_group = self._create_worker_group()
             if self.worker_group is not None:
+                self.worker_group.seed = self.seed
+                self.worker_group.deterministic = self.deterministic
                 self.worker_group.start_workers()
                 self._sync_params_to_workers()
                 if self.train_device.startswith("cuda"):
@@ -157,6 +173,8 @@ class Trainer:
             )
 
     def _compile_eval_models(self):
+        # Model/target construction must not shift the training RNG stream.
+        seed_everything(derive_seed(self.seed, TRAIN_STREAM))
         if self.compile_models and not self.use_multi_gpu:
             logging.info("Compiling models...")
             self.eval_agent_group = torch.compile(

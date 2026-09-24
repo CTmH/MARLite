@@ -13,6 +13,7 @@ workers) to the single-GPU path.
 """
 
 import torch
+from marlite.util.return_estimation import td_target
 import torch.distributed as dist
 import torch.nn.functional as F
 from typing import Any, Dict, Optional
@@ -300,7 +301,7 @@ class QTRANWorker(OffPolicyWorker):
                 .mean(dim=1)
             )
 
-        y = r_last + (1 - termination_last) * self.gamma * q_jt_next_at_best
+        y = td_target(batch, r_last, q_jt_next_at_best, self.gamma, termination_last)
         td_loss = F.mse_loss(q_jt_scalar, y.detach())
 
         current_best_actions = q_val.argmax(dim=-1)

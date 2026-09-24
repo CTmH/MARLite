@@ -23,6 +23,8 @@ class MultiProcessRolloutManager(RolloutManager):
         device: Union[str, List[str]],
         check_victory: Callable,
         required_attrs: Optional[Union[str, List[str]]] = None,
+        seed: int | None = None,
+        deterministic: bool = False,
     ):
 
         self.worker_func = worker_func
@@ -37,6 +39,9 @@ class MultiProcessRolloutManager(RolloutManager):
         self.device = device
         self.check_victory = check_victory
         self.required_attrs = required_attrs
+        self.seed = seed
+        self.deterministic = deterministic
+        self._generation = 0
 
     def generate_episodes(self) -> List[Any]:
         mp.set_start_method("spawn", force=True)
@@ -76,6 +81,8 @@ class MultiProcessRolloutManager(RolloutManager):
                             devices,
                             [self.check_victory] * self.n_episodes,
                             [self.required_attrs] * self.n_episodes,
+                            self._episode_seeds(),
+                            [self.deterministic] * self.n_episodes,
                         ),
                         total=self.n_episodes,
                         desc="Generating Episodes",

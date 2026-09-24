@@ -7,6 +7,7 @@ separate process and holds copies of the eval agent group and critic models.
 """
 
 import torch
+from marlite.util.return_estimation import ppo_targets
 import torch.distributed as dist
 import torch.nn.functional as F
 from marlite.util.action_distribution import masked_categorical
@@ -68,8 +69,8 @@ class MAPPOWorker(OnPolicyWorker):
             agent_optimizer_config: Configuration for agent group optimizer.
             gamma: Discount factor.
             clip_epsilon: PPO clip range.
-            gae_lambda: Reserved for future GAE support; GAE is not
-                implemented and this parameter currently has no effect.
+            gae_lambda: Retained for constructor compatibility. GAE is computed
+                by the trainer; workers consume precomputed labels.
             entropy_coef: Entropy bonus coefficient.
             vf_coef: Value function loss coefficient.
             max_grad_norm: Maximum gradient norm for clipping.
@@ -77,8 +78,7 @@ class MAPPOWorker(OnPolicyWorker):
         super().__init__(worker_id, device_id, rank, world_size, init_method)
         self.gamma = gamma
         self.clip_epsilon = clip_epsilon
-        # Reserved for future GAE support; current MAPPO uses one-step TD
-        # advantages and does not read this value during loss computation.
+        # The trainer computes GAE; workers consume its fixed labels.
         self.gae_lambda = gae_lambda
         self.entropy_coef = entropy_coef
         self.vf_coef = vf_coef
@@ -141,27 +141,14 @@ class MAPPOWorker(OnPolicyWorker):
         states = batch["states"].to(dtype=torch.float32)
         actions = batch["actions"].to(dtype=torch.int)
         rewards = batch["rewards"].to(dtype=torch.float32)
-        next_states = batch["next_states"].to(dtype=torch.float32)
-        next_timestep_padding_mask = batch["next_timestep_padding_mask"].to(
-            dtype=torch.bool, device=self.device
-        )
-        next_alive_mask = batch["next_alive_mask"].to(dtype=torch.bool)
         all_log_probs = batch["all_log_probs"].to(dtype=torch.float32)
-        terminations = batch["terminations"].to(dtype=torch.bool)
 
         bs = states.shape[0]
         n_agents = rewards.shape[2]
-        t_steps = rewards.shape[1]
 
         alive_mask = alive_mask.to(self.device)
-        next_alive_mask = next_alive_mask.to(self.device)
         states_dev = states.to(self.device)
-        next_states_dev = next_states.to(self.device)
 
-        rewards_sum = rewards.sum(dim=2).to(self.device)
-        terminations_any = terminations.any(dim=2).to(
-            dtype=torch.float32, device=self.device
-        )
 
         timestep_padding_mask_expanded = torch.stack(
             [timestep_padding_mask] * n_agents, dim=1
@@ -171,20 +158,9 @@ class MAPPOWorker(OnPolicyWorker):
         v = self.eval_critic(states_dev, alive_mask, timestep_padding_mask)["v"]
         v_last = v[:, 0]  # (B,)
 
-        with torch.no_grad():
-            v_next = self.eval_critic(
-                next_states_dev[:, -1:, ...],
-                next_alive_mask[:, -1:, ...],
-                next_timestep_padding_mask[:, -1:],
-            )["v"][:, 0]  # (B,)
-
-        r_last = self._aggregate_rewards(rewards[:, -1]).to(self.device)
-        termination_last = terminations[:, -1].prod(dim=-1).to(
-            dtype=torch.float32, device=self.device
+        advantages_last, returns = ppo_targets(
+            batch, v_last, self.eval_critic, self.gamma, self._aggregate_rewards
         )
-        delta = r_last + self.gamma * v_next * (1.0 - termination_last) - v_last
-        advantages_last = delta  # (B,)
-        returns = delta + v_last
 
         observations_transposed = torch.transpose(observations, 1, 2).to(self.device)
         self.eval_agent_group.train()

@@ -7,6 +7,7 @@ handling) are **required** and initialised unconditionally — subclasses
 """
 
 import os
+from marlite.util.randomness import configure_randomness, SSL_MODEL_STREAM
 import yaml
 import time
 import numpy as np
@@ -67,8 +68,8 @@ class SelfSupervisedMAPPOTrainer(OnPolicyTrainer):
     clip_epsilon : float
         PPO clip range for the importance sampling ratio.
     gae_lambda : float
-        Reserved for future GAE support. GAE is not implemented, so this
-        parameter currently has no effect.
+        Trace coefficient in [0, 1], used when advantage_estimator='gae'.
+        The default one_step estimator is equivalent to lambda=0.
     entropy_coef : float
         Coefficient for the entropy bonus.
     vf_coef : float
@@ -100,8 +101,7 @@ class SelfSupervisedMAPPOTrainer(OnPolicyTrainer):
     ):
         # -- PPO params (must be set before super().__init__) ------------
         self.clip_epsilon = clip_epsilon
-        # Reserved for future GAE support; current MAPPO uses one-step TD
-        # advantages and does not read this value during loss computation.
+        # OnPolicyTrainer precomputes fixed GAE labels before PPO updates.
         self.gae_lambda = gae_lambda
         self.entropy_coef = entropy_coef
         self.vf_coef = vf_coef
@@ -125,6 +125,7 @@ class SelfSupervisedMAPPOTrainer(OnPolicyTrainer):
         self.pit_loss_alpha = pit_loss_alpha
 
         # -- Data constructor (always created) -----------------------------
+        configure_randomness(kwargs.get("seed"), kwargs.get("deterministic", False), SSL_MODEL_STREAM)
         self.data_constructor = self.data_constructor_config.get_data_constructor()
 
         # -- SSL model & optimiser (must exist before super().__init__)

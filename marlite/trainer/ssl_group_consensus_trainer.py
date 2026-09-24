@@ -1,4 +1,5 @@
 import torch
+from marlite.util.return_estimation import td_target
 import torch.nn.functional as F
 import time
 import numpy as np
@@ -173,7 +174,7 @@ class SSLGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
         is_warmup = self.current_epoch < self.warmup_epochs
 
         for t in range(times):
-            dataset = self.replaybuffer.sample(sample_size)
+            dataset = self._sample_training_data(sample_size)
 
             # ── Pre-generate all reconstruction targets once per epoch ──
             use_ssl = not is_warmup
@@ -297,7 +298,7 @@ class SSLGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
         is_warmup = self.current_epoch < self.warmup_epochs
 
         for t in range(times):
-            dataset = self.replaybuffer.sample(sample_size)
+            dataset = self._sample_training_data(sample_size)
 
             # Pre-generate all reconstruction targets once per epoch.
             use_ssl = not is_warmup
@@ -597,7 +598,7 @@ class SSLGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
             q_tot_next = ret_next_critic["q_tot"]        # (B,)
 
         # TD target: y = r + γ·(1 - done)·Q_target(s', argmax_{a'} Q_eval(s', a'))
-        y_tot = r_last + (1 - termination_last) * self.gamma * q_tot_next
+        y_tot = td_target(batch, r_last, q_tot_next, self.gamma, termination_last)
         #   (B,) + (B,) · scalar · (B,) → (B,)
 
         critic_loss = torch.nn.functional.mse_loss(q_tot, y_tot.detach())

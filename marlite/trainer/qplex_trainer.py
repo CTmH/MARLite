@@ -19,6 +19,7 @@ The learn procedure implements Double DQN with the following steps:
 """
 
 import torch
+from marlite.util.return_estimation import td_target
 from tqdm import tqdm
 
 from marlite.trainer.offpolicy_trainer import OffPolicyTrainer
@@ -79,7 +80,7 @@ class QPLEXTrainer(OffPolicyTrainer):
             with tqdm(
                 total=sample_size, desc=f"Times {t + 1}/{times}", unit="batch"
             ) as pbar:
-                dataset = self.replaybuffer.sample(sample_size)
+                dataset = self._sample_training_data(sample_size)
                 dataloader = TrajectoryDataLoader(
                     dataset,
                     batch_size=batch_size,
@@ -238,7 +239,7 @@ class QPLEXTrainer(OffPolicyTrainer):
                     # The loss is:
                     #   L = MSE(y, Q_tot(τ, a)) + λ_reg · Σ_k (logit_k)²
                     # ------------------------------------------------------------------
-                    y_tot = r_last + (1 - termination_last) * self.gamma * q_tot_next
+                    y_tot = td_target(batch, r_last, q_tot_next, self.gamma, termination_last)
                     critic_loss = torch.nn.functional.mse_loss(q_tot, y_tot.detach())
 
                     if att_reg.item() != 0:

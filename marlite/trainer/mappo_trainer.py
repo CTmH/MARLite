@@ -10,6 +10,7 @@ import os
 import yaml
 import numpy as np
 import torch
+from marlite.util.return_estimation import ppo_targets
 import torch.nn.functional as F
 from marlite.util.action_distribution import masked_categorical
 from tqdm import tqdm
@@ -44,8 +45,8 @@ class MAPPOTrainer(OnPolicyTrainer):
     clip_epsilon : float
         PPO clip range for the importance sampling ratio.
     gae_lambda : float
-        Reserved for future GAE support. GAE is not implemented, so this
-        parameter currently has no effect.
+        Trace coefficient in [0, 1], used when advantage_estimator='gae'.
+        The default one_step estimator is equivalent to lambda=0.
     entropy_coef : float
         Coefficient for the entropy bonus (encourages exploration).
     vf_coef : float
@@ -68,8 +69,7 @@ class MAPPOTrainer(OnPolicyTrainer):
         # Must be set before super().__init__() because _create_worker_group()
         # is called during _setup_multi_gpu() in OnPolicyTrainer.__init__().
         self.clip_epsilon = clip_epsilon
-        # Reserved for future GAE support; current MAPPO uses one-step TD
-        # advantages and does not read this value during loss computation.
+        # OnPolicyTrainer precomputes fixed GAE labels before PPO updates.
         self.gae_lambda = gae_lambda
         self.entropy_coef = entropy_coef
         self.vf_coef = vf_coef
@@ -165,7 +165,7 @@ class MAPPOTrainer(OnPolicyTrainer):
         iterated over in mini-batches.  Each batch runs:
           - forward pass through the critic (V(s))
           - forward pass through the agent (action logits)
-          - TD residual advantage estimation
+          - fixed pre-update advantage/value targets
           - PPO clipped surrogate + entropy bonus  (actor)
           - MSE value loss  (critic)
           - separate backward passes with gradient clipping and optimizer steps.
@@ -177,7 +177,7 @@ class MAPPOTrainer(OnPolicyTrainer):
         self.eval_agent_group.to(self.train_device)
         self.eval_critic.to(self.train_device)
 
-        dataset = self.replaybuffer.sample(sample_size)
+        dataset = self._prepare_ppo_dataset(sample_size, batch_size)
 
         for epoch in range(times):
             dataloader = TrajectoryDataLoader(
@@ -198,28 +198,15 @@ class MAPPOTrainer(OnPolicyTrainer):
                     states = batch["states"].to(dtype=torch.float32)
                     actions = batch["actions"].to(dtype=torch.int)
                     rewards = batch["rewards"].to(dtype=torch.float32)
-                    next_states = batch["next_states"].to(dtype=torch.float32)
-                    next_timestep_padding_mask = batch["next_timestep_padding_mask"].to(
-                        dtype=torch.bool, device=self.train_device
-                    )
-                    next_alive_mask = batch["next_alive_mask"].to(dtype=torch.bool)
                     all_log_probs = batch["all_log_probs"].to(dtype=torch.float32)
-                    terminations = batch["terminations"].to(dtype=torch.bool)
 
                     bs = states.shape[0]
                     n_agents = rewards.shape[2]
-                    t_steps = rewards.shape[1]
 
                     device = self.train_device
                     alive_mask = alive_mask.to(device)
-                    next_alive_mask = next_alive_mask.to(device)
                     states_dev = states.to(device)
-                    next_states_dev = next_states.to(device)
 
-                    rewards_sum = self._aggregate_rewards(rewards).to(device)
-                    terminations_any = terminations.any(dim=2).to(
-                        dtype=torch.float32, device=device
-                    )
 
                     timestep_padding_mask_expanded = torch.stack(
                         [timestep_padding_mask] * n_agents, dim=1
@@ -230,22 +217,10 @@ class MAPPOTrainer(OnPolicyTrainer):
                     v = self.eval_critic(states_dev, alive_mask, timestep_padding_mask)["v"]
                     v_last = v[:, 0]  # (B,) — value at the last timestep of the segment
 
-                    # ---- Bootstrap: V(s_T) from the next state after the segment ----
-                    with torch.no_grad():
-                        v_next = self.eval_critic(
-                            next_states_dev[:, -1:, ...],
-                            next_alive_mask[:, -1:, ...],
-                            next_timestep_padding_mask[:, -1:],
-                        )["v"][:, 0]  # (B,)
-
-                    # ---- Single-step TD residual as advantage (GAE with one timestep) ----
-                    r_last = self._aggregate_rewards(rewards[:, -1]).to(device)  # (B,)
-                    termination_last = terminations[:, -1].prod(dim=-1).to(
-                        dtype=torch.float32, device=device
+                    # Fixed pre-update advantages and value targets.
+                    advantages_last, returns = ppo_targets(
+                        batch, v_last, self.eval_critic, self.gamma, self._aggregate_rewards
                     )
-                    delta = r_last + self.gamma * v_next * (1.0 - termination_last) - v_last
-                    advantages_last = delta  # (B,)
-                    returns = delta + v_last  # (B,) — TD target for the critic
 
                     # ---- Actor forward: action logits for last timestep ----
                     observations_transposed = torch.transpose(observations, 1, 2).to(
@@ -352,8 +327,8 @@ class MAPPOTrainer(OnPolicyTrainer):
         total_combined = 0.0
         total_batches = 0
 
+        dataset = self._prepare_ppo_dataset(sample_size, batch_size)
         for epoch in range(times):
-            dataset = self.replaybuffer.sample(sample_size)
             dataloader = TrajectoryDataLoader(
                 dataset,
                 batch_size=batch_size,

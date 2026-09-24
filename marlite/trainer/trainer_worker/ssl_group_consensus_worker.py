@@ -1,5 +1,6 @@
 import io
 import torch
+from marlite.util.return_estimation import td_target
 import torch.nn.functional as F
 import torch.distributed as dist
 import absl.logging as logging
@@ -318,7 +319,7 @@ class SSLGroupConsensusWorker(OffPolicyWorker):
             )
             q_tot_next = ret_next_critic["q_tot"]
 
-        y_tot = r_last + (1 - termination_last) * self.gamma * q_tot_next
+        y_tot = td_target(batch, r_last, q_tot_next, self.gamma, termination_last)
         self._check_nan(y_tot, "y_tot")
         critic_loss = torch.nn.functional.mse_loss(q_tot, y_tot.detach())
         self._check_nan(critic_loss, "critic_loss")

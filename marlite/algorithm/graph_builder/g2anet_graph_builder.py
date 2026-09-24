@@ -4,6 +4,7 @@ from torch import Tensor
 from typing import Tuple, List
 from marlite.algorithm.graph_builder.graph_builder import GraphBuilder
 from marlite.algorithm.model.g2anet_attention import G2ANetAttention
+from marlite.util.initialization import initialize_model
 
 
 class G2ANetGraphBuilder(GraphBuilder):
@@ -13,12 +14,14 @@ class G2ANetGraphBuilder(GraphBuilder):
         add_self_loop: bool = False,
         input_dim: int = None,
         hidden_dim: int = 64,
+        initialization: dict | None = None,
     ):
         super().__init__()
         self.add_module(
             "attention_model",
             G2ANetAttention(n_agents, add_self_loop, input_dim, hidden_dim),
         )
+        initialize_model(self.attention_model, initialization)
 
     def forward(
         self, encoded_obs: Tensor, alive_mask: Tensor = None

@@ -1,4 +1,5 @@
 import os
+from marlite.util.randomness import configure_randomness, SSL_MODEL_STREAM
 import torch
 import datetime
 import yaml
@@ -86,6 +87,7 @@ class SelfSupervisedQMIXTrainer(OffPolicyTrainer):
         self.pit_loss_alpha = pit_loss_alpha
 
         # Create data_constructor before super().__init__ because _create_worker_group needs it
+        configure_randomness(kwargs.get("seed"), kwargs.get("deterministic", False), SSL_MODEL_STREAM)
         self.data_constructor = self.data_constructor_config.get_data_constructor()
 
         # Create ssl_model and ssl_optimizer before super().__init__() so that

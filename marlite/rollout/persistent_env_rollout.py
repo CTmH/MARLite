@@ -21,6 +21,8 @@ from marlite.rollout.attribute_spec import (
     get_timestep_attrs,
 )
 from marlite.rollout.phases import resolve_phases, RolloutPhases
+from marlite.rollout.boundaries import finish_transition
+from marlite.util.randomness import configure_randomness, seed_everything
 
 
 def persistent_env_rollout(
@@ -34,6 +36,8 @@ def persistent_env_rollout(
     device: str = "cpu",
     check_victory: Optional[Callable] = None,
     required_attrs: Optional[Union[str, List[str]]] = None,
+    episode_seeds: Optional[List[int | None]] = None,
+    deterministic: bool = False,
 ) -> List[Dict[str, Any]]:
     """Execute multiple rollouts using a single environment instance.
 
@@ -66,6 +70,11 @@ def persistent_env_rollout(
     list[dict]
         List of episode data dictionaries.
     """
+    if episode_seeds is None:
+        episode_seeds = [None] * n_episodes
+    if len(episode_seeds) != n_episodes:
+        raise ValueError("episode_seeds must match n_episodes")
+    configure_randomness(episode_seeds[0] if n_episodes else None, deterministic)
     # ---- Deserialize agent group from shared memory ----
     shm_name, shm_size = shm_info
     shm = SharedMemory(name=shm_name)
@@ -88,6 +97,8 @@ def persistent_env_rollout(
             continue
 
     if env is None:
+        if any(seed is not None for seed in episode_seeds) or deterministic:
+            raise RuntimeError("Seeded environment creation failed after 3 attempts")
         print("Environment creation failed after 3 attempts")
         return []
 
@@ -102,6 +113,9 @@ def persistent_env_rollout(
     episodes = []
 
     for episode_idx in range(n_episodes):
+        seed = episode_seeds[episode_idx]
+        seed_everything(seed)
+        agent_group.reset()
         # ---- Pre-initialize episode dict ----
         episode: Dict[str, Any] = {attr: [] for attr in timestep_attr_names}
         episode["episode_reward"] = 0
@@ -139,11 +153,13 @@ def persistent_env_rollout(
             # [RESET]  (i == 0) — fixed logic
             # =======================================================
             if i == 0:
-                seed = int(time.time() * 1000) % (2**24 - 1)
+                reset_seed = seed if seed is not None else int(time.time() * 1000) % (2**24 - 1)
 
                 try:
-                    observations, infos = env.reset(seed=seed)
+                    observations, infos = env.reset(seed=reset_seed)
                 except Exception as e:
+                    if seed is not None or deterministic:
+                        raise RuntimeError("Seeded env.reset failed; check wrapper seed support") from e
                     print(f"Reset failed: {e}")
                     return episodes
 
@@ -218,6 +234,7 @@ def persistent_env_rollout(
                     _rollback(episode, lengths_before)
                     break
 
+                observed_agents = set(observations)
                 observations = ensure_all_agents_present(
                     observations, default_observations
                 )
@@ -227,6 +244,13 @@ def persistent_env_rollout(
                 )
                 truncations = ensure_all_agents_present(
                     truncations, default_truncations
+                )
+
+                if check_victory is not None:
+                    win_tag = check_victory(env, infos)
+                decision_state, decision_agents, episode_ended = finish_transition(
+                    env, observed_agents, terminations, truncations,
+                    episode["states"][-1], win_tag, i == episode_limit,
                 )
 
                 # ---------------------------------------------------
@@ -247,12 +271,8 @@ def persistent_env_rollout(
                 # ---------------------------------------------------
                 # [TERMINAL] — next_states (always) + terminal phase
                 # ---------------------------------------------------
-                if check_victory is not None:
-                    win_tag = check_victory(env, infos)
-                if win_tag or not env.agents:
-                    # Reuse last state — some envs raise on env.state()
-                    # after termination.
-                    episode["next_states"].append(episode["states"][-1])
+                episode["next_states"].append(decision_state)
+                if all(terminations.values()):
                     ctx_term = {
                         "default_avail_actions": default_avail_actions,
                         "default_alive_mask": default_alive_mask,
@@ -261,25 +281,30 @@ def persistent_env_rollout(
                     }
                     phases.terminal(episode, ctx_term)
                     break
-                episode["next_states"].append(env.state())
 
             # =======================================================
             # [COMPUTE_OBSERVE + COMPUTE_ACT] — fixed logic (every i)
             # =======================================================
+            if i == 0:
+                decision_agents = list(env.agents)
+                decision_state = env.state()
+                episode_ended = False
+
             alive_mask = ensure_all_agents_present(
-                {agent: True for agent in env.agents}, default_alive_mask
+                {agent: True for agent in decision_agents}, default_alive_mask
             )
 
             if use_action_mask:
                 current_avail_actions = {}
-                for agent in env.agents:
-                    if agent in infos and "action_mask" in infos[agent]:
-                        current_avail_actions[agent] = np.array(
-                            infos[agent]["action_mask"], dtype=np.int8
-                        )
+                for agent in decision_agents:
+                    if agent not in infos or "action_mask" not in infos[agent]:
+                        raise ValueError(f"Missing action mask for live agent {agent}")
+                    current_avail_actions[agent] = np.array(
+                        infos[agent]["action_mask"], dtype=np.int8
+                    )
             else:
                 current_avail_actions = {
-                    agent: env.action_space(agent) for agent in env.agents
+                    agent: env.action_space(agent) for agent in decision_agents
                 }
             avail_actions = ensure_all_agents_present(
                 current_avail_actions, default_avail_actions
@@ -293,10 +318,10 @@ def persistent_env_rollout(
 
             ret = agent_group.act(
                 processed_obs,
-                env.state(),
+                decision_state,
                 avail_actions,
                 traj_padding_mask,
-                env.agents,
+                decision_agents,
                 epsilon,
             )
             actions, all_actions = ret["actions"], ret["all_actions"]
@@ -319,6 +344,8 @@ def persistent_env_rollout(
                     "group_indices": all_group_indices,
                 }
                 phases.next_attr(episode, ctx_next)
+                if episode_ended:
+                    break
 
         # ===========================================================
         # [FINALIZE] — episode-level attrs

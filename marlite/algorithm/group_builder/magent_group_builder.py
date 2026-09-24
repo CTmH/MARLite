@@ -450,7 +450,8 @@ class MagentKMeansGroupBuilder(GroupBuilder):
             ):
                 return torch.from_numpy(deepcopy(self.cached_labels).astype(self.dtype))
 
-        rng = np.random.default_rng()
+        # default_rng() without a seed ignores the experiment's NumPy seed.
+        rng = np.random.default_rng(np.random.randint(0, 2**32))
 
         results = []
         for b in range(bs):
@@ -571,7 +572,8 @@ class MagentVecKMeansGroupBuilder(GroupBuilder):
                 return torch.from_numpy(result)
             self.cached_labels = None
 
-        rng = np.random.default_rng()
+        # Generate per-sample seeds in the parent, before scheduling processes.
+        rng = np.random.default_rng(np.random.randint(0, 2**32))
 
         if self.n_workers > 1:
             n_workers = min(bs, self.n_workers)

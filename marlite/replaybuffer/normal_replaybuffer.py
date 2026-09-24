@@ -13,7 +13,7 @@ class NormalReplayBuffer(ReplayBuffer):
         self.tail = -1
 
     def add_episode(self, episode):
-        if episode['episode_length'] < 2:
+        if episode['episode_length'] < 1:
             print("Episode is too short to be added to the replay buffer.")
             return self
 

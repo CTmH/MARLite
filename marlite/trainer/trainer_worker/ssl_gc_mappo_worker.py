@@ -3,6 +3,7 @@ SSL Group Consensus MAPPO worker for multi-GPU training.
 """
 
 import torch
+from marlite.util.return_estimation import ppo_targets
 import torch.nn.functional as F
 import torch.distributed as dist
 from marlite.util.action_distribution import masked_categorical
@@ -44,7 +45,7 @@ class SSLGroupConsensusMAPPOWorker(OnPolicyWorker):
         gamma: float,
         max_grad_norm: float,
         clip_epsilon: float,
-        # Reserved for future GAE support; GAE is not implemented.
+        # GAE is computed on the trainer; retained for constructor compatibility.
         gae_lambda: float,
         entropy_coef: float,
         vf_coef: float,
@@ -63,8 +64,7 @@ class SSLGroupConsensusMAPPOWorker(OnPolicyWorker):
         self.gamma = gamma
         self.max_grad_norm = max_grad_norm
         self.clip_epsilon = clip_epsilon
-        # Reserved for future GAE support; current MAPPO uses one-step TD
-        # advantages and does not read this value during loss computation.
+        # The trainer computes GAE; workers consume its fixed labels.
         self.gae_lambda = gae_lambda
         self.entropy_coef = entropy_coef
         self.vf_coef = vf_coef
@@ -235,22 +235,13 @@ class SSLGroupConsensusMAPPOWorker(OnPolicyWorker):
         states = batch["states"].to(dtype=torch.float32)
         actions = batch["actions"].to(dtype=torch.int)
         rewards = batch["rewards"].to(dtype=torch.float32)
-        next_states = batch["next_states"].to(dtype=torch.float32)
-        next_timestep_padding_mask = batch["next_timestep_padding_mask"].to(
-            dtype=torch.bool, device=self.device
-        )
-        next_alive_mask = batch["next_alive_mask"].to(dtype=torch.bool)
         all_log_probs = batch["all_log_probs"].to(dtype=torch.float32)
-        terminations = batch["terminations"].to(dtype=torch.bool)
 
         bs = states.shape[0]
         n_agents = rewards.shape[2]
-        t_steps = rewards.shape[1]
 
         alive_mask = alive_mask.to(self.device)
-        next_alive_mask = next_alive_mask.to(self.device)
         states_dev = states.to(self.device)
-        next_states_dev = next_states.to(self.device)
 
         group_indices_batch = batch.get("group_indices")
         if group_indices_batch is not None:
@@ -275,20 +266,9 @@ class SSLGroupConsensusMAPPOWorker(OnPolicyWorker):
         v = self.eval_critic(states_dev, alive_mask, timestep_padding_mask)["v"]
         v_last = v[:, 0]
 
-        with torch.no_grad():
-            v_next = self.eval_critic(
-                next_states_dev[:, -1:, ...],
-                next_alive_mask[:, -1:, ...],
-                next_timestep_padding_mask[:, -1:],
-            )["v"][:, 0]
-
-        r_last = self._aggregate_rewards(rewards[:, -1]).to(self.device)
-        termination_last = terminations[:, -1].prod(dim=-1).to(
-            dtype=torch.float32, device=self.device
+        advantages_last, returns = ppo_targets(
+            batch, v_last, self.eval_critic, self.gamma, self._aggregate_rewards
         )
-        delta = r_last + self.gamma * v_next * (1.0 - termination_last) - v_last
-        advantages_last = delta
-        returns = delta + v_last
 
         # ── agent forward ──
         states_last = states_dev[:, -1]

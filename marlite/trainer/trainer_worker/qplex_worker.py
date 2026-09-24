@@ -11,6 +11,7 @@ distributed worker process under :class:`OffPolicyWorkerGroup`.
 """
 
 import torch
+from marlite.util.return_estimation import td_target
 from typing import Any, Dict
 
 from marlite.algorithm.agents import AgentGroupConfig
@@ -192,7 +193,7 @@ class QPLEXWorker(OffPolicyWorker):
         # ------------------------------------------------------------------
         # 4. Loss.
         # ------------------------------------------------------------------
-        y_tot = r_last + (1 - termination_last) * self.gamma * q_tot_next
+        y_tot = td_target(batch, r_last, q_tot_next, self.gamma, termination_last)
         critic_loss = torch.nn.functional.mse_loss(q_tot, y_tot.detach())
 
         if att_reg.item() != 0:

@@ -26,7 +26,8 @@ def _create_agent_group_config(env):
         "agent_list": agents,
         "models": {
             name: {
-                "model": model_layers,
+                "encoder": model_layers,
+                "decoder": {"model_type": "Identity"},
                 "feature_extractor": {"model_type": "Identity"},
             }
             for name in ("RNN0", "RNN1")

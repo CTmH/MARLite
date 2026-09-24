@@ -34,7 +34,7 @@ class TestMAPPOMinibatches(unittest.TestCase):
                 }
                 batch["avail_actions"][..., 2:] = False
                 batches.append(batch)
-            trainer.replaybuffer.sample = Mock(return_value=None)
+            trainer._prepare_ppo_dataset = Mock(return_value=None)
             with patch("marlite.trainer.mappo_trainer.TrajectoryDataLoader", return_value=batches), \
                  patch.object(trainer.agent_optimizer, "step", wraps=trainer.agent_optimizer.step) as actor, \
                  patch.object(trainer.critic_optimizer, "step", wraps=trainer.critic_optimizer.step) as critic:

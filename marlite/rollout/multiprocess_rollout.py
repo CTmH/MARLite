@@ -20,6 +20,8 @@ from marlite.rollout.attribute_spec import (
     get_timestep_attrs,
 )
 from marlite.rollout.phases import resolve_phases, RolloutPhases
+from marlite.rollout.boundaries import finish_transition
+from marlite.util.randomness import configure_randomness, seed_everything
 
 
 def multiprocess_rollout(
@@ -32,6 +34,8 @@ def multiprocess_rollout(
     device: str = "cpu",
     check_victory: Optional[Callable] = None,
     required_attrs: Optional[Union[str, List[str], tuple]] = None,
+    seed: int | None = None,
+    deterministic: bool = False,
 ):
     """Execute a rollout using multiprocess environment.
 
@@ -63,6 +67,7 @@ def multiprocess_rollout(
         Episode data dictionary, or ``None`` if the episode could not be
         collected.
     """
+    configure_randomness(seed, deterministic)
     # ---- Deserialize agent group from shared memory ----
     shm_name, shm_size = shm_info
     shm = SharedMemory(name=shm_name)
@@ -118,11 +123,16 @@ def multiprocess_rollout(
         # [RESET]  (i == 0) — fixed logic
         # ===========================================================
         if i == 0:
-            seed = int(time.time() * 1000) % (2**24 - 1)
+            # Reseed after construction: discarded model weights must not alter
+            # action sampling. None retains the legacy time-based environment seed.
+            seed_everything(seed)
+            reset_seed = seed if seed is not None else int(time.time() * 1000) % (2**24 - 1)
 
             try:
-                observations, infos = env.reset(seed=seed)
+                observations, infos = env.reset(seed=reset_seed)
             except Exception as e:
+                if seed is not None or deterministic:
+                    raise RuntimeError("Seeded env.reset failed; check wrapper seed support") from e
                 print("Reset failed")
                 return None
 
@@ -195,6 +205,7 @@ def multiprocess_rollout(
                 _rollback(episode, lengths_before)
                 break
 
+            observed_agents = set(observations)
             observations = ensure_all_agents_present(
                 observations, default_observations
             )
@@ -204,6 +215,13 @@ def multiprocess_rollout(
             )
             truncations = ensure_all_agents_present(
                 truncations, default_truncations
+            )
+
+            if check_victory is not None:
+                win_tag = check_victory(env, infos)
+            decision_state, decision_agents, episode_ended = finish_transition(
+                env, observed_agents, terminations, truncations,
+                episode["states"][-1], win_tag, i == episode_limit,
             )
 
             # -------------------------------------------------------
@@ -224,12 +242,8 @@ def multiprocess_rollout(
             # -------------------------------------------------------
             # [TERMINAL] — next_states (always) + terminal phase
             # -------------------------------------------------------
-            if check_victory is not None:
-                win_tag = check_victory(env, infos)
-            if win_tag or not env.agents:
-                # Reuse last state — some envs raise on env.state()
-                # after termination.
-                episode["next_states"].append(episode["states"][-1])
+            episode["next_states"].append(decision_state)
+            if all(terminations.values()):
                 ctx_term = {
                     "default_avail_actions": default_avail_actions,
                     "default_alive_mask": default_alive_mask,
@@ -238,25 +252,30 @@ def multiprocess_rollout(
                 }
                 phases.terminal(episode, ctx_term)
                 break
-            episode["next_states"].append(env.state())
 
         # ===========================================================
         # [COMPUTE_OBSERVE + COMPUTE_ACT] — fixed logic (every i)
         # ===========================================================
+        if i == 0:
+            decision_agents = list(env.agents)
+            decision_state = env.state()
+            episode_ended = False
+
         alive_mask = ensure_all_agents_present(
-            {agent: True for agent in env.agents}, default_alive_mask
+            {agent: True for agent in decision_agents}, default_alive_mask
         )
 
         if use_action_mask:
             current_avail_actions = {}
-            for agent in env.agents:
-                if agent in infos and "action_mask" in infos[agent]:
-                    current_avail_actions[agent] = np.array(
-                        infos[agent]["action_mask"], dtype=np.int8
-                    )
+            for agent in decision_agents:
+                if agent not in infos or "action_mask" not in infos[agent]:
+                    raise ValueError(f"Missing action mask for live agent {agent}")
+                current_avail_actions[agent] = np.array(
+                    infos[agent]["action_mask"], dtype=np.int8
+                )
         else:
             current_avail_actions = {
-                agent: env.action_space(agent) for agent in env.agents
+                agent: env.action_space(agent) for agent in decision_agents
             }
         avail_actions = ensure_all_agents_present(
             current_avail_actions, default_avail_actions
@@ -270,10 +289,10 @@ def multiprocess_rollout(
 
         ret = agent_group.act(
             processed_obs,
-            env.state(),
+            decision_state,
             avail_actions,
             traj_padding_mask,
-            env.agents,
+            decision_agents,
             epsilon,
         )
         actions, all_actions = ret["actions"], ret["all_actions"]
@@ -295,6 +314,8 @@ def multiprocess_rollout(
                 "group_indices": all_group_indices,
             }
             phases.next_attr(episode, ctx_next)
+            if episode_ended:
+                break
 
     # ===============================================================
     # [FINALIZE] — episode-level attrs

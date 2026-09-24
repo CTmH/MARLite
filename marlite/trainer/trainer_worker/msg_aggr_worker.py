@@ -6,6 +6,7 @@ the training logic for message aggregation algorithms in a multi-GPU setting.
 """
 
 import torch
+from marlite.util.return_estimation import td_target
 import torch.distributed as dist
 from typing import Any, Dict
 
@@ -114,12 +115,9 @@ class MsgAggrWorker(OffPolicyWorker):
         bs = states.shape[0]
         n_agents = rewards.shape[2]
 
-        # Create alive_mask_next from terminations and truncations
+        # Use the recorded n-step endpoint, including survivors at timeouts.
         done_flags = terminations[:, -1]
-        truncations = truncations[:, -1]
-        next_alive_mask = ~(done_flags | truncations)
-        next_alive_mask = next_alive_mask.unsqueeze(dim=1)
-        next_alive_mask = torch.cat([alive_mask[:, 1:, :], next_alive_mask], dim=1)
+        next_alive_mask = batch["next_alive_mask"].to(dtype=torch.bool)
         next_alive_mask = next_alive_mask.to(self.device)
         alive_mask = alive_mask.to(self.device)
 
@@ -208,7 +206,7 @@ class MsgAggrWorker(OffPolicyWorker):
             q_tot_next = ret_next["q_tot"]
 
         # Compute TD target
-        y_tot = r_last + (1 - termination_last) * self.gamma * q_tot_next
+        y_tot = td_target(batch, r_last, q_tot_next, self.gamma, termination_last)
 
         # Compute TD error
         td_error = torch.nn.functional.mse_loss(q_tot, y_tot.detach())
@@ -428,7 +426,7 @@ class ProbMsgAggrWorker(MsgAggrWorker):
             q_tot_next = ret_next["q_tot"]
 
         # Compute TD target
-        y_tot = r_last + (1 - termination_last) * self.gamma * q_tot_next
+        y_tot = td_target(batch, r_last, q_tot_next, self.gamma, termination_last)
 
         # Compute TD error
         td_error = torch.nn.functional.mse_loss(q_tot, y_tot.detach())
