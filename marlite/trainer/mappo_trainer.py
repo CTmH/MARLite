@@ -11,7 +11,7 @@ import yaml
 import numpy as np
 import torch
 import torch.nn.functional as F
-from torch.distributions import Categorical
+from marlite.util.action_distribution import masked_categorical
 from tqdm import tqdm
 from absl import logging
 
@@ -225,100 +225,106 @@ class MAPPOTrainer(OnPolicyTrainer):
                         [timestep_padding_mask] * n_agents, dim=1
                     ).to(device)
 
-                # ---- Critic forward: full sequence -> V(s_{T-1}) only ----
-                self.eval_critic.train()
-                v = self.eval_critic(states_dev, alive_mask, timestep_padding_mask)["v"]
-                v_last = v[:, 0]  # (B,) — value at the last timestep of the segment
+                    # ---- Critic forward: full sequence -> V(s_{T-1}) only ----
+                    self.eval_critic.train()
+                    v = self.eval_critic(states_dev, alive_mask, timestep_padding_mask)["v"]
+                    v_last = v[:, 0]  # (B,) — value at the last timestep of the segment
 
-                # ---- Bootstrap: V(s_T) from the next state after the segment ----
-                with torch.no_grad():
-                    v_next = self.eval_critic(
-                        next_states_dev[:, -1:, ...],
-                        next_alive_mask[:, -1:, ...],
-                        next_timestep_padding_mask[:, -1:],
-                    )["v"][:, 0]  # (B,)
+                    # ---- Bootstrap: V(s_T) from the next state after the segment ----
+                    with torch.no_grad():
+                        v_next = self.eval_critic(
+                            next_states_dev[:, -1:, ...],
+                            next_alive_mask[:, -1:, ...],
+                            next_timestep_padding_mask[:, -1:],
+                        )["v"][:, 0]  # (B,)
 
-                # ---- Single-step TD residual as advantage (GAE with one timestep) ----
-                r_last = self._aggregate_rewards(rewards[:, -1]).to(device)  # (B,)
-                termination_last = terminations[:, -1].prod(dim=-1).to(
-                    dtype=torch.float32, device=device
-                )
-                delta = r_last + self.gamma * v_next * (1.0 - termination_last) - v_last
-                advantages_last = delta  # (B,)
-                returns = delta + v_last  # (B,) — TD target for the critic
-
-                # ---- Actor forward: action logits for last timestep ----
-                observations_transposed = torch.transpose(observations, 1, 2).to(
-                    device
-                )
-                self.eval_agent_group.train()
-                ret_agent = self.eval_agent_group(
-                    observations_transposed,
-                    timestep_padding_mask_expanded,
-                    alive_mask[:, -1, :],
-                )
-                action_logits = ret_agent["action_logits"]  # (B, N, action_dim)
-
-                actions_last = actions[:, -1].to(dtype=torch.int64, device=device)
-                log_probs_old = all_log_probs[:, -1, :].to(device)
-
-                # ---- PPO actor loss ----
-                dist = Categorical(logits=action_logits)
-                new_log_probs = dist.log_prob(actions_last)
-                entropy = dist.entropy()
-
-                alive_last_flag = alive_mask[:, -1, :].to(
-                    dtype=torch.float32, device=device
-                )
-                alive_last_count = alive_last_flag.sum()
-
-                ratio = torch.exp(new_log_probs - log_probs_old)
-                adv_expanded = advantages_last.detach().unsqueeze(-1).expand(
-                    -1, n_agents
-                )  # (B, N)
-                surr1 = ratio * adv_expanded
-                surr2 = (
-                    torch.clamp(
-                        ratio, 1.0 - self.clip_epsilon, 1.0 + self.clip_epsilon
+                    # ---- Single-step TD residual as advantage (GAE with one timestep) ----
+                    r_last = self._aggregate_rewards(rewards[:, -1]).to(device)  # (B,)
+                    termination_last = terminations[:, -1].prod(dim=-1).to(
+                        dtype=torch.float32, device=device
                     )
-                    * adv_expanded
-                )
-                actor_loss = (
-                    -(torch.min(surr1, surr2) * alive_last_flag).sum()
-                    / max(alive_last_count, torch.tensor(1.0, device=device))
-                )
-                entropy_loss = (
-                    -(entropy * alive_last_flag).sum()
-                    / max(alive_last_count, torch.tensor(1.0, device=device))
-                )
-                actor_loss = actor_loss + self.entropy_coef * entropy_loss
+                    delta = r_last + self.gamma * v_next * (1.0 - termination_last) - v_last
+                    advantages_last = delta  # (B,)
+                    returns = delta + v_last  # (B,) — TD target for the critic
 
-                # ---- Critic value loss (single timestep) ----
-                critic_loss = F.mse_loss(v_last, returns.detach())
+                    # ---- Actor forward: action logits for last timestep ----
+                    observations_transposed = torch.transpose(observations, 1, 2).to(
+                        device
+                    )
+                    self.eval_agent_group.train()
+                    ret_agent = self.eval_agent_group(
+                        observations_transposed,
+                        timestep_padding_mask_expanded,
+                        alive_mask[:, -1, :],
+                    )
+                    action_logits = ret_agent["action_logits"]  # (B, N, action_dim)
 
-                # ---- Backward pass: actor ----
-                self.agent_optimizer.zero_grad()
-                actor_loss.backward(retain_graph=True)
-                torch.nn.utils.clip_grad_norm_(
-                    self.eval_agent_group.parameters(), max_norm=self.max_grad_norm
-                )
+                    actions_last = actions[:, -1].to(dtype=torch.int64, device=device)
+                    log_probs_old = all_log_probs[:, -1, :].to(device)
 
-                # ---- Backward pass: critic ----
-                self.critic_optimizer.zero_grad()
-                critic_loss.backward()
-                torch.nn.utils.clip_grad_norm_(
-                    self.eval_critic.parameters(), max_norm=self.max_grad_norm
-                )
+                    # ---- PPO actor loss ----
+                    avail_actions = batch["avail_actions"]
+                    dist = masked_categorical(
+                        action_logits,
+                        avail_actions[:, -1] if isinstance(avail_actions, torch.Tensor) else None,
+                        active_mask=alive_mask[:, -1],
+                        actions=actions_last,
+                    )
+                    new_log_probs = dist.log_prob(actions_last)
+                    entropy = dist.entropy()
 
-                self.agent_optimizer.step()
-                self.critic_optimizer.step()
+                    alive_last_flag = alive_mask[:, -1, :].to(
+                        dtype=torch.float32, device=device
+                    )
+                    alive_last_count = alive_last_flag.sum()
 
-                total_actor_loss += actor_loss.detach().cpu().item()
-                total_critic_loss += critic_loss.detach().cpu().item()
-                total_batches += 1
+                    ratio = torch.exp(new_log_probs - log_probs_old)
+                    adv_expanded = advantages_last.detach().unsqueeze(-1).expand(
+                        -1, n_agents
+                    )  # (B, N)
+                    surr1 = ratio * adv_expanded
+                    surr2 = (
+                        torch.clamp(
+                            ratio, 1.0 - self.clip_epsilon, 1.0 + self.clip_epsilon
+                        )
+                        * adv_expanded
+                    )
+                    actor_loss = (
+                        -(torch.min(surr1, surr2) * alive_last_flag).sum()
+                        / max(alive_last_count, torch.tensor(1.0, device=device))
+                    )
+                    entropy_loss = (
+                        -(entropy * alive_last_flag).sum()
+                        / max(alive_last_count, torch.tensor(1.0, device=device))
+                    )
+                    actor_loss = actor_loss + self.entropy_coef * entropy_loss
 
-                bs = batch["states"].shape[0]
-                pbar.update(bs)
+                    # ---- Critic value loss (single timestep) ----
+                    critic_loss = F.mse_loss(v_last, returns.detach())
+
+                    # ---- Backward pass: actor ----
+                    self.agent_optimizer.zero_grad()
+                    actor_loss.backward()
+                    torch.nn.utils.clip_grad_norm_(
+                        self.eval_agent_group.parameters(), max_norm=self.max_grad_norm
+                    )
+
+                    # ---- Backward pass: critic ----
+                    self.critic_optimizer.zero_grad()
+                    critic_loss.backward()
+                    torch.nn.utils.clip_grad_norm_(
+                        self.eval_critic.parameters(), max_norm=self.max_grad_norm
+                    )
+
+                    self.agent_optimizer.step()
+                    self.critic_optimizer.step()
+
+                    total_actor_loss += actor_loss.detach().cpu().item()
+                    total_critic_loss += critic_loss.detach().cpu().item()
+                    total_batches += 1
+
+                    bs = batch["states"].shape[0]
+                    pbar.update(bs)
 
         self.eval_agent_group.to("cpu")
         self.eval_critic.to("cpu")

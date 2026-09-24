@@ -194,7 +194,7 @@ def trajectory_collate_fn(batch):
         first_elem = batch[0][k][0]
         if np.issubdtype(first_elem.dtype, np.object_):
             collated[k] = np.stack([sample[k] for sample in batch])
-        elif np.issubdtype(first_elem.dtype, np.number):
+        elif np.issubdtype(first_elem.dtype, np.number) or np.issubdtype(first_elem.dtype, np.bool_):
             collated[k] = torch.tensor(np.stack([sample[k] for sample in batch]))
         else:
             raise ValueError(f"Unexpected data type for {k}: {first_elem.dtype}")

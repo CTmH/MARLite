@@ -9,7 +9,7 @@ all_reduce across workers.
 
 import torch
 import torch.nn.functional as F
-from torch.distributions import Categorical
+from marlite.util.action_distribution import masked_categorical
 from typing import Any, Dict
 
 from marlite.algorithm.agents import AgentGroupConfig
@@ -151,7 +151,13 @@ class G2ANetMAPPOWorker(OnPolicyWorker):
         actions_last = actions[:, -1].to(dtype=torch.int64, device=self.device)
         log_probs_old = all_log_probs[:, -1, :].to(self.device)
 
-        dist = Categorical(logits=action_logits)
+        avail_actions = batch["avail_actions"]
+        dist = masked_categorical(
+            action_logits,
+            avail_actions[:, -1] if isinstance(avail_actions, torch.Tensor) else None,
+            active_mask=alive_mask[:, -1],
+            actions=actions_last,
+        )
         new_log_probs = dist.log_prob(actions_last)
         entropy = dist.entropy()
 

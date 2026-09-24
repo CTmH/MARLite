@@ -13,7 +13,7 @@ import yaml
 import numpy as np
 import torch
 import torch.nn.functional as F
-from torch.distributions import Categorical
+from marlite.util.action_distribution import masked_categorical
 from tqdm import tqdm
 from absl import logging
 
@@ -242,7 +242,13 @@ class GraphMAPPOTrainer(OnPolicyTrainer):
                     )
                     log_probs_old = all_log_probs[:, -1, :].to(device)
 
-                    dist = Categorical(logits=action_logits)
+                    avail_actions = batch["avail_actions"]
+                    dist = masked_categorical(
+                        action_logits,
+                        avail_actions[:, -1] if isinstance(avail_actions, torch.Tensor) else None,
+                        active_mask=alive_mask[:, -1],
+                        actions=actions_last,
+                    )
                     new_log_probs = dist.log_prob(actions_last)
                     entropy = dist.entropy()
 

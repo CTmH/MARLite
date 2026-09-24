@@ -5,7 +5,7 @@ SSL Group Consensus MAPPO worker for multi-GPU training.
 import torch
 import torch.nn.functional as F
 import torch.distributed as dist
-from torch.distributions import Categorical
+from marlite.util.action_distribution import masked_categorical
 import numpy as np
 from typing import Any, Dict
 
@@ -314,7 +314,13 @@ class SSLGroupConsensusMAPPOWorker(OnPolicyWorker):
         actions_last = actions[:, -1].to(dtype=torch.int64, device=self.device)
         log_probs_old = all_log_probs[:, -1, :].to(self.device)
 
-        dist = Categorical(logits=action_logits)
+        avail_actions = batch["avail_actions"]
+        dist = masked_categorical(
+            action_logits,
+            avail_actions[:, -1] if isinstance(avail_actions, torch.Tensor) else None,
+            active_mask=alive_mask[:, -1],
+            actions=actions_last,
+        )
         new_log_probs = dist.log_prob(actions_last)
         entropy = dist.entropy()
 

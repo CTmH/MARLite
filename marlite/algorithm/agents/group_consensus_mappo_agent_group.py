@@ -9,7 +9,7 @@ unchanged.  Supports both ``consensus_mode="vae"`` (probabilistic) and
 
 import numpy as np
 import torch
-from torch.distributions import Categorical
+from marlite.util.action_distribution import masked_categorical
 from typing import Dict, Any, List, Optional
 
 from marlite.algorithm.agents.group_consensus_agent_group import (
@@ -120,12 +120,9 @@ class GroupConsensusMAPPOAgentGroup(GroupConsensusAgentGroup):
 
         for i, agent in enumerate(self.agent_model_dict.keys()):
             if alive_flag[i]:
-                if action_masks is not None:
-                    masked_logits = logits[i].clone()
-                    masked_logits[~action_masks[i]] = -float("inf")
-                    dist = Categorical(logits=masked_logits)
-                else:
-                    dist = Categorical(logits=logits[i])
+                dist = masked_categorical(
+                    logits[i], None if action_masks is None else action_masks[i]
+                )
 
                 action = dist.sample()
                 log_prob = dist.log_prob(action)
