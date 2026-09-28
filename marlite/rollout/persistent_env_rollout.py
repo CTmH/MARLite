@@ -13,6 +13,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import time
 from multiprocessing.shared_memory import SharedMemory
 from marlite.environment import EnvConfig
+from marlite.environment.smac_wrapper import SC2_RECOVERABLE_ERRORS
 from marlite.algorithm.agents import AgentGroup, AgentGroupConfig
 from marlite.util.env_util import obs_preprocess, ensure_all_agents_present
 from marlite.util.serialization import deserialize_from_buffer
@@ -38,6 +39,7 @@ def persistent_env_rollout(
     required_attrs: Optional[Union[str, List[str]]] = None,
     episode_seeds: Optional[List[int | None]] = None,
     deterministic: bool = False,
+    _sc2_retries: int = 2,
 ) -> List[Dict[str, Any]]:
     """Execute multiple rollouts using a single environment instance.
 
@@ -112,6 +114,22 @@ def persistent_env_rollout(
 
     episodes = []
 
+    def retry_from(index: int, reset_seed: int, error: Exception):
+        try:
+            env.close()
+        except Exception as close_error:
+            print(f"Failed to close interrupted SC2 environment: {close_error}")
+        if _sc2_retries == 0:
+            raise RuntimeError("SC2 episode failed after recovery attempts") from error
+        print(f"Retrying SC2 episode {index} after: {error}")
+        return episodes + persistent_env_rollout(
+            env_config, agent_group_config, shm_info,
+            n_episodes - index, rnn_traj_len, episode_limit, epsilon, device,
+            check_victory, required_attrs,
+            [reset_seed, *episode_seeds[index + 1:]], deterministic,
+            _sc2_retries - 1,
+        )
+
     for episode_idx in range(n_episodes):
         seed = episode_seeds[episode_idx]
         seed_everything(seed)
@@ -156,10 +174,10 @@ def persistent_env_rollout(
                 try:
                     observations, infos = env.reset(seed=reset_seed)
                 except Exception as e:
-                    if seed is not None or deterministic:
-                        raise RuntimeError("Seeded env.reset failed; check wrapper seed support") from e
-                    print(f"Reset failed: {e}")
-                    return episodes
+                    if isinstance(e, SC2_RECOVERABLE_ERRORS):
+                        return retry_from(episode_idx, reset_seed, e)
+                    env.close()
+                    raise RuntimeError("env.reset failed") from e
 
                 info_item = next(iter(infos.values()), None)
                 if isinstance(info_item, dict) and isinstance(
@@ -213,10 +231,6 @@ def persistent_env_rollout(
                     "avail_actions": avail_actions,
                     "infos": infos,
                 }
-                # Record lengths before pre_step for error-rollback
-                lengths_before = {
-                    k: len(v) for k, v in episode.items() if isinstance(v, list)
-                }
                 phases.pre_step(episode, ctx_pre)
 
                 # ---------------------------------------------------
@@ -227,9 +241,10 @@ def persistent_env_rollout(
                         env.step(actions)
                     )
                 except Exception as e:
-                    print(f"Step failed: {e}")
-                    _rollback(episode, lengths_before)
-                    break
+                    if isinstance(e, SC2_RECOVERABLE_ERRORS):
+                        return retry_from(episode_idx, reset_seed, e)
+                    env.close()
+                    raise RuntimeError("env.step failed") from e
 
                 observed_agents = set(observations)
                 observations = ensure_all_agents_present(
@@ -358,10 +373,3 @@ def persistent_env_rollout(
 
     env.close()
     return episodes
-
-
-def _rollback(episode: dict, lengths_before: dict) -> None:
-    """Truncate episode lists back to their lengths before the pre_step phase."""
-    for key, length in lengths_before.items():
-        if isinstance(episode[key], list):
-            episode[key] = episode[key][:length]

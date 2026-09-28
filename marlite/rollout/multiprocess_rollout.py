@@ -12,6 +12,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import time
 from multiprocessing.shared_memory import SharedMemory
 from marlite.environment.env_config import EnvConfig
+from marlite.environment.smac_wrapper import SC2_RECOVERABLE_ERRORS
 from marlite.algorithm.agents import AgentGroup, AgentGroupConfig
 from marlite.util.env_util import obs_preprocess, ensure_all_agents_present
 from marlite.util.serialization import deserialize_from_buffer
@@ -36,6 +37,7 @@ def multiprocess_rollout(
     required_attrs: Optional[Union[str, List[str], tuple]] = None,
     seed: int | None = None,
     deterministic: bool = False,
+    _sc2_retries: int = 2,
 ):
     """Execute a rollout using multiprocess environment.
 
@@ -80,6 +82,20 @@ def multiprocess_rollout(
     env = env_config.create_env()
     agent_group = agent_group.reset().eval().to(device)
     possible_agents = env.possible_agents.copy()
+
+    def retry(reset_seed: int, error: Exception):
+        try:
+            env.close()
+        except Exception as close_error:
+            print(f"Failed to close interrupted SC2 environment: {close_error}")
+        if _sc2_retries == 0:
+            raise RuntimeError("SC2 episode failed after recovery attempts") from error
+        print(f"Retrying SC2 episode after: {error}")
+        return multiprocess_rollout(
+            env_config, agent_group_config, shm_info, rnn_traj_len,
+            episode_limit, epsilon, device, check_victory, required_attrs,
+            reset_seed, deterministic, _sc2_retries - 1,
+        )
 
     # ---- Resolve required attributes and collection phases ----
     attrs_list = resolve_required_attrs(required_attrs)
@@ -129,10 +145,10 @@ def multiprocess_rollout(
             try:
                 observations, infos = env.reset(seed=reset_seed)
             except Exception as e:
-                if seed is not None or deterministic:
-                    raise RuntimeError("Seeded env.reset failed; check wrapper seed support") from e
-                print("Reset failed")
-                return None
+                if isinstance(e, SC2_RECOVERABLE_ERRORS):
+                    return retry(reset_seed, e)
+                env.close()
+                raise RuntimeError("env.reset failed") from e
 
             info_item = next(iter(infos.values()), None)
             if isinstance(info_item, dict) and isinstance(
@@ -184,10 +200,6 @@ def multiprocess_rollout(
                 "avail_actions": avail_actions,
                 "infos": infos,
             }
-            # Record lengths before pre_step for error-rollback
-            lengths_before = {
-                k: len(v) for k, v in episode.items() if isinstance(v, list)
-            }
             phases.pre_step(episode, ctx_pre)
 
             # -------------------------------------------------------
@@ -198,9 +210,10 @@ def multiprocess_rollout(
                     actions
                 )
             except Exception as e:
-                print(f"Step failed: {e}")
-                _rollback(episode, lengths_before)
-                break
+                if isinstance(e, SC2_RECOVERABLE_ERRORS):
+                    return retry(reset_seed, e)
+                env.close()
+                raise RuntimeError("env.step failed") from e
 
             observed_agents = set(observations)
             observations = ensure_all_agents_present(
@@ -325,10 +338,3 @@ def multiprocess_rollout(
 
     env.close()
     return episode
-
-
-def _rollback(episode: dict, lengths_before: dict) -> None:
-    """Truncate episode lists back to their lengths before the pre_step phase."""
-    for key, length in lengths_before.items():
-        if isinstance(episode[key], list):
-            episode[key] = episode[key][:length]

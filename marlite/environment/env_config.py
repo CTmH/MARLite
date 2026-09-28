@@ -2,6 +2,7 @@ from typing import Dict, Any
 from pettingzoo import ParallelEnv
 import importlib
 from copy import deepcopy
+from functools import partial
 
 from marlite.environment.magent_wrapper import AdversarialPursuitPredator, AdversarialPursuitPrey, BattleWrapper
 from marlite.environment.smac_wrapper import SMACWrapper
@@ -49,6 +50,10 @@ class EnvConfig():
             if opp_agent_group is not None:
                 wrapper_params["opponent_agent_group_config"] = opp_agent_group
             wrapper_class = REGISTERED_WRAPPERS[self.wrapper_type]
+            if self.wrapper_type == "smac":
+                wrapper_params["env_factory"] = partial(
+                    env_class.parallel_env, **deepcopy(self.env_params)
+                )
             env = wrapper_class(env, **wrapper_params)
 
         return env
