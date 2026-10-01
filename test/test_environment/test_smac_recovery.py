@@ -32,7 +32,7 @@ class FakeSC2Env:
 def test_smac_wrapper_recreates_failed_env_with_same_seed():
     failed = FakeSC2Env(fail_reset=True)
     recovered = FakeSC2Env()
-    wrapper = SMACWrapper(failed, env_factory=lambda: recovered)
+    wrapper = SMACWrapper(failed, env_factory=lambda: recovered, reset_retries=2)
 
     observations, _ = wrapper.reset(seed=42)
 
@@ -62,8 +62,23 @@ def test_env_config_supplies_smac_recreation_factory(monkeypatch):
         lambda name: module,
     )
 
-    wrapper = EnvConfig("fake", "smacv2", wrapper={"type": "smac"}).create_env()
+    wrapper = EnvConfig(
+        "fake", "smacv2", wrapper={"type": "smac", "reset_retries": 2}
+    ).create_env()
     wrapper.reset(seed=13)
 
     assert environments[0].closed
     assert environments[1].seeds == [13]
+
+
+def test_smac_wrapper_defers_recovery_to_rollout_by_default():
+    failed = FakeSC2Env(fail_reset=True)
+
+    def unexpected_restart():
+        pytest.fail("Wrapper must not restart before rollout backoff")
+
+    wrapper = SMACWrapper(failed, env_factory=unexpected_restart)
+    with pytest.raises(SC2EpisodeInterrupted):
+        wrapper.reset(seed=42)
+    assert failed.closed
+    assert failed.seeds == [42]

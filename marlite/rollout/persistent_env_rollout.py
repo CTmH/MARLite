@@ -13,7 +13,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import time
 from multiprocessing.shared_memory import SharedMemory
 from marlite.environment import EnvConfig
-from marlite.environment.smac_wrapper import SC2_RECOVERABLE_ERRORS
+from marlite.environment.errors import recoverable_errors
 from marlite.algorithm.agents import AgentGroup, AgentGroupConfig
 from marlite.util.env_util import obs_preprocess, ensure_all_agents_present
 from marlite.util.serialization import deserialize_from_buffer
@@ -24,6 +24,7 @@ from marlite.rollout.attribute_spec import (
 from marlite.rollout.phases import resolve_phases, RolloutPhases
 from marlite.rollout.boundaries import finish_transition
 from marlite.util.randomness import configure_randomness, seed_everything
+from marlite.rollout.env_retry import EnvRetryPolicy
 
 
 def persistent_env_rollout(
@@ -39,7 +40,8 @@ def persistent_env_rollout(
     required_attrs: Optional[Union[str, List[str]]] = None,
     episode_seeds: Optional[List[int | None]] = None,
     deterministic: bool = False,
-    _sc2_retries: int = 2,
+    env_retry: EnvRetryPolicy | None = None,
+    _retry_attempt: int = 0,
 ) -> List[Dict[str, Any]]:
     """Execute multiple rollouts using a single environment instance.
 
@@ -77,6 +79,7 @@ def persistent_env_rollout(
     if len(episode_seeds) != n_episodes:
         raise ValueError("episode_seeds must match n_episodes")
     configure_randomness(episode_seeds[0] if n_episodes else None, deterministic)
+    env_retry = env_retry or EnvRetryPolicy()
     # ---- Deserialize agent group from shared memory ----
     shm_name, shm_size = shm_info
     shm = SharedMemory(name=shm_name)
@@ -118,16 +121,14 @@ def persistent_env_rollout(
         try:
             env.close()
         except Exception as close_error:
-            print(f"Failed to close interrupted SC2 environment: {close_error}")
-        if _sc2_retries == 0:
-            raise RuntimeError("SC2 episode failed after recovery attempts") from error
-        print(f"Retrying SC2 episode {index} after: {error}")
+            print(f"Failed to close interrupted environment: {close_error}")
+        env_retry.wait(_retry_attempt, error)
         return episodes + persistent_env_rollout(
             env_config, agent_group_config, shm_info,
             n_episodes - index, rnn_traj_len, episode_limit, epsilon, device,
             check_victory, required_attrs,
             [reset_seed, *episode_seeds[index + 1:]], deterministic,
-            _sc2_retries - 1,
+            env_retry, _retry_attempt + 1,
         )
 
     for episode_idx in range(n_episodes):
@@ -174,7 +175,7 @@ def persistent_env_rollout(
                 try:
                     observations, infos = env.reset(seed=reset_seed)
                 except Exception as e:
-                    if isinstance(e, SC2_RECOVERABLE_ERRORS):
+                    if isinstance(e, recoverable_errors(env)):
                         return retry_from(episode_idx, reset_seed, e)
                     env.close()
                     raise RuntimeError("env.reset failed") from e
@@ -241,7 +242,7 @@ def persistent_env_rollout(
                         env.step(actions)
                     )
                 except Exception as e:
-                    if isinstance(e, SC2_RECOVERABLE_ERRORS):
+                    if isinstance(e, recoverable_errors(env)):
                         return retry_from(episode_idx, reset_seed, e)
                     env.close()
                     raise RuntimeError("env.step failed") from e

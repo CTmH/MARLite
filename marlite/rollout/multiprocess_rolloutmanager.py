@@ -6,6 +6,7 @@ from marlite.algorithm.agents import AgentGroupConfig
 from marlite.environment.env_config import EnvConfig
 from marlite.rollout.rolloutmanager import RolloutManager
 from tqdm import tqdm
+from marlite.rollout.env_retry import EnvRetryPolicy
 
 
 class MultiProcessRolloutManager(RolloutManager):
@@ -25,6 +26,7 @@ class MultiProcessRolloutManager(RolloutManager):
         required_attrs: Optional[Union[str, List[str]]] = None,
         seed: int | None = None,
         deterministic: bool = False,
+        env_retry: dict | None = None,
     ):
 
         self.worker_func = worker_func
@@ -41,6 +43,7 @@ class MultiProcessRolloutManager(RolloutManager):
         self.required_attrs = required_attrs
         self.seed = seed
         self.deterministic = deterministic
+        self.env_retry = EnvRetryPolicy(**(env_retry if env_retry is not None else {}))
         self._generation = 0
 
     def generate_episodes(self) -> List[Any]:
@@ -83,6 +86,7 @@ class MultiProcessRolloutManager(RolloutManager):
                             [self.required_attrs] * self.n_episodes,
                             self._episode_seeds(),
                             [self.deterministic] * self.n_episodes,
+                            [self.env_retry] * self.n_episodes,
                         ),
                         total=self.n_episodes,
                         desc="Generating Episodes",

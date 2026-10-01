@@ -20,13 +20,18 @@ class SMACWrapper(BaseParallelWrapper):
     to return flattened per-agent states stacked in possible_agents order.
     Missing agents are represented by zero rows.
     """
+    # Keep backend-specific exception knowledge out of generic rollout workers.
+    recoverable_errors = SC2_RECOVERABLE_ERRORS
+
     def __init__(
-        self, env, env_factory: Callable | None = None, reset_retries: int = 2
+        self, env, env_factory: Callable | None = None, reset_retries: int = 0
     ):
         super().__init__(env)
         if reset_retries < 0:
             raise ValueError("reset_retries must be nonnegative")
         self.env_factory = env_factory
+        # Rollout owns recovery/backoff by default. Opt-in local retries are
+        # only for standalone wrapper users; stacking both policies retries twice.
         self.reset_retries = reset_retries
         self.default_state_dict = {}
         for agent in env.possible_agents:
