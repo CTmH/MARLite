@@ -35,6 +35,11 @@ class G2ANetAttention(nn.Module):
         # observations shape: (batch_size, n_agents, obs_dim)
         batch_size, n_agents, obs_dim = encoded_obs.shape
 
+        if alive_mask is not None:
+            encoded_obs = encoded_obs.masked_fill(
+                ~alive_mask.to(device=encoded_obs.device, dtype=torch.bool).unsqueeze(-1), 0.
+            )
+
         # Prepare pairs for hard attention: [h_i, h_j] for all i,j
         h_i = encoded_obs.unsqueeze(2).expand(-1, -1, n_agents, -1)  # (batch, n, n, h)
         h_j = encoded_obs.unsqueeze(1).expand(-1, n_agents, -1, -1)  # (batch, n, n, h)
@@ -46,38 +51,30 @@ class G2ANetAttention(nn.Module):
         hard_scores = self.hard_attention_fc(lstm_out).squeeze(-1)  # (batch*n, n)
         hard_scores = hard_scores.view(batch_size, n_agents, n_agents)  # (batch, n, n)
 
-        # Apply Gumbel-Softmax for discrete edge selection
-        if self.training:
-            # During training: Gumbel-Softmax
-            hard_scores_flat = hard_scores.view(-1, n_agents)  # (B*N, N)
-            hard_attention_weights = F.gumbel_softmax(hard_scores_flat, tau=1.0, hard=False, dim=-1)
-            hard_attention_weights = hard_attention_weights.view(batch_size, n_agents, n_agents)
-        else:
-            # During evaluation: argmax
-            hard_attention_weights = torch.zeros_like(hard_scores)
-            max_indices = torch.argmax(hard_scores, dim=-1)
-            for i in range(batch_size):
-                for j in range(n_agents):
-                    hard_attention_weights[i, j, max_indices[i, j]] = 1.0
-            # Vectorized version using scatter_
-            hard_attention_weights = torch.zeros_like(hard_scores)
-            max_indices = torch.argmax(hard_scores, dim=-1)
-            hard_attention_weights.scatter_(2, max_indices.unsqueeze(2), 1.0)
+        # A deterministic Bernoulli gate is used in BOTH collection and learning.
+        # Its straight-through derivative trains graph selection without injecting
+        # unrecorded Gumbel noise into PPO's importance-sampling denominator.
+        probability = hard_scores.sigmoid()
+        binary_gate = (probability >= 0.5).to(probability.dtype)
+        gates = binary_gate + (probability - probability.detach())
 
-        # Add self-loops if requested
-        if self.add_self_loop:
-            identity = torch.eye(n_agents, device=hard_attention_weights.device)
-            hard_attention_weights = hard_attention_weights + identity.unsqueeze(0)
+        live = (torch.ones((batch_size, n_agents), device=encoded_obs.device, dtype=torch.bool)
+                if alive_mask is None else alive_mask.to(device=encoded_obs.device, dtype=torch.bool))
+        valid = live.unsqueeze(2) & live.unsqueeze(1)
+        diagonal = torch.eye(n_agents, device=encoded_obs.device, dtype=torch.bool).unsqueeze(0)
+        gates = gates.masked_fill(diagonal, 1.0 if self.add_self_loop else 0.0)
+        gates = gates * valid
 
-        # Soft attention - compute attention weights
-        Q = self.W_q(encoded_obs)  # (batch, n, h)
-        K = self.W_k(encoded_obs)  # (batch, n, h)
-
-        # Compute attention scores
-        scores = torch.matmul(Q, K.transpose(1, 2))  # (batch, n, n)
-        scores = scores * hard_attention_weights  # apply hard attention mask
-
-        # Apply softmax
-        soft_attention_weights = F.softmax(scores, dim=-1)  # (batch, n, n)
-
-        return hard_attention_weights, soft_attention_weights
+        query = self.W_q(encoded_obs)
+        key = self.W_k(encoded_obs)
+        scores = torch.matmul(query, key.transpose(1, 2)) / self.hidden_dim ** 0.5
+        valid = valid & (torch.ones_like(diagonal) if self.add_self_loop else ~diagonal)
+        # Empty rows (dead or isolated agents) remain finite and send no messages.
+        scores = scores.masked_fill(~valid, torch.finfo(scores.dtype).min)
+        base_weights = F.softmax(scores, dim=-1) * valid
+        mass = (gates * base_weights).sum(-1, keepdim=True)
+        denominator = torch.where(mass.detach() > 0, mass, torch.ones_like(mass))
+        # GraphBuilder multiplies these factors. Keeping a finite soft factor on
+        # unselected edges also lets the straight-through gate learn to open them.
+        soft_weights = base_weights / denominator.clamp_min(1e-8)
+        return gates, soft_weights

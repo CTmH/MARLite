@@ -73,8 +73,6 @@ class SSLGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
         recon_mode: str = "per_agent",
         kl_divergence_weight: float = 0.005,
         warmup_epochs: int = 0,
-        loss_combination_method: str = "weighted_sum",
-        pit_loss_alpha: float = 0.9,
         kl_on_group: bool = False,
         kl_on_agent: bool = True,
         consensus_mode: str = "vae",
@@ -88,11 +86,7 @@ class SSLGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
         self.kl_on_group = kl_on_group
         self.kl_on_agent = kl_on_agent
         self.consensus_mode = consensus_mode
-        super().__init__(
-            loss_combination_method=loss_combination_method,
-            pit_loss_alpha=pit_loss_alpha,
-            **kwargs,
-        )
+        super().__init__(**kwargs)
         validate_group_capacity(self.eval_agent_group, self.data_constructor)
 
     # ── Multi-GPU support ───────────────────────────────────────────────
@@ -114,9 +108,7 @@ class SSLGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
             reconstruction_loss=self.reconstruction_loss,
             data_constructor=self.data_constructor,
             kl_divergence_weight=self.kl_divergence_weight,
-            self_supervised_learning_loss_weight=self.self_supervised_learning_loss_weight,
-            loss_combination_method=self.loss_combination_method,
-            pit_loss_alpha=self.pit_loss_alpha,
+            loss_mixer_config=self.loss_mixer_config,
             warmup_epochs=self.warmup_epochs,
             recon_mode=self.recon_mode,
             kl_on_group=self.kl_on_group,
@@ -135,17 +127,6 @@ class SSLGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
     def _extra_sync_kwargs(self) -> dict:
         """Push the SSL auxiliary learning rate to workers via SYNC_LR."""
         return {"ssl_lr": self.ssl_optimizer.param_groups[0]["lr"]}
-
-    def _sync_eval_params_from_workers(self):
-        if self.worker_group is None:
-            return
-        eval_params = self.worker_group.read_params_from_worker0()
-        load_state_dict_into(
-            self.eval_agent_group, eval_params["eval_agent_group"]
-        )
-        load_state_dict_into(self.eval_critic, eval_params["eval_critic"])
-        if "ssl_model" in eval_params and self.ssl_model is not None:
-            load_state_dict_into(self.ssl_model, eval_params["ssl_model"])
 
     # ── Training loop ────────────────────────────────────────────────────
 
@@ -692,8 +673,6 @@ class SSLGroupConsensusQMIXTrainer(SelfSupervisedQMIXTrainer):
             combined_loss = critic_loss
         else:
             combined_loss = self._combine_rl_ssl_loss(critic_loss, ssl_loss)
-            #   weighted_sum: L_TD + w_ssl * L_SSL
-            #   pit_loss:     PITLoss([L_TD, L_SSL])
 
         if isinstance(combined_loss, torch.Tensor) and not torch.isfinite(combined_loss).any():
             logging.error(

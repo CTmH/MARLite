@@ -12,6 +12,7 @@ distributed worker process under :class:`OffPolicyWorkerGroup`.
 
 import torch
 from marlite.util.return_estimation import td_target
+from marlite.util.value_learning import last_action_mask, masked_action_values
 from typing import Any, Dict
 
 from marlite.algorithm.agents import AgentGroupConfig
@@ -149,7 +150,8 @@ class QPLEXWorker(OffPolicyWorker):
 
         self.eval_critic.train()
         cret = self.eval_critic(
-            q_val, states, actions_last, alive_mask, timestep_padding_mask[:, 0, :]
+            q_val, states, actions_last, alive_mask, timestep_padding_mask[:, 0, :],
+            avail_actions=last_action_mask(batch, "avail_actions", self.device),
         )
         q_tot = cret["q_tot"]
         att_reg = cret["att_reg"]
@@ -166,10 +168,10 @@ class QPLEXWorker(OffPolicyWorker):
                 next_alive_mask[:, -1, :],
             )
             q_val_next_eval = ret_next_eval["q_val"]
-            if use_action_mask:
-                q_val_next_eval = torch.masked_fill(
-                    q_val_next_eval, ~next_avail_actions, -torch.inf
-                )
+            q_val_next_eval = masked_action_values(
+                q_val_next_eval, next_avail_actions if use_action_mask else None,
+                next_alive_mask[:, -1, :],
+            )
             best_actions = q_val_next_eval.argmax(dim=-1)
 
             self.target_agent_group.eval()
@@ -187,6 +189,7 @@ class QPLEXWorker(OffPolicyWorker):
                 best_actions,
                 next_alive_mask,
                 next_timestep_padding_mask[:, 0, :],
+                avail_actions=next_avail_actions if use_action_mask else None,
             )
             q_tot_next = cret_next["q_tot"]
 
@@ -196,10 +199,9 @@ class QPLEXWorker(OffPolicyWorker):
         y_tot = td_target(batch, r_last, q_tot_next, self.gamma, termination_last)
         critic_loss = torch.nn.functional.mse_loss(q_tot, y_tot.detach())
 
-        if att_reg.item() != 0:
-            total_loss = critic_loss + att_reg
-        else:
-            total_loss = critic_loss
+        # Keep the graph identical across ranks even when a local regularizer
+        # happens to be zero; conditional gradients can mismatch collectives.
+        total_loss = critic_loss + att_reg
 
         # ------------------------------------------------------------------
         # 5. Backprop + synchronise.
@@ -223,4 +225,4 @@ class QPLEXWorker(OffPolicyWorker):
         self._update_target_after_batch()
 
         loss = total_loss.detach().cpu().item()
-        return {"loss": loss, "critic_loss": loss}
+        return {"loss": loss, "critic_loss": critic_loss.detach().cpu().item()}

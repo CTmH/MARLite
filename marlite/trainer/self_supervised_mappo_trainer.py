@@ -29,7 +29,8 @@ from marlite.util.lr_scheduler_config import LRSchedulerConfig
 from marlite.util.self_supervised_data_constructor.self_supervised_data_constructor_config import (
     SelfSupervisedDataConstructorConfig,
 )
-from marlite.util.loss_func import ReconstructionLoss, PITLoss
+from marlite.util.loss_func import ReconstructionLoss
+from marlite.util.loss_mixer_config import LossMixerConfig
 
 
 class SelfSupervisedMAPPOTrainer(OnPolicyTrainer):
@@ -59,12 +60,9 @@ class SelfSupervisedMAPPOTrainer(OnPolicyTrainer):
         targets.
     reconstruction_loss : _Loss
         Loss function for reconstruction (e.g., ``PointSetMSELoss``).
-    self_supervised_learning_loss_weight : float
-        Weight ``w_ssl`` for VAE loss in ``weighted_sum`` mode.
-    loss_combination_method : str
-        ``"weighted_sum"`` or ``"pit_loss"``.
-    pit_loss_alpha : float
-        Alpha parameter for ``PITLoss``.
+    loss_mixer_config : LossMixerConfig or None
+        Builds weighted_sum (default), pit_loss, ema_grad_norm or pcgrad.
+        Task order is [RL, SSL]; gradient methods inspect shared AgentGroup parameters.
     clip_epsilon : float
         PPO clip range for the importance sampling ratio.
     gae_lambda : float
@@ -88,9 +86,7 @@ class SelfSupervisedMAPPOTrainer(OnPolicyTrainer):
         ssl_lr_scheduler_conf: LRSchedulerConfig | None,
         data_constructor_config: SelfSupervisedDataConstructorConfig,
         reconstruction_loss: _Loss,
-        self_supervised_learning_loss_weight: float = 1.0,
-        loss_combination_method: str = "weighted_sum",
-        pit_loss_alpha: float = 0.9,
+        loss_mixer_config: LossMixerConfig | None = None,
         # PPO params
         clip_epsilon: float = 0.2,
         gae_lambda: float = 0.95,
@@ -118,11 +114,8 @@ class SelfSupervisedMAPPOTrainer(OnPolicyTrainer):
                 f"reconstruction_loss must be a ReconstructionLoss subclass, "
                 f"got {type(self.reconstruction_loss).__name__}"
             )
-        self.self_supervised_learning_loss_weight = (
-            self_supervised_learning_loss_weight
-        )
-        self.loss_combination_method = loss_combination_method
-        self.pit_loss_alpha = pit_loss_alpha
+        self.loss_mixer_config = loss_mixer_config or LossMixerConfig()
+        self.loss_mixer = self.loss_mixer_config.get_loss_mixer()
 
         # -- Data constructor (always created) -----------------------------
         configure_randomness(kwargs.get("seed"), kwargs.get("deterministic", False), SSL_MODEL_STREAM)
@@ -157,11 +150,6 @@ class SelfSupervisedMAPPOTrainer(OnPolicyTrainer):
                 self.ssl_model.to(self.train_device)
             ).to("cpu")
 
-        # -- PITLoss for combining RL + SSL losses -------------------------
-        self.pit_loss = PITLoss(
-            num_tasks=2, alpha=self.pit_loss_alpha, reduction="mean"
-        )
-
         # -- Checkpoint caches ---------------------------------------------
         self.best_agent_group_params = serialize_to_buffer(
             get_state_dict(self.eval_agent_group)
@@ -172,9 +160,11 @@ class SelfSupervisedMAPPOTrainer(OnPolicyTrainer):
         self.best_ssl_model_params = serialize_to_buffer(
             self.ssl_model.state_dict()
         )
+        self.best_loss_mixer_params = serialize_to_buffer(self.loss_mixer.state_dict())
         self._cached_ssl_model_params = serialize_to_buffer(
             self.ssl_model.state_dict()
         )
+        self._cached_loss_mixer_params = serialize_to_buffer(self.loss_mixer.state_dict())
 
     # ------------------------------------------------------------------
     # SSL helpers
@@ -185,11 +175,10 @@ class SelfSupervisedMAPPOTrainer(OnPolicyTrainer):
         return self.reconstruction_loss(pred_set, target_set, mask)
 
     def _combine_rl_ssl_loss(self, rl_loss, ssl_loss):
-        """Combine RL and SSL losses via weighted sum or PITLoss."""
-        if self.loss_combination_method == "pit_loss":
-            losses = torch.stack([rl_loss, ssl_loss])
-            return self.pit_loss(losses)
-        return rl_loss + self.self_supervised_learning_loss_weight * ssl_loss
+        """Mix original objectives; keep private critic/decoder gradients intact."""
+        return self.loss_mixer(
+            (rl_loss, ssl_loss), parameters=self.eval_agent_group.parameters()
+        )
 
     # ------------------------------------------------------------------
     # PPO learning dispatch (single- / multi-GPU)
@@ -216,6 +205,7 @@ class SelfSupervisedMAPPOTrainer(OnPolicyTrainer):
             "eval_agent_group": get_state_dict(self.eval_agent_group),
             "eval_critic": get_state_dict(self.eval_critic),
             "ssl_model": get_state_dict(self.ssl_model),
+            "loss_mixer": self.loss_mixer.state_dict(),
             "reward_aggr_mode": self.reward_aggr_mode,
         }
         self.worker_group.broadcast_params(trainable_params)
@@ -231,6 +221,7 @@ class SelfSupervisedMAPPOTrainer(OnPolicyTrainer):
         if self.worker_group is None:
             return
         eval_params = self.worker_group.read_params_from_worker0()
+        self.loss_mixer.load_state_dict(eval_params["loss_mixer"])
         load_state_dict_into(self.eval_agent_group, eval_params["eval_agent_group"])
         load_state_dict_into(self.eval_critic, eval_params["eval_critic"])
         load_state_dict_into(self.ssl_model, eval_params["ssl_model"])
@@ -241,6 +232,10 @@ class SelfSupervisedMAPPOTrainer(OnPolicyTrainer):
 
     def save_current_model(self, checkpoint: str):
         super().save_current_model(checkpoint)
+        torch.save(
+            self.loss_mixer.state_dict(),
+            os.path.join(self.checkpointdir, checkpoint, "loss_mixer.pth"),
+        )
         ssl_path = os.path.join(
             self.checkpointdir, checkpoint, "ssl_model"
         )
@@ -254,6 +249,11 @@ class SelfSupervisedMAPPOTrainer(OnPolicyTrainer):
 
     def load_checkpoint(self, checkpoint: str):
         super().load_checkpoint(checkpoint)
+        mixer_path = os.path.join(self.checkpointdir, checkpoint, "loss_mixer.pth")
+        if os.path.exists(mixer_path):
+            self.loss_mixer.load_state_dict(torch.load(mixer_path, map_location="cpu", weights_only=True))
+        self.best_loss_mixer_params = serialize_to_buffer(self.loss_mixer.state_dict())
+        self._cached_loss_mixer_params = serialize_to_buffer(self.loss_mixer.state_dict())
         ssl_path = os.path.join(
             self.checkpointdir, checkpoint, "ssl_model", "ssl_model.pth"
         )
@@ -263,12 +263,16 @@ class SelfSupervisedMAPPOTrainer(OnPolicyTrainer):
                 self.ssl_model,
                 torch.load(ssl_path, weights_only=True),
             )
+        self._sync_params_to_workers()
         return self
 
     def save_best_model(self):
         """Write cached best params (agent, critic, ssl) directly to disk."""
         import os
         best_dir = os.path.join(self.checkpointdir, "best")
+        os.makedirs(best_dir, exist_ok=True)
+        torch.save(deserialize_from_buffer(self.best_loss_mixer_params),
+                   os.path.join(best_dir, "loss_mixer.pth"))
         agent_dir = os.path.join(best_dir, "agent")
         os.makedirs(agent_dir, exist_ok=True)
         torch.save(
@@ -401,6 +405,7 @@ class SelfSupervisedMAPPOTrainer(OnPolicyTrainer):
                 self.best_ssl_model_params = serialize_to_buffer(
                     get_state_dict(self.ssl_model)
                 )
+                self.best_loss_mixer_params = serialize_to_buffer(self.loss_mixer.state_dict())
 
             if first_metric >= target_first_metric:
                 break

@@ -2,6 +2,9 @@ import os
 from marlite.util.randomness import configure_randomness, VALUE_MODEL_STREAM
 import torch
 from marlite.util.return_estimation import td_target
+from marlite.util.value_learning import (
+    last_action_mask, masked_action_values, joint_q_from_counterfactual, qtran_constraints,
+)
 import torch.nn.functional as F
 import datetime
 import yaml
@@ -102,14 +105,11 @@ class QTRANTrainer(OffPolicyTrainer):
         trainable_params["eval_v_net"] = get_state_dict(self.eval_v_net)
 
     def _sync_eval_params_from_workers(self):
-        super()._sync_eval_params_from_workers()
         if self.worker_group is None:
             return
         eval_params = self.worker_group.read_params_from_worker0()
-        if "eval_v_net" in eval_params:
-            load_state_dict_into(
-                self.eval_v_net, eval_params["eval_v_net"]
-            )
+        for name in ("eval_agent_group", "eval_critic", "eval_v_net"):
+            load_state_dict_into(getattr(self, name), eval_params[name])
 
     def learn(
         self, sample_size, batch_size: int, times: int = 1
@@ -197,7 +197,7 @@ class QTRANTrainer(OffPolicyTrainer):
                     )
 
                     self.eval_critic.train()
-                    cret = self.eval_critic(enc_out, actions_last)
+                    cret = self.eval_critic(enc_out, actions_last, alive_mask=alive_mask[:, -1, :])
                     Q_jt_per_action = cret["q_per_action"]
 
                     self.eval_v_net.train()
@@ -208,10 +208,9 @@ class QTRANTrainer(OffPolicyTrainer):
                     )
                     v_jt = vret["v"]
 
-                    q_jt_at_a = Q_jt_per_action.gather(
-                        -1, actions_last.unsqueeze(-1)
-                    ).squeeze(-1)
-                    q_jt_scalar = q_jt_at_a.mean(dim=1)
+                    q_jt_scalar = joint_q_from_counterfactual(
+                        Q_jt_per_action, actions_last, alive_mask[:, -1, :]
+                    )
 
                     with torch.no_grad():
                         self.eval_agent_group.eval()
@@ -224,10 +223,10 @@ class QTRANTrainer(OffPolicyTrainer):
                             next_alive_mask[:, -1, :],
                         )
                         q_val_next_eval = ret_next_eval["q_val"]
-                        if use_action_mask:
-                            q_val_next_eval = torch.masked_fill(
-                                q_val_next_eval, ~next_avail_actions, -torch.inf
-                            )
+                        q_val_next_eval = masked_action_values(
+                            q_val_next_eval, next_avail_actions if use_action_mask else None,
+                            next_alive_mask[:, -1, :],
+                        )
                         next_best_actions = q_val_next_eval.argmax(dim=-1)
 
                         self.target_agent_group.eval()
@@ -239,45 +238,22 @@ class QTRANTrainer(OffPolicyTrainer):
                         enc_out_next = ret_next_target["enc_out"]
 
                         self.target_critic.eval()
-                        Q_jt_next = self.target_critic(enc_out_next, next_best_actions)[
+                        Q_jt_next = self.target_critic(enc_out_next, next_best_actions, alive_mask=next_alive_mask[:, -1, :])[
                             "q_per_action"
                         ]
-                        q_jt_next_at_best = (
-                            Q_jt_next.gather(-1, next_best_actions.unsqueeze(-1))
-                            .squeeze(-1)
-                            .mean(dim=1)
+                        q_jt_next_at_best = joint_q_from_counterfactual(
+                            Q_jt_next, next_best_actions, next_alive_mask[:, -1, :]
                         )
 
                     y = td_target(batch, r_last, q_jt_next_at_best, self.gamma, termination_last)
                     td_loss = F.mse_loss(q_jt_scalar, y.detach())
 
-                    current_best_actions = q_val.argmax(dim=-1)
-                    qmax = q_val.max(dim=-1).values
-                    q_jt_at_qmax = Q_jt_per_action.gather(
-                        -1, current_best_actions.unsqueeze(-1)
-                    ).squeeze(-1)
-                    is_optimal = (actions_last == current_best_actions).all(dim=1).float()
-                    diff_opt = qmax.sum(1) - q_jt_at_qmax.detach().sum(1) + v_jt.squeeze(-1)
-                    diff_opt_sq = diff_opt.square()
-
-                    q_actual_i = q_val.gather(
-                        -1, actions_last.unsqueeze(-1)
-                    ).squeeze(-1)
-                    counter_sum = (q_actual_i.sum(1, keepdim=True) - q_actual_i).unsqueeze(-1)
-                    Q_prime_cf = q_val + counter_sum
-                    D = Q_prime_cf - Q_jt_per_action.detach() + v_jt.unsqueeze(-1)
-                    D_min = D.min(dim=-1).values
-                    D_min_sq = D_min.square()
-
-                    if self.is_optimal_mask_mode:
-                        is_suboptimal = 1.0 - is_optimal
-                        denom_opt = is_optimal.sum().clamp(min=1.0)
-                        denom_nopt = is_suboptimal.sum().clamp(min=1.0)
-                        L_opt = (is_optimal * diff_opt_sq).sum() / denom_opt
-                        L_nopt = (is_suboptimal.unsqueeze(-1) * D_min_sq).sum() / denom_nopt
-                    else:
-                        L_opt = diff_opt_sq.mean()
-                        L_nopt = D_min_sq.mean()
+                    L_opt, L_nopt = qtran_constraints(
+                        q_val, enc_out, actions_last, Q_jt_per_action, v_jt,
+                        self.eval_critic, alive_mask[:, -1, :],
+                        last_action_mask(batch, "avail_actions", q_val.device),
+                        self.is_optimal_mask_mode,
+                    )
 
                     total_loss_batch = (
                         td_loss
@@ -414,22 +390,16 @@ class QTRANTrainer(OffPolicyTrainer):
         self._cached_v_net_params = serialize_to_buffer(get_state_dict(self.eval_v_net))
         load_state_dict_into(self.target_agent_group, get_state_dict(self.eval_agent_group))
         load_state_dict_into(self.target_critic, get_state_dict(self.eval_critic))
+        self._sync_params_to_workers()
         return self
 
     def save_best_model(self):
-        best_dir = os.path.join(self.checkpointdir, "best")
-        os.makedirs(best_dir, exist_ok=True)
-        torch.save(
-            deserialize_from_buffer(self.best_agent_group_params),
-            os.path.join(best_dir, "agent.pth"),
-        )
-        torch.save(
-            deserialize_from_buffer(self.best_critic_params),
-            os.path.join(best_dir, "critic.pth"),
-        )
+        super().save_best_model()
+        v_dir = os.path.join(self.checkpointdir, "best", "v_net")
+        os.makedirs(v_dir, exist_ok=True)
         torch.save(
             deserialize_from_buffer(self.best_v_net_params),
-            os.path.join(best_dir, "v_net.pth"),
+            os.path.join(v_dir, "v_net.pth"),
         )
         return self
 
@@ -495,12 +465,19 @@ class QTRANTrainer(OffPolicyTrainer):
                 f"Epoch {epoch}: Learning {learning_times_per_epoch} times per epoch ..."
             )
 
+            self._sync_params_to_workers()
             train_result = self.learn(
                 sample_size=sample_size,
                 batch_size=batch_size,
                 times=learning_times_per_epoch,
             )
             logging.info(f"Epoch {epoch}: Loss {train_result['loss']:.4f}")
+
+            if self.worker_group is not None:
+                self.worker_group.average_eval_params()
+                self.worker_group.average_target_params()
+            self._sync_eval_params_from_workers()
+            self._sync_target_params_from_workers()
 
             # Per-batch target updates are performed inside _learn_single_gpu
             # (see _update_target_after_batch).  In the multi-GPU path each
@@ -550,7 +527,8 @@ class QTRANTrainer(OffPolicyTrainer):
                 metric = metrics[metric_name]
                 best_metric = self.best_metrics[metric_name]
                 cache_params.append(
-                    (metric - best_metric) / max(abs(best_metric), 1)
+                    not np.isfinite(best_metric)
+                    or (metric - best_metric) / max(abs(best_metric), 1)
                     >= -self.update_cache_threshold
                 )
                 update_best.append(metric >= best_metric)
@@ -612,6 +590,7 @@ class QTRANTrainer(OffPolicyTrainer):
                 )
                 load_state_dict_into(self.target_agent_group, get_state_dict(self.eval_agent_group))
                 load_state_dict_into(self.target_critic, get_state_dict(self.eval_critic))
+                self._sync_params_to_workers()
                 logging.info(
                     f"Epoch {epoch}: Rolled back eval+v_net+target to cached parameters."
                 )

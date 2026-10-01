@@ -91,6 +91,7 @@ class SemiSupervisedMAPPOConfigProcessor(
         trainer_kwargs, train_args, checkpoint = MAPPOConfigProcessor.process(
             self, config
         )
+        self.parse_loss_mixer_config(trainer_kwargs)
         gate_scheduler_config = trainer_kwargs.pop(
             "rl_consensus_gate_scheduler", None
         )

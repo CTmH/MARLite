@@ -431,7 +431,8 @@ class OffPolicyTrainer(Trainer):
                 metric = metrics[metric_name]
                 best_metric = self.best_metrics[metric_name]
                 cache_params.append(
-                    (metric - best_metric) / max(abs(best_metric), 1)
+                    not np.isfinite(best_metric)
+                    or (metric - best_metric) / max(abs(best_metric), 1)
                     >= -self.update_cache_threshold
                 )
                 update_best.append(metric >= best_metric)

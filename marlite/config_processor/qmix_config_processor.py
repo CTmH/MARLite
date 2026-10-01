@@ -12,6 +12,7 @@ from marlite.util.scheduler_config import SchedulerConfig
 from marlite.util.optimizer_config import OptimizerConfig
 from marlite.util.lr_scheduler_config import LRSchedulerConfig
 from marlite.util.loss_func import REGISTERED_RECONSTRUCTION_LOSS
+from marlite.util.loss_mixer_config import LossMixerConfig
 from marlite.analyzer import AnalyzerConfig
 from marlite.util.self_supervised_data_constructor.self_supervised_data_constructor_config import (
     SelfSupervisedDataConstructorConfig,
@@ -141,6 +142,31 @@ class QMIXConfigProcessor(ConfigProcessor):
 
 
 class SemiSupervisedQMIXConfigProcessor(QMIXConfigProcessor):
+    @staticmethod
+    def parse_loss_mixer_config(trainer_kwargs):
+        """Keep legacy YAML conversion at the boundary, not in trainers/workers."""
+        legacy_keys = (
+            "loss_combination_method", "pit_loss_alpha",
+            "self_supervised_learning_loss_weight",
+        )
+        legacy = {key: trainer_kwargs.pop(key) for key in legacy_keys if key in trainer_kwargs}
+        config = trainer_kwargs.pop("loss_mixer", None)
+        if config is not None and legacy:
+            raise ValueError("Do not combine loss_mixer with legacy loss-combination options")
+        if legacy:
+            import warnings
+            warnings.warn(
+                "Use trainer.loss_mixer instead of legacy loss-combination options",
+                FutureWarning, stacklevel=2,
+            )
+            config = {
+                "type": legacy.get("loss_combination_method", "weighted_sum"),
+                "weights": [1.0, legacy.get("self_supervised_learning_loss_weight", 1.0)],
+            }
+            if config["type"] == "pit_loss":
+                config["alpha"] = legacy.get("pit_loss_alpha", 0.9)
+        trainer_kwargs["loss_mixer_config"] = LossMixerConfig(**(config or {}))
+
     def parse_self_supervised_learning_config(
         self, config: Dict[str, Dict]
     ) -> Tuple[ModelConfig, SelfSupervisedDataConstructorConfig, Any]:
@@ -175,6 +201,7 @@ class SemiSupervisedQMIXConfigProcessor(QMIXConfigProcessor):
         config = deepcopy(config)
         # Parse individual components using parent class
         trainer_kwargs, train_args, checkpoint = super().process(config)
+        self.parse_loss_mixer_config(trainer_kwargs)
 
         # Parse self-supervised learning config specific to this class
         (

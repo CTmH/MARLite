@@ -25,22 +25,15 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
 
     Joint RL+SSL Training:
     - During warmup_epochs: only RL loss is used
-    - After warmup: combined loss is computed using the specified combination method
-        - "weighted_sum": combined_loss = critic_loss + weight * vae_loss
-        - "pit_loss": PITLoss-based combination
+    - After warmup: the configured loss mixer combines RL and SSL gradients.
 
-    SSL and RL loss combination is controlled by:
-        - loss_combination_method: "weighted_sum" or "pit_loss"
-        - self_supervised_learning_loss_weight: weight for VAE loss (used in weighted_sum mode)
-        - pit_loss_alpha: alpha for PITLoss (used in pit_loss mode)
+    SSL and RL loss combination is controlled by the parent's loss_mixer_config.
     """
 
     def __init__(
         self,
         kl_divergence_weight=0.005,
         warmup_epochs=0,
-        loss_combination_method="weighted_sum",
-        pit_loss_alpha=0.9,
         **kwargs,
     ):
         """
@@ -49,19 +42,11 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
         Args:
             kl_divergence_weight: Weight for KL divergence in VAE loss
             warmup_epochs: Number of epochs to train with RL only before enabling SSL
-            loss_combination_method: Method to combine RL and SSL losses
-                - "weighted_sum": combined_loss = critic_loss + weight * vae_loss
-                - "pit_loss": use PITLoss to combine critic_loss and vae_loss
-            pit_loss_alpha: Alpha parameter for PITLoss (exponential decay rate)
             **kwargs: Additional arguments passed to parent class
         """
         self.kl_divergence_weight = kl_divergence_weight
         self.warmup_epochs = warmup_epochs
-        super().__init__(
-            loss_combination_method=loss_combination_method,
-            pit_loss_alpha=pit_loss_alpha,
-            **kwargs,
-        )
+        super().__init__(**kwargs)
 
     def _create_worker_group(self):
         """Create VAEGraphQMIXWorkerGroup for multi-GPU joint RL+SSL training."""
@@ -80,9 +65,7 @@ class VAEGraphQMIXTrainer(SelfSupervisedQMIXTrainer):
             ssl_optimizer_config=self.ssl_optimizer_config,
             reconstruction_loss=self.reconstruction_loss,
             kl_divergence_weight=self.kl_divergence_weight,
-            self_supervised_learning_loss_weight=self.self_supervised_learning_loss_weight,
-            loss_combination_method=self.loss_combination_method,
-            pit_loss_alpha=self.pit_loss_alpha,
+            loss_mixer_config=self.loss_mixer_config,
             data_constructor=self.data_constructor,
             warmup_epochs=self.warmup_epochs,
         )

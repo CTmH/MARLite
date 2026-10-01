@@ -13,7 +13,11 @@ workers) to the single-GPU path.
 """
 
 import torch
+from marlite.util.loss_mixer import reduce_mixed_gradients
 from marlite.util.return_estimation import td_target
+from marlite.util.value_learning import (
+    last_action_mask, masked_action_values, joint_q_from_counterfactual, qtran_constraints,
+)
 import torch.distributed as dist
 import torch.nn.functional as F
 from typing import Any, Dict, Optional
@@ -84,9 +88,8 @@ class QTRANWorker(OffPolicyWorker):
             max_grad_norm: Maximum gradient norm for clipping.
             lambda_opt: Weight on the L_opt term.
             lambda_nopt: Weight on the L_nopt term.
-            is_optimal_mask_mode: If True, separate L_opt / L_nopt by
-                per-sample optimality; if False, use a flat mean over
-                the batch.
+            is_optimal_mask_mode: Exclude sampled greedy joint actions from
+                L_nopt. L_opt always constrains the full greedy joint action.
         """
         super().__init__(worker_id, device_id, rank, world_size, init_method)
         self.gamma = gamma
@@ -156,10 +159,7 @@ class QTRANWorker(OffPolicyWorker):
 
     def reduce_gradients(self):
         super().reduce_gradients()
-        for param in self.eval_v_net.parameters():
-            if param.grad is not None:
-                dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
-                param.grad.data /= self.world_size
+        reduce_mixed_gradients(self.eval_v_net.parameters())
 
     def synchronize_eval_params(self):
         super().synchronize_eval_params()
@@ -251,7 +251,7 @@ class QTRANWorker(OffPolicyWorker):
 
         # Eval critic → joint Q per action
         self.eval_critic.train()
-        cret = self.eval_critic(enc_out, actions_last)
+        cret = self.eval_critic(enc_out, actions_last, alive_mask=alive_mask[:, -1, :])
         Q_jt_per_action = cret["q_per_action"]
 
         # Eval V net → joint V
@@ -263,8 +263,9 @@ class QTRANWorker(OffPolicyWorker):
         )
         v_jt = vret["v"]
 
-        q_jt_at_a = Q_jt_per_action.gather(-1, actions_last.unsqueeze(-1)).squeeze(-1)
-        q_jt_scalar = q_jt_at_a.mean(dim=1)
+        q_jt_scalar = joint_q_from_counterfactual(
+            Q_jt_per_action, actions_last, alive_mask[:, -1, :]
+        )
 
         with torch.no_grad():
             self.eval_agent_group.eval()
@@ -277,10 +278,10 @@ class QTRANWorker(OffPolicyWorker):
                 next_alive_mask[:, -1, :],
             )
             q_val_next_eval = ret_next_eval["q_val"]
-            if use_action_mask:
-                q_val_next_eval = torch.masked_fill(
-                    q_val_next_eval, ~next_avail_actions, -torch.inf
-                )
+            q_val_next_eval = masked_action_values(
+                q_val_next_eval, next_avail_actions if use_action_mask else None,
+                next_alive_mask[:, -1, :],
+            )
             next_best_actions = q_val_next_eval.argmax(dim=-1)
 
             self.target_agent_group.eval()
@@ -292,43 +293,22 @@ class QTRANWorker(OffPolicyWorker):
             enc_out_next = ret_next_target["enc_out"]
 
             self.target_critic.eval()
-            Q_jt_next = self.target_critic(enc_out_next, next_best_actions)[
+            Q_jt_next = self.target_critic(enc_out_next, next_best_actions, alive_mask=next_alive_mask[:, -1, :])[
                 "q_per_action"
             ]
-            q_jt_next_at_best = (
-                Q_jt_next.gather(-1, next_best_actions.unsqueeze(-1))
-                .squeeze(-1)
-                .mean(dim=1)
+            q_jt_next_at_best = joint_q_from_counterfactual(
+                Q_jt_next, next_best_actions, next_alive_mask[:, -1, :]
             )
 
         y = td_target(batch, r_last, q_jt_next_at_best, self.gamma, termination_last)
         td_loss = F.mse_loss(q_jt_scalar, y.detach())
 
-        current_best_actions = q_val.argmax(dim=-1)
-        qmax = q_val.max(dim=-1).values
-        q_jt_at_qmax = Q_jt_per_action.gather(
-            -1, current_best_actions.unsqueeze(-1)
-        ).squeeze(-1)
-        is_optimal = (actions_last == current_best_actions).all(dim=1).float()
-        diff_opt = qmax.sum(1) - q_jt_at_qmax.detach().sum(1) + v_jt.squeeze(-1)
-        diff_opt_sq = diff_opt.square()
-
-        q_actual_i = q_val.gather(-1, actions_last.unsqueeze(-1)).squeeze(-1)
-        counter_sum = (q_actual_i.sum(1, keepdim=True) - q_actual_i).unsqueeze(-1)
-        Q_prime_cf = q_val + counter_sum
-        D = Q_prime_cf - Q_jt_per_action.detach() + v_jt.unsqueeze(-1)
-        D_min = D.min(dim=-1).values
-        D_min_sq = D_min.square()
-
-        if self.is_optimal_mask_mode:
-            is_suboptimal = 1.0 - is_optimal
-            denom_opt = is_optimal.sum().clamp(min=1.0)
-            denom_nopt = is_suboptimal.sum().clamp(min=1.0)
-            L_opt = (is_optimal * diff_opt_sq).sum() / denom_opt
-            L_nopt = (is_suboptimal.unsqueeze(-1) * D_min_sq).sum() / denom_nopt
-        else:
-            L_opt = diff_opt_sq.mean()
-            L_nopt = D_min_sq.mean()
+        L_opt, L_nopt = qtran_constraints(
+            q_val, enc_out, actions_last, Q_jt_per_action, v_jt,
+            self.eval_critic, alive_mask[:, -1, :],
+            last_action_mask(batch, "avail_actions", q_val.device),
+            self.is_optimal_mask_mode,
+        )
 
         total_loss_batch = (
             td_loss

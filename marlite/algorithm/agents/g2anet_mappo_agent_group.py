@@ -24,6 +24,22 @@ class G2ANetMAPPOAgentGroup(G2ANetAgentGroup):
     log-probabilities required by PPO.
     """
 
+    def train(self, mode: bool = True):
+        """PPO needs the same conditional policy in collection and optimization.
+
+        Keep BatchNorm statistics frozen and dropout disabled in the actor. This
+        does not disable autograd or freeze their affine parameters. Recurrent
+        modules remain in training mode for GPU backward, but without dropout.
+        """
+        super().train(mode)
+        for module in self.modules():
+            if isinstance(module, (torch.nn.modules.batchnorm._BatchNorm,
+                                   torch.nn.modules.dropout._DropoutNd)):
+                module.eval()
+            if isinstance(module, (torch.nn.RNNBase, torch.nn.MultiheadAttention)):
+                module.dropout = 0.
+        return self
+
     def forward(
         self,
         observations: torch.Tensor,

@@ -8,6 +8,9 @@ for parallel training across multiple GPUs.
 import io
 import socket
 import threading
+import traceback
+from queue import Empty
+from absl import logging
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 
@@ -83,10 +86,25 @@ def _slice_batch(batch: Dict[str, Any], num_slices: int) -> List[Dict[str, Any]]
     Returns:
         List of batch slices
     """
+    if num_slices < 1:
+        raise ValueError("num_slices must be positive")
+    # Validate before dispatch: an empty rank can strand peers in all-reduce.
+    sizes = {key: len(value) for key, value in batch.items()
+             if isinstance(value, (torch.Tensor, list, tuple)) and
+             (not isinstance(value, torch.Tensor) or value.ndim > 0)}
+    if not sizes or len(set(sizes.values())) != 1:
+        raise ValueError(f"Batch fields must have one common sample count: {sizes}")
+    size = next(iter(sizes.values()))
+    if size < num_slices or size % num_slices:
+        raise ValueError(
+            f"Batch size {size} must be a positive multiple of the GPU count "
+            f"({num_slices}), including the final batch. Check the actual "
+            "sample count after replay-buffer sampling."
+        )
     slices = [{} for _ in range(num_slices)]
 
     for key, value in batch.items():
-        if isinstance(value, torch.Tensor):
+        if isinstance(value, torch.Tensor) and value.ndim > 0:
             step = value.shape[0] // num_slices
             for i in range(num_slices):
                 slices[i][key] = value[
@@ -123,6 +141,7 @@ def worker_loop(
     ready_event,
     seed=None,
     deterministic=False,
+    error_queue=None,
 ):
     """
     Main loop function that runs in each worker process.
@@ -149,28 +168,30 @@ def worker_loop(
         ack_queue: Queue for sending ACK signals back to main process
         ready_event: Event to signal worker is ready
     """
-    # Create worker instance
-    worker_seed = derive_seed(seed, WORKER_STREAM, rank)
-    configure_randomness(worker_seed, deterministic)
-    worker = worker_class(**worker_kwargs)
-    # Parameters are still synchronized from the trainer; stochastic training
-    # uses a separate rank-specific stream, independent of construction draws.
-    seed_everything(worker_seed)
-
-    # Signal that worker is ready
-    ready_event.set()
-
-    # Main worker loop
-    while True:
-        cmd = cmd_queue.get()
-
-        # Handle command via worker's handle_command method
-        should_continue = worker.handle_command(
-            cmd, param_queue, data_queue, loss_queue, ack_queue
-        )
-
-        if not should_continue:
-            break
+    cmd = "INITIALIZE"
+    try:
+        worker_seed = derive_seed(seed, WORKER_STREAM, rank)
+        configure_randomness(worker_seed, deterministic)
+        worker = worker_class(**worker_kwargs)
+        seed_everything(worker_seed)
+        ready_event.set()
+        while True:
+            cmd = cmd_queue.get()
+            if not worker.handle_command(
+                cmd, param_queue, data_queue, loss_queue, ack_queue
+            ):
+                break
+    except BaseException:
+        if error_queue is not None:
+            error_queue.put(
+                f"Worker {worker_id} (device {device_id}), command {cmd!r}:\n"
+                f"{traceback.format_exc()}"
+            )
+            # Flush the traceback before exit. SIGKILL/abort cannot be caught;
+            # the parent detects those separately through process exit codes.
+            error_queue.close()
+            error_queue.join_thread()
+        raise
 
 
 class BaseWorkerGroup(ABC):
@@ -230,6 +251,7 @@ class BaseWorkerGroup(ABC):
         self.workers = []
         self.loss_queue = None
         self.ready_events = []
+        self.error_queue = None
 
     def _create_worker_kwargs(self) -> Dict[str, Any]:
         """
@@ -259,10 +281,11 @@ class BaseWorkerGroup(ABC):
         2. Creates model copies on its assigned GPU
         3. Waits for commands from main process
 
-        Note: Using SimpleQueue to avoid automatic shared memory allocation,
-        which can cause file descriptor exhaustion with large models.
+        Timed Queue reads let the parent detect worker failures. Parameter
+        broadcasts remain serialized bytes to avoid tensor IPC overhead.
         """
-        self.loss_queue = self.mp_ctx.SimpleQueue()
+        self.loss_queue = self.mp_ctx.Queue()
+        self.error_queue = self.mp_ctx.Queue()
 
         # Create separate queues for each worker to avoid race conditions
         self.cmd_queues = []
@@ -270,10 +293,10 @@ class BaseWorkerGroup(ABC):
         self.data_queues = []
         self.ack_queues = []
         for _ in range(self.world_size):
-            self.cmd_queues.append(self.mp_ctx.SimpleQueue())
-            self.param_queues.append(self.mp_ctx.SimpleQueue())
-            self.data_queues.append(self.mp_ctx.SimpleQueue())
-            self.ack_queues.append(self.mp_ctx.SimpleQueue())
+            self.cmd_queues.append(self.mp_ctx.Queue())
+            self.param_queues.append(self.mp_ctx.Queue())
+            self.data_queues.append(self.mp_ctx.Queue())
+            self.ack_queues.append(self.mp_ctx.Queue())
 
         worker_class = self._get_worker_class()
 
@@ -311,13 +334,49 @@ class BaseWorkerGroup(ABC):
                     ready_event,
                     getattr(self, "seed", None),
                     getattr(self, "deterministic", False),
+                    self.error_queue,
                 ),
             )
             p.start()
             self.workers.append(p)
 
         for event in self.ready_events:
-            event.wait()
+            while not event.wait(timeout=0.2):
+                self._check_workers()
+        self._check_workers()
+
+    def _check_workers(self):
+        """Raise in the training thread, with a logged traceback or exit code."""
+        try:
+            error = self.error_queue.get_nowait()
+        except Empty:
+            dead = [p for p in self.workers if p.exitcode is not None]
+            if not dead:
+                return
+            try:
+                error = self.error_queue.get(timeout=0.2)
+            except Empty:
+                error = "Worker exited unexpectedly: " + ", ".join(
+                    f"pid={p.pid}, exitcode={p.exitcode}" for p in dead
+                )
+        logging.error("Distributed training aborted: %s", error)
+        self.shutdown(force=True)
+        raise RuntimeError(f"Distributed training aborted: {error}")
+
+    def _receive(self, queue):
+        """Wait for a response without waiting forever for a dead worker."""
+        while True:
+            self._check_workers()
+            try:
+                return queue.get(timeout=0.2)
+            except Empty:
+                continue
+            except (EOFError, OSError, RuntimeError) as error:
+                # A worker can die while a tensor payload is being unpickled.
+                self._check_workers()
+                logging.exception("Distributed worker response failed")
+                self.shutdown(force=True)
+                raise RuntimeError("Distributed worker response failed") from error
 
     def write_params_to_workers(
         self, trainable_params: Dict[str, Any], blocking: bool = True
@@ -347,7 +406,7 @@ class BaseWorkerGroup(ABC):
 
         if blocking:
             for i in range(self.world_size):
-                ack = self.ack_queues[i].get()
+                ack = self._receive(self.ack_queues[i])
                 if ack != "ACK":
                     raise RuntimeError(f"Worker {i}: Expected ACK, got {ack}")
 
@@ -378,7 +437,7 @@ class BaseWorkerGroup(ABC):
             Dictionary containing cloned model parameters
         """
         self.cmd_queues[0].put("SYNC_TO_MAIN")
-        params = self.param_queues[0].get()
+        params = self._receive(self.param_queues[0])
         return _dict_to_cpu(params)
 
     def read_target_params_from_worker0(self) -> Dict[str, Any]:
@@ -392,7 +451,7 @@ class BaseWorkerGroup(ABC):
         prevents cross-worker drift.
         """
         self.cmd_queues[0].put("SYNC_TARGET_TO_MAIN")
-        params = self.param_queues[0].get()
+        params = self._receive(self.param_queues[0])
         return _dict_to_cpu(params)
 
     def average_eval_params(self):
@@ -408,7 +467,7 @@ class BaseWorkerGroup(ABC):
         for i in range(self.world_size):
             self.cmd_queues[i].put("AVERAGE_EVAL_PARAMS")
         for i in range(self.world_size):
-            ack = self.ack_queues[i].get()
+            ack = self._receive(self.ack_queues[i])
             if ack != "ACK":
                 raise RuntimeError(f"Worker {i}: Expected ACK, got {ack}")
 
@@ -424,7 +483,7 @@ class BaseWorkerGroup(ABC):
         for i in range(self.world_size):
             self.cmd_queues[i].put("AVERAGE_TARGET_PARAMS")
         for i in range(self.world_size):
-            ack = self.ack_queues[i].get()
+            ack = self._receive(self.ack_queues[i])
             if ack != "ACK":
                 raise RuntimeError(f"Worker {i}: Expected ACK, got {ack}")
 
@@ -441,14 +500,22 @@ class BaseWorkerGroup(ABC):
         Returns:
             Per-metric averages across all workers.
         """
-        batch_slices = _slice_batch(batch, self.world_size)
+        try:
+            batch_slices = _slice_batch(batch, self.world_size)
+        except ValueError:
+            # Non-daemon workers must not keep Python alive after a rejected
+            # batch raises out of the training entry point.
+            if getattr(self, "workers", None):
+                logging.exception("Distributed training rejected an invalid batch")
+                self.shutdown(force=True)
+            raise
         for i in range(self.world_size):
             self.cmd_queues[i].put("TRAIN_STEP")
             self.data_queues[i].put(batch_slices[i])
 
         results = []
         for _ in range(self.world_size):
-            result = self.loss_queue.get()
+            result = self._receive(self.loss_queue)
             if not isinstance(result, dict):
                 raise TypeError(
                     "Worker train_step must return a dict, got "
@@ -476,7 +543,7 @@ class BaseWorkerGroup(ABC):
         for i in range(self.world_size):
             self.cmd_queues[i].put("MOVE_TO_GPU")
         for i in range(self.world_size):
-            ack = self.ack_queues[i].get()
+            ack = self._receive(self.ack_queues[i])
             if ack != "ACK":
                 raise RuntimeError(f"Worker {i}: Expected ACK, got {ack}")
 
@@ -487,7 +554,7 @@ class BaseWorkerGroup(ABC):
         for i in range(self.world_size):
             self.cmd_queues[i].put("MOVE_TO_CPU")
         for i in range(self.world_size):
-            ack = self.ack_queues[i].get()
+            ack = self._receive(self.ack_queues[i])
             if ack != "ACK":
                 raise RuntimeError(f"Worker {i}: Expected ACK, got {ack}")
 
@@ -517,23 +584,37 @@ class BaseWorkerGroup(ABC):
             self.param_queues[i].put(lr_data)
 
         for i in range(self.world_size):
-            ack = self.ack_queues[i].get()
+            ack = self._receive(self.ack_queues[i])
             if ack != "ACK":
                 raise RuntimeError(f"Worker {i}: Expected ACK, got {ack}")
 
-    def shutdown(self):
+    def shutdown(self, force=False):
         """
         Stop all worker processes and clean up resources.
         """
-        for i in range(self.world_size):
-            self.cmd_queues[i].put("STOP")
+        for i, process in enumerate(self.workers):
+            if process.is_alive():
+                if force:
+                    process.terminate()
+                else:
+                    self.cmd_queues[i].put("STOP")
 
         for p in self.workers:
             p.join(timeout=5)
             if p.is_alive():
-                p.terminate()
+                p.kill()
+                p.join(timeout=5)
 
         self.workers = []
+        for queue in [self.loss_queue, self.error_queue,
+                      *getattr(self, "cmd_queues", []),
+                      *getattr(self, "param_queues", []),
+                      *getattr(self, "data_queues", []),
+                      *getattr(self, "ack_queues", [])]:
+            if queue is not None:
+                # Pending payloads may have no reader after a worker failure.
+                queue.cancel_join_thread()
+                queue.close()
 
 
 class OffPolicyWorkerGroup(BaseWorkerGroup):

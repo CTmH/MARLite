@@ -42,6 +42,8 @@ class G2ANetAgentGroup(GraphAgentGroup):
             # observation shape: (Batch Size, Agent Number, Time Step, Feature Dimensions) (B, N, T, F)
             obs = observations[:, idx]
             obs = torch.Tensor(obs)  # (B, N, T, *(obs_shape))
+            live = alive_mask[:, idx].to(device=obs.device, dtype=torch.bool)
+            obs = obs.masked_fill(~live.reshape(*live.shape, *([1] * (obs.ndim - 2))), 0.)
             bs = obs.shape[0]
             n_agents = len(selected_agents)
             ts = obs.shape[2]
@@ -65,7 +67,6 @@ class G2ANetAgentGroup(GraphAgentGroup):
                 obs_vectorized = obs_vectorized.reshape(
                     bs * n_agents, ts, -1
                 )  # (B*N*T, F) -> (B*N, T, F)
-                enc.train()  # cudnn RNN backward can only be called in training mode
                 msg_selected = enc(obs_vectorized)  # (B*N, T, F) -> (B*N, F)
             elif model_class_name == "AttentionModel":
                 obs = obs.reshape(bs * n_agents * ts, *obs_shape).to(self.device)
@@ -92,10 +93,14 @@ class G2ANetAgentGroup(GraphAgentGroup):
                 msg[agent_idx] = msg_selected[:, j, :]  # (B, F)
 
         msg = torch.stack(msg, dim=1).to(self.device)  # (B, N, F)
+        alive_mask = alive_mask.to(device=msg.device, dtype=torch.bool)
+        msg = msg.masked_fill(~alive_mask.unsqueeze(-1), 0.)
         local_obs = msg
 
         # Build Graph
-        adj_matrix, edge_indices = self.graph_builder(msg)
+        # Recompute the deterministic graph so its parameters receive gradients.
+        # Stored edge indices alone do not encode its learned attention weights.
+        adj_matrix, edge_indices = self.graph_builder(msg, alive_mask)
 
         # Communication between agents using the graph model.
         hidden_states = self.graph_model(msg, adj_matrix)  # (B, N, Hidden Size)

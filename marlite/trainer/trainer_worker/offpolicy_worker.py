@@ -7,6 +7,8 @@ QTRAN, ``ssl_optimizer`` for self-supervised variants) are owned by
 further subclasses.
 """
 
+from itertools import chain
+from marlite.util.loss_mixer import reduce_mixed_gradients
 from typing import Any, Dict
 import torch
 import torch.distributed as dist
@@ -170,11 +172,9 @@ class OffPolicyWorker(BaseWorker):
         and call ``super().reduce_gradients()`` first, then add the extra
         networks' gradient all-reduce.
         """
-        for net in (self.eval_critic, self.eval_agent_group):
-            for param in net.parameters():
-                if param.grad is not None:
-                    dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
-                    param.grad.data /= self.world_size
+        reduce_mixed_gradients(chain(
+            self.eval_critic.parameters(), self.eval_agent_group.parameters(),
+        ))
 
     # ------------------------------------------------------------------
     # Learning-rate sync (standard critic + agent optimizers)

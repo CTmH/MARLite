@@ -8,7 +8,7 @@ separate process and holds copies of the eval agent group and critic models.
 
 import torch
 from marlite.util.return_estimation import ppo_targets
-import torch.distributed as dist
+from marlite.util.loss_mixer import reduce_mixed_gradients
 import torch.nn.functional as F
 from marlite.util.action_distribution import masked_categorical
 from typing import Any, Dict
@@ -99,17 +99,11 @@ class MAPPOWorker(OnPolicyWorker):
 
     def _reduce_agent_gradients(self):
         """Reduce agent group gradients across all workers via all_reduce."""
-        for param in self.eval_agent_group.parameters():
-            if param.grad is not None:
-                dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
-                param.grad.data /= self.world_size
+        reduce_mixed_gradients(self.eval_agent_group.parameters())
 
     def _reduce_critic_gradients(self):
         """Reduce critic gradients across all workers via all_reduce."""
-        for param in self.eval_critic.parameters():
-            if param.grad is not None:
-                dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
-                param.grad.data /= self.world_size
+        reduce_mixed_gradients(self.eval_critic.parameters())
 
     def train_step(self, batch: Dict[str, Any]) -> Dict[str, float]:
         """
@@ -218,14 +212,15 @@ class MAPPOWorker(OnPolicyWorker):
         )
 
         self.critic_optimizer.zero_grad()
-        critic_loss.backward()
+        (self.vf_coef * critic_loss).backward()
         self._reduce_critic_gradients()
         torch.nn.utils.clip_grad_norm_(
             self.eval_critic.parameters(), max_norm=self.max_grad_norm
         )
 
         self.agent_optimizer.step()
-        self.critic_optimizer.step()
+        if self.vf_coef != 0:
+            self.critic_optimizer.step()
 
         actor_loss_value = actor_loss.detach().cpu().item()
         critic_loss_value = critic_loss.detach().cpu().item()

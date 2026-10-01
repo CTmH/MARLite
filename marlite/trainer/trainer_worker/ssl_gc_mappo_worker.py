@@ -14,7 +14,10 @@ from marlite.algorithm.agents import AgentGroupConfig
 from marlite.algorithm.critic import CriticConfig
 from marlite.algorithm.model import ModelConfig
 from marlite.util.optimizer_config import OptimizerConfig
-from marlite.util.loss_func import PITLoss, ReconstructionLoss
+from marlite.util.loss_func import ReconstructionLoss
+from itertools import chain
+from marlite.util.loss_mixer_config import LossMixerConfig
+from marlite.util.loss_mixer import reduce_mixed_gradients
 from marlite.util.group_consensus import (
     validate_group_capacity,
     validate_group_reconstruction_shapes,
@@ -50,9 +53,7 @@ class SSLGroupConsensusMAPPOWorker(OnPolicyWorker):
         entropy_coef: float,
         vf_coef: float,
         kl_divergence_weight: float,
-        self_supervised_learning_loss_weight: float,
-        loss_combination_method: str,
-        pit_loss_alpha: float,
+        loss_mixer_config: LossMixerConfig,
         warmup_iterations: int,
         recon_mode: str,
         kl_on_agent: bool,
@@ -75,8 +76,6 @@ class SSLGroupConsensusMAPPOWorker(OnPolicyWorker):
         self.warmup_iterations = warmup_iterations
         self.current_training_epoch = 0
         self.consensus_mode = consensus_mode
-        self.self_supervised_learning_loss_weight = self_supervised_learning_loss_weight
-        self.loss_combination_method = loss_combination_method
 
         self.eval_agent_group = agent_group_config.get_agent_group()
         self.eval_critic = critic_config.get_critic()
@@ -104,9 +103,7 @@ class SSLGroupConsensusMAPPOWorker(OnPolicyWorker):
         self.ssl_optimizer = ssl_optimizer_config.get_optimizer(
             self.ssl_model.parameters()
         )
-        self.pit_loss = PITLoss(
-            num_tasks=2, alpha=pit_loss_alpha, reduction="mean"
-        )
+        self.loss_mixer = loss_mixer_config.get_loss_mixer()
 
     def move_to_device(self, device: str):
         if self.eval_agent_group is not None:
@@ -117,11 +114,10 @@ class SSLGroupConsensusMAPPOWorker(OnPolicyWorker):
         self.device = device
 
     def reduce_gradients(self):
-        super().reduce_gradients()
-        for param in self.ssl_model.parameters():
-            if param.grad is not None:
-                dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
-                param.grad.data /= self.world_size
+        reduce_mixed_gradients(chain(
+            self.eval_critic.parameters(), self.eval_agent_group.parameters(),
+            self.ssl_model.parameters(),
+        ))
 
     def synchronize_eval_params(self):
         super().synchronize_eval_params()
@@ -142,6 +138,7 @@ class SSLGroupConsensusMAPPOWorker(OnPolicyWorker):
                 k: v.clone().cpu() for k, v in self.ssl_model.state_dict().items()
             },
         }
+        params["loss_mixer"] = {k: v.clone().cpu() for k, v in self.loss_mixer.state_dict().items()}
         return params
 
     def sync_params_from_main(self, params):
@@ -152,6 +149,8 @@ class SSLGroupConsensusMAPPOWorker(OnPolicyWorker):
         # frozen gate for a trajectory batch.  SSL auxiliary model is added
         # here.
         params = super().sync_params_from_main(params)
+        if "loss_mixer" in params:
+            self.loss_mixer.load_state_dict(params["loss_mixer"])
         if "ssl_model" in params and self.ssl_model is not None:
             self.ssl_model.load_state_dict(
                 {k: v.clone() for k, v in params["ssl_model"].items()}
@@ -163,9 +162,11 @@ class SSLGroupConsensusMAPPOWorker(OnPolicyWorker):
         return self.reconstruction_loss(pred_set, target_set, mask)
 
     def _combine_rl_ssl_loss(self, rl_loss, ssl_loss):
-        if self.loss_combination_method == "pit_loss":
-            return self.pit_loss(torch.stack([rl_loss, ssl_loss]))
-        return rl_loss + self.self_supervised_learning_loss_weight * ssl_loss
+        """Use globally aggregated task gradients/statistics on every worker."""
+        return self.loss_mixer(
+            (rl_loss, ssl_loss), parameters=self.eval_agent_group.parameters(),
+            distributed=self.world_size > 1,
+        )
 
     def _build_recon_targets(self, observations, states, group_indices, alive_mask):
         obs_np = observations.detach().cpu().numpy()

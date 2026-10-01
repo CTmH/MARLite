@@ -57,37 +57,35 @@ class TestG2ANetAttention(unittest.TestCase):
         self.assertEqual(soft_attention_weights.shape, (self.batch_size, self.n_agents, self.n_agents))
 
     def test_hard_attention_training_mode(self):
-        """Test hard attention in training mode: should output probability distributions (sum=1)"""
-        self.graph_builder.train()
-        hard_attention_weights, _ = self.graph_builder(self.encoded_obs)
+        """Forward graph is binary and identical during collection and training."""
+        train_hard, train_soft = self.graph_builder.train()(self.encoded_obs)
+        eval_hard, eval_soft = self.graph_builder.eval()(self.encoded_obs)
+        torch.testing.assert_close(train_hard, eval_hard)
+        torch.testing.assert_close(train_soft, eval_soft)
+        self.assertTrue(((train_hard == 0) | (train_hard == 1)).all())
 
-        # Each row should sum to ~1 (due to Gumbel-Softmax)
-        hard_row_sums = torch.sum(hard_attention_weights, dim=-1)
-        self.assertTrue(
-            torch.allclose(hard_row_sums, torch.ones_like(hard_row_sums), atol=1e-5),
-            f"Hard attention weights do not sum to 1 in training mode. Sums: {hard_row_sums}"
-        )
+    def test_dead_and_isolated_agents(self):
+        alive = torch.tensor([[True, False, True, False, False]]).expand(self.batch_size, -1)
+        first = self.graph_builder(self.encoded_obs, alive)
+        changed = self.encoded_obs.clone()
+        changed[:, ~alive[0]] = 1000.
+        second = self.graph_builder(changed, alive)
+        torch.testing.assert_close(first[0] * first[1], second[0] * second[1])
+        adjacency = first[0] * first[1]
+        self.assertTrue((adjacency[:, ~alive[0]] == 0).all())
+        self.assertTrue((adjacency[:, :, ~alive[0]] == 0).all())
+        hard, soft = self.graph_builder(self.encoded_obs, torch.zeros_like(alive))
+        self.assertTrue(torch.isfinite(hard * soft).all())
+        self.assertTrue((hard * soft == 0).all())
 
-    def test_hard_attention_eval_mode(self):
-        """Test hard attention in eval mode: should output one-hot vectors (exactly one 1 per row)"""
-        self.graph_builder.eval()
-        hard_attention_weights, _ = self.graph_builder(self.encoded_obs)
-
-        # In eval mode, each row must have exactly one 1 and rest 0s
-        hard_max_values, hard_max_indices = torch.max(hard_attention_weights, dim=-1)
-
-        # Max value should be 1 for all rows
-        self.assertTrue(
-            torch.allclose(hard_max_values, torch.ones(self.n_agents), atol=1e-5),
-            f"Max values are not 1 in eval mode: {hard_max_values}"
-        )
-
-        # Sum of each row should also be 1
-        hard_row_sums = torch.sum(hard_attention_weights, dim=-1)
-        self.assertTrue(
-            torch.allclose(hard_row_sums, torch.ones(self.n_agents), atol=1e-5),
-            f"Row sums are not 1 in eval mode: {hard_row_sums}"
-        )
+    def test_closed_gates_can_learn_to_open(self):
+        with torch.no_grad():
+            self.graph_builder.hard_attention_fc.weight.zero_()
+            self.graph_builder.hard_attention_fc.bias.fill_(-1.)
+        hard, soft = self.graph_builder(self.encoded_obs)
+        self.assertTrue((hard == 0).all())
+        (hard * soft).sum().backward()
+        self.assertGreater(self.graph_builder.hard_attention_fc.bias.grad.abs().sum(), 0.)
 
     def test_soft_attention_shape(self):
         # Test soft attention weights shape

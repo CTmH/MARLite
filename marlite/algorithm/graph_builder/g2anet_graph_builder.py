@@ -27,7 +27,7 @@ class G2ANetGraphBuilder(GraphBuilder):
         self, encoded_obs: Tensor, alive_mask: Tensor = None
     ) -> Tuple[Tensor, List[np.ndarray]]:
         hard_attention_weights, soft_attention_weights = self.attention_model(
-            encoded_obs
+            encoded_obs, alive_mask
         )
         weight_adj_matrix = hard_attention_weights * soft_attention_weights
 
@@ -36,7 +36,7 @@ class G2ANetGraphBuilder(GraphBuilder):
         edge_indices = []
 
         # Use torch.nonzero to find all (batch, src, dst) indices where hard_attention_weights > 0
-        adj_matrix = hard_attention_weights.cpu()
+        adj_matrix = hard_attention_weights.detach().cpu()
 
         # Generate edge_indices from hard_attention_weights
         batch_size, n_nodes, _ = adj_matrix.shape

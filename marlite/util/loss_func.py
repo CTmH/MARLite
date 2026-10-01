@@ -2,33 +2,39 @@ import torch
 import torch.nn.functional as F
 from torch.nn.modules.loss import _Loss, MSELoss
 from typing import Dict, Type
+from marlite.util.loss_mixer import LossMixer, distributed_mean
 
 
-class PITLoss(_Loss):
+class PITLoss(LossMixer):
     def __init__(
         self,
         num_tasks: int,
         alpha: float = 0.9,
         eps: float = 1e-8,
         reduction: str = "mean",
+        weights=None,
+        min_std: float = 0.01,
     ):
         """
         Probability Integral Transformation Loss (PITLoss)
 
-        This loss function normalizes task losses using exponential moving averages
-        and transforms them to follow a standard normal distribution.
+        Normalize task losses with EMA statistics, then minimize their normal CDF.
+        Unlike a squared distance from CDF=0.5, this preserves optimization direction.
 
         Args:
             num_tasks (int): Number of tasks to balance
             alpha (float): Exponential decay rate for moving averages (0.0-1.0)
             eps (float): Small value to prevent division by zero
             reduction (str): Type of loss reduction ('none', 'mean', 'sum')
+            weights: Nonnegative task weights, applied after the CDF transform.
+            min_std: Standard-deviation floor limiting amplification of tiny variance.
         """
-        super().__init__()
-        self.num_tasks = num_tasks
+        super().__init__(num_tasks, weights, reduction)
+        if not 0 <= alpha < 1 or not 0 < eps < float("inf") or not 0 < min_std < float("inf"):
+            raise ValueError("PIT requires alpha in [0, 1), positive finite eps/min_std")
         self.alpha = alpha
         self.eps = eps
-        self.reduction = reduction
+        self.min_std = min_std
 
         # Initialize buffers for moving averages
         # Mean is initialized to 0, variance to small positive value (prevents division by zero)
@@ -38,7 +44,7 @@ class PITLoss(_Loss):
         )  # Small positive value for numerical stability
         self.register_buffer("step", torch.zeros(1, dtype=torch.long))
 
-    def forward(self, losses: torch.Tensor) -> torch.Tensor:
+    def forward(self, losses, parameters=None, distributed=False) -> torch.Tensor:
         """
         Compute the PIT loss for multiple tasks.
 
@@ -48,54 +54,32 @@ class PITLoss(_Loss):
         Returns:
             torch.Tensor: PIT loss value
 
-        Device management:
-            - EMA state (moving_mean, moving_var) persists across calls
-            - On first call, buffers are moved to the device of input losses
-            - Subsequent calls expect losses on the same device
-            - step counter stays on CPU as a scalar (used only for unbiased variance formula)
+        CDF is monotone: minimizing it never asks a task loss to increase.
+        Historical statistics are detached snapshots; EMA updates cannot mutate
+        tensors saved for backward. Distributed workers share global loss statistics.
         """
-        target_device = losses.device
-
-        with torch.no_grad():
-            if self.training:
-                self.step += 1
-                current_losses = losses.detach()
-
-                # Ensure EMA buffers are on the correct device for in-place updates
-                # This is critical: if buffers were on a different device (e.g., CPU
-                # from initialization), moving them here ensures subsequent operations work
-                self.moving_mean = self.moving_mean.to(target_device)
-                self.moving_var = self.moving_var.to(target_device)
-
-                if self.step.item() == 1:
-                    self.moving_mean.copy_(current_losses)
+        losses = self._loss_vector(losses)
+        current = distributed_mean(losses, distributed)
+        mean = self.moving_mean.detach().clone() if self.step.item() else current
+        std = (self.moving_var.detach().clone() + self.eps).sqrt().clamp_min(self.min_std)
+        # Same CDF derivative on every rank; the normal worker reduction then
+        # averages local task gradients into the gradient of the global objective.
+        global_losses = losses + (current - losses.detach())
+        result = self._reduce(torch.special.ndtr((global_losses - mean) / std))
+        if self.training:
+            with torch.no_grad():
+                if self.step.item() == 0:
+                    self.moving_mean.copy_(current)
                 else:
-                    self.moving_mean.mul_(self.alpha).add_(
-                        current_losses, alpha=1 - self.alpha
-                    )
-                    diff = current_losses - self.moving_mean
+                    delta = current - self.moving_mean
+                    # Central-moment EMA, initialized with a variance prior; no
+                    # zero-initialization bias correction applies to this estimate.
                     self.moving_var.mul_(self.alpha).add_(
-                        diff.pow(2), alpha=(1 - self.alpha)
+                        delta.square(), alpha=self.alpha * (1 - self.alpha)
                     )
-
-        # Compute forward pass (can be on different device than EMA state)
-        unbiased_var = self.moving_var / (1 - self.alpha ** self.step.item())
-        std = torch.sqrt(unbiased_var + self.eps)
-
-        # Move mean to target device for computation
-        moving_mean = self.moving_mean.to(target_device)
-        normalized_losses = (losses - moving_mean) / std
-
-        sqrt2 = torch.tensor(2.0, device=target_device).sqrt()
-        cdf_values = 0.5 * (1 + torch.erf(normalized_losses / sqrt2))
-        pit_loss = (cdf_values - 0.5).pow(2)
-
-        if self.reduction == "mean":
-            return pit_loss.mean()
-        elif self.reduction == "sum":
-            return pit_loss.sum()
-        else:
-            return pit_loss
+                    self.moving_mean.lerp_(current, 1 - self.alpha)
+                self.step.add_(1)
+        return result
 
 
 class InfoNCELoss(_Loss):

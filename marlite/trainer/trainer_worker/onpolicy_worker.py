@@ -7,9 +7,10 @@ sync via ``handle_command("SYNC_LR")``; algorithm-specific extras
 owned by further subclasses.
 """
 
+from itertools import chain
+from marlite.util.loss_mixer import reduce_mixed_gradients
 from typing import Any, Dict
 import torch
-import torch.distributed as dist
 from marlite.trainer.trainer_worker.base_worker import BaseWorker
 
 
@@ -38,11 +39,9 @@ class OnPolicyWorker(BaseWorker):
         modules (e.g. ``ssl_model``) override this and call
         ``super().reduce_gradients()`` first.
         """
-        for net in (self.eval_critic, self.eval_agent_group):
-            for param in net.parameters():
-                if param.grad is not None:
-                    dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
-                    param.grad.data /= self.world_size
+        reduce_mixed_gradients(chain(
+            self.eval_critic.parameters(), self.eval_agent_group.parameters(),
+        ))
 
     def handle_command(
         self, cmd, param_queue, data_queue, loss_queue, ack_queue=None

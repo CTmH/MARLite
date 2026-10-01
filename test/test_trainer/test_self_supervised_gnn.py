@@ -237,7 +237,9 @@ trainer:
   train_device: "cpu"
   compile_models: false
   n_workers: 0
-  self_supervised_learning_loss_weight: 0.75
+  loss_mixer:
+    type: weighted_sum
+    weights: [1.0, 0.75]
   target_update_interval: 2
 
   epsilon_scheduler:

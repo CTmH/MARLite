@@ -10,7 +10,10 @@ from marlite.algorithm.agents import AgentGroupConfig
 from marlite.algorithm.critic import CriticConfig
 from marlite.algorithm.model import ModelConfig
 from marlite.util.optimizer_config import OptimizerConfig
-from marlite.util.loss_func import PITLoss, ReconstructionLoss
+from marlite.util.loss_func import ReconstructionLoss
+from itertools import chain
+from marlite.util.loss_mixer_config import LossMixerConfig
+from marlite.util.loss_mixer import reduce_mixed_gradients
 from marlite.util.group_consensus import (
     validate_group_capacity,
     validate_group_reconstruction_shapes,
@@ -41,9 +44,7 @@ class SSLGroupConsensusWorker(OffPolicyWorker):
         gamma: float,
         max_grad_norm: float,
         kl_divergence_weight: float,
-        self_supervised_learning_loss_weight: float,
-        loss_combination_method: str,
-        pit_loss_alpha: float,
+        loss_mixer_config: LossMixerConfig,
         warmup_epochs: int,
         recon_mode: str,
         kl_on_group: bool,
@@ -59,9 +60,7 @@ class SSLGroupConsensusWorker(OffPolicyWorker):
         self.kl_on_group = kl_on_group
         self.kl_on_agent = kl_on_agent
         self.warmup_epochs = warmup_epochs
-        self.pit_loss_alpha = pit_loss_alpha
         self.kl_divergence_weight = kl_divergence_weight
-        self.loss_combination_method = loss_combination_method
         self.gamma = gamma
         self.max_grad_norm = max_grad_norm
         self.consensus_mode = consensus_mode
@@ -85,7 +84,6 @@ class SSLGroupConsensusWorker(OffPolicyWorker):
             self.eval_agent_group.parameters()
         )
 
-        self.self_supervised_learning_loss_weight = self_supervised_learning_loss_weight
         self.data_constructor = data_constructor
         validate_group_capacity(self.eval_agent_group, self.data_constructor)
 
@@ -99,11 +97,7 @@ class SSLGroupConsensusWorker(OffPolicyWorker):
         self.ssl_optimizer = ssl_optimizer_config.get_optimizer(
             self.ssl_model.parameters()
         )
-        self.pit_loss = PITLoss(
-            num_tasks=2,
-            alpha=self.pit_loss_alpha,
-            reduction="mean",
-        )
+        self.loss_mixer = loss_mixer_config.get_loss_mixer()
 
     def move_to_device(self, device: str):
         if self.eval_agent_group is not None:
@@ -118,11 +112,10 @@ class SSLGroupConsensusWorker(OffPolicyWorker):
         self.device = device
 
     def reduce_gradients(self):
-        super().reduce_gradients()
-        for param in self.ssl_model.parameters():
-            if param.grad is not None:
-                dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
-                param.grad.data /= self.world_size
+        reduce_mixed_gradients(chain(
+            self.eval_critic.parameters(), self.eval_agent_group.parameters(),
+            self.ssl_model.parameters(),
+        ))
 
     def synchronize_eval_params(self):
         super().synchronize_eval_params()
@@ -150,6 +143,7 @@ class SSLGroupConsensusWorker(OffPolicyWorker):
                 k: v.clone().cpu() for k, v in self.ssl_model.state_dict().items()
             },
         }
+        params["loss_mixer"] = {k: v.clone().cpu() for k, v in self.loss_mixer.state_dict().items()}
         return params
 
     def sync_params_from_main(self, params):
@@ -157,6 +151,8 @@ class SSLGroupConsensusWorker(OffPolicyWorker):
         # eval/target agent_group + critic, and target_update_*
         # handling.  Only the SSL auxiliary model is added here.
         params = super().sync_params_from_main(params)
+        if "loss_mixer" in params:
+            self.loss_mixer.load_state_dict(params["loss_mixer"])
         if "ssl_model" in params and self.ssl_model is not None:
             self.ssl_model.load_state_dict(
                 {k: v.clone() for k, v in params["ssl_model"].items()}
@@ -486,15 +482,12 @@ class SSLGroupConsensusWorker(OffPolicyWorker):
     def _compute_ssl_loss(self, pred_set, target_set, mask=None):
         return self.reconstruction_loss(pred_set, target_set, mask)
 
-    def _combine_rl_ssl_loss(self, critic_loss, ssl_loss):
-        if self.loss_combination_method == "pit_loss":
-            losses = torch.stack([critic_loss, ssl_loss])
-            combined_loss = self.pit_loss(losses)
-        else:
-            combined_loss = (
-                critic_loss + self.self_supervised_learning_loss_weight * ssl_loss
-            )
-        return combined_loss
+    def _combine_rl_ssl_loss(self, rl_loss, ssl_loss):
+        """Use globally aggregated task gradients/statistics on every worker."""
+        return self.loss_mixer(
+            (rl_loss, ssl_loss), parameters=self.eval_agent_group.parameters(),
+            distributed=self.world_size > 1,
+        )
 
     def handle_command(
         self,

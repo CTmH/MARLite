@@ -236,10 +236,7 @@ class BaseWorker:
             if ack_queue:
                 ack_queue.put("ACK")
         else:
-            print(
-                f"Worker {self.worker_id}: Unknown command: {repr(cmd)}",
-                flush=True,
-            )
+            raise ValueError(f"Worker {self.worker_id}: Unknown command: {cmd!r}")
         return True
 
     def cleanup(self):

@@ -1,3 +1,4 @@
+from marlite.util.loss_mixer_config import LossMixerConfig
 from typing import Any, Dict
 from marlite.algorithm.model import ModelConfig
 from marlite.util.optimizer_config import OptimizerConfig
@@ -21,9 +22,7 @@ class SSLGroupConsensusWorkerGroup(OffPolicyWorkerGroup):
         gamma: float = 0.9,
         max_grad_norm: float = 5.0,
         kl_divergence_weight: float = 0.005,
-        self_supervised_learning_loss_weight: float = 1.0,
-        loss_combination_method: str = "weighted_sum",
-        pit_loss_alpha: float = 0.9,
+        loss_mixer_config: LossMixerConfig | None = None,
         warmup_epochs: int = 0,
         recon_mode: str = "per_agent",
         kl_on_group: bool = False,
@@ -42,9 +41,7 @@ class SSLGroupConsensusWorkerGroup(OffPolicyWorkerGroup):
         self.reconstruction_loss = reconstruction_loss
         self.data_constructor = data_constructor
         self.kl_divergence_weight = kl_divergence_weight
-        self.self_supervised_learning_loss_weight = self_supervised_learning_loss_weight
-        self.loss_combination_method = loss_combination_method
-        self.pit_loss_alpha = pit_loss_alpha
+        self.loss_mixer_config = loss_mixer_config or LossMixerConfig()
         self.warmup_epochs = warmup_epochs
         self.recon_mode = recon_mode
         self.kl_on_group = kl_on_group
@@ -77,11 +74,7 @@ class SSLGroupConsensusWorkerGroup(OffPolicyWorkerGroup):
         kwargs["reconstruction_loss"] = self.reconstruction_loss
         kwargs["data_constructor"] = self.data_constructor
         kwargs["kl_divergence_weight"] = self.kl_divergence_weight
-        kwargs["self_supervised_learning_loss_weight"] = (
-            self.self_supervised_learning_loss_weight
-        )
-        kwargs["loss_combination_method"] = self.loss_combination_method
-        kwargs["pit_loss_alpha"] = self.pit_loss_alpha
+        kwargs["loss_mixer_config"] = self.loss_mixer_config
         kwargs["warmup_epochs"] = self.warmup_epochs
         kwargs["recon_mode"] = self.recon_mode
         kwargs["kl_on_group"] = self.kl_on_group

@@ -1,6 +1,7 @@
 """Regression tests for generic worker-command delegation."""
 
 from queue import Queue
+import torch
 import unittest
 
 from marlite.trainer.trainer_worker.g2anet_mappo_worker import (
@@ -99,7 +100,9 @@ class TestWorkerCommandDelegation(unittest.TestCase):
         group.cmd_queues = [Queue(), Queue()]
         group.data_queues = [Queue(), Queue()]
         group.loss_queue = Queue()
-        batch = {"data": 7}
+        group.workers = []
+        group.error_queue = Queue()
+        batch = {"data": torch.tensor([7, 7])}
         result = {"loss": 1.0, "critic_loss": 2.0, "ssl_loss": 3.0}
 
         group.loss_queue.put(result)
@@ -110,4 +113,4 @@ class TestWorkerCommandDelegation(unittest.TestCase):
             group.cmd_queues, group.data_queues
         ):
             self.assertEqual(command_queue.get_nowait(), "TRAIN_STEP")
-            self.assertEqual(data_queue.get_nowait(), batch)
+            torch.testing.assert_close(data_queue.get_nowait()["data"], torch.tensor([7]))

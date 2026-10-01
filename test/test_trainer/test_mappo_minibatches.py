@@ -65,3 +65,26 @@ class TestMAPPOMinibatches(unittest.TestCase):
                 distributed = worker.train_step(batch)
             for key in ("actor_loss", "critic_loss", "loss"):
                 self.assertAlmostEqual(single[key], distributed[key], places=5)
+
+            # Check scaling before clipping/Adam can hide a constant multiplier.
+            for runner in (lambda: trainer.learn(4, 4, times=1), lambda: worker.train_step(batch)):
+                gradients = []
+                for coefficient in (1., .25, 0.):
+                    trainer.vf_coef = worker.vf_coef = coefficient
+                    with patch.object(trainer.agent_optimizer, "step"), \
+                         patch.object(trainer.critic_optimizer, "step"), \
+                         patch("torch.nn.utils.clip_grad_norm_"), \
+                         patch("marlite.trainer.mappo_trainer.TrajectoryDataLoader", return_value=[batch]):
+                        runner()
+                    gradients.append(torch.cat([
+                        p.grad.flatten() for p in trainer.eval_critic.parameters()
+                        if p.grad is not None
+                    ]))
+                torch.testing.assert_close(gradients[1], .25 * gradients[0])
+                torch.testing.assert_close(gradients[2], torch.zeros_like(gradients[2]))
+
+            # Existing Adam momentum/weight decay must not move a disabled critic.
+            before = [p.detach().clone() for p in trainer.eval_critic.parameters()]
+            worker.train_step(batch)
+            for initial, current in zip(before, trainer.eval_critic.parameters()):
+                torch.testing.assert_close(initial, current)

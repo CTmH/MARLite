@@ -73,12 +73,15 @@ class Qtransform(Mixer):
         self,
         enc_out: torch.Tensor,
         actions: torch.Tensor,
+        alive_mask: torch.Tensor | None = None,
     ) -> Dict[str, torch.Tensor]:
         """Compute per-agent counterfactual joint Q-values.
 
         Args:
             enc_out: per-agent encoder output, shape ``(B, N, D_enc)``.
             actions: per-agent action indices, shape ``(B, N)``.
+            alive_mask: Optional ``(B, N)`` flags. Inactive state/action
+                embeddings are excluded; the context averages over alive agents.
 
         Returns:
             dict with key ``"q_per_action"`` of shape
@@ -89,17 +92,23 @@ class Qtransform(Mixer):
         """
         # One-hot encode actions and concatenate with enc_out, then pass
         # through phi_net to get per-agent state-action features.
+        if alive_mask is None:
+            alive_mask = torch.ones_like(actions, dtype=torch.bool)
+        alive_mask = alive_mask.to(device=enc_out.device, dtype=torch.bool)
+        actions = actions.masked_fill(~alive_mask, 0)
+        enc_out = enc_out.masked_fill(~alive_mask.unsqueeze(-1), 0.)
         a_onehot = F.one_hot(actions.long(), num_classes=self.action_dim).to(enc_out)
         phi = self.phi_net(torch.cat([enc_out, a_onehot], dim=-1))
         # Per-agent state-only features (no action conditioning).
         psi = self.psi_net(enc_out)
-        # Counterfactual aggregation: vector_i = psi_i + mean(phi) - phi_i / N.
-        # Note: algebraically this is psi_i + (1/N) Σ_{j != i} phi_j, which
+        # Counterfactual aggregation uses N_alive instead of padded capacity N.
+        # Algebraically this is psi_i + (1/N_alive) Σ_{j != i, alive} phi_j, which
         # is independent of a_i. That is what enables the "1 forward pass
         # to enumerate all A counterfactuals" trick.
-        n_agents = phi.size(1)
-        enc_mean = phi.mean(dim=1, keepdim=True)
-        vector = psi + enc_mean - phi / n_agents
+        phi = phi * alive_mask.unsqueeze(-1)
+        n_alive = alive_mask.sum(1, keepdim=True).clamp_min(1).unsqueeze(-1)
+        enc_mean = phi.sum(dim=1, keepdim=True) / n_alive
+        vector = psi + enc_mean - phi / n_alive
         # Project aggregated vector to per-agent Q-values for all actions.
-        q_per_action = self.base_model(vector)
+        q_per_action = self.base_model(vector) * alive_mask.unsqueeze(-1)
         return {"q_per_action": q_per_action}

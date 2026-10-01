@@ -308,7 +308,8 @@ trainer:
   n_workers: 0
   consensus_mode: "vae"
   kl_divergence_weight: 0.005
-  loss_combination_method: "pit_loss"
+  loss_mixer:
+    type: pit_loss
   warmup_epochs: 0
   target_update_interval: 1
 

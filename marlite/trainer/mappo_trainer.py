@@ -286,13 +286,16 @@ class MAPPOTrainer(OnPolicyTrainer):
 
                     # ---- Backward pass: critic ----
                     self.critic_optimizer.zero_grad()
-                    critic_loss.backward()
+                    (self.vf_coef * critic_loss).backward()
                     torch.nn.utils.clip_grad_norm_(
                         self.eval_critic.parameters(), max_norm=self.max_grad_norm
                     )
 
                     self.agent_optimizer.step()
-                    self.critic_optimizer.step()
+                    # A disabled value objective must not update via optimizer
+                    # momentum or weight decay either.
+                    if self.vf_coef != 0:
+                        self.critic_optimizer.step()
 
                     total_actor_loss += actor_loss.detach().cpu().item()
                     total_critic_loss += critic_loss.detach().cpu().item()

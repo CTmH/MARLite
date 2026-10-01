@@ -20,7 +20,8 @@ from marlite.util.lr_scheduler_config import LRSchedulerConfig
 from marlite.util.self_supervised_data_constructor.self_supervised_data_constructor_config import (
     SelfSupervisedDataConstructorConfig,
 )
-from marlite.util.loss_func import ReconstructionLoss, PITLoss
+from marlite.util.loss_func import ReconstructionLoss
+from marlite.util.loss_mixer_config import LossMixerConfig
 
 
 class SelfSupervisedQMIXTrainer(OffPolicyTrainer):
@@ -30,9 +31,7 @@ class SelfSupervisedQMIXTrainer(OffPolicyTrainer):
     This trainer supports both reinforcement learning (via learn()) and
     self-supervised learning (via ssl_learn()).
 
-    The SSL loss can be combined with RL loss using two methods:
-    1. Weighted sum: combined_loss = critic_loss + weight * vae_loss
-    2. PITLoss: combines RL and SSL losses via Probability Integral Transformation
+    RL/SSL objectives are combined by a LossMixerConfig-built mixer.
     """
 
     def __init__(
@@ -42,10 +41,8 @@ class SelfSupervisedQMIXTrainer(OffPolicyTrainer):
         ssl_lr_scheduler_conf: LRSchedulerConfig,
         data_constructor_config: SelfSupervisedDataConstructorConfig,
         reconstruction_loss: _Loss,
-        self_supervised_learning_loss_weight=1.0,
-        loss_combination_method="weighted_sum",
+        loss_mixer_config: LossMixerConfig | None = None,
         ssl_update_mode="joint",
-        pit_loss_alpha=0.9,
         **kwargs,
     ):
         """
@@ -57,14 +54,10 @@ class SelfSupervisedQMIXTrainer(OffPolicyTrainer):
             ssl_lr_scheduler_conf: Configuration for SSL learning rate scheduler
             data_constructor_config: Configuration for SSL data constructor
             reconstruction_loss: Loss function for reconstruction
-            self_supervised_learning_loss_weight: Weight for VAE loss in combined loss
-            loss_combination_method: Method to combine RL and SSL losses
-                - "weighted_sum": combined_loss = critic_loss + weight * vae_loss
-                - "pit_loss": use PITLoss to combine critic_loss and vae_loss
+            loss_mixer_config: Configuration for joint RL/SSL loss and gradient mixing.
             ssl_update_mode: Requested SSL update behaviour.  Stored at this
                 base level for shared configuration; current QMIX subclasses
                 retain their existing update implementation.
-            pit_loss_alpha: Alpha parameter for PITLoss (exponential decay rate)
         """
         self.ssl_model_config = ssl_model_config
         self.ssl_optimizer_config = ssl_optimizer_config
@@ -76,15 +69,14 @@ class SelfSupervisedQMIXTrainer(OffPolicyTrainer):
                 f"reconstruction_loss must be a ReconstructionLoss subclass, "
                 f"got {type(self.reconstruction_loss).__name__}"
             )
-        self.self_supervised_learning_loss_weight = self_supervised_learning_loss_weight
-        self.loss_combination_method = loss_combination_method
+        self.loss_mixer_config = loss_mixer_config or LossMixerConfig()
+        self.loss_mixer = self.loss_mixer_config.get_loss_mixer()
         if ssl_update_mode not in {"joint", "sequential"}:
             raise ValueError(
                 "ssl_update_mode must be 'joint' or 'sequential', got "
                 f"'{ssl_update_mode}'"
             )
         self.ssl_update_mode = ssl_update_mode
-        self.pit_loss_alpha = pit_loss_alpha
 
         # Create data_constructor before super().__init__ because _create_worker_group needs it
         configure_randomness(kwargs.get("seed"), kwargs.get("deterministic", False), SSL_MODEL_STREAM)
@@ -101,6 +93,8 @@ class SelfSupervisedQMIXTrainer(OffPolicyTrainer):
 
         self.best_ssl_model_params = serialize_to_buffer(self.ssl_model.state_dict())
         self._cached_ssl_model_params = serialize_to_buffer(self.ssl_model.state_dict())
+        self.best_loss_mixer_params = serialize_to_buffer(self.loss_mixer.state_dict())
+        self._cached_loss_mixer_params = serialize_to_buffer(self.loss_mixer.state_dict())
 
         # Optionally compile ssl_model (only on single-GPU)
         if self.compile_models:
@@ -113,14 +107,6 @@ class SelfSupervisedQMIXTrainer(OffPolicyTrainer):
         else:
             self.ssl_lr_scheduler = None
 
-        # Initialize PITLoss for combining RL and SSL losses
-        # PITLoss expects losses for all tasks, so we have 2 tasks: critic_loss and vae_loss
-        self.pit_loss = PITLoss(
-            num_tasks=2,
-            alpha=self.pit_loss_alpha,
-            reduction="mean",
-        )
-
         # Note: ssl_worker_group is removed. Multi-GPU SSL training is now handled
         # by VAEGraphQMIXWorkerGroup which combines RL and SSL in a single train_step.
 
@@ -131,6 +117,10 @@ class SelfSupervisedQMIXTrainer(OffPolicyTrainer):
     def save_current_model(self, checkpoint: str):
         """Save current model including target networks and self_supervised_model."""
         super().save_current_model(checkpoint)
+        torch.save(
+            self.loss_mixer.state_dict(),
+            os.path.join(self.checkpointdir, checkpoint, "loss_mixer.pth"),
+        )
         ssl_model_path = os.path.join(
             self.checkpointdir, checkpoint, "self_supervised_model"
         )
@@ -145,7 +135,9 @@ class SelfSupervisedQMIXTrainer(OffPolicyTrainer):
     def load_checkpoint(self, checkpoint: str):
         """Load checkpoint including self_supervised_model parameters."""
         super().load_checkpoint(checkpoint)
-
+        mixer_path = os.path.join(self.checkpointdir, checkpoint, "loss_mixer.pth")
+        if os.path.exists(mixer_path):
+            self.loss_mixer.load_state_dict(torch.load(mixer_path, map_location="cpu", weights_only=True))
         ssl_model_path = os.path.join(
             self.checkpointdir,
             checkpoint,
@@ -161,9 +153,11 @@ class SelfSupervisedQMIXTrainer(OffPolicyTrainer):
         self.best_ssl_model_params = serialize_to_buffer(
             get_state_dict(self.ssl_model)
         )
+        self.best_loss_mixer_params = serialize_to_buffer(self.loss_mixer.state_dict())
         self._cached_ssl_model_params = serialize_to_buffer(
             get_state_dict(self.ssl_model)
         )
+        self._cached_loss_mixer_params = serialize_to_buffer(self.loss_mixer.state_dict())
 
         # Rebroadcast so workers get the loaded SSL model too.
         self._sync_params_to_workers()
@@ -178,8 +172,17 @@ class SelfSupervisedQMIXTrainer(OffPolicyTrainer):
         this branch and is not visible to the base.
         """
         super()._add_target_params_for_sync(trainable_params)
+        trainable_params["loss_mixer"] = self.loss_mixer.state_dict()
         if self.ssl_model is not None:
             trainable_params["ssl_model"] = get_state_dict(self.ssl_model)
+
+    def _sync_eval_params_from_workers(self):
+        if self.worker_group is None:
+            return
+        params = self.worker_group.read_params_from_worker0()
+        for name in ("eval_agent_group", "eval_critic", "ssl_model"):
+            load_state_dict_into(getattr(self, name), params[name])
+        self.loss_mixer.load_state_dict(params["loss_mixer"])
 
     def _extra_sync_kwargs(self) -> dict:
         """Push the SSL auxiliary learning rate to workers via SYNC_LR."""
@@ -189,6 +192,9 @@ class SelfSupervisedQMIXTrainer(OffPolicyTrainer):
         """Write cached best params (agent, critic, ssl) directly to disk."""
         import os
         best_dir = os.path.join(self.checkpointdir, "best")
+        os.makedirs(best_dir, exist_ok=True)
+        torch.save(deserialize_from_buffer(self.best_loss_mixer_params),
+                   os.path.join(best_dir, "loss_mixer.pth"))
         agent_dir = os.path.join(best_dir, "agent")
         os.makedirs(agent_dir, exist_ok=True)
         torch.save(
@@ -333,7 +339,8 @@ class SelfSupervisedQMIXTrainer(OffPolicyTrainer):
                 metric = metrics[metric_name]
                 best_metric = self.best_metrics[metric_name]
                 cache_params.append(
-                    (metric - best_metric) / max(abs(best_metric), 1)
+                    not np.isfinite(best_metric)
+                    or (metric - best_metric) / max(abs(best_metric), 1)
                     >= -self.update_cache_threshold
                 )
                 update_best.append(metric >= best_metric)
@@ -350,6 +357,7 @@ class SelfSupervisedQMIXTrainer(OffPolicyTrainer):
                 self._cached_ssl_model_params = serialize_to_buffer(
                     get_state_dict(self.ssl_model)
                 )
+                self._cached_loss_mixer_params = serialize_to_buffer(self.loss_mixer.state_dict())
                 logging.info(
                     f"Epoch {epoch}: Cached parameters updated with current parameters."
                 )
@@ -365,6 +373,7 @@ class SelfSupervisedQMIXTrainer(OffPolicyTrainer):
                 self.best_ssl_model_params = serialize_to_buffer(
                     get_state_dict(self.ssl_model)
                 )
+                self.best_loss_mixer_params = serialize_to_buffer(self.loss_mixer.state_dict())
                 logging.info(
                     f"Epoch {epoch}: New best {first_metric_name}: {first_metric:.4f}"
                 )
@@ -397,6 +406,7 @@ class SelfSupervisedQMIXTrainer(OffPolicyTrainer):
                     self.ssl_model,
                     deserialize_from_buffer(self._cached_ssl_model_params),
                 )
+                self.loss_mixer.load_state_dict(deserialize_from_buffer(self._cached_loss_mixer_params))
                 # Rollback: hard-copy eval → target regardless of target_update_mode.
                 load_state_dict_into(self.target_agent_group, get_state_dict(self.eval_agent_group))
                 load_state_dict_into(self.target_critic, get_state_dict(self.eval_critic))
@@ -416,25 +426,8 @@ class SelfSupervisedQMIXTrainer(OffPolicyTrainer):
     def _compute_ssl_loss(self, pred_set, target_set, mask=None):
         return self.reconstruction_loss(pred_set, target_set, mask)
 
-    def _combine_rl_ssl_loss(self, critic_loss, vae_loss):
-        """
-        Combine RL (critic) loss and SSL (VAE) loss using the specified method.
-
-        Args:
-            critic_loss: RL critic loss tensor (scalar)
-            vae_loss: SSL VAE loss tensor (scalar)
-
-        Returns:
-            combined_loss: Combined loss tensor (scalar)
-        """
-        if self.loss_combination_method == "pit_loss":
-            # PITLoss combines multiple tasks by transforming losses to standard normal
-            # and applying CDF-based transformation
-            losses = torch.stack([critic_loss, vae_loss])  # (2,)
-            combined_loss = self.pit_loss(losses)
-        else:
-            # Default: weighted sum
-            combined_loss = (
-                critic_loss + self.self_supervised_learning_loss_weight * vae_loss
-            )
-        return combined_loss
+    def _combine_rl_ssl_loss(self, rl_loss, ssl_loss):
+        """Mix original objectives; keep private critic/decoder gradients intact."""
+        return self.loss_mixer(
+            (rl_loss, ssl_loss), parameters=self.eval_agent_group.parameters()
+        )

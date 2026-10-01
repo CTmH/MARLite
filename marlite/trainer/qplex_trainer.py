@@ -1,4 +1,4 @@
-"""QPLEX Trainer (single-GPU).
+"""QPLEX Trainer with single- and multi-GPU learning.
 
 Off-policy trainer for the QPLEX algorithm (Wang et al., ICLR 2021).
 Mirrors :class:`QMIXTrainer` but uses a :class:`QPLEXMixer` that
@@ -20,13 +20,15 @@ The learn procedure implements Double DQN with the following steps:
 
 import torch
 from marlite.util.return_estimation import td_target
+from marlite.util.value_learning import last_action_mask, masked_action_values
 from tqdm import tqdm
 
-from marlite.trainer.offpolicy_trainer import OffPolicyTrainer
+from marlite.trainer.qmix_trainer import QMIXTrainer
+from marlite.trainer.trainer_worker_group.qplex_worker_group import QPLEXWorkerGroup
 from marlite.util.trajectory_dataset import TrajectoryDataLoader
 
 
-class QPLEXTrainer(OffPolicyTrainer):
+class QPLEXTrainer(QMIXTrainer):
     """Off-policy QPLEX trainer.
 
     All keyword arguments are forwarded to :class:`OffPolicyTrainer`.
@@ -35,24 +37,19 @@ class QPLEXTrainer(OffPolicyTrainer):
     parameters are needed beyond the standard off-policy set.
     """
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-
     def _create_worker_group(self):
-        """Create multi-GPU worker group (placeholder; not yet implemented)."""
-        return None
-
-    def learn(
-        self, sample_size, batch_size: int, times: int = 1
-    ) -> dict[str, float]:
-        """Perform one or more passes of gradient-based learning.
-
-        Delegates to the single- or multi-GPU implementation depending
-        on ``self.use_multi_gpu``.
-        """
+        """Reuse QMIX's dispatch loop with QPLEX-specific worker losses."""
         if not self.use_multi_gpu:
-            return self._learn_single_gpu(sample_size, batch_size, times)
-        return self._learn_multi_gpu(sample_size, batch_size, times)
+            return None
+        return QPLEXWorkerGroup(
+            device_ids=self._get_device_ids(),
+            agent_group_config=self.agent_group_config,
+            critic_config=self.critic_config,
+            critic_optimizer_config=self.critic_optimizer_config,
+            agent_optimizer_config=self.agent_optimizer_config,
+            gamma=self.gamma,
+            max_grad_norm=self.max_grad_norm,
+        )
 
     def _learn_single_gpu(
         self, sample_size, batch_size: int, times: int = 1
@@ -167,6 +164,7 @@ class QPLEXTrainer(OffPolicyTrainer):
                         actions_last,
                         alive_mask,
                         timestep_padding_mask[:, 0, :],
+                        avail_actions=last_action_mask(batch, "avail_actions", self.train_device),
                     )
                     q_tot = cret["q_tot"]
                     att_reg = cret["att_reg"]
@@ -202,12 +200,10 @@ class QPLEXTrainer(OffPolicyTrainer):
                             next_alive_mask[:, -1, :],
                         )
                         q_val_next_eval = ret_next_eval["q_val"]
-                        if use_action_mask:
-                            q_val_next_eval = torch.masked_fill(
-                                q_val_next_eval,
-                                ~next_avail_actions,
-                                -torch.inf,
-                            )
+                        q_val_next_eval = masked_action_values(
+                            q_val_next_eval, next_avail_actions if use_action_mask else None,
+                            next_alive_mask[:, -1, :],
+                        )
                         best_actions = q_val_next_eval.argmax(dim=-1)
 
                         # Target agent evaluates the next state Q for those actions.
@@ -226,6 +222,7 @@ class QPLEXTrainer(OffPolicyTrainer):
                             best_actions,
                             next_alive_mask,
                             next_timestep_padding_mask[:, 0, :],
+                            avail_actions=next_avail_actions if use_action_mask else None,
                         )
                         q_tot_next = cret_next["q_tot"]
 
@@ -242,10 +239,7 @@ class QPLEXTrainer(OffPolicyTrainer):
                     y_tot = td_target(batch, r_last, q_tot_next, self.gamma, termination_last)
                     critic_loss = torch.nn.functional.mse_loss(q_tot, y_tot.detach())
 
-                    if att_reg.item() != 0:
-                        total_batch_loss = critic_loss + att_reg
-                    else:
-                        total_batch_loss = critic_loss
+                    total_batch_loss = critic_loss + att_reg
 
                     # ------------------------------------------------------------------
                     # Backprop.
@@ -281,12 +275,3 @@ class QPLEXTrainer(OffPolicyTrainer):
         torch.cuda.empty_cache()
 
         return {"loss": total_loss / total_batches}
-
-    def _learn_multi_gpu(
-        self, sample_size, batch_size: int, times: int = 1
-    ) -> dict[str, float]:
-        """Multi-GPU placeholder.  Raise a clear error."""
-        raise NotImplementedError(
-            "QPLEX multi-GPU training is not yet implemented. "
-            "Please set ``train_device`` to a single device."
-        )

@@ -4,7 +4,7 @@ VAE Graph worker implementation for joint RL+SSL multi-GPU training.
 This module provides the VAEGraphQMIXWorker class that implements the training logic
 for VAE-based GraphQMIX algorithm in a multi-GPU setting.
 
-Training computes combined_loss = td_error + self_supervised_learning_loss_weight * vae_loss
+Training combines RL and SSL objectives using a configured loss mixer.
 in a single forward pass, where vae_loss is computed using local_state_estimates,
 mu, and log_var returned directly from eval_agent_group.forward().
 """
@@ -19,7 +19,10 @@ from marlite.algorithm.agents import AgentGroupConfig
 from marlite.algorithm.critic import CriticConfig
 from marlite.algorithm.model import ModelConfig
 from marlite.util.optimizer_config import OptimizerConfig
-from marlite.util.loss_func import PITLoss, ReconstructionLoss
+from marlite.util.loss_func import ReconstructionLoss
+from itertools import chain
+from marlite.util.loss_mixer_config import LossMixerConfig
+from marlite.util.loss_mixer import reduce_mixed_gradients
 from marlite.trainer.trainer_worker.offpolicy_worker import OffPolicyWorker
 
 
@@ -60,9 +63,7 @@ class VAEGraphQMIXWorker(OffPolicyWorker):
         gamma: float,
         max_grad_norm: float,
         kl_divergence_weight: float,
-        self_supervised_learning_loss_weight: float,
-        loss_combination_method: str,
-        pit_loss_alpha: float,
+        loss_mixer_config: LossMixerConfig,
         warmup_epochs: int,
         **kwargs,
     ):
@@ -84,19 +85,13 @@ class VAEGraphQMIXWorker(OffPolicyWorker):
             ssl_optimizer_config: Configuration for SSL optimizer
             reconstruction_loss: Loss function for reconstruction
             kl_divergence_weight: Weight for KL divergence loss
-            self_supervised_learning_loss_weight: Weight for VAE loss in combined loss
-            loss_combination_method: Method to combine RL and SSL losses
-                - "weighted_sum": combined_loss = critic_loss + weight * vae_loss
-                - "pit_loss": use PITLoss to combine critic_loss and vae_loss
-            pit_loss_alpha: Alpha parameter for PITLoss (exponential decay rate)
+            loss_mixer_config: Configuration for joint RL/SSL loss and gradient mixing.
             data_constructor: Data constructor for SSL preprocessing
             warmup_epochs: Number of epochs to train with RL only before enabling SSL
         """
         super().__init__(worker_id, device_id, rank, world_size, init_method)
         self.gamma = gamma
         self.max_grad_norm = max_grad_norm
-        self.loss_combination_method = loss_combination_method
-        self.pit_loss_alpha = pit_loss_alpha
 
         # Initialize RL models
         self.eval_agent_group = agent_group_config.get_agent_group()
@@ -128,13 +123,8 @@ class VAEGraphQMIXWorker(OffPolicyWorker):
         self.ssl_optimizer = ssl_optimizer_config.get_optimizer(
             self.ssl_model.parameters()
         )
-        self.pit_loss = PITLoss(
-            num_tasks=2,
-            alpha=self.pit_loss_alpha,
-            reduction="mean",
-        )
+        self.loss_mixer = loss_mixer_config.get_loss_mixer()
         self.kl_divergence_weight = kl_divergence_weight
-        self.self_supervised_learning_loss_weight = self_supervised_learning_loss_weight
         self.data_constructor = data_constructor
         self.warmup_epochs = warmup_epochs
 
@@ -157,11 +147,10 @@ class VAEGraphQMIXWorker(OffPolicyWorker):
         self.device = device
 
     def reduce_gradients(self):
-        super().reduce_gradients()
-        for param in self.ssl_model.parameters():
-            if param.grad is not None:
-                dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
-                param.grad.data /= self.world_size
+        reduce_mixed_gradients(chain(
+            self.eval_critic.parameters(), self.eval_agent_group.parameters(),
+            self.ssl_model.parameters(),
+        ))
 
     def synchronize_eval_params(self):
         super().synchronize_eval_params()
@@ -195,6 +184,7 @@ class VAEGraphQMIXWorker(OffPolicyWorker):
         params["ssl_model"] = {
             k: v.clone().cpu() for k, v in self.ssl_model.state_dict().items()
         }
+        params["loss_mixer"] = {k: v.clone().cpu() for k, v in self.loss_mixer.state_dict().items()}
         return params
 
     def sync_params_from_main(self, params):
@@ -207,6 +197,8 @@ class VAEGraphQMIXWorker(OffPolicyWorker):
         (VAE decoder) is added here.
         """
         params = super().sync_params_from_main(params)
+        if "loss_mixer" in params:
+            self.loss_mixer.load_state_dict(params["loss_mixer"])
         if "ssl_model" in params and self.ssl_model is not None:
             self.ssl_model.load_state_dict(
                 {k: v.clone() for k, v in params["ssl_model"].items()}
@@ -468,25 +460,12 @@ class VAEGraphQMIXWorker(OffPolicyWorker):
         """
         return self.reconstruction_loss(pred_set, target_set, mask)
 
-    def _combine_rl_ssl_loss(self, critic_loss, vae_loss):
-        """
-        Combine RL (critic) loss and SSL (VAE) loss using the specified method.
-
-        Args:
-            critic_loss: RL critic loss tensor (scalar)
-            vae_loss: SSL VAE loss tensor (scalar)
-
-        Returns:
-            combined_loss: Combined loss tensor (scalar)
-        """
-        if self.loss_combination_method == "pit_loss":
-            losses = torch.stack([critic_loss, vae_loss])  # (2,)
-            combined_loss = self.pit_loss(losses)
-        else:
-            combined_loss = (
-                critic_loss + self.self_supervised_learning_loss_weight * vae_loss
-            )
-        return combined_loss
+    def _combine_rl_ssl_loss(self, rl_loss, ssl_loss):
+        """Use globally aggregated task gradients/statistics on every worker."""
+        return self.loss_mixer(
+            (rl_loss, ssl_loss), parameters=self.eval_agent_group.parameters(),
+            distributed=self.world_size > 1,
+        )
 
     def handle_command(
         self,

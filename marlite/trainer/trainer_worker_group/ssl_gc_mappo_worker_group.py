@@ -2,6 +2,8 @@
 SSL Group Consensus MAPPO worker group for multi-GPU training.
 """
 
+from marlite.util.loss_mixer_config import LossMixerConfig
+
 from typing import Any, Dict
 from marlite.algorithm.model import ModelConfig
 from marlite.util.optimizer_config import OptimizerConfig
@@ -30,9 +32,7 @@ class SSLGroupConsensusMAPPOWorkerGroup(OnPolicyWorkerGroup):
         entropy_coef: float = 0.01,
         vf_coef: float = 0.5,
         kl_divergence_weight: float = 0.005,
-        self_supervised_learning_loss_weight: float = 1.0,
-        loss_combination_method: str = "weighted_sum",
-        pit_loss_alpha: float = 0.9,
+        loss_mixer_config: LossMixerConfig | None = None,
         warmup_iterations: int = 0,
         recon_mode: str = "per_agent",
         kl_on_agent: bool = True,
@@ -56,9 +56,7 @@ class SSLGroupConsensusMAPPOWorkerGroup(OnPolicyWorkerGroup):
         self.reconstruction_loss = reconstruction_loss
         self.data_constructor = data_constructor
         self.kl_divergence_weight = kl_divergence_weight
-        self.self_supervised_learning_loss_weight = self_supervised_learning_loss_weight
-        self.loss_combination_method = loss_combination_method
-        self.pit_loss_alpha = pit_loss_alpha
+        self.loss_mixer_config = loss_mixer_config or LossMixerConfig()
         self.warmup_iterations = warmup_iterations
         self.recon_mode = recon_mode
         self.kl_on_agent = kl_on_agent
@@ -94,9 +92,7 @@ class SSLGroupConsensusMAPPOWorkerGroup(OnPolicyWorkerGroup):
         kwargs["reconstruction_loss"] = self.reconstruction_loss
         kwargs["data_constructor"] = self.data_constructor
         kwargs["kl_divergence_weight"] = self.kl_divergence_weight
-        kwargs["self_supervised_learning_loss_weight"] = self.self_supervised_learning_loss_weight
-        kwargs["loss_combination_method"] = self.loss_combination_method
-        kwargs["pit_loss_alpha"] = self.pit_loss_alpha
+        kwargs["loss_mixer_config"] = self.loss_mixer_config
         kwargs["warmup_iterations"] = self.warmup_iterations
         kwargs["recon_mode"] = self.recon_mode
         kwargs["kl_on_agent"] = self.kl_on_agent
@@ -112,5 +108,5 @@ class SSLGroupConsensusMAPPOWorkerGroup(OnPolicyWorkerGroup):
             command_queue.put("SET_TRAINING_EPOCH")
             param_queue.put(epoch)
         for ack_queue in self.ack_queues:
-            if ack_queue.get() != "ACK":
+            if self._receive(ack_queue) != "ACK":
                 raise RuntimeError("Worker failed to acknowledge training epoch")

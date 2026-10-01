@@ -149,7 +149,8 @@ def test_gae_labels_match_independent_full_episode_calculation():
     ("ae_group_consensus", "TestAEGroupConsensusTrainer", "ssl_group_consensus", "SSLGroupConsensusWorker"),
     ("self_supervised_gnn", "TestVAEGraphQMIXBattle", "vae_graph", "VAEGraphQMIXWorker"),
 ])
-def test_family_trainer_and_worker(module_name, fixture_name, worker_module, worker_name):
+def test_family_trainer_and_worker(module_name, fixture_name, worker_module, worker_name,
+                                  loss_mixer_type=None):
     fixture = getattr(importlib.import_module(f"test.test_trainer.test_{module_name}_trainer"
         if module_name != "self_supervised_gnn" else "test.test_trainer.test_self_supervised_gnn"), fixture_name)()
     fixture.setUp()
@@ -180,6 +181,12 @@ def test_family_trainer_and_worker(module_name, fixture_name, worker_module, wor
         config["trainer"].pop("warmup_epochs", None)
     if "self_supervised_learning" in config:
         config["self_supervised_learning"]["data_constructor"]["n_workers"] = 0
+        if loss_mixer_type is not None:
+            for key in ("loss_combination_method", "pit_loss_alpha", "self_supervised_learning_loss_weight"):
+                config["trainer"].pop(key, None)
+            config["trainer"]["loss_mixer"] = {"type": loss_mixer_type, "weights": [1., .2]}
+            if "group_consensus" in module_name or onpolicy:
+                config["agent_group"]["enable_rl_grad_to_group_estimate"] = True
     with tempfile.TemporaryDirectory() as directory:
         config["trainer"]["workdir"] = directory
         trainer = TrainerConfig(config).create_trainer()
@@ -211,6 +218,7 @@ def test_family_trainer_and_worker(module_name, fixture_name, worker_module, wor
         worker = worker_cls.__new__(worker_cls)
         worker.__dict__.update(trainer.__dict__)
         worker.device = torch.device("cpu")
+        worker.world_size = 1
         worker.current_training_epoch = trainer.current_epoch
         if worker_name == "ProbMsgAggrWorker":
             worker.Normal = torch.distributions.Normal
@@ -220,3 +228,35 @@ def test_family_trainer_and_worker(module_name, fixture_name, worker_module, wor
         worker._reduce_critic_gradients = lambda: None
         worker_metrics = worker.train_step(batch)
         assert all(np.isfinite(v) for v in worker_metrics.values())
+        if loss_mixer_type is not None:
+            # Exercise the real config -> worker-group -> worker constructor path
+            # without starting GPU processes in this CPU integration check.
+            from marlite.trainer.trainer_worker_group.base_worker_group import BaseWorkerGroup
+            from marlite.trainer.trainer_worker.base_worker import BaseWorker
+            trainer.use_multi_gpu = True
+            with patch.object(BaseWorkerGroup, "__init__", return_value=None), \
+                 patch.object(trainer, "_get_device_ids", return_value=[0, 1]):
+                group = trainer._create_worker_group()
+            trainer.use_multi_gpu = False
+            with patch.object(BaseWorker, "_setup_distributed", return_value=None):
+                fresh_worker = worker_cls(worker_id=0, device_id=0, rank=0,
+                    world_size=1, init_method="unused", **group._create_worker_kwargs())
+            fresh_worker.sync_params_from_main(worker.get_params_for_main())
+            for key, value in trainer.loss_mixer.state_dict().items():
+                torch.testing.assert_close(fresh_worker.loss_mixer.state_dict()[key], value)
+
+            state = deepcopy(trainer.loss_mixer.state_dict())
+            trainer.save_current_model("mixer")
+            for value in trainer.loss_mixer.buffers():
+                if value.is_floating_point():
+                    value.add_(1)
+            trainer.load_checkpoint("mixer")
+            for key, value in state.items():
+                torch.testing.assert_close(trainer.loss_mixer.state_dict()[key], value)
+            warmup_attribute = "warmup_iterations" if onpolicy else "warmup_epochs"
+            setattr(trainer, warmup_attribute, trainer.current_epoch + 1)
+            trainer.learn(4, 2, times=1)
+            setattr(worker, warmup_attribute, trainer.current_epoch + 1)
+            worker.train_step(batch)
+            for key, value in state.items():
+                torch.testing.assert_close(trainer.loss_mixer.state_dict()[key], value)

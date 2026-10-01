@@ -311,7 +311,8 @@ trainer:
   kl_on_agent: false
   kl_on_group: false
   consensus_mode: "ae"
-  loss_combination_method: "pit_loss"
+  loss_mixer:
+    type: pit_loss
   warmup_epochs: 0
 
   epsilon_scheduler:

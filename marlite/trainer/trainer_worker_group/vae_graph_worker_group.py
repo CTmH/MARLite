@@ -5,6 +5,8 @@ This module provides VAEGraphQMIXWorkerGroup that manages VAEGraphQMIXWorker
 instances for joint RL+SSL training with VAEGraphQMIXTrainer.
 """
 
+from marlite.util.loss_mixer_config import LossMixerConfig
+
 from typing import Any, Dict
 from marlite.algorithm.model import ModelConfig
 from marlite.util.optimizer_config import OptimizerConfig
@@ -23,7 +25,7 @@ class VAEGraphQMIXWorkerGroup(OffPolicyWorkerGroup):
     - ssl_model for SSL (VAE decoder)
 
     Workers execute train_step() that computes:
-    combined_loss = critic_loss + self_supervised_learning_loss_weight * vae_loss
+    combined_loss = loss_mixer([critic_loss, vae_loss])
 
     Returns a dictionary of averaged loss metrics across workers.
     """
@@ -41,9 +43,7 @@ class VAEGraphQMIXWorkerGroup(OffPolicyWorkerGroup):
         gamma: float = 0.9,
         max_grad_norm: float = 5.0,
         kl_divergence_weight: float = 1.0,
-        self_supervised_learning_loss_weight: float = 1.0,
-        loss_combination_method: str = "weighted_sum",
-        pit_loss_alpha: float = 0.9,
+        loss_mixer_config: LossMixerConfig | None = None,
         data_constructor=None,
         warmup_epochs: int = 0,
         init_method: str = None,
@@ -62,11 +62,7 @@ class VAEGraphQMIXWorkerGroup(OffPolicyWorkerGroup):
             ssl_optimizer_config: Configuration for SSL optimizer
             reconstruction_loss: Loss function for reconstruction
             kl_divergence_weight: Weight for KL divergence loss
-            self_supervised_learning_loss_weight: Weight for VAE loss in combined loss
-            loss_combination_method: Method to combine RL and SSL losses
-                - "weighted_sum": combined_loss = critic_loss + weight * vae_loss
-                - "pit_loss": use PITLoss to combine critic_loss and vae_loss
-            pit_loss_alpha: Alpha parameter for PITLoss (exponential decay rate)
+            loss_mixer_config: Configuration for joint RL/SSL loss and gradient mixing.
             data_constructor: Data constructor for SSL preprocessing
             warmup_epochs: Number of epochs to train with RL only before enabling SSL
             init_method: URL for distributed initialization
@@ -81,9 +77,7 @@ class VAEGraphQMIXWorkerGroup(OffPolicyWorkerGroup):
         self.ssl_optimizer_config = ssl_optimizer_config
         self.reconstruction_loss = reconstruction_loss
         self.kl_divergence_weight = kl_divergence_weight
-        self.self_supervised_learning_loss_weight = self_supervised_learning_loss_weight
-        self.loss_combination_method = loss_combination_method
-        self.pit_loss_alpha = pit_loss_alpha
+        self.loss_mixer_config = loss_mixer_config or LossMixerConfig()
         self.data_constructor = data_constructor
         self.warmup_epochs = warmup_epochs
 
@@ -112,11 +106,7 @@ class VAEGraphQMIXWorkerGroup(OffPolicyWorkerGroup):
         kwargs["ssl_optimizer_config"] = self.ssl_optimizer_config
         kwargs["reconstruction_loss"] = self.reconstruction_loss
         kwargs["kl_divergence_weight"] = self.kl_divergence_weight
-        kwargs["self_supervised_learning_loss_weight"] = (
-            self.self_supervised_learning_loss_weight
-        )
-        kwargs["loss_combination_method"] = self.loss_combination_method
-        kwargs["pit_loss_alpha"] = self.pit_loss_alpha
+        kwargs["loss_mixer_config"] = self.loss_mixer_config
         kwargs["data_constructor"] = self.data_constructor
         kwargs["warmup_epochs"] = self.warmup_epochs
         return kwargs
