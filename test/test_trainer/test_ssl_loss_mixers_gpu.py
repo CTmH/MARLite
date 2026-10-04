@@ -64,13 +64,13 @@ def test_real_ssl_workers(tmp_path, family, mode, mixer):
         initial_mixer = deepcopy(trainer.loss_mixer.state_dict())
         before = deepcopy(get_state_dict(trainer.eval_agent_group))
         # Warmup must not initialize/update mixer statistics on either GPU.
-        metrics = trainer.learn(4, 4, times=1)
+        metrics = trainer.learn(4, 3, times=1)
         trainer._sync_eval_params_from_workers()
         for key, value in initial_mixer.items():
             torch.testing.assert_close(trainer.loss_mixer.state_dict()[key], value)
         trainer.current_epoch = 1
         trainer._sync_params_to_workers()
-        metrics = trainer.learn(8, 4, times=1)
+        metrics = trainer.learn(7, 3, times=1)
         assert all(np.isfinite(value) for value in metrics.values())
         trainer._sync_eval_params_from_workers()
         after = get_state_dict(trainer.eval_agent_group)

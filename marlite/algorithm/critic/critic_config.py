@@ -12,6 +12,7 @@ from marlite.algorithm.critic.mappo_critic import MAPPOCritic
 from marlite.algorithm.critic.seq_mappo_critic import SeqMAPPOCritic
 from marlite.algorithm.critic.qtransform import Qtransform
 from marlite.algorithm.critic.qplex_mixer import QPLEXMixer
+from marlite.algorithm.critic.seq_qplex_mixer import SeqQPLEXMixer
 from marlite.algorithm.model import ModelConfig
 
 
@@ -103,6 +104,11 @@ def create_qplex_mixer(critic_config: Dict[str, Any]) -> QPLEXMixer:
     )
 
 
+def create_seq_qplex_mixer(critic_config: Dict[str, Any]) -> SeqQPLEXMixer:
+    """Create sequence-aware QPLEX with the same state encoder config as SeqQMixer."""
+    return SeqQPLEXMixer(**critic_config)
+
+
 # Registry mapping critic type names to creator functions
 registered_critic_creators: Dict[str, Callable[[Dict[str, Any]], Module]] = {
     "QMixer": create_qmixer,
@@ -114,6 +120,7 @@ registered_critic_creators: Dict[str, Callable[[Dict[str, Any]], Module]] = {
     "SeqMAPPOCritic": create_seq_mappo_critic,
     "Qtransform": create_qtransform,
     "QPLEXMixer": create_qplex_mixer,
+    "SeqQPLEXMixer": create_seq_qplex_mixer,
 }
 
 

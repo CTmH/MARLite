@@ -12,6 +12,7 @@ from marlite.algorithm.critic.seq_state_value import SeqStateValue
 from marlite.algorithm.critic.state_value_config import StateValueConfig
 from marlite.algorithm.critic.qtransform import Qtransform
 from marlite.algorithm.critic.qplex_mixer import QPLEXMixer
+from marlite.algorithm.critic.seq_qplex_mixer import SeqQPLEXMixer
 
 __all__ = [
     "CriticConfig", "Critic", "Mixer",
@@ -19,5 +20,5 @@ __all__ = [
     "MAPPOCritic", "SeqMAPPOCritic",
     "StateValue", "SeqStateValue", "StateValueConfig",
     "Qtransform",
-    "QPLEXMixer",
+    "QPLEXMixer", "SeqQPLEXMixer",
 ]

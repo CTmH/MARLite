@@ -14,12 +14,13 @@ from marlite.util.serialization import get_state_dict, serialize_to_buffer
 
 
 @pytest.mark.parametrize("device", ["cpu", "cuda:0", "dual"])
-@pytest.mark.parametrize("family", ["qtran", "qplex", "qplex_ema", "g2anet_mappo", "g2anet_qmix", "mappo", "mappo_no_value"])
+@pytest.mark.parametrize("family", ["qtran", "qplex", "qplex_ema", "qplex_seq", "g2anet_mappo", "g2anet_qmix", "mappo", "mappo_no_value"])
 def test_priority_trainer_updates(tmp_path, device, family):
     if device != "cpu" and torch.cuda.device_count() < (2 if device == "dual" else 1):
         pytest.skip("Required GPUs unavailable")
     qplex_ema = family == "qplex_ema"
-    if qplex_ema:
+    qplex_seq = family == "qplex_seq"
+    if qplex_ema or qplex_seq:
         family = "qplex"
     fixtures = {
         "qtran": ("qtran_trainer", "TestQTRANTrainer"),
@@ -41,6 +42,11 @@ def test_priority_trainer_updates(tmp_path, device, family):
         config["trainer"].update(n_steps=3, target_update_mode="ema",
                                  target_update_tau=.2, target_update_interval=2)
         config["critic"]["transformation"]["attend_reg_coef"] = .01
+    if qplex_seq:
+        config["critic"].update(type="SeqQPLEXMixer", seq_model={
+            "model_type": "RNN", "input_shape": 54, "output_shape": 54,
+            "rnn_hidden_dim": 16,
+        })
     config["rollout"]["device"] = "cpu"
     trainer = TrainerConfig(config).create_trainer()
     try:
@@ -62,7 +68,7 @@ def test_priority_trainer_updates(tmp_path, device, family):
             if family == "qtran":
                 trainer.v_lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(trainer.v_optimizer, .5)
             with patch.object(trainer, "collect_experience"), patch.object(trainer, "evaluate", side_effect=evaluate):
-                metrics = trainer.train(epochs=2, target_first_metric=2., batch_size=2)
+                metrics = trainer.train(epochs=2, target_first_metric=2., batch_size=3)
             assert len(evaluated) == 2
             for snapshot in evaluated:
                 assert any(not torch.equal(before[key].cpu(), snapshot[key].cpu())
@@ -70,7 +76,8 @@ def test_priority_trainer_updates(tmp_path, device, family):
             # Best checkpoints must use the same layout as load_checkpoint.
             trainer.load_checkpoint("best")
         else:
-            metrics = trainer.learn(4, 2, times=1)
+            # Odd batches exercise balanced shards; the tail exercises replication.
+            metrics = trainer.learn(4, 3, times=1)
             trainer._sync_eval_params_from_workers()
         assert all(np.isfinite(value) for value in metrics.values())
         after = get_state_dict(trainer.eval_agent_group)
@@ -97,12 +104,11 @@ def test_priority_trainer_updates(tmp_path, device, family):
             trainer.worker_group.shutdown()
 
 
-@pytest.mark.parametrize("size", [0, 1, 3, 5])
-def test_qplex_rejects_uneven_batches_before_dispatch(size):
+def test_qplex_rejects_empty_batch_before_dispatch():
     from marlite.trainer.trainer_worker_group.qplex_worker_group import QPLEXWorkerGroup
 
     # No processes or queues: validation must happen before issuing commands.
     group = object.__new__(QPLEXWorkerGroup)
     group.world_size = 2
-    with pytest.raises(ValueError, match="positive multiple"):
-        group.train_step({"states": torch.empty(size, 3, 54)})
+    with pytest.raises(ValueError, match="must be positive"):
+        group.train_step({"states": torch.empty(0, 3, 54)})

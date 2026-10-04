@@ -81,6 +81,13 @@ class QPLEXMixer(Mixer):
         self.weighted_head = weighted_head
         self.is_minus_one = is_minus_one
 
+    def _encode_states(self, states, alive_mask, padding_mask):
+        """Encode current state; sequence mixers override only this step."""
+        states_last = states[:, -1]
+        if self._fe_is_masked:
+            return self.feature_extractor(states_last, alive_mask[:, -1].bool())
+        return self.feature_extractor(states_last)
+
     def forward(
         self,
         q_value_from_agents: torch.Tensor,
@@ -98,11 +105,7 @@ class QPLEXMixer(Mixer):
         """
         bs = q_value_from_agents.size(0)
         alive = alive_mask[:, -1].to(device=q_value_from_agents.device, dtype=torch.bool)
-        states_last = states[:, -1]
-        encoded_state = (
-            self.feature_extractor(states_last, alive)
-            if self._fe_is_masked else self.feature_extractor(states_last)
-        )
+        encoded_state = self._encode_states(states, alive_mask, padding_mask)
         feasible_q = masked_action_values(q_value_from_agents, avail_actions, alive)
         max_q = feasible_q.max(-1).values
         effective_actions = actions.long().masked_fill(~alive, 0)

@@ -71,10 +71,26 @@ def test_worker_failure_raises_and_cleans_peers(fault, caplog):
         group.shutdown()
 
 
-@pytest.mark.parametrize("size", [0, 1, 3, 5])
-def test_all_groups_reject_uneven_shards(size):
-    with pytest.raises(ValueError, match="positive multiple"):
-        _slice_batch({"states": torch.empty(size, 2)}, 2)
+@pytest.mark.parametrize("ranks", [1, 2, 3, 8])
+@pytest.mark.parametrize("size", [1, 2, 3, 5, 64, 65, 68, 129])
+def test_balanced_shards_cover_samples_and_keep_fields_aligned(size, ranks):
+    batch = {"states": torch.arange(size), "graphs": list(range(size)),
+             "labels": tuple(range(size)), "epoch": 7, "scale": torch.tensor(1.)}
+    shards = _slice_batch(batch, ranks)
+    lengths = [len(s["states"]) for s in shards]
+    assert min(lengths) > 0 and max(lengths) - min(lengths) <= 1
+    expected = batch["states"].repeat(ranks) if size < ranks else batch["states"]
+    torch.testing.assert_close(torch.cat([s["states"] for s in shards]), expected)
+    for shard in shards:
+        assert shard["states"].tolist() == shard["graphs"] == list(shard["labels"])
+        assert shard["epoch"] == 7 and shard["scale"] == 1
+    shards[0]["states"][0] = -1
+    assert batch["states"][0] == 0  # Worker tensors must not alias the input.
+
+
+def test_empty_batch_still_rejected():
+    with pytest.raises(ValueError, match="must be positive"):
+        _slice_batch({"states": torch.empty(0, 2)}, 2)
 
 
 def test_equal_shards_and_metadata():
@@ -99,12 +115,12 @@ if __name__ == '__main__':
     group = FaultGroup([0, 1], 2)
     group.fault = {fault!r}
     group.start_workers()
-    group.train_step({{'states': torch.ones({1 if fault == 'invalid_batch' else 2}, 1)}})
+    group.train_step({{'states': torch.ones({0 if fault == 'invalid_batch' else 2}, 1)}})
 """
     result = subprocess.run([sys.executable, "-c", script],
                             capture_output=True, text=True, timeout=60)
     assert result.returncode != 0
-    assert ("injected TRAIN_STEP error" if fault == "TRAIN_STEP" else "positive multiple") in result.stderr
+    assert ("injected TRAIN_STEP error" if fault == "TRAIN_STEP" else "must be positive") in result.stderr
 
 
 @pytest.mark.parametrize("module,name", [
@@ -172,6 +188,20 @@ def _conditional_gradient_check(rank, rendezvous, backend):
                 torch.testing.assert_close(net[0].grad, torch.ones_like(net[0]))
                 torch.testing.assert_close(net[1].grad, 2 * torch.ones_like(net[1]))
                 assert net[2].grad is None
+        # Real collectives must accept both uneven shards and singleton tails.
+        from marlite.util.loss_mixer import reduce_mixed_gradients
+        for size in (1, 3, 65):
+            samples = torch.arange(1, size + 1, dtype=torch.float32, device=device)
+            shards = _slice_batch({"samples": samples}, 2)
+            parameter = torch.nn.Parameter(torch.ones((), device=device))
+            (parameter * shards[rank]["samples"]).mean().backward()
+            reduce_mixed_gradients([parameter])
+            expected = torch.stack([s["samples"].mean() for s in shards]).mean()
+            torch.testing.assert_close(parameter.grad, expected)
+            if size == 65:
+                # 33/32 shards: gradient = 33.25 rather than sample mean 33.
+                torch.testing.assert_close(parameter.grad - samples.mean(),
+                                           torch.tensor(.25, device=device))
     finally:
         dist.destroy_process_group()
 

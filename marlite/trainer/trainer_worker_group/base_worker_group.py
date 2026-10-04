@@ -77,7 +77,16 @@ def _dict_to_cpu(data: Any) -> Any:
 
 def _slice_batch(batch: Dict[str, Any], num_slices: int) -> List[Dict[str, Any]]:
     """
-    Slice a batch into multiple sub-batches for data parallelism.
+    Split samples as evenly as possible (shard sizes differ by at most one).
+
+    Workers still average rank-local losses/gradients equally, not by sample
+    count. For B >= D and B = q*D + r samples over D ranks, this changes the
+    sample-weight distribution by total variation r*(D-r)/(D*B). This is a small approximation
+    when each rank has many samples, not a bound on relative gradient error.
+
+    If B < D, replicate the entire tiny batch on every rank. Averaging identical
+    batch objectives preserves sample weights and avoids empty-rank collectives;
+    stochastic layers and rank-local statistics can still differ between ranks.
 
     Args:
         batch: Dictionary containing batch data
@@ -95,27 +104,28 @@ def _slice_batch(batch: Dict[str, Any], num_slices: int) -> List[Dict[str, Any]]
     if not sizes or len(set(sizes.values())) != 1:
         raise ValueError(f"Batch fields must have one common sample count: {sizes}")
     size = next(iter(sizes.values()))
-    if size < num_slices or size % num_slices:
+    if size == 0:
         raise ValueError(
-            f"Batch size {size} must be a positive multiple of the GPU count "
-            f"({num_slices}), including the final batch. Check the actual "
-            "sample count after replay-buffer sampling."
+            "Batch size must be positive; cannot dispatch an empty batch."
         )
+    if size < num_slices:
+        bounds = [(0, size)] * num_slices
+    else:
+        step, remainder = divmod(size, num_slices)
+        bounds = []
+        start = 0
+        for i in range(num_slices):
+            end = start + step + (i < remainder)
+            bounds.append((start, end))
+            start = end
     slices = [{} for _ in range(num_slices)]
 
     for key, value in batch.items():
         if isinstance(value, torch.Tensor) and value.ndim > 0:
-            step = value.shape[0] // num_slices
-            for i in range(num_slices):
-                slices[i][key] = value[
-                    i * step : (i + 1) * step if i < num_slices - 1 else None
-                ].clone()
+            for i, (start, end) in enumerate(bounds):
+                slices[i][key] = value[start:end].clone()
         elif isinstance(value, (list, tuple)):
-            # Slice list - divide indices evenly
-            step = len(value) // num_slices
-            for i in range(num_slices):
-                start = i * step
-                end = (i + 1) * step if i < num_slices - 1 else len(value)
+            for i, (start, end) in enumerate(bounds):
                 slices[i][key] = value[start:end]
         else:
             # Non-sliceable data (scalars, strings, etc.) - keep as is

@@ -1,0 +1,323 @@
+# Flat64 50v50 QPLEX: qmix_td1 hyperparameters, extended from 200 to 1000 epochs.
+# Reference: smac_flat64_50v50_baselines_20260924/qmix_td1/config.yaml.
+# Requires SeqQPLEXMixer support and balanced uneven multi-GPU batch dispatch.
+# Compare epochs 0..199 first, then 200..999 for additional QPLEX training benefit.
+# Historical QMIX used older code; both configurations now encode state history.
+# Keep agent order identical to the environment: Marauder, Marine, Medivac.
+agent_group:
+  type: QMIX
+  agent_list:
+    marauder_0: marauder
+    marauder_1: marauder
+    marauder_2: marauder
+    marauder_3: marauder
+    marauder_4: marauder
+    marauder_5: marauder
+    marauder_6: marauder
+    marauder_7: marauder
+    marauder_8: marauder
+    marauder_9: marauder
+    marauder_10: marauder
+    marauder_11: marauder
+    marauder_12: marauder
+    marauder_13: marauder
+    marauder_14: marauder
+    marine_0: marine
+    marine_1: marine
+    marine_2: marine
+    marine_3: marine
+    marine_4: marine
+    marine_5: marine
+    marine_6: marine
+    marine_7: marine
+    marine_8: marine
+    marine_9: marine
+    marine_10: marine
+    marine_11: marine
+    marine_12: marine
+    marine_13: marine
+    marine_14: marine
+    marine_15: marine
+    marine_16: marine
+    marine_17: marine
+    marine_18: marine
+    marine_19: marine
+    marine_20: marine
+    marine_21: marine
+    marine_22: marine
+    marine_23: marine
+    marine_24: marine
+    marine_25: marine
+    marine_26: marine
+    marine_27: marine
+    marine_28: marine
+    marine_29: marine
+    medivac_0: medivac
+    medivac_1: medivac
+    medivac_2: medivac
+    medivac_3: medivac
+    medivac_4: medivac
+  models:
+    marauder:
+      feature_extractor:
+        model_type: Custom
+        initialization: {scheme: orthogonal, gain: 1.4142135623730951, bias: 0.0}
+        layers:
+          - {type: Linear, in_features: 852, out_features: 128}
+          - {type: LayerNorm, normalized_shape: 128}
+          - {type: GELU}
+          - {type: ResidualMLP, input_dim: 128, hidden_dim: 256}
+          - {type: LayerNorm, normalized_shape: 128}
+      encoder:
+        model_type: SimpleResAttSeqEnc
+        input_dim: 128
+        embed_dim: 128
+        output_dim: 128
+        num_heads: 4
+        max_seq_len: 16
+        dropout: 0.0
+        initialization: {scheme: xavier_uniform, gain: 1.0, bias: 0.0}
+      decoder:
+        model_type: Custom
+        initialization: {scheme: orthogonal, gain: 0.01, bias: 0.0}
+        layers:
+          - {type: Linear, in_features: 128, out_features: 56}
+    marine:
+      feature_extractor:
+        model_type: Custom
+        initialization: {scheme: orthogonal, gain: 1.4142135623730951, bias: 0.0}
+        layers:
+          - {type: Linear, in_features: 852, out_features: 128}
+          - {type: LayerNorm, normalized_shape: 128}
+          - {type: GELU}
+          - {type: ResidualMLP, input_dim: 128, hidden_dim: 256}
+          - {type: LayerNorm, normalized_shape: 128}
+      encoder:
+        model_type: SimpleResAttSeqEnc
+        input_dim: 128
+        embed_dim: 128
+        output_dim: 128
+        num_heads: 4
+        max_seq_len: 16
+        dropout: 0.0
+        initialization: {scheme: xavier_uniform, gain: 1.0, bias: 0.0}
+      decoder:
+        model_type: Custom
+        initialization: {scheme: orthogonal, gain: 0.01, bias: 0.0}
+        layers:
+          - {type: Linear, in_features: 128, out_features: 56}
+    medivac:
+      feature_extractor:
+        model_type: Custom
+        initialization: {scheme: orthogonal, gain: 1.4142135623730951, bias: 0.0}
+        layers:
+          - {type: Linear, in_features: 852, out_features: 128}
+          - {type: LayerNorm, normalized_shape: 128}
+          - {type: GELU}
+          - {type: ResidualMLP, input_dim: 128, hidden_dim: 256}
+          - {type: LayerNorm, normalized_shape: 128}
+      encoder:
+        model_type: SimpleResAttSeqEnc
+        input_dim: 128
+        embed_dim: 128
+        output_dim: 128
+        num_heads: 4
+        max_seq_len: 16
+        dropout: 0.0
+        initialization: {scheme: xavier_uniform, gain: 1.0, bias: 0.0}
+      decoder:
+        model_type: Custom
+        initialization: {scheme: orthogonal, gain: 0.01, bias: 0.0}
+        layers:
+          - {type: Linear, in_features: 128, out_features: 56}
+  # Fixed learning rates deliberately isolate the tuning variables.
+  optimizer: {type: Adam, lr: 0.0005, eps: 0.00000001, weight_decay: 0.0}
+
+environment:
+  module_name: smac_pettingzoo
+  env_name: smacv2_pettingzoo_v1
+  env_params:
+    map_name: 10gen_terran_50_vs_50
+    capability_config:
+      team_gen:
+        dist_type: fixed_teams
+        ally_team: {marine: 30, marauder: 15, medivac: 5}
+        enemy_team: {marine: 30, marauder: 15, medivac: 5}
+        observe: true
+      # These outputs replace the default start_positions outputs.
+      # Absolute SC2 coordinates: playable region [12,76) x [10,74).
+      ally_start_positions:
+        dist_type: per_agent_uniform
+        lower_bound: [16, 14]
+        upper_bound: [40, 70]
+      enemy_start_positions:
+        dist_type: per_agent_uniform
+        lower_bound: [48, 14]
+        upper_bound: [72, 70]
+    smacv2_env_args:
+      map_file: SMAC_Maps/Flat64_SMACv2.SC2Map
+      episode_limit: 400
+      obs_last_action: false
+      state_last_action: false
+  wrapper: {type: smac}
+
+critic:
+  type: SeqQPLEXMixer
+  n_agents: 50
+  action_dim: 56
+  weighted_head: true
+  is_minus_one: true
+  # Match the reference SeqQMixer: state-row attention followed by time attention.
+  feature_extractor:
+    model_type: SimpleResAttMaskedStateEnc
+    input_dim: 1151
+    embed_dim: 128
+    num_heads: 4
+    max_seq_len: 50
+    dropout: 0.0
+    initialization: {scheme: xavier_uniform, gain: 1.0, bias: 0.0}
+  seq_model:
+    model_type: SimpleResAttSeqEnc
+    input_dim: 128
+    embed_dim: 128
+    output_dim: 128
+    num_heads: 4
+    max_seq_len: 16
+    dropout: 0.0
+    initialization: {scheme: xavier_uniform, gain: 1.0, bias: 0.0}
+  # YAML aliases reuse configurations, NOT trainable parameters.
+  value_stream_w_final: &value_head
+    model_type: Custom
+    layers:
+      - {type: Linear, in_features: 128, out_features: 64}
+      - {type: ReLU}
+      - {type: Linear, in_features: 64, out_features: 50}
+  value_stream_v: *value_head
+  transformation:
+    model_type: QplexTransformation
+    state_dim: 128
+    n_agents: 50
+    n_head: 4
+    embed_dim: 32
+    nonlinear: false
+    # Keep the learning objective TD-only for this first comparison.
+    attend_reg_coef: 0.0
+    selector_configs:
+      - &selector
+        model_type: Custom
+        layers:
+          - {type: Linear, in_features: 128, out_features: 32}
+      - *selector
+      - *selector
+      - *selector
+    key_configs:
+      - &transform_key
+        model_type: Custom
+        layers:
+          # 50 agents * 32 embedding features.
+          - {type: Linear, in_features: 128, out_features: 1600}
+      - *transform_key
+      - *transform_key
+      - *transform_key
+    head_weight_config:
+      model_type: Custom
+      layers:
+        - {type: Linear, in_features: 128, out_features: 64}
+        - {type: ReLU}
+        - {type: Linear, in_features: 64, out_features: 4}
+    v_config:
+      model_type: Custom
+      layers:
+        - {type: Linear, in_features: 128, out_features: 32}
+        - {type: ReLU}
+        - {type: Linear, in_features: 32, out_features: 1}
+  joint_attention:
+    model_type: QplexJointAttention
+    state_dim: 128
+    action_dim: 56
+    n_agents: 50
+    n_head: 4
+    key_configs:
+      - &joint_key
+        model_type: Custom
+        layers:
+          - {type: Linear, in_features: 128, out_features: 1}
+      - *joint_key
+      - *joint_key
+      - *joint_key
+    agent_extractor_configs:
+      - &agent_weight
+        model_type: Custom
+        layers:
+          - {type: Linear, in_features: 128, out_features: 50}
+      - *agent_weight
+      - *agent_weight
+      - *agent_weight
+    action_extractor_configs:
+      - &action_weight
+        model_type: Custom
+        layers:
+          # Encoded state (128) + 50 * 56 joint one-hot action features.
+          - {type: Linear, in_features: 2928, out_features: 64}
+          - {type: ReLU}
+          - {type: Linear, in_features: 64, out_features: 50}
+      - *action_weight
+      - *action_weight
+      - *action_weight
+  optimizer: {type: Adam, lr: 0.0005, eps: 0.00000001, weight_decay: 0.0}
+
+rollout:
+  manager_type: persistent-env
+  worker_type: persistent-env
+  n_workers: 4
+  n_episodes: 16
+  n_eval_episodes: 32
+  traj_len: 16
+  episode_limit: 400
+  victory_checker: smac
+  device: [cuda:0, cuda:1]
+  required_attrs: qmix
+
+replay_buffer:
+  type: Normal
+  # Capacity counts episodes, not transitions.
+  capacity: 256
+  traj_len: 16
+  required_attrs: qmix
+
+analyzer: {type: default}
+
+trainer:
+  type: QPLEX
+  seed: 42
+  deterministic: false
+  eval_metric_list: [win_rate]
+  reward_aggr_mode: mean
+  gamma: 0.99
+  max_grad_norm: 10
+  workdir: /home/ctmh/exp/smac_flat64_50v50_baselines_20260924/qplex_td1_long
+  train_device: [cuda:0, cuda:1]
+  compile_models: false
+  n_workers: 0
+  n_steps: 1
+  eval_epsilon: 0.0
+  eval_episodes_to_replay_ratio: 0.0
+  target_update_mode: hard
+  # Unit: gradient minibatches, NOT episodes or outer epochs.
+  target_update_interval: 200
+  sample_mode: direct
+  sample_ratio_scheduler: {type: fixed, value: 2048}
+  # Unit: outer collection/training epochs, NOT environment steps.
+  epsilon_scheduler:
+    type: linear
+    start_value: 1.0
+    end_value: 0.05
+    ramp_start_step: 0
+    ramp_steps: 100
+  train_args:
+    epochs: 1000
+    target_first_metric: 1.1
+    # Keep later epochs uninterrupted; do not restore an earlier best checkpoint.
+    rollback_interval: 1001
+    batch_size: 256
+    learning_times_per_epoch: 1
