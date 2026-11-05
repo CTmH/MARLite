@@ -17,7 +17,6 @@ _CHECKPOINT = flags.DEFINE_string(
     "checkpoint", "best", "Checkpoint name used for analysis."
 )
 
-flags.mark_flag_as_required("config")
 flags.FLAGS.set_default("verbosity", logging.INFO)
 flags.FLAGS.set_default("stderrthreshold", "info")
 
@@ -58,4 +57,6 @@ def main(argv):
 
 
 if __name__ == "__main__":
+    # Require the CLI config only in the entry process, not spawned workers.
+    flags.mark_flag_as_required("config")
     app.run(main)

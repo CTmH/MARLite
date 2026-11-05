@@ -1,7 +1,8 @@
-# Flat64 50v50 QPLEX: qmix_td1 hyperparameters, extended from 200 to 1000 epochs.
+# Flat64 50v50 QPLEX: qmix_td1 hyperparameters, extended from 200 to 800 epochs.
 # Reference: smac_flat64_50v50_baselines_20260924/qmix_td1/config.yaml.
 # Requires SeqQPLEXMixer support and balanced uneven multi-GPU batch dispatch.
-# Compare epochs 0..199 first, then 200..999 for additional QPLEX training benefit.
+# Compare epochs 0..199 first, then 200..799 for additional QPLEX training benefit.
+# Rollout parallelism differs from qmix_td1: 8 workers instead of 4.
 # Historical QMIX used older code; both configurations now encode state history.
 # Keep agent order identical to the environment: Marauder, Marine, Medivac.
 agent_group:
@@ -269,7 +270,7 @@ critic:
 rollout:
   manager_type: persistent-env
   worker_type: persistent-env
-  n_workers: 4
+  n_workers: 8
   n_episodes: 16
   n_eval_episodes: 32
   traj_len: 16
@@ -315,9 +316,9 @@ trainer:
     ramp_start_step: 0
     ramp_steps: 100
   train_args:
-    epochs: 1000
+    epochs: 800
     target_first_metric: 1.1
     # Keep later epochs uninterrupted; do not restore an earlier best checkpoint.
-    rollback_interval: 1001
+    rollback_interval: 801
     batch_size: 256
     learning_times_per_epoch: 1
