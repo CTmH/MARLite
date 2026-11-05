@@ -1,0 +1,315 @@
+# CP03 small pilot: 25x25, 8 pursuers, 25 evaders, 50 rounds.
+agent_group:
+  type: GroupCommunicationQMIX
+  agent_list:
+    pursuer_0: shared
+    pursuer_1: shared
+    pursuer_2: shared
+    pursuer_3: shared
+    pursuer_4: shared
+    pursuer_5: shared
+    pursuer_6: shared
+    pursuer_7: shared
+  optimizer:
+    type: Adam
+    lr: 0.0003
+    weight_decay: 0.0
+  message_map_size: 25
+  encoder_lr_scale: 0.25
+  observation_dim: 2349
+  action_dim: 29
+  hidden_dim: 64
+  heads: 4
+  slots: 8
+  message_dim: 32
+  bits: 4
+  use_np: false
+  query_dim: 14
+  latent_dim: 8
+  hyper_rank: 0
+  message_mode: raw
+  group_builder:
+    type: PartialMAgent
+    binary_agent_id_dim:
+    - 5
+    - 6
+    - 7
+    - 8
+    - 9
+    - 10
+    - 11
+    - 12
+    - 13
+    - 14
+    agent_presence_dim:
+    - 3
+    comm_distance: 8
+    valid_node_list:
+    - 25
+    - 26
+    - 27
+    - 28
+    - 29
+    - 30
+    - 31
+    - 32
+    target_node_list: []
+    n_groups: 8
+    n_workers: 1
+    update_interval: 4
+  relation_targets: null
+  feature_extractor:
+    model_type: Custom
+    layers:
+    - type: Permute
+      dims:
+      - 0
+      - 3
+      - 1
+      - 2
+    - type: Conv2d
+      in_channels: 29
+      out_channels: 16
+      kernel_size: 3
+      padding: 1
+    - type: GELU
+    - type: AdaptiveAvgPool2d
+      output_size:
+      - 3
+      - 3
+    - type: Flatten
+      start_dim: 1
+    - type: Linear
+      in_features: 144
+      out_features: 64
+environment:
+  module_name: marlite.environment
+  env_name: complementary_pursuit
+  env_params:
+    map_size: 25
+    n_pursuers: 8
+    n_evaders: 25
+    minimap_mode: true
+    extra_features: true
+    max_cycles: 200
+critic:
+  type: QPLEXMixer
+  action_dim: 29
+  n_agents: 8
+  feature_extractor:
+    model_type: Custom
+    layers:
+    - type: Permute
+      dims:
+      - 0
+      - 3
+      - 1
+      - 2
+    - type: Conv2d
+      in_channels: 25
+      out_channels: 16
+      kernel_size: 3
+      padding: 1
+    - type: GELU
+    - type: AdaptiveAvgPool2d
+      output_size:
+      - 3
+      - 3
+    - type: Flatten
+      start_dim: 1
+    - type: Linear
+      in_features: 144
+      out_features: 64
+  weighted_head: true
+  is_minus_one: true
+  value_stream_w_final:
+    model_type: Custom
+    layers:
+    - type: Linear
+      in_features: 64
+      out_features: 8
+  value_stream_v:
+    model_type: Custom
+    layers:
+    - type: Linear
+      in_features: 64
+      out_features: 8
+  transformation:
+    model_type: QplexTransformation
+    state_dim: 64
+    n_agents: 8
+    n_head: 4
+    embed_dim: 16
+    selector_configs:
+    - model_type: Custom
+      layers:
+      - type: Linear
+        in_features: 64
+        out_features: 16
+    - model_type: Custom
+      layers:
+      - type: Linear
+        in_features: 64
+        out_features: 16
+    - model_type: Custom
+      layers:
+      - type: Linear
+        in_features: 64
+        out_features: 16
+    - model_type: Custom
+      layers:
+      - type: Linear
+        in_features: 64
+        out_features: 16
+    key_configs:
+    - model_type: Custom
+      layers:
+      - type: Linear
+        in_features: 64
+        out_features: 128
+    - model_type: Custom
+      layers:
+      - type: Linear
+        in_features: 64
+        out_features: 128
+    - model_type: Custom
+      layers:
+      - type: Linear
+        in_features: 64
+        out_features: 128
+    - model_type: Custom
+      layers:
+      - type: Linear
+        in_features: 64
+        out_features: 128
+    v_config:
+      model_type: Custom
+      layers:
+      - type: Linear
+        in_features: 64
+        out_features: 1
+    attend_reg_coef: 0.001
+  joint_attention:
+    model_type: QplexJointAttention
+    state_dim: 64
+    action_dim: 29
+    n_agents: 8
+    n_head: 4
+    key_configs:
+    - model_type: Custom
+      layers:
+      - type: Linear
+        in_features: 64
+        out_features: 1
+    - model_type: Custom
+      layers:
+      - type: Linear
+        in_features: 64
+        out_features: 1
+    - model_type: Custom
+      layers:
+      - type: Linear
+        in_features: 64
+        out_features: 1
+    - model_type: Custom
+      layers:
+      - type: Linear
+        in_features: 64
+        out_features: 1
+    agent_extractor_configs:
+    - model_type: Custom
+      layers:
+      - type: Linear
+        in_features: 64
+        out_features: 8
+    - model_type: Custom
+      layers:
+      - type: Linear
+        in_features: 64
+        out_features: 8
+    - model_type: Custom
+      layers:
+      - type: Linear
+        in_features: 64
+        out_features: 8
+    - model_type: Custom
+      layers:
+      - type: Linear
+        in_features: 64
+        out_features: 8
+    action_extractor_configs:
+    - model_type: Custom
+      layers:
+      - type: Linear
+        in_features: 296
+        out_features: 8
+    - model_type: Custom
+      layers:
+      - type: Linear
+        in_features: 296
+        out_features: 8
+    - model_type: Custom
+      layers:
+      - type: Linear
+        in_features: 296
+        out_features: 8
+    - model_type: Custom
+      layers:
+      - type: Linear
+        in_features: 296
+        out_features: 8
+  optimizer:
+    type: Adam
+    lr: 0.0003
+    weight_decay: 0.0
+rollout:
+  victory_checker: complementary
+  manager_type: persistent-env
+  worker_type: persistent-env
+  n_workers: 2
+  n_episodes: 8
+  n_eval_episodes: 8
+  traj_len: 4
+  episode_limit: 200
+  device: cpu
+  required_attrs: complementary_qmix
+replay_buffer:
+  type: Normal
+  capacity: 64
+  traj_len: 4
+  required_attrs: complementary_qmix
+analyzer:
+  type: complementary
+trainer:
+  eval_metric_list:
+  - capture_fraction
+  type: QPLEX
+  seed: 42
+  gamma: 0.99
+  n_workers: 0
+  max_grad_norm: 5.0
+  train_device:
+  - cuda:0
+  - cuda:1
+  workdir: ./results/complementary_qplex_8v25
+  reward_aggr_mode: mean
+  eval_epsilon: 0.0
+  eval_episodes_to_replay_ratio: 0.0
+  target_update_mode: hard
+  target_update_interval: 200
+  sample_mode: direct
+  sample_ratio_scheduler:
+    type: fixed
+    value: 1024
+  epsilon_scheduler:
+    type: linear
+    start_value: 1.0
+    end_value: 0.05
+    ramp_start_step: 0
+    ramp_steps: 17
+  train_args:
+    epochs: 50
+    target_first_metric: 1.1
+    rollback_interval: 51
+    batch_size: 32
+    learning_times_per_epoch: 2
