@@ -315,7 +315,7 @@ replay_buffer:
 analyzer:
   type: complementary
 trainer:
-  eval_metric_list: [capture_fraction, effective_hit_rate, missed_attack_rate]
+  eval_metric_list: [capture_fraction]
   type: QPLEX
   seed: 42
   gamma: 0.99
