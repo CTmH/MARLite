@@ -19,6 +19,10 @@ The learn procedure implements Double DQN with the following steps:
 """
 
 import torch
+from marlite.util.communication_training import (
+    agent_training_forward,
+    advance_communication_step,
+)
 from marlite.util.return_estimation import td_target
 from marlite.util.value_learning import last_action_mask, masked_action_values
 from tqdm import tqdm
@@ -125,8 +129,12 @@ class QPLEXTrainer(QMIXTrainer):
 
                     # Rewards and terminations: only the last timestep matters for
                     # 1-step TD; agents share a single joint reward.
-                    r_last = self._aggregate_rewards(rewards[:, -1]).to(self.train_device)
-                    termination_last = terminations[:, -1].prod(dim=1).to(self.train_device)
+                    r_last = self._aggregate_rewards(rewards[:, -1]).to(
+                        self.train_device
+                    )
+                    termination_last = (
+                        terminations[:, -1].prod(dim=1).to(self.train_device)
+                    )
 
                     timestep_padding_mask = torch.stack(
                         [timestep_padding_mask] * n_agents, dim=1
@@ -148,8 +156,13 @@ class QPLEXTrainer(QMIXTrainer):
                     observations = torch.transpose(observations, 1, 2).to(
                         self.train_device
                     )
-                    ret = self.eval_agent_group(
-                        observations, timestep_padding_mask, alive_mask[:, -1, :]
+                    ret = agent_training_forward(
+                        self.eval_agent_group,
+                        observations,
+                        timestep_padding_mask,
+                        alive_mask[:, -1, :],
+                        batch,
+                        next_state=False,
                     )
                     q_val_full = ret["q_val"]  # (B, N, A)
                     actions_last = actions[:, -1].to(
@@ -164,7 +177,9 @@ class QPLEXTrainer(QMIXTrainer):
                         actions_last,
                         alive_mask,
                         timestep_padding_mask[:, 0, :],
-                        avail_actions=last_action_mask(batch, "avail_actions", self.train_device),
+                        avail_actions=last_action_mask(
+                            batch, "avail_actions", self.train_device
+                        ),
                     )
                     q_tot = cret["q_tot"]
                     att_reg = cret["att_reg"]
@@ -194,24 +209,31 @@ class QPLEXTrainer(QMIXTrainer):
                         next_observations_t = torch.transpose(
                             next_observations, 1, 2
                         ).to(self.train_device)
-                        ret_next_eval = self.eval_agent_group(
+                        ret_next_eval = agent_training_forward(
+                            self.eval_agent_group,
                             next_observations_t,
                             next_timestep_padding_mask,
                             next_alive_mask[:, -1, :],
+                            batch,
+                            next_state=True,
                         )
                         q_val_next_eval = ret_next_eval["q_val"]
                         q_val_next_eval = masked_action_values(
-                            q_val_next_eval, next_avail_actions if use_action_mask else None,
+                            q_val_next_eval,
+                            next_avail_actions if use_action_mask else None,
                             next_alive_mask[:, -1, :],
                         )
                         best_actions = q_val_next_eval.argmax(dim=-1)
 
                         # Target agent evaluates the next state Q for those actions.
                         self.target_agent_group.eval()
-                        ret_next_target = self.target_agent_group(
+                        ret_next_target = agent_training_forward(
+                            self.target_agent_group,
                             next_observations_t,
                             next_timestep_padding_mask,
                             next_alive_mask[:, -1, :],
+                            batch,
+                            next_state=True,
                         )
                         q_val_next = ret_next_target["q_val"]  # (B, N, A)
                         next_states = next_states.to(self.train_device)
@@ -222,7 +244,9 @@ class QPLEXTrainer(QMIXTrainer):
                             best_actions,
                             next_alive_mask,
                             next_timestep_padding_mask[:, 0, :],
-                            avail_actions=next_avail_actions if use_action_mask else None,
+                            avail_actions=next_avail_actions
+                            if use_action_mask
+                            else None,
                         )
                         q_tot_next = cret_next["q_tot"]
 
@@ -236,10 +260,14 @@ class QPLEXTrainer(QMIXTrainer):
                     # The loss is:
                     #   L = MSE(y, Q_tot(τ, a)) + λ_reg · Σ_k (logit_k)²
                     # ------------------------------------------------------------------
-                    y_tot = td_target(batch, r_last, q_tot_next, self.gamma, termination_last)
+                    y_tot = td_target(
+                        batch, r_last, q_tot_next, self.gamma, termination_last
+                    )
                     critic_loss = torch.nn.functional.mse_loss(q_tot, y_tot.detach())
 
-                    total_batch_loss = critic_loss + att_reg
+                    total_batch_loss = (
+                        critic_loss + att_reg + ret.get("auxiliary_loss", 0.0)
+                    )
 
                     # ------------------------------------------------------------------
                     # Backprop.
@@ -256,6 +284,7 @@ class QPLEXTrainer(QMIXTrainer):
                     )
                     self.critic_optimizer.step()
                     self.agent_optimizer.step()
+                    advance_communication_step(self.eval_agent_group)
 
                     total_loss += total_batch_loss.detach().cpu().item()
                     total_batches += 1

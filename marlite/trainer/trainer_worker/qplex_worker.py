@@ -11,6 +11,10 @@ distributed worker process under :class:`OffPolicyWorkerGroup`.
 """
 
 import torch
+from marlite.util.communication_training import (
+    agent_training_forward,
+    advance_communication_step,
+)
 from marlite.util.return_estimation import td_target
 from marlite.util.value_learning import last_action_mask, masked_action_values
 from typing import Any, Dict
@@ -75,7 +79,7 @@ class QPLEXWorker(OffPolicyWorker):
             self.eval_critic.parameters()
         )
         self.agent_optimizer = self.agent_optimizer_config.get_optimizer(
-            self.eval_agent_group.parameters()
+            self.eval_agent_group
         )
 
     def train_step(self, batch: Dict[str, Any]) -> Dict[str, float]:
@@ -141,8 +145,13 @@ class QPLEXWorker(OffPolicyWorker):
         # ------------------------------------------------------------------
         self.eval_agent_group.train()
         observations = torch.transpose(observations, 1, 2).to(self.device)
-        ret = self.eval_agent_group(
-            observations, timestep_padding_mask, alive_mask[:, -1, :]
+        ret = agent_training_forward(
+            self.eval_agent_group,
+            observations,
+            timestep_padding_mask,
+            alive_mask[:, -1, :],
+            batch,
+            next_state=False,
         )
         q_val = ret["q_val"]  # (B, N, A) — full Q-values.
         actions_last = actions[:, -1].to(device=self.device, dtype=torch.int64)
@@ -150,7 +159,11 @@ class QPLEXWorker(OffPolicyWorker):
 
         self.eval_critic.train()
         cret = self.eval_critic(
-            q_val, states, actions_last, alive_mask, timestep_padding_mask[:, 0, :],
+            q_val,
+            states,
+            actions_last,
+            alive_mask,
+            timestep_padding_mask[:, 0, :],
             avail_actions=last_action_mask(batch, "avail_actions", self.device),
         )
         q_tot = cret["q_tot"]
@@ -162,23 +175,30 @@ class QPLEXWorker(OffPolicyWorker):
         with torch.no_grad():
             self.eval_agent_group.eval()
             next_observations = torch.transpose(next_observations, 1, 2).to(self.device)
-            ret_next_eval = self.eval_agent_group(
+            ret_next_eval = agent_training_forward(
+                self.eval_agent_group,
                 next_observations,
                 next_timestep_padding_mask,
                 next_alive_mask[:, -1, :],
+                batch,
+                next_state=True,
             )
             q_val_next_eval = ret_next_eval["q_val"]
             q_val_next_eval = masked_action_values(
-                q_val_next_eval, next_avail_actions if use_action_mask else None,
+                q_val_next_eval,
+                next_avail_actions if use_action_mask else None,
                 next_alive_mask[:, -1, :],
             )
             best_actions = q_val_next_eval.argmax(dim=-1)
 
             self.target_agent_group.eval()
-            ret_next_target = self.target_agent_group(
+            ret_next_target = agent_training_forward(
+                self.target_agent_group,
                 next_observations,
                 next_timestep_padding_mask,
                 next_alive_mask[:, -1, :],
+                batch,
+                next_state=True,
             )
             q_val_next = ret_next_target["q_val"]  # (B, N, A)
             next_states = next_states.to(self.device)
@@ -201,7 +221,7 @@ class QPLEXWorker(OffPolicyWorker):
 
         # Keep the graph identical across ranks even when a local regularizer
         # happens to be zero; conditional gradients can mismatch collectives.
-        total_loss = critic_loss + att_reg
+        total_loss = critic_loss + att_reg + ret.get("auxiliary_loss", 0.0)
 
         # ------------------------------------------------------------------
         # 5. Backprop + synchronise.
@@ -220,6 +240,7 @@ class QPLEXWorker(OffPolicyWorker):
         )
         self.critic_optimizer.step()
         self.agent_optimizer.step()
+        advance_communication_step(self.eval_agent_group)
 
         # Per-batch target update (hard / ema)
         self._update_target_after_batch()

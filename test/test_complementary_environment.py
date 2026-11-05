@@ -193,7 +193,7 @@ def test_configurable_cnn_and_shared_teacher(tmp_path, use_np, hyper_rank):
     assert not torch.equal(head, student.action_head.weight)
 
 
-@pytest.mark.parametrize("algorithm", ["mappo", "qmix"])
+@pytest.mark.parametrize("algorithm", ["mappo", "qmix", "qplex"])
 @pytest.mark.parametrize("mode", ["local", "raw", "quantized"])
 @pytest.mark.parametrize("manager", ["multi-process", "persistent-env"])
 def test_native_training_modes(algorithm, mode, manager, tmp_path):

@@ -93,7 +93,7 @@ def test_np_empty_targets():
     loss.backward()
 
 
-@pytest.mark.parametrize("algorithm", ["MAPPO", "QMIX"])
+@pytest.mark.parametrize("algorithm", ["MAPPO", "QMIX", "QPLEX"])
 @pytest.mark.parametrize("manager", ["multi-process", "persistent-env"])
 def test_real_rollout_and_training(algorithm, manager, tmp_path):
     import importlib
@@ -102,14 +102,19 @@ def test_real_rollout_and_training(algorithm, manager, tmp_path):
         "test.test_trainer.test_" + algorithm.lower() + "_trainer"
     )
     cls = getattr(
-        fixture, "TestMAPPOTrainer" if algorithm == "MAPPO" else "TestQMixTrainer"
+        fixture,
+        {
+            "MAPPO": "TestMAPPOTrainer",
+            "QMIX": "TestQMixTrainer",
+            "QPLEX": "TestQPLEXTrainer",
+        }[algorithm],
     )
     template = cls()
     template.setUp()
     config = template.config
     old = config["agent_group"]
     config["agent_group"] = dict(
-        type="GroupCommunication" + algorithm,
+        type="GroupCommunication" + ("QMIX" if algorithm == "QPLEX" else algorithm),
         agent_list=old["agent_list"],
         optimizer=old["optimizer"],
         observation_dim=18,
@@ -126,7 +131,9 @@ def test_real_rollout_and_training(algorithm, manager, tmp_path):
             "thresholds": [0, 0],
         },
     )
-    profile = "group_communication_" + algorithm.lower()
+    profile = "group_communication_" + (
+        "qmix" if algorithm == "QPLEX" else algorithm.lower()
+    )
     config["rollout"].update(
         manager_type=manager,
         worker_type=manager,
@@ -200,8 +207,16 @@ def test_real_rollout_and_training(algorithm, manager, tmp_path):
         worker._reduce_critic_gradients = lambda: None
         worker.reduce_gradients = lambda: None
         worker._update_target_after_batch = lambda: None
+        worker_posterior = worker.eval_agent_group.np.posterior.weight.detach().clone()
+        previous_updates = worker.eval_agent_group.distillation_updates.item()
         assert torch.isfinite(torch.tensor(worker.train_step(batch)["loss"]))
-        if algorithm == "QMIX":
+        assert not torch.equal(
+            worker_posterior, worker.eval_agent_group.np.posterior.weight
+        )
+        assert (
+            worker.eval_agent_group.distillation_updates.item() == previous_updates + 1
+        )
+        if algorithm in ("QMIX", "QPLEX"):
             trainer._update_target_after_batch()
             for key, value in trainer.eval_agent_group.state_dict().items():
                 torch.testing.assert_close(
