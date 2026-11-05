@@ -35,20 +35,23 @@ develop = [
     "pytest-xdist>=3.8.0",
 ]
 
+# Select exactly one accelerator extra; pin versions here because uv.lock is ignored.
+# Apple Silicon: uv sync --locked --extra mps --extra develop
+# iu1iu5-local (AMD RX 7900 XT/XTX): uv sync --locked --extra rocm --extra develop
 cuda = [
-    "torch>=2.8.0",
+    "torch==2.14.1",
 ]
 
 rocm = [
-    "torch>=2.8.0",
+    "torch==2.15.0",
 ]
 
 mps = [
-    "torch>=2.8.0",
+    "torch==2.15.0",
 ]
 
 cpu = [
-    "torch>=2.8.0",
+    "torch==2.15.0",
 ]
 
 analysis = [
@@ -76,7 +79,7 @@ conflicts = [
 
 [tool.uv.sources]
 smac-pettingzoo = { git = "https://github.com/CTmH/SMAC-PettingZoo.git" }
-magent2 = { git = "https://github.com/CTmH/MAgent2.git" }
+magent2 = { git = "https://github.com/CTmH/MAgent2.git", rev = "209021e17e5d4503522285ef545cf15593d3da26" }
 dm_env = { git = "https://github.com/CTmH/dm_env.git" }
 sumo-rl = { git = "https://github.com/LucasAlegre/sumo-rl.git" }
 torch = [
