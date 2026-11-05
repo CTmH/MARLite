@@ -94,7 +94,7 @@ class TrajectoryDataset(Dataset):
         attrs = resolve_required_attrs(required_attrs)
         # Old saved episodes predate communication metadata.
         if required_attrs is None:
-            attrs = [a for a in attrs if a not in ("message_codes", "snapshot_steps")
+            attrs = [a for a in attrs if a not in ("message_codes", "snapshot_steps", "communication_bytes")
                      or all(a in ep for ep in episode_buffer.values() if ep is not None)]
         self.array_attr = get_as_is_attrs(attrs)
         self.dict_attr = get_dict_attrs(attrs)

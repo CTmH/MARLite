@@ -25,6 +25,7 @@ _VICTORY_CHECKER_REGISTRY = {
     "smac": check_smac_victory,
     "battle_wrapper": check_battle_wrapper_victory,
     "default": always_lose,
+    "complementary": check_complementary_victory,
 }
 
 

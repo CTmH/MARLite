@@ -232,6 +232,7 @@ def persistent_env_rollout(
                     "all_log_probs": all_log_probs,
                     "message_codes": ret.get("message_codes", {a: np.zeros(0, dtype=np.uint8) for a in possible_agents}),
                     "snapshot_steps": ret.get("snapshot_steps", {a: i-1 for a in possible_agents}),
+                    "communication_bytes": ret.get("communication_bytes", {a: 0 for a in possible_agents}),
                     "avail_actions": avail_actions,
                     "infos": infos,
                 }
@@ -372,6 +373,8 @@ def persistent_env_rollout(
             "episode_reward": episode_reward,
         }
         phases.finalize(episode, ctx_final)
+        if hasattr(env, "episode_metrics"):
+            episode.update({key: value for key, value in env.episode_metrics().items() if key in attrs_list})
 
         if episode.get("observations") and len(episode["observations"]) > 0:
             episodes.append(episode)

@@ -323,7 +323,7 @@ def build_partial_groups(
 
     # Clamp best_n to the number of nodes in the graph (networkx constraint).
     best_n = min(n_groups, G.number_of_nodes())
-    if best_n <= 1:
+    if best_n <= 1 or G.number_of_edges() == 0:
         # Cannot form more than one group; assign each present valid node to
         # its own community so the result is still well-defined.
         for node in present_nodes:

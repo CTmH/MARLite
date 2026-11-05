@@ -68,6 +68,6 @@ def validate_communication_result(result, required_attrs):
 
     if required_attrs is None or required_attrs == "full":
         return
-    for field in ("message_codes", "snapshot_steps"):
+    for field in ("message_codes", "snapshot_steps", "communication_bytes"):
         if field in resolve_required_attrs(required_attrs) and field not in result:
             raise ValueError(f"Communication profile requires agent output {field}")

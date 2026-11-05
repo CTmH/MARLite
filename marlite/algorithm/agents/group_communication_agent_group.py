@@ -14,6 +14,13 @@ from marlite.util.action_distribution import masked_categorical
 
 
 class GroupCommunicationAgentGroup(AgentGroup):
+    """Shared local encoder and group-conditioned action/Q reader.
+
+    Observations use (batch, agent, time, ...); groups and alive masks use
+    (batch, agent). Group slots are indexed by recorded group IDs, not by
+    their order of appearance. Only auxiliary supervision may read labels.
+    """
+
     output_key = None
 
     def __init__(
@@ -38,6 +45,10 @@ class GroupCommunicationAgentGroup(AgentGroup):
         teacher_checkpoint=None,
         distillation_steps=0,
         distillation_weight=0.1,
+        feature_extractor=None,
+        teacher_config=None,
+        message_map_size=None,
+        encoder_lr_scale=1.0,
     ):
         super().__init__()
         if (
@@ -50,19 +61,65 @@ class GroupCommunicationAgentGroup(AgentGroup):
         if len(set(agent_model_dict.values())) != 1:
             raise ValueError("Group communication currently requires a shared model")
         self.agent_model_dict = dict(agent_model_dict)
-        if message_mode not in ("raw", "quantized"):
-            raise ValueError("message_mode must be raw or quantized")
+        if message_mode not in ("raw", "quantized", "local"):
+            raise ValueError("message_mode must be raw, quantized or local")
         self.message_mode = message_mode
+        if message_map_size is not None and (
+            type(message_map_size) is not int or not 1 <= message_map_size <= 256
+        ):
+            raise ValueError("Version-1 coordinates require map size in [1,256]")
+        self.message_map_size = message_map_size
         self.mask_observation_channels = tuple(mask_observation_channels)
         from marlite.util.communication_training import StateThresholdQueries
 
-        self.relation_targets = (
-            StateThresholdQueries(**relation_targets) if relation_targets else None
-        )
+        self.relation_targets = None
+        if relation_targets:
+            target_config = dict(relation_targets)
+            target_type = target_config.pop("type", "StateThresholdQueries")
+            if target_type == "ComplementaryAttackQueries":
+                from marlite.util.complementary_targets import (
+                    ComplementaryAttackQueries,
+                )
+
+                if query_dim != ComplementaryAttackQueries.query_dim:
+                    raise ValueError(
+                        "Complementary attack queries require query_dim=14"
+                    )
+                self.relation_targets = ComplementaryAttackQueries(**target_config)
+            elif target_type == "StateThresholdQueries":
+                self.relation_targets = StateThresholdQueries(**target_config)
+            else:
+                raise ValueError(f"Unknown relation target constructor: {target_type}")
+        if not 0 < encoder_lr_scale <= 1:
+            raise ValueError("encoder_lr_scale must lie in (0,1]")
+        self.encoder_lr_scale = encoder_lr_scale
         self.action_dim = action_dim
         self.auxiliary_weight = auxiliary_weight
         self.group_builder = GroupBuilderConfig(**group_builder).get_group_builder()
-        self.features = nn.Sequential(nn.Linear(observation_dim, hidden_dim), nn.GELU())
+        self.flatten_observation = feature_extractor is None
+        if feature_extractor is None:
+            self.features = nn.Sequential(
+                nn.Linear(observation_dim, hidden_dim),
+                nn.GELU(),
+            )
+        else:
+            from marlite.algorithm.model import ModelConfig
+
+            self.features = ModelConfig(**feature_extractor).get_model()
+        for module in self.features.modules():
+            if isinstance(module, nn.modules.batchnorm._BatchNorm):
+                raise ValueError(
+                    "Local message encoders require per-sample normalization, not BatchNorm"
+                )
+            if (
+                isinstance(module, (nn.MultiheadAttention, nn.RNNBase))
+                and module.dropout > 0
+            ):
+                raise ValueError("Local attention/recurrent dropout must be zero")
+            if isinstance(module, nn.modules.dropout._DropoutNd) and module.p > 0:
+                raise ValueError(
+                    "Message encoders must be deterministic for PPO probability replay"
+                )
         self.history = nn.GRUCell(hidden_dim, hidden_dim)
         self.codec = ScalarMessageCodec(hidden_dim, message_dim, bits)
         self.fusion = GroupSetFusion(hidden_dim, heads, slots)
@@ -96,6 +153,8 @@ class GroupCommunicationAgentGroup(AgentGroup):
         )
         if distillation_steps < 0 or distillation_weight < 0:
             raise ValueError("Distillation steps and weight must be nonnegative")
+        if teacher_config is not None and teacher_checkpoint is None:
+            raise ValueError("teacher_config requires a trained teacher checkpoint")
         if teacher_checkpoint is None and distillation_steps:
             raise ValueError(
                 "Online distillation requires a trained raw teacher checkpoint"
@@ -107,7 +166,32 @@ class GroupCommunicationAgentGroup(AgentGroup):
         if teacher_checkpoint is not None:
             from copy import deepcopy
 
-            teacher = deepcopy(self)
+            if teacher_config is None:
+                teacher = deepcopy(self)
+            else:
+                from marlite.algorithm.agents.agent_group_config import AgentGroupConfig
+
+                if teacher_config.get("teacher_checkpoint") is not None:
+                    raise ValueError(
+                        "A teacher cannot recursively contain another teacher"
+                    )
+                teacher = AgentGroupConfig(**teacher_config).get_agent_group()
+                if teacher.message_mode != "raw":
+                    raise ValueError(
+                        "teacher_config must describe a raw-message teacher"
+                    )
+                if (
+                    teacher.action_dim != self.action_dim
+                    or teacher.output_key != self.output_key
+                    or teacher.agent_model_dict != self.agent_model_dict
+                ):
+                    raise ValueError(
+                        "Teacher algorithm and sender schema must match student"
+                    )
+                if teacher.mask_observation_channels != self.mask_observation_channels:
+                    raise ValueError(
+                        "Teacher and student observation permissions must match"
+                    )
             teacher.load_state_dict(
                 torch.load(teacher_checkpoint, map_location="cpu", weights_only=True)
             )
@@ -115,6 +199,8 @@ class GroupCommunicationAgentGroup(AgentGroup):
             teacher.distillation_steps = 0
             self.teacher = teacher.requires_grad_(False).eval()
         self.snapshot_step = 0
+        self._last_groups = None
+        self.group_version = 0
 
     def train(self, mode=True):
         super().train(mode)
@@ -122,13 +208,65 @@ class GroupCommunicationAgentGroup(AgentGroup):
             self.teacher.eval()
         return self
 
+    def optimizer_parameter_groups(self, base_lr):
+        """Keep policy LR first so trainer/worker LR synchronization stays consistent."""
+        encoder = [
+            p
+            for module in (self.features, self.history, self.codec)
+            for p in module.parameters()
+            if p.requires_grad
+        ]
+        encoder_ids = {id(p) for p in encoder}
+        policy = [
+            p for p in self.parameters() if p.requires_grad and id(p) not in encoder_ids
+        ]
+        return [
+            {"params": policy, "lr": base_lr, "lr_scale": 1.0},
+            {
+                "params": encoder,
+                "lr": base_lr * self.encoder_lr_scale,
+                "lr_scale": self.encoder_lr_scale,
+            },
+        ]
+
     def advance_training_step(self):
         self.distillation_updates.add_(1)
 
     def reset(self):
         self.group_builder.reset()
         self.snapshot_step = 0
+        self._last_groups = None
+        self.group_version = 0
         return self
+
+    def encode_local(self, observations, traj_padding_mask):
+        """Encode each sender independently; no group/state/partner input is accepted."""
+        b, n, t = observations.shape[:3]
+        if traj_padding_mask.shape != (b, n, t):
+            raise ValueError("History padding must have shape B,N,T")
+        if self.mask_observation_channels:
+            if observations.ndim != 6:
+                raise ValueError("Channel masking expects B,N,T,H,W,C observations")
+            observations = observations.clone()
+            observations[..., list(self.mask_observation_channels)] = 0
+        frames = observations.reshape(b * n * t, *observations.shape[3:])
+        x = self.features(frames.flatten(1) if self.flatten_observation else frames)
+        x = x.reshape(b * n, t, -1)
+        if x.shape[-1] != self.history.input_size:
+            raise ValueError(
+                "Feature extractor must output hidden_dim features per frame"
+            )
+        h = x.new_zeros(b * n, x.shape[-1])
+        for step in range(t):
+            candidate = self.history(x[:, step], h)
+            h = torch.where(~traj_padding_mask[:, :, step].reshape(-1, 1), candidate, h)
+        h = h.reshape(b, n, -1)
+        if self.message_mode == "quantized":
+            decoded, codes = self.codec(h)
+        else:
+            decoded = h
+            codes = torch.empty(b, n, 0, dtype=torch.uint8, device=h.device)
+        return h, decoded, codes
 
     def forward(
         self,
@@ -138,6 +276,7 @@ class GroupCommunicationAgentGroup(AgentGroup):
         group_indices=None,
         message_override=None,
         replace_mask=None,
+        detach_messages=False,
     ):
         if group_indices is None:
             raise ValueError(
@@ -146,20 +285,14 @@ class GroupCommunicationAgentGroup(AgentGroup):
         b, n, t = observations.shape[:3]
         if traj_padding_mask.shape != (b, n, t) or alive_mask.shape != (b, n):
             raise ValueError("Observation and mask axes must be B,N,T")
-        if self.mask_observation_channels:
-            if observations.ndim != 6:
-                raise ValueError("Channel masking expects B,N,T,H,W,C observations")
-            observations = observations.clone()
-            observations[..., list(self.mask_observation_channels)] = 0
-        x = self.features(observations.reshape(b * n, t, -1))
-        h = x.new_zeros(b * n, x.shape[-1])
-        for step in range(t):
-            candidate = self.history(x[:, step], h)
-            h = torch.where(~traj_padding_mask[:, :, step].reshape(-1, 1), candidate, h)
-        h = h.reshape(b, n, -1)
-        decoded, codes = self.codec(h)
+        h, decoded, codes = self.encode_local(observations, traj_padding_mask)
+        if detach_messages:
+            h, decoded = h.detach(), decoded.detach()
         codes = codes.masked_fill(~alive_mask.unsqueeze(-1), 0)
-        tokens = h if self.message_mode == "raw" else decoded
+        tokens = h if self.message_mode in ("raw", "local") else decoded
+        if self.message_mode == "local":
+            group_indices = torch.arange(n, device=h.device).expand(b, -1)
+            codes = codes[..., :0]
         if message_override is not None:
             if (
                 message_override.shape != h.shape
@@ -303,11 +436,16 @@ class GroupCommunicationAgentGroup(AgentGroup):
             traj_padding_mask, device=self.device, dtype=torch.bool
         )[None, None].expand(1, len(names), -1)
         alive = torch.tensor([[a in alive_agents for a in names]], device=self.device)
-        groups = (
-            self.group_builder(torch.as_tensor(state, device=self.device).unsqueeze(0))
-            .to(self.device)
-            .long()
-        )
+        if self.message_mode == "local":
+            groups = torch.arange(len(names), device=self.device).unsqueeze(0)
+        else:
+            groups = (
+                self.group_builder(
+                    torch.as_tensor(state, device=self.device).unsqueeze(0)
+                )
+                .to(self.device)
+                .long()
+            )
         groups = groups.masked_fill(~alive, -1)
         ret = self(obs, padding, alive, groups)
         values = ret[self.output_key][0]
@@ -351,6 +489,58 @@ class GroupCommunicationAgentGroup(AgentGroup):
                     dist.log_prob(actions).masked_fill(~alive[0], 0).cpu().tolist(),
                 )
             )
+        # Serialize the actual payload for byte accounting; transport remains synchronous.
+        from marlite.util.communication_protocol import MessagePacket, snapshot_packets
+
+        current_groups = groups[0].cpu().tolist()
+        if self._last_groups is not None and current_groups != self._last_groups:
+            self.group_version += 1
+        self._last_groups = current_groups
+        packets = []
+        sizes = dict.fromkeys(names, 0)
+        if self.message_mode != "local":
+            for sender, name in enumerate(names):
+                if name not in alive_agents:
+                    continue
+                if self.message_mode == "raw":
+                    payload = (
+                        ret["raw_tokens"][0, sender].float().cpu().numpy().tobytes()
+                    )
+                else:
+                    payload = (
+                        self.codec.pack(ret["message_codes"][0, sender].cpu())
+                        .numpy()
+                        .tobytes()
+                    )
+                x = y = 0
+                if self.message_map_size is not None:
+                    frame = observations[name][-1]
+                    if frame.ndim != 3:
+                        raise ValueError(
+                            "Grid coordinate metadata requires H,W,C observations"
+                        )
+                    position = frame[frame.shape[0] // 2, frame.shape[1] // 2, -2:]
+                    x, y = (
+                        np.rint(position * self.message_map_size).astype(int).tolist()
+                    )
+                packet = MessagePacket(
+                    sender, self.snapshot_step, self.group_version, x, y, payload
+                )
+                sizes[name] = len(packet.encode())
+                packets.append(packet)
+            for group in set(current_groups) - {-1}:
+                senders = [
+                    i
+                    for i, g in enumerate(current_groups)
+                    if g == group and names[i] in alive_agents
+                ]
+                snapshot_packets(
+                    [p for p in packets if p.sender in senders],
+                    self.snapshot_step,
+                    self.group_version,
+                    senders,
+                )
+        result["communication_bytes"] = sizes
         self.snapshot_step += 1
         return result
 

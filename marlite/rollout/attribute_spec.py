@@ -59,12 +59,16 @@ ATTR_REGISTRY: Dict[str, Dict] = {
     "truncations":         {"storage": StorageType.DICT, "essential": True,  "collate": CollateType.NUMERIC},
     "infos":               {"storage": StorageType.DICT, "essential": True,  "collate": CollateType.SKIP},
     "all_log_probs":       {"storage": StorageType.DICT, "essential": False, "collate": CollateType.NUMERIC},
-    "message_codes": {"storage": StorageType.DICT, "essential": False, "collate": CollateType.NUMERIC},
-    "snapshot_steps": {"storage": StorageType.DICT, "essential": False, "collate": CollateType.NUMERIC},
+    "communication_bytes": {"storage": StorageType.DICT, "essential": False, "collate": CollateType.NUMERIC},
+    "message_codes":       {"storage": StorageType.DICT, "essential": False, "collate": CollateType.NUMERIC},
+    "snapshot_steps":      {"storage": StorageType.DICT, "essential": False, "collate": CollateType.NUMERIC},
     "group_indices":       {"storage": StorageType.DICT, "essential": False, "collate": CollateType.NUMERIC},
     "next_group_indices":  {"storage": StorageType.DICT, "essential": False, "collate": CollateType.NUMERIC},
 
     # --- Episode-level attributes (scalars set once per episode) ---
+    "effective_hit_rate":  {"storage": StorageType.EPISODE, "essential": False, "collate": CollateType.SKIP},
+    "missed_attack_rate":  {"storage": StorageType.EPISODE, "essential": False, "collate": CollateType.SKIP},
+    "capture_fraction":    {"storage": StorageType.EPISODE, "essential": False, "collate": CollateType.SKIP},
     "episode_reward":      {"storage": StorageType.EPISODE, "essential": True,  "collate": CollateType.SKIP},
     "win_tag":             {"storage": StorageType.EPISODE, "essential": True,  "collate": CollateType.SKIP},
     "episode_length":      {"storage": StorageType.EPISODE, "essential": True,  "collate": CollateType.SKIP},
@@ -119,8 +123,12 @@ ROLLOUT_PROFILES: Dict[str, List[str]] = {
 }
 
 
-ROLLOUT_PROFILES["group_communication_qmix"] = ROLLOUT_PROFILES["group_consensus"] + ["message_codes", "snapshot_steps"]
+ROLLOUT_PROFILES["group_communication_qmix"] = ROLLOUT_PROFILES["group_consensus"] + ["message_codes", "snapshot_steps", "communication_bytes"]
 ROLLOUT_PROFILES["group_communication_mappo"] = ROLLOUT_PROFILES["group_communication_qmix"] + ["all_log_probs"]
+
+
+ROLLOUT_PROFILES["complementary_mappo"] = ROLLOUT_PROFILES["group_communication_mappo"] + ["capture_fraction", "effective_hit_rate", "missed_attack_rate"]
+ROLLOUT_PROFILES["complementary_qmix"] = ROLLOUT_PROFILES["group_communication_qmix"] + ["capture_fraction", "effective_hit_rate", "missed_attack_rate"]
 
 
 # ---------------------------------------------------------------------------

@@ -33,3 +33,7 @@ def always_win(env, infos) -> bool:
 def always_lose(env, infos) -> bool:
     """Always return False, for testing purposes"""
     return False
+
+def check_complementary_victory(env, infos) -> bool:
+    """Victory requires capturing the initial evader population, not mere truncation."""
+    return env.initial_evaders > 0 and env.captured == env.initial_evaders

@@ -112,7 +112,7 @@ class Trainer:
             self.eval_critic.parameters()
         )
         self.agent_optimizer = self.agent_optimizer_config.get_optimizer(
-            self.eval_agent_group.parameters()
+            self.eval_agent_group
         )
 
         self.lr_scheduler_conf = lr_scheduler_conf

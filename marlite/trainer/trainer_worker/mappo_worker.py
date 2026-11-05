@@ -1,4 +1,7 @@
-from marlite.util.communication_training import agent_training_forward, advance_communication_step
+from marlite.util.communication_training import (
+    agent_training_forward,
+    advance_communication_step,
+)
 """
 MAPPO worker implementation for multi-GPU training.
 
@@ -95,7 +98,7 @@ class MAPPOWorker(OnPolicyWorker):
             self.eval_critic.parameters()
         )
         self.agent_optimizer = agent_optimizer_config.get_optimizer(
-            self.eval_agent_group.parameters()
+            self.eval_agent_group
         )
 
     def _reduce_agent_gradients(self):
@@ -159,7 +162,16 @@ class MAPPOWorker(OnPolicyWorker):
 
         observations_transposed = torch.transpose(observations, 1, 2).to(self.device)
         self.eval_agent_group.train()
-        ret_agent = agent_training_forward(self.eval_agent_group, observations_transposed, timestep_padding_mask_expanded, alive_mask[:, -1, :], batch, next_state=False)
+        ret_agent = agent_training_forward(
+            self.eval_agent_group,
+            observations_transposed,
+            timestep_padding_mask_expanded,
+            alive_mask[:,
+            -1,
+            :],
+            batch,
+            next_state=False,
+        )
         action_logits = ret_agent["action_logits"]
 
         actions_last = actions[:, -1].to(dtype=torch.int64, device=self.device)

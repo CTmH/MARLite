@@ -53,7 +53,7 @@ class OnPolicyWorker(BaseWorker):
                     pg["lr"] = lr_data["critic_lr"]
             if "agent_lr" in lr_data and self.agent_optimizer is not None:
                 for pg in self.agent_optimizer.param_groups:
-                    pg["lr"] = lr_data["agent_lr"]
+                    pg["lr"] = lr_data["agent_lr"] * pg.get("lr_scale", 1.)
             if ack_queue:
                 ack_queue.put("ACK")
             return True

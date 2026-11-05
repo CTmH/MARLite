@@ -6,6 +6,11 @@ from torch.nn import functional as F
 
 
 class ScalarMessageCodec(nn.Module):
+    """Hard scalar codes in the forward pass, straight-through gradients in training.
+
+    Replay codes are unpacked uint8 values; pack/unpack define wire payloads.
+    """
+
     def __init__(self, hidden_dim, message_dim=32, bits=4):
         super().__init__()
         if bits not in (1, 2, 4, 8) or message_dim <= 0 or message_dim * bits % 8:
@@ -52,6 +57,11 @@ class ScalarMessageCodec(nn.Module):
 
 
 class GroupSetFusion(nn.Module):
+    """Fuse each live sender set into shared slots without sender-order features.
+
+    Empty group slots stay zero and are excluded through the returned mask.
+    """
+
     def __init__(self, hidden_dim=128, heads=4, slots=8, inducing_points=16):
         super().__init__()
         self.inducing = nn.Parameter(
@@ -91,6 +101,12 @@ class GroupSetFusion(nn.Module):
 
 
 class RelationalNeuralProcess(nn.Module):
+    """Message-conditioned prior with a label-conditioned training posterior.
+
+    A single latent draw is shared across a group's queries. The policy reads
+    only deterministic prior parameters, keeping posterior labels out of actions.
+    """
+
     def __init__(self, hidden_dim=128, query_dim=4, latent_dim=32):
         super().__init__()
         self.prior = nn.Linear(hidden_dim, 2 * latent_dim)

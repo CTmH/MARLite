@@ -1,3 +1,7 @@
+from marlite.algorithm.agents.group_communication_agent_group import (
+    GroupCommunicationMAPPOAgentGroup,
+    GroupCommunicationQMIXAgentGroup,
+)
 from copy import deepcopy
 from typing import Dict, Any, Type
 from marlite.algorithm.agents.agent_group import AgentGroup
@@ -378,17 +382,19 @@ def _create_group_consensus_agent_group(
     )
 
 
-from marlite.algorithm.agents.group_communication_agent_group import (
-    GroupCommunicationMAPPOAgentGroup, GroupCommunicationQMIXAgentGroup,
-)
+
 
 
 def create_group_communication_mappo(config):
-    return GroupCommunicationMAPPOAgentGroup(agent_model_dict=config.pop("agent_list"), **config)
+    return GroupCommunicationMAPPOAgentGroup(
+        agent_model_dict=config.pop("agent_list"), **config
+    )
 
 
 def create_group_communication_qmix(config):
-    return GroupCommunicationQMIXAgentGroup(agent_model_dict=config.pop("agent_list"), **config)
+    return GroupCommunicationQMIXAgentGroup(
+        agent_model_dict=config.pop("agent_list"), **config
+    )
 
 
 registered_agent_groups = {

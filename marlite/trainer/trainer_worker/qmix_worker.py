@@ -1,4 +1,7 @@
-from marlite.util.communication_training import agent_training_forward, advance_communication_step
+from marlite.util.communication_training import (
+    agent_training_forward,
+    advance_communication_step,
+)
 """
 QMIX worker implementation for multi-GPU training.
 
@@ -79,7 +82,7 @@ class QMIXWorker(OffPolicyWorker):
             self.eval_critic.parameters()
         )
         self.agent_optimizer = agent_optimizer_config.get_optimizer(
-            self.eval_agent_group.parameters()
+            self.eval_agent_group
         )
 
     def train_step(self, batch: Dict[str, Any]) -> Dict[str, float]:
@@ -158,7 +161,16 @@ class QMIXWorker(OffPolicyWorker):
         # Compute Q-tot for current state
         self.eval_agent_group.train()
         observations = torch.transpose(observations, 1, 2).to(self.device)
-        ret_agent = agent_training_forward(self.eval_agent_group, observations, timestep_padding_mask, alive_mask[:, -1, :], batch, next_state=False)
+        ret_agent = agent_training_forward(
+            self.eval_agent_group,
+            observations,
+            timestep_padding_mask,
+            alive_mask[:,
+            -1,
+            :],
+            batch,
+            next_state=False,
+        )
         q_val = ret_agent["q_val"]
         actions = actions[:, -1].to(device=self.device, dtype=torch.int64)
         q_val = torch.gather(q_val, dim=-1, index=actions.unsqueeze(-1))
@@ -175,7 +187,16 @@ class QMIXWorker(OffPolicyWorker):
             # Double Q: eval agent group selects best actions
             self.eval_agent_group.eval()
             next_observations = torch.transpose(next_observations, 1, 2).to(self.device)
-            ret_next_eval = agent_training_forward(self.eval_agent_group, next_observations, next_timestep_padding_mask, next_alive_mask[:, -1, :], batch, next_state=True)
+            ret_next_eval = agent_training_forward(
+                self.eval_agent_group,
+                next_observations,
+                next_timestep_padding_mask,
+                next_alive_mask[:,
+                -1,
+                :],
+                batch,
+                next_state=True,
+            )
             q_val_next_eval = ret_next_eval["q_val"]
             if use_action_mask:
                 q_val_next_eval = torch.masked_fill(
@@ -185,7 +206,16 @@ class QMIXWorker(OffPolicyWorker):
 
             # Double Q: target agent group evaluates chosen actions
             self.target_agent_group.eval()
-            ret_next_target = agent_training_forward(self.target_agent_group, next_observations, next_timestep_padding_mask, next_alive_mask[:, -1, :], batch, next_state=True)
+            ret_next_target = agent_training_forward(
+                self.target_agent_group,
+                next_observations,
+                next_timestep_padding_mask,
+                next_alive_mask[:,
+                -1,
+                :],
+                batch,
+                next_state=True,
+            )
             q_val_next = ret_next_target["q_val"].gather(
                 dim=-1, index=best_actions.unsqueeze(-1)
             ).squeeze(-1)
