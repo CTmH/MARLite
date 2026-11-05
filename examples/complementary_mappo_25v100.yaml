@@ -181,6 +181,7 @@ replay_buffer:
 analyzer:
   type: complementary
 trainer:
+  eval_metric_list: [capture_fraction, effective_hit_rate, missed_attack_rate]
   type: MAPPO
   gamma: 0.99
   workdir: ./results/complementary_mappo_25v100
