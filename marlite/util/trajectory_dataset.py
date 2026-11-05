@@ -12,6 +12,7 @@ from torch.utils.data import Dataset, DataLoader
 
 from marlite.rollout.attribute_spec import (
     ATTR_REGISTRY,
+    resolve_required_attrs,
     StorageType,
     CollateType,
     PADDING_ATTRS,
@@ -90,15 +91,13 @@ class TrajectoryDataset(Dataset):
         self.training_targets = {}
         self.padding_attr = PADDING_ATTR
 
+        attrs = resolve_required_attrs(required_attrs)
+        # Old saved episodes predate communication metadata.
         if required_attrs is None:
-            self.array_attr = ARRAY_ATTR
-            self.dict_attr = DICT_ATTR
-        else:
-            # Only include attributes that are (a) in the full registered
-            # classification and (b) requested by the profile.
-            attrs_set = set(required_attrs)
-            self.array_attr = [a for a in ARRAY_ATTR if a in attrs_set]
-            self.dict_attr = [a for a in DICT_ATTR if a in attrs_set]
+            attrs = [a for a in attrs if a not in ("message_codes", "snapshot_steps")
+                     or all(a in ep for ep in episode_buffer.values() if ep is not None)]
+        self.array_attr = get_as_is_attrs(attrs)
+        self.dict_attr = get_dict_attrs(attrs)
 
     def __len__(self):
         return len(self.sample_id_list)

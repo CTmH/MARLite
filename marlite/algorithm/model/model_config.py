@@ -1,3 +1,4 @@
+from marlite.algorithm.model.group_communication import ScalarMessageCodec, GroupSetFusion, RelationalNeuralProcess
 import torch
 import torch.nn as nn
 from absl import logging
@@ -33,6 +34,9 @@ from marlite.algorithm.model.qplex_joint_attention import QplexJointAttention
 
 
 registered_models = {
+    "ScalarMessageCodec": ScalarMessageCodec,
+    "GroupSetFusion": GroupSetFusion,
+    "RelationalNeuralProcess": RelationalNeuralProcess,
     "RNN": GRUModel,  # For compatibility
     "GRU": GRUModel,
     "GCN": GCNModel,

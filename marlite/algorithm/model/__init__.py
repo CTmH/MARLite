@@ -21,3 +21,5 @@ __all__ = [
     "QplexTransformation",
     "QplexJointAttention",
 ]
+from marlite.algorithm.model.group_communication import ScalarMessageCodec, GroupSetFusion, RelationalNeuralProcess
+__all__ += ['ScalarMessageCodec', 'GroupSetFusion', 'RelationalNeuralProcess']

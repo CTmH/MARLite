@@ -8,6 +8,7 @@ to control which attributes are stored in the episode dictionary.
 from __future__ import annotations
 
 import numpy as np
+from marlite.util.communication_training import validate_communication_result
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import time
 from multiprocessing.shared_memory import SharedMemory
@@ -198,6 +199,8 @@ def multiprocess_rollout(
                 "group_indices": all_group_indices,
                 "actions": all_actions,
                 "all_log_probs": all_log_probs,
+                "message_codes": ret.get("message_codes", {a: np.zeros(0, dtype=np.uint8) for a in possible_agents}),
+                "snapshot_steps": ret.get("snapshot_steps", {a: i-1 for a in possible_agents}),
                 "avail_actions": avail_actions,
                 "infos": infos,
             }
@@ -306,6 +309,7 @@ def multiprocess_rollout(
             decision_agents,
             epsilon,
         )
+        validate_communication_result(ret, required_attrs)
         actions, all_actions = ret["actions"], ret["all_actions"]
         edge_indices = ret.get("edge_indices", np.zeros((2, 0)))
         all_group_indices = ret.get(

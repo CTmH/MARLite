@@ -1,3 +1,4 @@
+from marlite.util.communication_training import agent_training_forward, advance_communication_step
 """MAPPO Trainer — Multi-Agent PPO with on-policy training loop.
 
 Implements the MAPPO algorithm (Yu et al., 2021) for discrete action spaces.
@@ -227,11 +228,7 @@ class MAPPOTrainer(OnPolicyTrainer):
                         device
                     )
                     self.eval_agent_group.train()
-                    ret_agent = self.eval_agent_group(
-                        observations_transposed,
-                        timestep_padding_mask_expanded,
-                        alive_mask[:, -1, :],
-                    )
+                    ret_agent = agent_training_forward(self.eval_agent_group, observations_transposed, timestep_padding_mask_expanded, alive_mask[:, -1, :], batch, next_state=False)
                     action_logits = ret_agent["action_logits"]  # (B, N, action_dim)
 
                     actions_last = actions[:, -1].to(dtype=torch.int64, device=device)
@@ -272,7 +269,7 @@ class MAPPOTrainer(OnPolicyTrainer):
                         -(entropy * alive_last_flag).sum()
                         / max(alive_last_count, torch.tensor(1.0, device=device))
                     )
-                    actor_loss = actor_loss + self.entropy_coef * entropy_loss
+                    actor_loss = actor_loss + self.entropy_coef * entropy_loss + ret_agent.get("auxiliary_loss", 0.0)
 
                     # ---- Critic value loss (single timestep) ----
                     critic_loss = F.mse_loss(v_last, returns.detach())
@@ -292,6 +289,7 @@ class MAPPOTrainer(OnPolicyTrainer):
                     )
 
                     self.agent_optimizer.step()
+                    advance_communication_step(self.eval_agent_group)
                     # A disabled value objective must not update via optimizer
                     # momentum or weight decay either.
                     if self.vf_coef != 0:

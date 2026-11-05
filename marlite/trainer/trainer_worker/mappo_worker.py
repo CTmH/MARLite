@@ -1,3 +1,4 @@
+from marlite.util.communication_training import agent_training_forward, advance_communication_step
 """
 MAPPO worker implementation for multi-GPU training.
 
@@ -158,11 +159,7 @@ class MAPPOWorker(OnPolicyWorker):
 
         observations_transposed = torch.transpose(observations, 1, 2).to(self.device)
         self.eval_agent_group.train()
-        ret_agent = self.eval_agent_group(
-            observations_transposed,
-            timestep_padding_mask_expanded,
-            alive_mask[:, -1, :],
-        )
+        ret_agent = agent_training_forward(self.eval_agent_group, observations_transposed, timestep_padding_mask_expanded, alive_mask[:, -1, :], batch, next_state=False)
         action_logits = ret_agent["action_logits"]
 
         actions_last = actions[:, -1].to(dtype=torch.int64, device=self.device)
@@ -200,7 +197,7 @@ class MAPPOWorker(OnPolicyWorker):
             -(entropy * alive_last_flag).sum()
             / max(alive_last_count, torch.tensor(1.0, device=self.device))
         )
-        actor_loss = actor_loss + self.entropy_coef * entropy_loss
+        actor_loss = actor_loss + self.entropy_coef * entropy_loss + ret_agent.get("auxiliary_loss", 0.0)
 
         critic_loss = F.mse_loss(v_last, returns.detach())
 
@@ -219,6 +216,7 @@ class MAPPOWorker(OnPolicyWorker):
         )
 
         self.agent_optimizer.step()
+        advance_communication_step(self.eval_agent_group)
         if self.vf_coef != 0:
             self.critic_optimizer.step()
 

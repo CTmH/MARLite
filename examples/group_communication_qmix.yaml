@@ -1,0 +1,103 @@
+# Interface smoke test; state-threshold queries are not capture labels.
+agent_group:
+  type: GroupCommunicationQMIX
+  agent_list:
+    agent_0: model1
+    agent_1: model1
+    agent_2: model1
+  optimizer:
+    type: Adam
+    lr: 0.0005
+    weight_decay: 0.0001
+  observation_dim: 18
+  action_dim: 5
+  hidden_dim: 32
+  heads: 4
+  slots: 8
+  message_dim: 32
+  bits: 4
+  use_np: true
+  query_dim: 4
+  latent_dim: 8
+  hyper_rank: 0
+  message_mode: quantized
+  group_builder:
+    type: Fixed
+    group_ids:
+    - 0
+    - 0
+    - 0
+  relation_targets:
+    indices:
+    - 0
+    - 1
+    queries:
+    - - 1
+      - 0
+      - 0
+      - 0
+    - - 0
+      - 1
+      - 0
+      - 0
+    thresholds:
+    - 0
+    - 0
+environment:
+  module_name: mpe2
+  env_name: simple_spread_v3
+critic:
+  type: QMixer
+  model:
+    model_type: QMixModel
+    state_shape: 54
+    input_dim: 3
+    qmix_hidden_dim: 16
+  feature_extractor:
+    model_type: Identity
+  optimizer:
+    type: Adam
+    lr: 0.0005
+    weight_decay: 0.0001
+rollout:
+  manager_type: multi-process
+  worker_type: multi-process
+  n_workers: 1
+  n_episodes: 1
+  n_eval_episodes: 1
+  traj_len: 4
+  episode_limit: 8
+  device: cpu
+  required_attrs: group_communication_qmix
+replay_buffer:
+  type: Normal
+  capacity: 5
+  traj_len: 4
+  required_attrs: group_communication_qmix
+analyzer:
+  type: default
+trainer:
+  type: QMIX
+  gamma: 0.95
+  eval_epsilon: 0.01
+  workdir: ./results/group_communication_qmix
+  train_device: cpu
+  epsilon_scheduler:
+    type: logarithmic
+    start_value: 1.0
+    end_value: 0.05
+    ramp_start_step: 0
+    ramp_steps: 10
+  sample_ratio_scheduler:
+    type: linear
+    start_value: 16
+    end_value: 16
+    ramp_start_step: 0
+    ramp_steps: 10
+  train_args:
+    epochs: 1
+    target_first_metric: 100
+    rollback_interval: 1
+    batch_size: 8
+    learning_times_per_epoch: 1
+  seed: 42

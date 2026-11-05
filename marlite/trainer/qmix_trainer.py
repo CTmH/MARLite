@@ -1,3 +1,4 @@
+from marlite.util.communication_training import agent_training_forward, advance_communication_step
 import numpy as np
 import torch
 from marlite.util.return_estimation import td_target
@@ -105,10 +106,8 @@ class QMIXTrainer(OffPolicyTrainer):
                     observations = torch.transpose(observations, 1, 2).to(
                         self.train_device
                     )
-                    ret = self.eval_agent_group(
-                        observations, timestep_padding_mask, alive_mask[:, -1, :]
-                    )
-                    q_val = ret["q_val"]
+                    ret_agent = agent_training_forward(self.eval_agent_group, observations, timestep_padding_mask, alive_mask[:, -1, :], batch, next_state=False)
+                    q_val = ret_agent["q_val"]
                     actions = actions[:, -1].to(
                         device=self.train_device, dtype=torch.int64
                     )
@@ -127,11 +126,7 @@ class QMIXTrainer(OffPolicyTrainer):
                         next_observations = torch.transpose(next_observations, 1, 2).to(
                             self.train_device
                         )
-                        ret_next_eval = self.eval_agent_group(
-                            next_observations,
-                            next_timestep_padding_mask,
-                            next_alive_mask[:, -1, :],
-                        )
+                        ret_next_eval = agent_training_forward(self.eval_agent_group, next_observations, next_timestep_padding_mask, next_alive_mask[:, -1, :], batch, next_state=True)
                         q_val_next_eval = ret_next_eval["q_val"]
                         if use_action_mask:
                             q_val_next_eval = torch.masked_fill(
@@ -141,11 +136,7 @@ class QMIXTrainer(OffPolicyTrainer):
 
                         # Double Q: target agent group evaluates chosen actions
                         self.target_agent_group.eval()
-                        ret_next_target = self.target_agent_group(
-                            next_observations,
-                            next_timestep_padding_mask,
-                            next_alive_mask[:, -1, :],
-                        )
+                        ret_next_target = agent_training_forward(self.target_agent_group, next_observations, next_timestep_padding_mask, next_alive_mask[:, -1, :], batch, next_state=True)
                         q_val_next = ret_next_target["q_val"].gather(
                             dim=-1, index=best_actions.unsqueeze(-1)
                         ).squeeze(-1)
@@ -160,7 +151,7 @@ class QMIXTrainer(OffPolicyTrainer):
                         q_tot_next = ret_next["q_tot"]
 
                     y_tot = td_target(batch, r_last, q_tot_next, self.gamma, termination_last)
-                    critic_loss = torch.nn.functional.mse_loss(q_tot, y_tot.detach())
+                    critic_loss = torch.nn.functional.mse_loss(q_tot, y_tot.detach()) + ret_agent.get("auxiliary_loss", 0.0)
 
                     self.agent_optimizer.zero_grad()
                     self.eval_critic.zero_grad()
@@ -173,6 +164,7 @@ class QMIXTrainer(OffPolicyTrainer):
                     )
                     self.critic_optimizer.step()
                     self.agent_optimizer.step()
+                    advance_communication_step(self.eval_agent_group)
 
                     total_loss += critic_loss.detach().cpu().item()
                     total_batches += 1

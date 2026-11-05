@@ -60,6 +60,12 @@ def _pre_graph(ep: Dict, ctx: Dict) -> None:
     ep["edge_indices"].append(ctx["edge_indices"])
 
 
+def _pre_communication(ep: Dict, ctx: Dict) -> None:
+    for name in ("message_codes", "snapshot_steps"):
+        if name in ep:
+            ep[name].append(ctx.get(name, {}))
+
+
 def _pre_group(ep: Dict, ctx: Dict) -> None:
     ep["group_indices"].append(ctx["group_indices"])
 
@@ -131,6 +137,7 @@ def pre_step_full(ep: Dict, ctx: Dict) -> None:
     _pre_mappo(ep, ctx)
     _pre_graph(ep, ctx)
     _pre_group(ep, ctx)
+    _pre_communication(ep, ctx)
 
 
 def pre_step_qmix(ep: Dict, ctx: Dict) -> None:
@@ -231,6 +238,9 @@ def _pre_step_filtered(ep: Dict, ctx: Dict, attrs_set: FrozenSet[str]) -> None:
         ep["group_indices"].append(ctx["group_indices"])
     if "all_log_probs" in attrs_set:
         ep["all_log_probs"].append(ctx["all_log_probs"])
+    for name in ("message_codes", "snapshot_steps"):
+        if name in attrs_set:
+            ep[name].append(ctx[name])
 
 
 def _post_step_filtered(ep: Dict, ctx: Dict, attrs_set: FrozenSet[str]) -> None:
@@ -397,6 +407,9 @@ def resolve_phases(
     if required_attrs is None or required_attrs == "full":
         return FULL_PHASES
     if isinstance(required_attrs, str):
+        if required_attrs in ("group_communication_qmix", "group_communication_mappo"):
+            from marlite.rollout.attribute_spec import resolve_required_attrs
+            return _build_custom_phases(resolve_required_attrs(required_attrs))
         if required_attrs in PHASE_REGISTRY:
             return PHASE_REGISTRY[required_attrs]
         raise ValueError(
