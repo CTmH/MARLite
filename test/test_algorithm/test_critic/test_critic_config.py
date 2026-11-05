@@ -83,7 +83,7 @@ critic:
       in_features: 54
       out_features: 32
   consensus_processor:
-    model_type: "HyperNetwork"
+    model_type: "QMixHyperNetwork"
     cond_dim: 32
     layer_dims: [24, 32, 32]
     cond_hidden_dim: 64

@@ -5,7 +5,7 @@ from typing import Dict, Optional
 
 from marlite.algorithm.model.model_config import ModelConfig
 from marlite.algorithm.critic.mixer import Mixer
-from marlite.algorithm.model import MaskedModel, HyperNetwork
+from marlite.algorithm.model import MaskedModel, GeneralHyperNetwork
 
 
 class GroupConsensusMixer(Mixer):
@@ -88,7 +88,7 @@ class GroupConsensusMixer(Mixer):
             )
 
         # Consensus processor is a HyperNetwork: (all_group_consensus, state_features) -> group_hidden
-        if isinstance(self.consensus_processor, HyperNetwork):
+        if isinstance(self.consensus_processor, GeneralHyperNetwork):
             group_hidden = self.consensus_processor(all_group_consensus, state_features)
         else:
             group_hidden = self.consensus_processor(all_group_consensus)
