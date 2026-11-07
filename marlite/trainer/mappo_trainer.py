@@ -13,6 +13,8 @@ single-GPU and multi-GPU training via replicated workers.
 
 import math
 import os
+from pathlib import Path
+from tempfile import mkdtemp
 import yaml
 import numpy as np
 import torch
@@ -96,6 +98,10 @@ class MAPPOTrainer(OnPolicyTrainer):
             and getattr(self.eval_agent_group, "message_mode", None) != "quantized"
         ):
             raise ValueError("Experimental message KL requires a quantized actor")
+        if self.experimental_message_target_kl is not None:
+            self._message_rollout_device = self.rolloutmanager_config.config["device"]
+            if not isinstance(self._message_rollout_device, str):
+                raise ValueError("Experimental message KL requires a single rollout device")
         if isinstance(self.eval_critic, MixerCritic):
             raise TypeError(
                 "Critic subclass required, not Mixer subclass"
@@ -180,15 +186,18 @@ class MAPPOTrainer(OnPolicyTrainer):
         return self._learn_multi_gpu(sample_size, batch_size, times)
 
     @torch.no_grad()
-    def _message_audit_forward(self, batch):
+    def _message_audit_forward(self, batch, *, actor=None, device=None, contiguous=False):
         """Recompute hard codes and masked policies without running training losses."""
-        device = self.train_device
+        actor = self.eval_agent_group if actor is None else actor
+        device = self.train_device if device is None else device
         observations = batch["observations"].to(device, dtype=torch.float32).transpose(1, 2)
+        if contiguous:
+            observations = observations.contiguous()
         alive = batch["alive_mask"][:, -1].to(device, dtype=torch.bool)
         groups = batch["group_indices"][:, -1].to(device, dtype=torch.long)
         padding = batch["timestep_padding_mask"].to(device, dtype=torch.bool)
         padding = padding[:, None, :].expand(-1, alive.shape[1], -1)
-        result = self.eval_agent_group(observations, padding, alive, groups)
+        result = actor(observations, padding, alive, groups)
         available = batch["avail_actions"]
         dist = masked_categorical(
             result["action_logits"],
@@ -197,21 +206,132 @@ class MAPPOTrainer(OnPolicyTrainer):
         )
         return dist, result["message_codes"], alive
 
-    def _capture_message_audit(self, batch):
+    @torch.no_grad()
+    def _replay_message_audit(self, batch, actor_state):
+        """Recreate rollout's actor, device and single-team input layout."""
+        with torch.random.fork_rng(devices=[]):
+            actor = self.agent_group_config.get_agent_group()
+        actor.load_state_dict(actor_state, strict=True)
+        device = self._message_rollout_device
+        actor.eval().to(device)
+        logits, codes = [], []
+        for index in range(len(batch["observations"])):
+            window = {key: None if value is None else value[index:index + 1]
+                      for key, value in batch.items()}
+            dist, code, _ = self._message_audit_forward(
+                window, actor=actor, device=device, contiguous=True,
+            )
+            logits.append(dist.logits.cpu())
+            codes.append(code.cpu())
+        return torch.cat(logits), torch.cat(codes)
+
+    @staticmethod
+    def _message_audit_error(codes, log_probs, batch, alive):
+        if not torch.equal(codes[alive], batch["message_codes"][:, -1].to(codes.device)[alive]):
+            return "hard codes do not reproduce PPO rollout codes"
+        recorded = batch["all_log_probs"][:, -1].to(log_probs)
+        actual = log_probs[alive]
+        expected = recorded[alive]
+        if not (
+            torch.isfinite(actual).all()
+            and torch.isfinite(expected).all()
+            and torch.allclose(actual, expected, atol=1e-5, rtol=1e-5)
+        ):
+            return "action probabilities do not reproduce PPO rollout log probabilities"
+        return None
+
+    def _save_message_audit(self, evidence):
+        root = Path(self.workdir) / "message_audit"
+        root.mkdir(parents=True, exist_ok=True)
+        directory = Path(mkdtemp(prefix=f"round_{self.current_epoch + 1:04d}_", dir=root))
+        path = directory / "reproduction.pt"
+        pending = path.with_suffix(".tmp")
+        torch.save(evidence, pending)
+        pending.replace(path)
+        return path
+
+    def _capture_message_audit(self, batch, sample_ids=()):
         dist, codes, alive = self._message_audit_forward(batch)
         if not alive.any():
             raise ValueError("Message KL audit batch has no live agents")
-        recorded_codes = batch["message_codes"][:, -1].to(codes.device)
-        if not torch.equal(codes[alive], recorded_codes[alive]):
-            raise RuntimeError("Current hard codes do not reproduce PPO rollout codes")
         actions = batch["actions"][:, -1].to(device=alive.device, dtype=torch.long)
-        actual = dist.log_prob(actions)
-        recorded = batch["all_log_probs"][:, -1].to(actual)
-        if not torch.allclose(
-            actual[alive], recorded[alive], atol=1e-5, rtol=1e-5
-        ):
-            raise RuntimeError("Current policy does not reproduce PPO rollout log probabilities")
-        return dist, codes
+        log_probs = dist.log_prob(actions)
+        mismatch = self._message_audit_error(codes, log_probs, batch, alive)
+        if mismatch is None:
+            return dist, codes, {}
+
+        keys = (
+            "observations", "timestep_padding_mask", "alive_mask", "group_indices",
+            "avail_actions", "actions", "all_log_probs", "message_codes",
+        )
+        saved_batch = {
+            key: batch[key].detach().cpu() if isinstance(batch[key], torch.Tensor) else None
+            for key in keys
+        }
+        actor_state = {
+            key: value.detach().cpu().clone()
+            for key, value in get_state_dict(self.eval_agent_group).items()
+        }
+        evidence = {
+            "round": self.current_epoch + 1,
+            "sample_ids": [(int(episode), int(step)) for episode, step in sample_ids],
+            "batch": saved_batch,
+            "actor_state": actor_state,
+            "agent_config": {
+                "type": self.agent_group_config.ag_type,
+                **self.agent_group_config.agent_group_config,
+            },
+            "training_device": str(self.train_device),
+            "rollout_device": self._message_rollout_device,
+            "torch_version": str(torch.__version__),
+            "hip_version": torch.version.hip,
+            "cuda_version": torch.version.cuda,
+            "torch_threads": torch.get_num_threads(),
+            "matmul_precision": torch.get_float32_matmul_precision(),
+            "training_mismatch": mismatch,
+            "training_codes": codes.cpu(),
+            "training_logits": dist.logits.cpu(),
+            "training_action_log_probs": log_probs.cpu(),
+        }
+
+        metrics = {}
+        try:
+            replay_logits, replay_codes = self._replay_message_audit(saved_batch, actor_state)
+            # Categorical.logits are already normalized; gather without renormalizing.
+            replay_log_probs = replay_logits.gather(-1, actions.cpu().unsqueeze(-1)).squeeze(-1)
+            error = self._message_audit_error(
+                replay_codes, replay_log_probs, saved_batch, alive.cpu(),
+            )
+            evidence.update(replay_logits=replay_logits, replay_codes=replay_codes,
+                            replay_action_log_probs=replay_log_probs)
+            if error is None:
+                behavior = torch.distributions.Categorical(logits=replay_logits.to(dist.logits))
+                drift = torch.distributions.kl_divergence(behavior, dist)[alive]
+                if not torch.isfinite(drift).all():
+                    error = "non-finite policy drift between rollout and training forwards"
+                else:
+                    metrics = {
+                        "message_behavior_replay_verified": 1.0,
+                        "message_backend_code_mismatches": float(
+                            (codes[alive] != replay_codes.to(codes.device)[alive]).sum()
+                        ),
+                        "message_backend_kl_mean": float(drift.mean()),
+                        "message_backend_kl_max": float(drift.max()),
+                        "message_backend_action_log_prob_max_abs": float(
+                            (log_probs - replay_log_probs.to(log_probs))[alive].abs().max()
+                        ),
+                    }
+        except Exception as exc:
+            error = f"rollout replay failed: {type(exc).__name__}: {exc}"
+
+        evidence.update(verified_rollout_replay=error is None, replay_error=error, metrics=metrics)
+        path = self._save_message_audit(evidence)
+        if error is not None:
+            raise RuntimeError(f"Message audit: {error}. Evidence: {path}")
+        logging.warning("Message audit: rollout replay verified; backend drift saved to %s", path)
+        # PPO uses the logged behavior probabilities. KL early-stop compares
+        # training-device forwards before and after updates, not two backends.
+        return dist, codes, metrics
 
     def _learn_single_gpu(
         self, sample_size, batch_size: int, times: int = 4
@@ -243,7 +363,9 @@ class MAPPOTrainer(OnPolicyTrainer):
                 dataset, batch_size=batch_size, shuffle=False, num_workers=0
             )
             audit_batch = next(iter(audit_loader))
-            old_dist, old_codes = self._capture_message_audit(audit_batch)
+            sample_ids = getattr(dataset, "sample_id_list", ())[:batch_size]
+            old_dist, old_codes, replay_metrics = self._capture_message_audit(audit_batch, sample_ids)
+            message_metrics.update(replay_metrics)
 
         for epoch in range(times):
             dataloader = TrajectoryDataLoader(

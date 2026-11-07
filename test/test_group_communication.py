@@ -389,16 +389,22 @@ def test_mps_forward_backward_np():
     assert torch.isfinite(samples).all()
 
 
-def test_experimental_mappo_message_kl_stops_extra_passes(monkeypatch):
+def test_experimental_mappo_message_kl_stops_extra_passes(monkeypatch, tmp_path):
+    from marlite.algorithm.agents import AgentGroupConfig
     from marlite.trainer.mappo_trainer import MAPPOTrainer
 
     torch.manual_seed(4)
     trainer = MAPPOTrainer.__new__(MAPPOTrainer)
-    trainer.eval_agent_group = GroupCommunicationMAPPOAgentGroup(
-        {"a": "shared", "b": "shared"}, 6, 5,
-        {"type": "Fixed", "group_ids": [0, 0]},
+    trainer.agent_group_config = AgentGroupConfig(
+        type="GroupCommunicationMAPPO", agent_list={"a": "shared", "b": "shared"},
+        observation_dim=6, action_dim=5,
+        group_builder={"type": "Fixed", "group_ids": [0, 0]},
         hidden_dim=8, heads=2, slots=2, message_dim=4,
     )
+    trainer.eval_agent_group = trainer.agent_group_config.get_agent_group()
+    trainer.workdir = str(tmp_path)
+    trainer.current_epoch = 0
+    trainer._message_rollout_device = "cpu"
     trainer.eval_critic = torch.nn.Module()
     trainer.eval_critic.register_parameter("value", torch.nn.Parameter(torch.zeros(1)))
     trainer.eval_critic.forward = lambda states, *_: {
@@ -431,7 +437,42 @@ def test_experimental_mappo_message_kl_stops_extra_passes(monkeypatch):
     batch["message_codes"][0, -1, 0, 0] ^= 1
     with pytest.raises(RuntimeError, match="rollout codes"):
         trainer._capture_message_audit(batch)
+    saved = list(tmp_path.glob("message_audit/*/reproduction.pt"))
+    assert len(saved) == 1
+    evidence = torch.load(saved[0], weights_only=True)
+    assert not evidence["verified_rollout_replay"]
+    assert not torch.equal(evidence["replay_codes"], evidence["batch"]["message_codes"][:, -1])
     batch["message_codes"][0, -1, 0, 0] ^= 1
+
+    # Inject a disagreement only on the batched training path. The separate
+    # rollout replay must use the original single-window policy and state.
+    forward = trainer._message_audit_forward
+    flipped = codes.clone()
+    flipped[0, 0, 0] ^= 1
+
+    def disagree(batch, **kwargs):
+        policy, message_codes, alive = forward(batch, **kwargs)
+        if kwargs.get("actor") is None:
+            logits = policy.logits.clone()
+            logits[0, 0, 0] += 0.05
+            return torch.distributions.Categorical(logits=logits), flipped, alive
+        return policy, message_codes, alive
+
+    rng = torch.get_rng_state().clone()
+    with monkeypatch.context() as patch:
+        patch.setattr(trainer, "_message_audit_forward", disagree)
+        _, initial_codes, metrics = trainer._capture_message_audit(batch, [(0, 3), (1, 2)])
+    assert torch.equal(torch.get_rng_state(), rng)
+    assert torch.equal(initial_codes, flipped)
+    assert metrics["message_behavior_replay_verified"] == 1
+    assert metrics["message_backend_code_mismatches"] == 1
+    assert metrics["message_backend_kl_max"] > 0
+    saved = set(tmp_path.glob("message_audit/*/reproduction.pt")) - set(saved)
+    assert len(saved) == 1
+    evidence = torch.load(saved.pop(), weights_only=True)
+    assert evidence["verified_rollout_replay"]
+    assert evidence["sample_ids"] == [(0, 3), (1, 2)]
+    assert torch.equal(evidence["replay_codes"], evidence["batch"]["message_codes"][:, -1])
     trainer._prepare_ppo_dataset = lambda *_: [batch]
     monkeypatch.setattr(
         "marlite.trainer.mappo_trainer.TrajectoryDataLoader",

@@ -110,7 +110,15 @@ For experimental single-device quantized MAPPO, set
 probabilities against the pre-update policy. After each PPO pass the trainer
 recomputes hard codes and measures the masked categorical KL against that
 policy. Exceeding the threshold skips the remaining passes; it does not roll
-back the last pass. This option is disabled by default and is not a guarantee
+back the last pass. If the initial training-device forward disagrees with
+rollout, the audit replays the same actor on the rollout device one team
+window at a time. Hard codes must match that replay exactly. The existing
+action log-probability check still applies. On mismatch, a reproduction
+bundle under `message_audit/` records the sample IDs, observations, masks,
+behavior weights, and outputs of both paths. An unreproducible rollout stops
+training; a verified rollout records the finite backend discrepancy separately
+from the pre/post-update KL. No quantization tolerance is used, and current
+policy forwards never consume cached rollout codes. This option is disabled by default and is not a guarantee
 on the rest of the rollout or on individual code changes.
 
 No teacher is automatically trained by loading a checkpoint. No performance or
