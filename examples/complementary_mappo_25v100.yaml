@@ -1,3 +1,4 @@
+# Experimental C04 configuration; behavior and results are provisional.
 # CP03 pilot: local/raw paired runs; device selected by HIP_VISIBLE_DEVICES.
 agent_group:
   type: GroupCommunicationMAPPO

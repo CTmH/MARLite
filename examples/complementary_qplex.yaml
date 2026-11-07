@@ -1,3 +1,4 @@
+# Experimental C04 configuration; behavior and results are provisional.
 # Local QPLEX communication interface smoke test.
 agent_group:
   type: GroupCommunicationQMIX

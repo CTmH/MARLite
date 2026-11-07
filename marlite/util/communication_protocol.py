@@ -1,4 +1,4 @@
-"""Bounded message envelopes and exact retransmission deduplication.
+"""Experimental: Bounded message envelopes and exact retransmission deduplication.
 
 Transport is synchronous in MARLite; this utility does not simulate radio delays.
 """

@@ -1,4 +1,4 @@
-"""Training-only, state-independent spatial query sampling for complementary pursuit."""
+"""Experimental training-only spatial queries for complementary pursuit."""
 
 import math
 import torch
@@ -17,7 +17,8 @@ class ComplementaryAttackQueries:
     query_dim = 14
 
     def __init__(
-        self, n_queries=64, evader_hp=5.0, effective_damage=10.0, ineffective_damage=0.2
+        self, n_queries=64, evader_hp=5.0, effective_damage=10.0,
+        ineffective_damage=0.2, proposal="uniform",
     ):
         if type(n_queries) is not int or n_queries < 1:
             raise ValueError("n_queries must be positive")
@@ -31,6 +32,9 @@ class ComplementaryAttackQueries:
             or ineffective_damage < 0
         ):
             raise ValueError("Invalid HP or damage")
+        if proposal not in ("uniform", "group_geometry"):
+            raise ValueError("Unknown complementary query proposal")
+        self.proposal = proposal
         self.n_queries = n_queries
         self.evader_hp = evader_hp
         self.effective_damage = effective_damage
@@ -43,6 +47,12 @@ class ComplementaryAttackQueries:
         b, g = valid.shape
         width, height = state.shape[1:3]
         shape = (b, g, self.n_queries)
+        if self.proposal == "group_geometry":
+            target, positions, modes, active = self._group_proposals(
+                batch, valid, width, height, device
+            )
+            kind = torch.randint(3, shape, device=device)
+            return self.evaluate(state, valid, target, positions, modes, active, kind)
         target = torch.stack(
             [
                 torch.randint(width, shape, device=device),
@@ -60,6 +70,53 @@ class ComplementaryAttackQueries:
         active = torch.arange(3, device=device) < counts.unsqueeze(-1)
         kind = torch.randint(3, shape, device=device)
         return self.evaluate(state, valid, target, positions, modes, active, kind)
+
+    def _group_proposals(self, batch, valid, width, height, device):
+        """Propose target cells from legal sender coordinates, without reading prey."""
+        obs = batch["observations"][:, -1].to(device)
+        if obs.ndim != 5 or obs.shape[-1] != 29:
+            raise ValueError("Group query proposals require native position observations")
+        b, g = valid.shape
+        agents, h, w = obs.shape[1:4]
+        alive = batch["alive_mask"][:, -1].to(device).bool()
+        groups = batch["group_indices"][:, -1].to(device).long()
+        scale = obs.new_tensor([width, height])
+        xy = (obs[:, :, h // 2, w // 2, -2:] * scale).round().long()
+        if ((xy[alive] < 0) | (xy[alive] >= scale)).any():
+            raise ValueError("Invalid normalized sender coordinates for group queries")
+        members = alive[:, None, :] & (
+            groups[:, None, :] == torch.arange(g, device=device)[None, :, None]
+        )
+
+        x, y = torch.meshgrid(
+            torch.arange(width, device=device), torch.arange(height, device=device),
+            indexing="ij",
+        )
+        cells = torch.stack((x.flatten(), y.flatten()), dim=-1)
+        distances = (cells[None, :, None, :] - xy[:, None, :, :]).abs().sum(-1)
+        reachable = (distances > 0) & (distances <= 2)
+        coverage = (reachable[:, None] & members[:, :, None]).sum(-1)
+        # Half the queries target potential two-sender interactions when possible.
+        single = coverage > 0
+        pair = coverage >= 2
+        fallback = torch.where(single.any(-1, keepdim=True), single, True)
+        paired = torch.where(pair.any(-1, keepdim=True), pair, fallback)
+        weights = torch.stack((fallback, paired), dim=2).float().flatten(0, 2)
+        draws = torch.multinomial(weights, (self.n_queries + 1) // 2, replacement=True)
+        indices = draws.reshape(b, g, -1)[..., : self.n_queries]
+        target = cells[indices]
+
+        rows = torch.arange(b, device=device)[:, None, None]
+        candidates = reachable[rows, indices] & members[:, :, None]
+        priorities = torch.rand(candidates.shape, device=device).masked_fill(~candidates, -1)
+        chosen = priorities.topk(min(2, agents), dim=-1).indices
+        positions = xy[rows[..., None], chosen]
+        active = candidates.gather(-1, chosen)
+        pad = 3 - chosen.shape[-1]
+        positions = torch.nn.functional.pad(positions, (0, 0, 0, pad))
+        active = torch.nn.functional.pad(active, (0, pad), value=False)
+        modes = torch.randint(2, active.shape, device=device)
+        return target, positions, modes, active
 
     def evaluate(self, state, valid, target, positions, modes, active, kind):
         """Deterministic label path, also used to compare hand-built native scenes."""

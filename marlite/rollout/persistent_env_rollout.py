@@ -43,6 +43,7 @@ def persistent_env_rollout(
     deterministic: bool = False,
     env_retry: EnvRetryPolicy | None = None,
     _retry_attempt: int = 0,
+    greedy_evaluation: bool = False,
 ) -> List[Dict[str, Any]]:
     """Execute multiple rollouts using a single environment instance.
 
@@ -129,7 +130,7 @@ def persistent_env_rollout(
             n_episodes - index, rnn_traj_len, episode_limit, epsilon, device,
             check_victory, required_attrs,
             [reset_seed, *episode_seeds[index + 1:]], deterministic,
-            env_retry, _retry_attempt + 1,
+            env_retry, _retry_attempt + 1, greedy_evaluation,
         )
 
     for episode_idx in range(n_episodes):
@@ -340,6 +341,7 @@ def persistent_env_rollout(
                 traj_padding_mask,
                 decision_agents,
                 epsilon,
+                **({"greedy_evaluation": True} if greedy_evaluation else {}),
             )
             validate_communication_result(ret, required_attrs)
             actions, all_actions = ret["actions"], ret["all_actions"]

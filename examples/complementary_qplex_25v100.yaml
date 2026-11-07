@@ -1,3 +1,4 @@
+# Experimental C04 configuration; behavior and results are provisional.
 # CP03 pilot: one two-GPU job; batch 32 is split across workers.
 agent_group:
   type: GroupCommunicationQMIX

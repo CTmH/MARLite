@@ -18,7 +18,9 @@ def test_codec_payload(bits):
     decoded, codes = codec(x)
     packed = codec.pack(codes)
     assert packed.shape[-1] == 16 * bits // 8
-    assert torch.equal(codec.unpack(packed), codes)
+    received = codec.unpack(packed)
+    assert torch.equal(received, codes)
+    torch.testing.assert_close(codec.decode(received), decoded)
     decoded.square().sum().backward()
     assert x.grad.abs().sum() > 0
     with pytest.raises(ValueError):
@@ -68,7 +70,15 @@ def test_np_training_does_not_expose_labels_to_actions(agent_class):
         "relation_labels": torch.zeros(2, 3, 4),
         "relation_mask": torch.ones(2, 3, 4, dtype=torch.bool),
     }
+    def unexpected_generation(*args):
+        pytest.fail("Precomputed relation targets must not be regenerated")
+
+    agent.relation_targets = unexpected_generation
     first = agent.training_forward(obs, pad, alive, batch)
+    with pytest.raises(ValueError, match="queries, labels and mask"):
+        agent.training_forward(
+            obs, pad, alive, {k: v for k, v in batch.items() if k != "relation_mask"}
+        )
     batch["relation_labels"].fill_(1)
     second = agent.training_forward(obs, pad, alive, batch)
     torch.testing.assert_close(first[agent.output_key], second[agent.output_key])
@@ -240,7 +250,10 @@ def test_real_rollout_and_training(algorithm, manager, tmp_path):
 @pytest.mark.parametrize(
     "agent_class", [GroupCommunicationMAPPOAgentGroup, GroupCommunicationQMIXAgentGroup]
 )
-def test_frozen_teacher_input_gradient_and_curriculum_restore(agent_class):
+@pytest.mark.parametrize("replacement", ["progressive", "all"])
+def test_frozen_teacher_input_gradient_and_curriculum_restore(
+    agent_class, replacement, tmp_path
+):
     from copy import deepcopy
     from marlite.util.communication_curriculum import CommunicationCurriculum
 
@@ -256,22 +269,32 @@ def test_frozen_teacher_input_gradient_and_curriculum_restore(agent_class):
     )
     teacher = deepcopy(student)
     teacher.message_mode = "raw"
-    c = CommunicationCurriculum(student, teacher, (1, 1, 1))
+    c = CommunicationCurriculum(student, teacher, (1, 1, 1), replacement)
     obs = torch.randn(2, 3, 2, 6)
     padding = torch.zeros(2, 3, 2, dtype=torch.bool)
     alive = torch.ones(2, 3, dtype=torch.bool)
     groups = torch.zeros(2, 3, dtype=torch.long)
     optimizer = torch.optim.Adam(student.parameters(), lr=0.001)
-    for expected in (1, 2, 3):
-        assert c.replacement_mask(groups, alive).sum(-1).tolist() == [
-            expected,
-            expected,
-        ]
+    alive[1, 2] = False
+    groups[1, 2] = -1
+    counts = ([1, 1], [2, 1], [3, 2]) if replacement == "progressive" else ([3, 2],) * 3
+    for expected in counts:
+        selected = c.replacement_mask(groups, alive)
+        assert selected.sum(-1).tolist() == expected
+        assert not (selected & ~alive).any()
         c.step(optimizer, obs, padding, alive, groups)
         assert student.codec.encoder.weight.grad.abs().sum() > 0
         assert all(p.grad is None for p in c.teacher.parameters())
-    restored = CommunicationCurriculum(deepcopy(student), teacher, (10, 10, 10))
-    restored.load_state_dict(c.state_dict())
+    checkpoint = tmp_path / "curriculum.pth"
+    c.save_checkpoint(checkpoint, optimizer)
+    restored = CommunicationCurriculum(
+        deepcopy(student), teacher, (10, 10, 10), replacement
+    )
+    restored_optimizer = torch.optim.Adam(restored.student.parameters(), lr=0.001)
+    restored.load_checkpoint(checkpoint, restored_optimizer)
+    restored.replacement = "all" if replacement == "progressive" else "progressive"
+    with pytest.raises(ValueError, match="replacement schedule"):
+        restored.load_checkpoint(checkpoint, restored_optimizer)
     assert restored.stage == 3
     with pytest.raises(RuntimeError):
         restored.loss(obs, padding, alive, groups)
@@ -364,3 +387,57 @@ def test_mps_forward_backward_np():
     samples = agent.np.predict(context, queries, samples=4)
     assert samples.shape == (4, 1, 2, 3)
     assert torch.isfinite(samples).all()
+
+
+def test_experimental_mappo_message_kl_stops_extra_passes(monkeypatch):
+    from marlite.trainer.mappo_trainer import MAPPOTrainer
+
+    torch.manual_seed(4)
+    trainer = MAPPOTrainer.__new__(MAPPOTrainer)
+    trainer.eval_agent_group = GroupCommunicationMAPPOAgentGroup(
+        {"a": "shared", "b": "shared"}, 6, 5,
+        {"type": "Fixed", "group_ids": [0, 0]},
+        hidden_dim=8, heads=2, slots=2, message_dim=4,
+    )
+    trainer.eval_critic = torch.nn.Module()
+    trainer.eval_critic.register_parameter("value", torch.nn.Parameter(torch.zeros(1)))
+    trainer.eval_critic.forward = lambda states, *_: {
+        "v": trainer.eval_critic.value.expand(len(states), 1)
+    }
+    trainer.agent_optimizer = torch.optim.Adam(trainer.eval_agent_group.parameters(), lr=0.05)
+    trainer.critic_optimizer = torch.optim.Adam(trainer.eval_critic.parameters())
+    trainer.train_device = torch.device("cpu")
+    trainer.n_workers = 0
+    trainer.gamma, trainer.clip_epsilon = 0.99, 0.2
+    trainer.entropy_coef, trainer.vf_coef, trainer.max_grad_norm = 0.0, 0.5, 5.0
+    trainer.experimental_message_target_kl = 1e-6
+    batch = {
+        "observations": torch.randn(2, 2, 2, 6),
+        "states": torch.zeros(2, 2, 1),
+        "alive_mask": torch.ones(2, 2, 2, dtype=torch.bool),
+        "timestep_padding_mask": torch.zeros(2, 2, dtype=torch.bool),
+        "group_indices": torch.zeros(2, 2, 2, dtype=torch.long),
+        "avail_actions": torch.ones(2, 2, 2, 5, dtype=torch.bool),
+        "actions": torch.zeros(2, 2, 2, dtype=torch.long),
+        "rewards": torch.zeros(2, 2, 2),
+        "advantages": torch.ones(2),
+        "value_targets": torch.ones(2),
+    }
+    batch["alive_mask"][1, -1, -1] = False
+    batch["avail_actions"][..., -1] = False
+    dist, codes, _ = trainer._message_audit_forward(batch)
+    batch["all_log_probs"] = dist.log_prob(batch["actions"][:, -1]).double()[:, None].expand(-1, 2, -1)
+    batch["message_codes"] = codes[:, None].expand(-1, 2, -1, -1).clone()
+    batch["message_codes"][0, -1, 0, 0] ^= 1
+    with pytest.raises(RuntimeError, match="rollout codes"):
+        trainer._capture_message_audit(batch)
+    batch["message_codes"][0, -1, 0, 0] ^= 1
+    trainer._prepare_ppo_dataset = lambda *_: [batch]
+    monkeypatch.setattr(
+        "marlite.trainer.mappo_trainer.TrajectoryDataLoader",
+        lambda dataset, **_: dataset,
+    )
+    metrics = trainer._learn_single_gpu(2, 2, times=4)
+    assert metrics["message_policy_kl"] > trainer.experimental_message_target_kl
+    assert metrics["message_ppo_passes"] == 1
+    assert trainer.eval_agent_group.distillation_updates.item() == 1

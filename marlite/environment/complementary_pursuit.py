@@ -1,4 +1,4 @@
-"""Pursuer-only complementary pursuit with explicit population sizes.
+"""Experimental: Pursuer-only complementary pursuit with explicit population sizes.
 
 Native dynamics/rewards are unchanged. Observation filtering is applied here,
 so every actor (including a raw teacher) receives the same legal input.

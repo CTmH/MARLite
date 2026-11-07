@@ -357,6 +357,8 @@ class OffPolicyTrainer(Trainer):
                 after each roll-out (and before the next evaluation).
         """
         for epoch in range(epochs):
+            if getattr(self.rolloutmanager_config, "collection_exhausted", False):
+                break
             self.current_epoch = epoch
 
             logging.info(f"Epoch {epoch}: Collecting experiences")

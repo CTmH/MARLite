@@ -1,6 +1,28 @@
 """Use recorded communication contexts without changing legacy agent contracts."""
 
 
+import math
+
+import torch
+
+
+def message_gradient_cosine(rl_loss, relation_loss, codec):
+    """Measure a minibatch without writing parameter gradients."""
+    if relation_loss is None or not relation_loss.requires_grad:
+        return None
+    parameters = tuple(p for p in codec.parameters() if p.requires_grad)
+    if not parameters:
+        return None
+    rl = torch.autograd.grad(rl_loss, parameters, retain_graph=True, allow_unused=True)
+    relation = torch.autograd.grad(relation_loss, parameters, retain_graph=True, allow_unused=True)
+    dot = sum(float((a * b).sum()) for a, b in zip(rl, relation) if a is not None and b is not None)
+    norms = [sum(float(g.square().sum()) for g in side if g is not None) for side in (rl, relation)]
+    denominator = math.sqrt(norms[0] * norms[1])
+    if not denominator or not math.isfinite(denominator) or not math.isfinite(dot):
+        return None
+    return max(-1.0, min(1.0, dot / denominator))
+
+
 def agent_training_forward(
     agent, observations, padding, alive, batch, next_state=False
 ):

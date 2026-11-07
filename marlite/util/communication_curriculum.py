@@ -1,4 +1,4 @@
-"""Offline sender-replacement warm-up, separate from on-policy rollout data."""
+"""Experimental offline sender-replacement warm-up, separate from on-policy rollout data."""
 
 from copy import deepcopy
 import torch
@@ -27,7 +27,13 @@ class CommunicationCurriculum(nn.Module):
     Pass an already trained teacher; constructing this class does not train it.
     """
 
-    def __init__(self, student, teacher, stage_steps=(10000, 10000, 10000)):
+    def __init__(
+        self,
+        student,
+        teacher,
+        stage_steps=(10000, 10000, 10000),
+        replacement="progressive",
+    ):
         super().__init__()
         if (
             student.message_mode != "quantized"
@@ -35,7 +41,9 @@ class CommunicationCurriculum(nn.Module):
             or teacher.message_mode != "raw"
         ):
             raise ValueError("Student and raw teacher must use the same RL algorithm")
-        if len(stage_steps) != 3 or any(s < 1 for s in stage_steps):
+        if replacement not in ("progressive", "all"):
+            raise ValueError("replacement must be progressive or all")
+        if len(stage_steps) != 3 or any(type(s) is not int or s < 1 for s in stage_steps):
             raise ValueError("Provide three positive warm-up stage lengths")
         if student.agent_model_dict != teacher.agent_model_dict:
             raise ValueError("Teacher and student sender schemas must match")
@@ -43,6 +51,7 @@ class CommunicationCurriculum(nn.Module):
             raise ValueError(
                 "Teacher and student must use the same legal observation channels"
             )
+        self.replacement = replacement
         self.student = student
         self.teacher = deepcopy(teacher).requires_grad_(False).eval()
         self.register_buffer("stage_steps", torch.tensor(stage_steps, dtype=torch.long))
@@ -64,21 +73,21 @@ class CommunicationCurriculum(nn.Module):
             raise RuntimeError(
                 "Warm-up is complete; start fresh fully quantized rollouts"
             )
+        if groups.shape != alive.shape or groups.ndim != 2 or alive.dtype != torch.bool:
+            raise ValueError("Group indices and boolean alive mask must have shape B,N")
+        if torch.any(alive & ((groups < 0) | (groups >= groups.shape[1]))):
+            raise ValueError("Live group indices must lie in [0,N)")
+        if self.replacement == "all" or stage == 2:
+            return alive.clone()
         selected = torch.zeros_like(alive)
         for b in range(groups.shape[0]):
             for g in groups[b, alive[b]].unique():
                 indices = torch.where(alive[b] & (groups[b] == g))[0]
-                count = (
-                    1
-                    if stage == 0
-                    else (len(indices) + 1) // 2
-                    if stage == 1
-                    else len(indices)
-                )
                 if stage == 0:
                     index = int(self.updates.item()) % len(indices)
                     indices = indices[index : index + 1]
                 else:
+                    count = (len(indices) + 1) // 2
                     indices = indices[
                         torch.randperm(len(indices), device=indices.device)[:count]
                     ]
@@ -172,6 +181,7 @@ class CommunicationCurriculum(nn.Module):
         """Save warm-up/readout parameters, optimizer and sampling RNG together."""
         state = {
             "model": self.state_dict(),
+            "replacement": self.replacement,
             "optimizer": optimizer.state_dict(),
             "torch_rng": torch.get_rng_state(),
         }
@@ -184,6 +194,8 @@ class CommunicationCurriculum(nn.Module):
     def load_checkpoint(self, path, optimizer):
         """Restore into an instance built from the same saved experiment config."""
         state = torch.load(path, map_location="cpu", weights_only=True)
+        if state.get("replacement", "progressive") != self.replacement:
+            raise ValueError("Checkpoint replacement schedule does not match the experiment")
         self.load_state_dict(state["model"])
         optimizer.load_state_dict(state["optimizer"])
         torch.set_rng_state(state["torch_rng"])

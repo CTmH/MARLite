@@ -1,6 +1,12 @@
 # Group communication: MAPPO, QMIX and relational NP
 
-## Supported path
+> **Experimental (C04).** Group communication for MAPPO, QMIX and QPLEX,
+> relational NP, the optional conditional head, the message curriculum and the
+> complementary-pursuit benchmarks are research interfaces. Configuration keys
+> remain available for reproducing earlier runs; these experiments do not
+> change the status of the stock algorithms.
+
+## Implementation
 
 `GroupCommunicationMAPPO` and `GroupCommunicationQMIX` inherit the shared
 `GroupCommunicationAgentGroup`. Each sender encodes only its own observation
@@ -74,7 +80,9 @@ for labels and the central critic, never for the actor's forward input.
    interface first and use the explicit readout handoff below. Create
    `CommunicationCurriculum(student, teacher, stage_steps=(...,...,...))`.
 3. Pass recorded observations, padding, alive masks and group IDs to `step`.
-   The stages replace one sender, half of each group rounded up, then all senders.
+   The default stages replace one sender, half of each group rounded up, then
+   all senders. Set `replacement="all"` for the direct-distillation control;
+   it uses the same update budget and readout handoff.
    The frozen teacher fuses the replacement tokens with its raw tokens. Teacher
    parameters receive no gradients, but replacement-token gradients remain live.
    Supply `batch` to add the same relation loss used by online training.
@@ -95,6 +103,15 @@ for labels and the central critic, never for the actor's forward input.
    teacher file must remain available when reconstructing this configured agent.
    Include config and optimizer state in any full training-resume archive;
    the existing `save_current_model` API remains a model-weight checkpoint.
+
+For experimental single-device quantized MAPPO, set
+`trainer.experimental_message_target_kl` to a positive threshold (for example,
+`0.02`). A fixed minibatch first checks the collected hard codes and action log
+probabilities against the pre-update policy. After each PPO pass the trainer
+recomputes hard codes and measures the masked categorical KL against that
+policy. Exceeding the threshold skips the remaining passes; it does not roll
+back the last pass. This option is disabled by default and is not a guarantee
+on the rest of the rollout or on individual code changes.
 
 No teacher is automatically trained by loading a checkpoint. No performance or
 optimality guarantee follows from these utilities.
@@ -164,3 +181,150 @@ that communication improves task performance.
 Capture labels at the float32 HP reconstruction boundary are masked rather than
 asserted as certain. Runtime capture checks accept the corresponding bounded
 ambiguity; the reported capture count always comes from native entity removal.
+
+## Experimental CP04 run preparation
+
+A matching CP03 raw checkpoint can be converted into a paired teacher and
+initialization bundle without importing temporary CP03 training code:
+
+```sh
+python -m marlite.experimental.cp04 prepare \
+  --source-config /path/to/cp03/config.yaml \
+  --source-actor /path/to/cp03/checkpoints/final/agent/agent.pth \
+  --seed 42 --output /path/to/new/bundle
+```
+
+Preparation strictly checks the source actor's weights, initializes a fresh
+codec and critic, and records SHA-256 hashes. The manifest explicitly records
+that real trajectory parity has not yet been verified. Retain the bundle as
+the common initialization across paired variants.
+
+Use a YAML file containing separate nonempty lists under
+`offline_train`, `offline_validation`, `online_validation`, and `test`:
+
+```sh
+python -m marlite.experimental.cp04 collect \
+  --bundle /path/to/bundle --split-file /path/to/splits.yaml \
+  --output /path/to/new/offline_data
+```
+
+Only the two offline lists are passed to the raw teacher. Episode files store
+numeric tensors and retain sender order; `load_offline_dataset` reconstructs
+the original padded trajectory windows and checks that the data belong to the
+same teacher. Online training uses a separate seed stream, which the online
+runner must record and audit against these held-out splits.
+
+Fit the relation head once from the shared teacher/data bundle, then pass the
+same probe to both warm-up variants:
+
+```sh
+python -m marlite.experimental.cp04 fit-relations \
+  --bundle /path/to/bundle --data /path/to/offline_data --output /path/to/probe
+python -m marlite.experimental.cp04 warmup \
+  --bundle /path/to/bundle --data /path/to/offline_data --probe /path/to/probe \
+  --replacement progressive --output /path/to/new/warmup
+```
+
+Use `--replacement all` for the matched full-replacement control. The probe
+reports per-query label coverage and Brier scores against the training prior.
+The joint warm-up rejects a probe without positive and negative support in
+both splits for every query type, or without pooled Brier improvement. For
+a short wiring test, `--kl-only` replaces `--probe`; its output is explicitly
+marked KL-only. It is not an evaluation of the full supervised method.
+
+Both variants consume the same deterministically selected windows and
+queries. Codec training freezes the student history/front-end and teacher;
+the readout phase additionally freezes the learned codec and trains the
+student fusion and heads. `actor.pth` contains only the student. The separate
+`offline_state.pth` can be resumed with `--resume` and the same arguments;
+it preserves both optimizer states and validates input manifests and settings.
+
+The CP04 probe now uses a `group_geometry` proposal. It samples candidate
+cells in attack range of the group's recorded live sender positions, favoring
+jointly reachable cells for half the queries. It never reads target existence
+or HP to choose a query; those fields supply labels only. Legacy query configs
+still use the uniform proposal unless explicitly changed.
+
+Start a new single-device run and evaluate a selected checkpoint separately:
+
+```sh
+python -m marlite.experimental.cp04 online \
+  --bundle /path/to/bundle --data /path/to/offline_data --probe /path/to/probe \
+  --offline /path/to/warmup --rounds 10 --distillation-steps 100 \
+  --device cpu --output /path/to/new/online
+python -m marlite.experimental.cp04 evaluate \
+  --run-directory /path/to/new/online --data /path/to/offline_data \
+  --checkpoint /path/to/new/online/checkpoints/final/agent/agent.pth \
+  --split online_validation --output /path/to/validation.yaml
+```
+
+Omit `--offline` and set no online distillation for the ordinary quantization
+control. The runner starts with empty replay, checks that the derived rollout
+seed schedules do not collide with reserved splits, and records configuration,
+hashes and schedules. Validation/test episodes never enter replay. Test mode
+requires a previously selected checkpoint SHA-256 and is disabled for
+`--kl-only-smoke` runs; that option allows one round without a relation probe
+for wiring verification. MAPPO evaluation samples actions; QPLEX uses greedy
+execution. Fixed rounds are not an exact environment-step budget.
+
+Add `--structured` without `--offline` or teacher distillation to run the
+experimental structured control. Its fixed local encoder sends four
+4-byte records `[x, y, HP, type]` (nearest visible prey first, then visible
+walls, then padding). It uses the same 16-byte payload, 9-byte envelope,
+history for the local policy, and trainable decoder/fusion/readout. The
+fixed encoder has no trainable parameters; report that difference when
+comparing model sizes. The records are derived from the sender's current
+legal view, with no global state or other senders as encoder input.
+
+### Experimental paper controls and frozen references
+
+Set `online --paper-baseline masia|ss_gigc|coalign` to use an experimental
+128-bit adaptation with its own auxiliary loss. Do not supply a CP04 relation
+probe or teacher-distillation budget for these controls. All use the same
+local observation schema, grouping, 16-byte payload, packet envelope,
+actor initialization for shared tensors, and fresh critic initialization.
+
+| Control | Preserved mechanism | Adaptation |
+|---|---|---|
+| `masia` | Permutation-invariant common representation, local extraction, reconstruction and future prediction | Shared attention context, per-agent gate, current/one-step next 4×4 occupancy targets; forecast conditioned on a group action histogram |
+| `ss_gigc` | Diagonal Gaussian precision-weighted group fusion, mean used for actions, reconstruction with prior KL | Four bits each for 16 means and 16 log variances; reconstructs the coarsened union of positives in the group's legal views |
+| `coalign` | Attention aggregation and collaborative-to-global Gaussian KL | Global belief learned by an occupancy VAE during training, rather than the manuscript's critic-integrated global value representation; the collaborative mean feeds the actor |
+
+These are matched-budget mechanism controls, not reproductions of the
+original architectures or reported performance. The global state and future
+state appear only in the training losses. The policy forward is deterministic
+given the hard messages; latent sampling is confined to auxiliary objectives.
+The run manifest includes total and requires-grad parameter counts. A
+requires-grad count can include shared components unused by a given control.
+
+Use `reference --bundle ... --data ... --split online_validation --output ...`
+to evaluate the raw teacher on the same maps as the quantized variants. Supply
+both `--local-config` and `--local-actor` for a compatible frozen local-only
+reference. The local architecture, environment and history must match.
+Archived references remain historical checkpoints, not equal-training-budget
+controls. Test mode requires the locked reference weight hash.
+
+### Experimental budget and diagnostics
+
+For matched training interactions, add `online --environment-steps N`. Set
+`--rounds` high enough to reach the cap even when episodes end early. The
+persistent manager shortens the last collection batches through native
+episode limits, preserving the truncation/bootstrap fields. Interrupted
+episode retries are disabled in exact-budget mode. If the round limit ends
+first, the manifest stays incomplete and records the observed count.
+Fixed-round mode remains available for small diagnostics.
+
+The online manifest separates successful collection steps, trainer-only
+diagnostic steps and independent validation/test; records actual rollout
+seeds, episode lengths, optimizer step counts and online wall time. Offline
+artifacts report data generation, probe and warm-up costs separately. The
+warm-up compares the initial codec, warmed codec and trained readout on the
+same fixed offline validation windows. The codec metric uses the unchanged
+teacher readout with all tokens replaced; the student metric uses its own
+readout. MAPPO records hard-message KL, clip fraction and code flips.
+When relation supervision is available, both trainers log the first
+minibatch's RL/relation gradient cosine on the codec, excluding distillation
+from the RL term; a zero or unusable norm is not reported as zero cosine.
+
+Use `evaluate --greedy` or `reference --greedy` for supplemental MAPPO
+evaluation; it respects available actions and never changes training rollout.

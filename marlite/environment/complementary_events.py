@@ -1,4 +1,4 @@
-"""Training-only attack queries for north-facing complementary-pursuit agents.
+"""Experimental: Training-only attack queries for north-facing complementary-pursuit agents.
 
 Queries specify the complete candidate attack set; omitted agents stay. Damage
 is applied once per target, before recovery and movement, as in native dynamics.

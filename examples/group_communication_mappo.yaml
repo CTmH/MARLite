@@ -1,3 +1,4 @@
+# Experimental C04 configuration; behavior and results are provisional.
 # Interface smoke test; state-threshold queries are not capture labels.
 agent_group:
   type: GroupCommunicationMAPPO

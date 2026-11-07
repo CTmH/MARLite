@@ -1,12 +1,20 @@
-"""Shared finite-rate communication with parallel MAPPO and QMIX adapters."""
+"""Experimental shared finite-rate communication with parallel MAPPO and QMIX adapters."""
 
 import numpy as np
 import torch
 from torch import nn
 from marlite.algorithm.agents.agent_group import AgentGroup
 from marlite.algorithm.group_builder import GroupBuilderConfig
+from marlite.algorithm.model.cp04_baselines import (
+    CP04Baseline,
+    CP04_BASELINES,
+    gaussian_product,
+    group_members,
+)
 from marlite.algorithm.model.group_communication import (
     ScalarMessageCodec,
+    GaussianMessageCodec,
+    StructuredPursuitCodec,
     GroupSetFusion,
     RelationalNeuralProcess,
 )
@@ -49,6 +57,8 @@ class GroupCommunicationAgentGroup(AgentGroup):
         teacher_config=None,
         message_map_size=None,
         encoder_lr_scale=1.0,
+        experimental_message_codec="learned",
+        experimental_cp04_baseline=None,
     ):
         super().__init__()
         if (
@@ -121,7 +131,28 @@ class GroupCommunicationAgentGroup(AgentGroup):
                     "Message encoders must be deterministic for PPO probability replay"
                 )
         self.history = nn.GRUCell(hidden_dim, hidden_dim)
-        self.codec = ScalarMessageCodec(hidden_dim, message_dim, bits)
+        if experimental_cp04_baseline is not None and (
+            experimental_cp04_baseline not in CP04_BASELINES
+            or experimental_message_codec != "learned"
+            or message_mode != "quantized"
+            or (message_dim, bits) != (32, 4)
+            or message_map_size is None
+            or use_np or hyper_rank or teacher_checkpoint is not None
+        ):
+            raise ValueError("CP04 adaptations require plain 128-bit quantized pursuit agents")
+        self.cp04_baseline = (
+            None if experimental_cp04_baseline is None else
+            CP04Baseline(experimental_cp04_baseline, hidden_dim, action_dim, message_map_size)
+        )
+        if experimental_message_codec == "learned":
+            codec = GaussianMessageCodec if experimental_cp04_baseline == "ss_gigc" else ScalarMessageCodec
+            self.codec = codec(hidden_dim, message_dim, bits)
+        elif experimental_message_codec == "structured_pursuit":
+            if message_mode != "quantized" or (message_dim, bits) != (32, 4):
+                raise ValueError("Structured pursuit requires 128-bit quantized messages")
+            self.codec = StructuredPursuitCodec(hidden_dim, message_map_size)
+        else:
+            raise ValueError("Unknown experimental message codec")
         self.fusion = GroupSetFusion(hidden_dim, heads, slots)
         self.reader = nn.MultiheadAttention(
             hidden_dim, heads, batch_first=True, dropout=0
@@ -262,7 +293,8 @@ class GroupCommunicationAgentGroup(AgentGroup):
             h = torch.where(~traj_padding_mask[:, :, step].reshape(-1, 1), candidate, h)
         h = h.reshape(b, n, -1)
         if self.message_mode == "quantized":
-            decoded, codes = self.codec(h)
+            source = observations[:, :, -1] if isinstance(self.codec, StructuredPursuitCodec) else h
+            decoded, codes = self.codec(source)
         else:
             decoded = h
             codes = torch.empty(b, n, 0, dtype=torch.uint8, device=h.device)
@@ -294,13 +326,26 @@ class GroupCommunicationAgentGroup(AgentGroup):
             group_indices = torch.arange(n, device=h.device).expand(b, -1)
             codes = codes[..., :0]
         if message_override is not None:
+            if self.cp04_baseline is not None:
+                raise ValueError("Paper adaptations do not use CP04's message replacement curriculum")
             if (
                 message_override.shape != h.shape
                 or replace_mask.shape != alive_mask.shape
             ):
                 raise ValueError("Replacement messages and mask must match sender axes")
             tokens = torch.where(replace_mask.unsqueeze(-1), message_override, tokens)
-        memory, valid = self.fusion(tokens, group_indices, alive_mask)
+        baseline = self.cp04_baseline
+        baseline_context = None
+        if baseline is not None and baseline.method == "ss_gigc":
+            baseline_context, valid = gaussian_product(tokens, group_members(group_indices, alive_mask))
+            mean, logvar = baseline_context.chunk(2, -1)
+            memory = self.codec.decoder(
+                torch.cat((mean, torch.zeros_like(logvar)), -1)
+            ).unsqueeze(-2)
+        else:
+            memory, valid = self.fusion(tokens, group_indices, alive_mask)
+            if baseline is not None:
+                memory, baseline_context = baseline.context(memory)
         context = memory.mean(-2)
         policy_context = self.np.policy_context(context) if self.np else context
         indices = torch.where(alive_mask, group_indices, 0)
@@ -310,12 +355,15 @@ class GroupCommunicationAgentGroup(AgentGroup):
             agent_memory = agent_memory + (policy_context - context)[
                 rows, indices
             ].unsqueeze(-2)
-        read, _ = self.reader(
-            h.reshape(b * n, 1, -1),
-            agent_memory.flatten(0, 1),
-            agent_memory.flatten(0, 1),
-            need_weights=False,
-        )
+        if baseline is not None and baseline.method == "masia":
+            read = baseline.read(h, agent_memory)
+        else:
+            read, _ = self.reader(
+                h.reshape(b * n, 1, -1),
+                agent_memory.flatten(0, 1),
+                agent_memory.flatten(0, 1),
+                need_weights=False,
+            )
         features = self.local_head(torch.cat([h, read.reshape(b, n, -1)], -1))
         values = self.action_head(features)
         if self.hyper:
@@ -341,6 +389,7 @@ class GroupCommunicationAgentGroup(AgentGroup):
             "group_tokens": memory,
             "group_valid": valid,
             "relation_context": context,
+            **({"baseline_context": baseline_context} if baseline is not None else {}),
         }
 
     def training_forward(self, observations, padding, alive, batch, next_state=False):
@@ -352,9 +401,14 @@ class GroupCommunicationAgentGroup(AgentGroup):
         groups = batch[key][:, -1].to(device=observations.device, dtype=torch.long)
         ret = self(observations, padding, alive, groups)
         if not next_state:
-            loss = self.relation_loss(ret, batch)
+            loss = (
+                self.relation_loss(ret, batch) if self.cp04_baseline is None
+                else self.cp04_baseline.loss(ret, batch, alive, groups)
+            )
             if loss is not None:
                 ret["auxiliary_loss"] = self.auxiliary_weight * loss
+                if self.cp04_baseline is None:
+                    ret["relation_auxiliary_loss"] = ret["auxiliary_loss"]
         if not next_state and self.teacher is not None and self.distillation_steps:
             from marlite.util.communication_curriculum import action_distillation
 
@@ -380,12 +434,13 @@ class GroupCommunicationAgentGroup(AgentGroup):
 
     def relation_loss(self, ret, batch):
         device = ret["relation_context"].device
-        if self.relation_targets is not None:
-            batch = dict(
-                batch, **self.relation_targets(batch, ret["group_valid"], device)
-            )
-        if "relation_queries" not in batch:
-            return None
+        fields = ("relation_queries", "relation_labels", "relation_mask")
+        if not any(field in batch for field in fields):
+            if self.relation_targets is None:
+                return None
+            batch = self.relation_targets(batch, ret["group_valid"], device)
+        if not all(field in batch for field in fields):
+            raise ValueError("Supply relation queries, labels and mask together")
         queries = batch["relation_queries"].to(device=device, dtype=torch.float32)
         labels = batch["relation_labels"].to(device=device, dtype=torch.float32)
         mask = batch["relation_mask"].to(device).bool()
@@ -425,6 +480,8 @@ class GroupCommunicationAgentGroup(AgentGroup):
         traj_padding_mask,
         alive_agents,
         epsilon=0.0,
+        *,
+        greedy_evaluation=False,
     ):
         names = list(self.agent_model_dict)
         obs = torch.as_tensor(
@@ -457,7 +514,9 @@ class GroupCommunicationAgentGroup(AgentGroup):
                 dtype=torch.bool,
             )
         dist = masked_categorical(values, masks, active_mask=alive[0])
-        if self.output_key == "action_logits":
+        if greedy_evaluation:
+            actions = dist.logits.argmax(-1)
+        elif self.output_key == "action_logits":
             actions = dist.sample()
         else:
             if not 0 <= epsilon <= 1:

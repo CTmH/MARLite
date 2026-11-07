@@ -1,4 +1,4 @@
-"""Finite-rate messages, set fusion, and a context-conditioned neural process."""
+"""Experimental finite-rate messages, set fusion, and a context-conditioned neural process."""
 
 import torch
 from torch import nn
@@ -30,13 +30,25 @@ class ScalarMessageCodec(nn.Module):
         soft = (self.encoder(features).tanh() + 1) * levels / 2
         hard = soft.round()
         quantized = soft + (hard - soft).detach()
-        return self.decoder(quantized * (2 / levels) - 1), hard.to(torch.uint8)
+        return self._decode_levels(quantized), hard.to(torch.uint8)
 
-    def pack(self, codes):
+    def _decode_levels(self, codes):
+        levels = (1 << self.bits) - 1
+        return self.decoder(codes * (2 / levels) - 1)
+
+    def decode(self, codes):
+        """Decode received integer codes without rerunning the sender encoder."""
+        self._validate_codes(codes)
+        return self._decode_levels(codes.to(dtype=self.encoder.weight.dtype))
+
+    def _validate_codes(self, codes):
         if codes.dtype != torch.uint8 or codes.shape[-1] != self.message_dim:
             raise ValueError("Expected uint8 codes of configured message width")
         if torch.any(codes.to(torch.int64) >= (1 << self.bits)):
             raise ValueError("Code exceeds quantizer range")
+
+    def pack(self, codes):
+        self._validate_codes(codes)
         width = 8 // self.bits
         pieces = codes.to(torch.int64).reshape(*codes.shape[:-1], -1, width)
         shift = torch.arange(width, device=codes.device) * self.bits
@@ -54,6 +66,74 @@ class ScalarMessageCodec(nn.Module):
             .flatten(-2)
             .to(torch.uint8)
         )
+
+
+class GaussianMessageCodec(ScalarMessageCodec):
+    """Experimental four-bit quantization of 16 means and 16 log variances."""
+
+    def _decode_levels(self, codes):
+        means, logvars = (codes * (2 / 15) - 1).chunk(2, dim=-1)
+        return torch.cat((means, 2 * logvars), dim=-1)
+
+
+class StructuredPursuitCodec(ScalarMessageCodec):
+    """Experimental 16-byte control: four visible prey or obstacle records."""
+
+    def __init__(self, hidden_dim, map_size):
+        if type(map_size) is not int or not 2 <= map_size <= 256:
+            raise ValueError("Structured pursuit messages require a map size in [2,256]")
+        super().__init__(hidden_dim, message_dim=32, bits=4)
+        self.map_size = map_size
+        del self.encoder
+
+    def forward(self, frame):
+        if frame.ndim != 5 or frame.shape[-1] != 29 or frame.shape[2] * frame.shape[3] < 4:
+            raise ValueError("Structured pursuit messages require native B,N,H,W,29 frames")
+        b, n, h, w, _ = frame.shape
+        pixels = frame.flatten(2, 3)
+        center = (frame[:, :, h // 2, w // 2, -2:] * self.map_size).round().long()
+        row, col = torch.meshgrid(
+            torch.arange(h, device=frame.device), torch.arange(w, device=frame.device),
+            indexing="ij",
+        )
+        offsets = torch.stack((col.flatten() - w // 2, row.flatten() - h // 2), -1)
+        positions = center[:, :, None] + offsets
+        inside = ((positions >= 0) & (positions < self.map_size)).all(-1)
+        prey = pixels[..., 4] > 0
+        walls = pixels[..., 0] > 0
+        valid = inside & (prey | walls)
+
+        # Preserve nearest prey first; walls fill unused record slots.
+        index = torch.arange(h * w, device=frame.device)
+        distance = offsets.abs().sum(-1)
+        priority = (distance + (~prey) * (h + w)) * (h * w) + index
+        chosen = priority.masked_fill(~valid, torch.iinfo(priority.dtype).max).topk(
+            4, dim=-1, largest=False
+        ).indices
+        record_xy = positions.gather(-2, chosen[..., None].expand(b, n, 4, 2))
+        record_prey = prey.gather(-1, chosen)
+        kind = torch.where(record_prey, 1, 2)
+        hp = (pixels[..., 5].gather(-1, chosen).clamp(0, 1) * 255).round().long()
+        hp = hp.masked_fill(~record_prey, 0)
+        records = torch.cat((record_xy, hp[..., None], kind[..., None]), -1)
+        payload = records.masked_fill(~valid.gather(-1, chosen)[..., None], 0)
+        codes = self.unpack(payload.flatten(-2).to(torch.uint8))
+        return self.decode(codes), codes
+
+    def decode(self, codes):
+        payload = self.pack(codes).unflatten(-1, (4, 4))
+        dtype = self.decoder[0].weight.dtype
+        xy = payload[..., :2].to(dtype) / (self.map_size - 1)
+        hp = payload[..., 2:3].to(dtype) / 255
+        kind = payload[..., 3]
+        if (kind > 2).any():
+            raise ValueError("Unknown structured pursuit record type")
+        occupied = (kind != 0).unsqueeze(-1)
+        categories = F.one_hot(kind.long(), num_classes=3).to(dtype)
+        features = torch.cat(
+            (xy, hp, categories, occupied.to(dtype), (1 - hp) * occupied), -1
+        )
+        return self.decoder(features.flatten(-2))
 
 
 class GroupSetFusion(nn.Module):

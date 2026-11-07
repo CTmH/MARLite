@@ -1,4 +1,4 @@
-"""Capture-first evaluation using terminal episode metrics, not lagged infos."""
+"""Experimental: Capture-first evaluation using terminal episode metrics, not lagged infos."""
 
 from marlite.analyzer.analyzer import Analyzer
 

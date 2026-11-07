@@ -19,9 +19,11 @@ The learn procedure implements Double DQN with the following steps:
 """
 
 import torch
+from absl import logging
 from marlite.util.communication_training import (
     agent_training_forward,
     advance_communication_step,
+    message_gradient_cosine,
 )
 from marlite.util.return_estimation import td_target
 from marlite.util.value_learning import last_action_mask, masked_action_values
@@ -265,6 +267,18 @@ class QPLEXTrainer(QMIXTrainer):
                     )
                     critic_loss = torch.nn.functional.mse_loss(q_tot, y_tot.detach())
 
+                    relation_loss = ret.get("relation_auxiliary_loss")
+                    if (
+                        total_batches == 0 and relation_loss is not None
+                        and getattr(self.rolloutmanager_config, "record_cp04_diagnostics", False)
+                    ):
+                        cosine = message_gradient_cosine(
+                            critic_loss + att_reg, relation_loss, self.eval_agent_group.codec
+                        )
+                        self.rolloutmanager_config.record_diagnostics(
+                            self.current_epoch, {"message_rl_relation_cosine": cosine}
+                        )
+                        logging.info("Experimental QPLEX message RL/relation gradient cosine: %s", cosine)
                     total_batch_loss = (
                         critic_loss + att_reg + ret.get("auxiliary_loss", 0.0)
                     )
