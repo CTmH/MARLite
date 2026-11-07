@@ -279,6 +279,14 @@ requires a previously selected checkpoint SHA-256 and is disabled for
 for wiring verification. MAPPO evaluation samples actions; QPLEX uses greedy
 execution. Fixed rounds are not an exact environment-step budget.
 
+For a formal relation-loss ablation, use `warmup --kl-only` to omit offline
+relation supervision and `online --no-online-relations` to omit online
+relation gradients. Supply the eligible probe to the online command even
+when disabling gradients: the label proposals still consume the same
+random draws. Neither option disables action distillation or changes the
+model architecture. The separate `--kl-only-smoke` flag still limits an
+unprobed run to one round and cannot be used for formal test evaluation.
+
 Add `--structured` without `--offline` or teacher distillation to run the
 experimental structured control. Its fixed local encoder sends four
 4-byte records `[x, y, HP, type]` (nearest visible prey first, then visible

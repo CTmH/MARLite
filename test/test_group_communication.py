@@ -355,6 +355,57 @@ def test_online_teacher_schedule_and_restore(tmp_path):
     assert not restored.teacher.training
 
 
+def test_relation_ablation_keeps_query_rng_and_teacher_gradients(tmp_path):
+    kwargs = dict(
+        agent_model_dict={"a": "shared", "b": "shared"},
+        observation_dim=6,
+        action_dim=5,
+        group_builder={"type": "Fixed", "group_ids": [0, 0]},
+        hidden_dim=8,
+        heads=2,
+        slots=2,
+        message_dim=4,
+    )
+    teacher = GroupCommunicationMAPPOAgentGroup(**kwargs, message_mode="raw")
+    checkpoint = tmp_path / "teacher.pth"
+    torch.save(teacher.state_dict(), checkpoint)
+    student = GroupCommunicationMAPPOAgentGroup(
+        **kwargs, teacher_checkpoint=checkpoint, distillation_steps=2
+    )
+    obs = torch.randn(2, 2, 2, 6)
+    padding = torch.zeros(2, 2, 2, dtype=torch.bool)
+    alive = torch.ones(2, 2, dtype=torch.bool)
+    batch = {"group_indices": torch.zeros(2, 2, 2, dtype=torch.long)}
+
+    def targets(_, valid, device):
+        return {
+            "relation_queries": torch.rand(2, 2, 3, 4, device=device),
+            "relation_labels": (torch.rand(2, 2, 3, device=device) > 0.5).float(),
+            "relation_mask": valid.unsqueeze(-1).expand(2, 2, 3),
+        }
+
+    student.relation_targets = targets
+    with torch.random.fork_rng(devices=[]):
+        torch.manual_seed(42)
+        full = student.training_forward(obs, padding, alive, batch)
+        after = torch.get_rng_state()
+        student.auxiliary_weight = 0.0
+        torch.manual_seed(42)
+        off = student.training_forward(obs, padding, alive, batch)
+        assert torch.equal(torch.get_rng_state(), after)
+
+    assert "relation_auxiliary_loss" not in off
+    assert full["relation_auxiliary_loss"] > 0
+    torch.testing.assert_close(
+        full["auxiliary_loss"] - full["relation_auxiliary_loss"], off["auxiliary_loss"]
+    )
+    torch.testing.assert_close(full["action_logits"], off["action_logits"], rtol=0, atol=0)
+    off["auxiliary_loss"].backward()
+    assert all(p.grad is None for p in student.relation_head.parameters())
+    assert student.codec.encoder.weight.grad.abs().sum() > 0
+    assert all(p.grad is None for p in student.teacher.parameters())
+
+
 @pytest.mark.skipif(
     not torch.backends.mps.is_available(), reason="Apple MPS not available"
 )

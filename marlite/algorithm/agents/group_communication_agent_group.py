@@ -401,10 +401,15 @@ class GroupCommunicationAgentGroup(AgentGroup):
         groups = batch[key][:, -1].to(device=observations.device, dtype=torch.long)
         ret = self(observations, padding, alive, groups)
         if not next_state:
-            loss = (
-                self.relation_loss(ret, batch) if self.cp04_baseline is None
-                else self.cp04_baseline.loss(ret, batch, alive, groups)
-            )
+            if self.cp04_baseline is not None:
+                loss = self.cp04_baseline.loss(ret, batch, alive, groups)
+            elif self.auxiliary_weight:
+                loss = self.relation_loss(ret, batch)
+            else:
+                # Keep the same query draws while excluding relation gradients.
+                with torch.no_grad():
+                    self.relation_loss(ret, batch)
+                loss = None
             if loss is not None:
                 ret["auxiliary_loss"] = self.auxiliary_weight * loss
                 if self.cp04_baseline is None:

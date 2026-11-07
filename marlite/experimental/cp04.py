@@ -444,7 +444,7 @@ def warmup(bundle, data, output, replacement, stage_steps, readout_steps, batch_
     if min(readout_steps, batch_size) < 1:
         raise ValueError("Positive readout step and batch counts are required")
     if (probe is not None) == kl_only:
-        raise ValueError("Supply an eligible relation probe or explicitly select KL-only smoke")
+        raise ValueError("Supply an eligible relation probe or explicitly select KL-only warm-up")
     bundle, data, output = Path(bundle), Path(data), Path(output)
     manifest = load_bundle(bundle)
     teacher_hash = manifest["artifacts"]["teacher.pth"]
@@ -592,7 +592,7 @@ def _online_seed_schedule(config, rounds, splits):
 def run_online(
     bundle, data, output, rounds, device, distillation_steps=0,
     offline=None, probe=None, kl_only_smoke=False, structured=False, paper_baseline=None,
-    environment_steps=None,
+    environment_steps=None, *, online_relations=True,
 ):
     """Start fresh quantized training from the common or warmed student weights."""
     if type(rounds) is not int or rounds < 1 or distillation_steps < 0:
@@ -640,7 +640,7 @@ def run_online(
             warm["bundle_manifest_sha256"] != _digest(bundle / "manifest.yaml")
             or warm["data_manifest_sha256"] != data_hash
             or warm["actor_sha256"] != _digest(actor_path)
-            or warm["kl_only"] != kl_only_smoke
+            or (kl_only_smoke and not warm["kl_only"])
         ):
             raise ValueError("Incompatible CP04 offline handoff")
         variant = "distill_all" if warm["replacement"] == "all" else "distill_curriculum"
@@ -669,11 +669,14 @@ def run_online(
             or relation["teacher_sha256"] != teacher_hash
             or relation["data_manifest_sha256"] != data_hash
             or relation["probe_sha256"] != _digest(probe / "relation_head.pth")
-            or (warm is not None and warm["probe_sha256"] != relation["probe_sha256"])
+            or (
+                warm is not None and not warm["kl_only"]
+                and warm["probe_sha256"] != relation["probe_sha256"]
+            )
         ):
             raise ValueError("Ineligible or incompatible relation probe for online training")
         agent["relation_targets"] = {"type": "ComplementaryAttackQueries", **relation["query_spec"]}
-        agent["auxiliary_weight"] = 0.1
+        agent["auxiliary_weight"] = 0.1 if online_relations else 0.0
 
     trainer_spec.update(workdir=str(output), train_device=device, n_workers=0)
     rollout = config["rollout"]
@@ -704,6 +707,8 @@ def run_online(
         "experimental": True,
         "variant": variant,
         "kl_only_smoke": kl_only_smoke,
+        "offline_relation_supervision": None if warm is None else not warm["kl_only"],
+        "online_relation_supervision": bool(agent.get("relation_targets") and agent["auxiliary_weight"]),
         "bundle_manifest_sha256": _digest(bundle / "manifest.yaml"),
         "data_manifest_sha256": data_hash,
         "initial_actor_sha256": _digest(actor_path),
@@ -905,6 +910,7 @@ def main():
     online.add_argument("--offline", type=Path)
     online.add_argument("--probe", type=Path)
     online.add_argument("--kl-only-smoke", action="store_true")
+    online.add_argument("--no-online-relations", action="store_true")
     online.add_argument("--structured", action="store_true")
     online.add_argument("--paper-baseline", choices=CP04_BASELINES)
     evaluation = subparsers.add_parser("evaluate", help="Evaluate on a fixed held-out split")
@@ -940,6 +946,7 @@ def main():
             args.bundle, args.data, args.output, args.rounds, args.device,
             args.distillation_steps, args.offline, args.probe, args.kl_only_smoke,
             args.structured, args.paper_baseline, args.environment_steps,
+            online_relations=not args.no_online_relations,
         )
     elif args.command == "evaluate":
         evaluate_checkpoint(
