@@ -644,14 +644,18 @@ def run_online(
         ):
             raise ValueError("Incompatible CP04 offline handoff")
         variant = "distill_all" if warm["replacement"] == "all" else "distill_curriculum"
+        if not distillation_steps:
+            variant += "_offline_only"
+    elif distillation_steps:
+        variant = "distill_online_only"
+
+    if distillation_steps:
         agent.update(
             teacher_checkpoint=str(bundle / "teacher.pth"),
             teacher_config=manifest["teacher"],
             distillation_steps=distillation_steps,
             distillation_weight=0.1,
         )
-    elif distillation_steps:
-        raise ValueError("The ordinary quantization control must not distill online")
 
     if kl_only_smoke or paper_baseline is not None:
         agent["relation_targets"] = None

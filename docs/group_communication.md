@@ -266,8 +266,12 @@ python -m marlite.experimental.cp04 evaluate \
   --split online_validation --output /path/to/validation.yaml
 ```
 
-Omit `--offline` and set no online distillation for the ordinary quantization
-control. The runner starts with empty replay, checks that the derived rollout
+The initial student weights and online teacher are independent. Omit
+`--offline` to start from the bundle's student initialization; supply it to
+reuse an offline handoff. A positive `--distillation-steps` enables the
+bundle's frozen raw teacher. With zero steps, no online teacher is loaded.
+Omitting both gives the ordinary quantization control. The runner starts
+with empty replay, checks that the derived rollout
 seed schedules do not collide with reserved splits, and records configuration,
 hashes and schedules. Validation/test episodes never enter replay. Test mode
 requires a previously selected checkpoint SHA-256 and is disabled for
