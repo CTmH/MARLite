@@ -276,11 +276,11 @@ def load_offline_dataset(directory, split, teacher_sha256):
     return TrajectoryDataset(ids, episode_buffer, manifest["history"], required_attrs=attrs)
 
 
-def initialize_online(trainer, actor_weights, critic_weights):
-    """Load pure student weights before the first fresh online rollout."""
+def initialize_online(trainer, actor_weights, critic_weights, *, message_mode="quantized"):
+    """Load matching actor and critic weights before the first fresh online rollout."""
     actor = trainer.eval_agent_group
-    if getattr(actor, "message_mode", None) != "quantized" or len(trainer.replaybuffer.buffer):
-        raise ValueError("CP04 handoff requires a fresh quantized trainer")
+    if getattr(actor, "message_mode", None) != message_mode or len(trainer.replaybuffer.buffer):
+        raise ValueError(f"CP04 handoff requires a fresh {message_mode} trainer")
     current = get_state_dict(actor)
     expected = {name for name in current if not name.startswith("teacher.")}
     if set(actor_weights) != expected:
@@ -439,7 +439,7 @@ def _offline_validation(curriculum, batch, query_spec, seed):
 
 
 def warmup(bundle, data, output, replacement, stage_steps, readout_steps, batch_size,
-           probe=None, kl_only=False, resume=False):
+           probe=None, kl_only=False, resume=False, *, structured=False):
     """Run paired hard-message distillation followed by a frozen-codec handoff."""
     if min(readout_steps, batch_size) < 1:
         raise ValueError("Positive readout step and batch counts are required")
@@ -452,8 +452,16 @@ def warmup(bundle, data, output, replacement, stage_steps, readout_steps, batch_
     validation = load_offline_dataset(data, "offline_validation", teacher_hash)
     validation_batch = _offline_batch(validation, 128, manifest["seed"] + 300000)
     data_hash = _digest(data / "manifest.yaml")
-    student = AgentGroupConfig(**_agent_spec(manifest["student_config"])).get_agent_group()
-    student.load_state_dict(_load_weights(bundle / "actor_init.pth"), strict=True)
+    student_spec = _agent_spec(manifest["student_config"])
+    initial = _load_weights(bundle / "actor_init.pth")
+    if structured:
+        if replacement != "all":
+            raise ValueError("The structured warm-up uses direct replacement")
+        _query_spec(manifest["student_config"])
+        student_spec["experimental_message_codec"] = "structured_pursuit"
+        del initial["codec.encoder.weight"], initial["codec.encoder.bias"]
+    student = AgentGroupConfig(**student_spec).get_agent_group()
+    student.load_state_dict(initial, strict=True)
     teacher = AgentGroupConfig(**manifest["teacher"]).get_agent_group()
     teacher.load_state_dict(_load_weights(bundle / "teacher.pth"), strict=True)
     probe_hash = None
@@ -490,6 +498,8 @@ def warmup(bundle, data, output, replacement, stage_steps, readout_steps, batch_
         "readout_steps": readout_steps,
         "batch_size": batch_size,
     }
+    if structured:
+        settings["structured"] = True
     state_path = output / "offline_state.pth"
     losses = []
     diagnostics = {}
@@ -592,13 +602,25 @@ def _online_seed_schedule(config, rounds, splits):
 def run_online(
     bundle, data, output, rounds, device, distillation_steps=0,
     offline=None, probe=None, kl_only_smoke=False, structured=False, paper_baseline=None,
-    environment_steps=None, *, online_relations=True,
+    environment_steps=None, *, online_relations=True, reference_mode=None,
+    local_config=None, local_actor=None,
 ):
     """Start fresh quantized training from the common or warmed student weights."""
     if type(rounds) is not int or rounds < 1 or distillation_steps < 0:
         raise ValueError("Invalid online round or distillation budget")
-    if (structured or paper_baseline is not None) and (offline is not None or distillation_steps):
-        raise ValueError("The fixed or paper controls do not use CP04 warm-up or teacher distillation")
+    if paper_baseline is not None and (offline is not None or distillation_steps):
+        raise ValueError("Paper adaptations do not use CP04 warm-up or teacher distillation")
+    if reference_mode not in (None, "raw", "local"):
+        raise ValueError("Reference mode must be raw or local")
+    if reference_mode is not None and (
+        structured or paper_baseline is not None or offline is not None or distillation_steps
+    ):
+        raise ValueError("Raw/local reference continuation does not use codec or teacher options")
+    if reference_mode == "local":
+        if local_config is None or local_actor is None:
+            raise ValueError("Local continuation requires both a local config and actor")
+    elif local_config is not None or local_actor is not None:
+        raise ValueError("Local source arguments require local continuation")
     if paper_baseline is not None and (
         paper_baseline not in CP04_BASELINES or structured or probe is not None or kl_only_smoke
     ):
@@ -632,6 +654,14 @@ def run_online(
             raise ValueError("The MASIA adaptation uses a one-step forecast target")
     actor_path = bundle / "actor_init.pth"
     warm = None
+    if reference_mode is not None:
+        variant = f"{reference_mode}_continuation"
+        agent["message_mode"] = reference_mode
+        if reference_mode == "local":
+            _local_reference_spec(manifest, local_config)
+            actor_path = Path(local_actor)
+        else:
+            actor_path = bundle / "teacher.pth"
     if offline is not None:
         offline = Path(offline)
         warm = _read_config(offline / "manifest.yaml")
@@ -641,6 +671,7 @@ def run_online(
             or warm["data_manifest_sha256"] != data_hash
             or warm["actor_sha256"] != _digest(actor_path)
             or (kl_only_smoke and not warm["kl_only"])
+            or warm.get("structured", False) != structured
         ):
             raise ValueError("Incompatible CP04 offline handoff")
         variant = "distill_all" if warm["replacement"] == "all" else "distill_curriculum"
@@ -648,6 +679,9 @@ def run_online(
             variant += "_offline_only"
     elif distillation_steps:
         variant = "distill_online_only"
+
+    if structured and (offline is not None or distillation_steps):
+        variant = f"structured_pursuit_{variant}"
 
     if distillation_steps:
         agent.update(
@@ -720,16 +754,21 @@ def run_online(
     trainer_config = TrainerConfig(config)
     trainer = trainer_config.create_trainer()
     initial = _load_weights(actor_path)
-    if structured:
+    if structured and offline is None:
         # Only the fixed record encoder replaces learned weights; reuse the decoder.
-        for name in ("codec.encoder.weight", "codec.encoder.bias"):
-            del initial[name]
+        del initial["codec.encoder.weight"], initial["codec.encoder.bias"]
+    if reference_mode is not None:
+        initial["distillation_updates"] = torch.zeros_like(initial["distillation_updates"])
     if paper_baseline is not None:
         initial.update(
             (key, value) for key, value in get_state_dict(trainer.eval_agent_group).items()
             if key.startswith("cp04_baseline.")
         )
-    initialize_online(trainer, initial, _load_weights(bundle / "critic_init.pth"))
+    critic = _load_weights(bundle / "critic_init.pth")
+    if reference_mode is None:
+        initialize_online(trainer, initial, critic)
+    else:
+        initialize_online(trainer, initial, critic, message_mode=reference_mode)
     run["actor_parameters"] = sum(p.numel() for p in trainer.eval_agent_group.parameters())
     run["trainable_actor_parameters"] = sum(
         p.numel() for p in trainer.eval_agent_group.parameters() if p.requires_grad
@@ -801,6 +840,27 @@ def evaluate_checkpoint(
     return _evaluate_actor(config, spec, state, seeds, split, digest, output, greedy=greedy)
 
 
+def _local_reference_spec(manifest, local_config):
+    config = manifest["student_config"]
+    spec = {**manifest["teacher"], "message_mode": "local"}
+    local = _read_config(local_config)
+    local_spec = _agent_spec(local)
+    legacy, stock = _ALGORITHMS[manifest["algorithm"]]
+    if local_spec["type"] not in (legacy, stock) or local_spec.get("message_mode") != "local":
+        raise ValueError("Expected a matching CP03 local-only reference")
+    local_spec["type"] = stock
+    for key in _GUIDANCE_FIELDS:
+        local_spec.pop(key, None)
+    if (
+        local_spec != spec
+        or local["trainer"]["type"] != manifest["algorithm"]
+        or local["environment"] != config["environment"]
+        or local["rollout"]["traj_len"] != config["rollout"]["traj_len"]
+    ):
+        raise ValueError("Local reference does not match the paired raw architecture/environment")
+    return spec
+
+
 def evaluate_reference(
     bundle, data, split, output, locked_sha256=None,
     local_config=None, local_actor=None, *, greedy=False,
@@ -819,22 +879,7 @@ def evaluate_reference(
     if local_config is not None or local_actor is not None:
         if local_config is None or local_actor is None:
             raise ValueError("Supply both local config and local actor checkpoint")
-        local = _read_config(local_config)
-        local_spec = _agent_spec(local)
-        legacy, stock = _ALGORITHMS[manifest["algorithm"]]
-        if local_spec["type"] not in (legacy, stock) or local_spec.get("message_mode") != "local":
-            raise ValueError("Expected a matching CP03 local-only reference")
-        local_spec["type"] = stock
-        for key in _GUIDANCE_FIELDS:
-            local_spec.pop(key, None)
-        spec["message_mode"] = "local"
-        if (
-            local_spec != spec
-            or local["trainer"]["type"] != manifest["algorithm"]
-            or local["environment"] != config["environment"]
-            or local["rollout"]["traj_len"] != config["rollout"]["traj_len"]
-        ):
-            raise ValueError("Local reference does not match the paired raw architecture/environment")
+        spec = _local_reference_spec(manifest, local_config)
         checkpoint = Path(local_actor)
     digest = _digest(checkpoint)
     if split == "test" and locked_sha256 != digest:
@@ -900,6 +945,7 @@ def main():
     supervision.add_argument("--probe", type=Path)
     supervision.add_argument("--kl-only", action="store_true")
     offline.add_argument("--resume", action="store_true")
+    offline.add_argument("--structured", action="store_true")
     online = subparsers.add_parser("online", help="Start fresh fully quantized training")
     for key in ("bundle", "data", "output"):
         online.add_argument(f"--{key}", required=True, type=Path)
@@ -912,6 +958,9 @@ def main():
     online.add_argument("--kl-only-smoke", action="store_true")
     online.add_argument("--no-online-relations", action="store_true")
     online.add_argument("--structured", action="store_true")
+    online.add_argument("--reference-mode", choices=("raw", "local"))
+    online.add_argument("--local-config", type=Path)
+    online.add_argument("--local-actor", type=Path)
     online.add_argument("--paper-baseline", choices=CP04_BASELINES)
     evaluation = subparsers.add_parser("evaluate", help="Evaluate on a fixed held-out split")
     for key in ("run-directory", "data", "checkpoint", "output"):
@@ -939,7 +988,7 @@ def main():
         warmup(
             args.bundle, args.data, args.output, args.replacement,
             args.stage_steps, args.readout_steps, args.batch_size,
-            args.probe, args.kl_only, args.resume,
+            args.probe, args.kl_only, args.resume, structured=args.structured,
         )
     elif args.command == "online":
         run_online(
@@ -947,6 +996,7 @@ def main():
             args.distillation_steps, args.offline, args.probe, args.kl_only_smoke,
             args.structured, args.paper_baseline, args.environment_steps,
             online_relations=not args.no_online_relations,
+            reference_mode=args.reference_mode, local_config=args.local_config, local_actor=args.local_actor,
         )
     elif args.command == "evaluate":
         evaluate_checkpoint(

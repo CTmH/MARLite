@@ -287,14 +287,26 @@ random draws. Neither option disables action distillation or changes the
 model architecture. The separate `--kl-only-smoke` flag still limits an
 unprobed run to one round and cannot be used for formal test evaluation.
 
-Add `--structured` without `--offline` or teacher distillation to run the
-experimental structured control. Its fixed local encoder sends four
+Add `--structured` to run the experimental structured control. Its
+fixed local encoder sends four
 4-byte records `[x, y, HP, type]` (nearest visible prey first, then visible
 walls, then padding). It uses the same 16-byte payload, 9-byte envelope,
 history for the local policy, and trainable decoder/fusion/readout. The
 fixed encoder has no trainable parameters; report that difference when
 comparing model sizes. The records are derived from the sender's current
 legal view, with no global state or other senders as encoder input.
+
+To match the learned codec's teacher budget, use
+`warmup --structured --replacement all` and pass that handoff to
+`online --structured` with the same distillation schedule. Only the
+decoder and readout can learn during warm-up; the record generator is fixed.
+The handoff manifest prevents mixing learned and structured codecs.
+
+For operating references, `online --reference-mode raw` continues the
+bundle's raw teacher. `--reference-mode local` requires a matching
+`--local-config` and `--local-actor` from an independently trained local
+policy. Both start with fresh replay and critic initialization and use the
+same MAPPO policy KL guard; there are no hard-code changes to report.
 
 ### Experimental paper controls and frozen references
 

@@ -62,8 +62,8 @@ class MAPPOTrainer(OnPolicyTrainer):
     max_grad_norm : float
         Maximum gradient norm for clipping.
     experimental_message_target_kl : float or None
-        Optional post-pass hard-message policy KL threshold for single-device
-        quantized MAPPO. None preserves the standard training loop.
+        Optional post-pass policy KL threshold for single-device group MAPPO.
+        Quantized actors also report hard-code changes. None preserves the standard loop.
     **kwargs :
         Forwarded to ``OnPolicyTrainer.__init__``.
     """
@@ -95,9 +95,9 @@ class MAPPOTrainer(OnPolicyTrainer):
         super().__init__(**kwargs)
         if (
             self.experimental_message_target_kl is not None
-            and getattr(self.eval_agent_group, "message_mode", None) != "quantized"
+            and getattr(self.eval_agent_group, "message_mode", None) not in ("quantized", "raw", "local")
         ):
-            raise ValueError("Experimental message KL requires a quantized actor")
+            raise ValueError("Experimental message KL requires a group communication actor")
         if self.experimental_message_target_kl is not None:
             self._message_rollout_device = self.rolloutmanager_config.config["device"]
             if not isinstance(self._message_rollout_device, str):
@@ -521,7 +521,7 @@ class MAPPOTrainer(OnPolicyTrainer):
                     "message_clip_fraction": clip_count / max(clip_total, 1),
                     "message_code_flip_fraction": float(
                         (old_codes[alive] != codes[alive]).float().mean()
-                    ),
+                    ) if codes.shape[-1] else 0.0,
                     "message_ppo_passes": epoch + 1,
                     "message_kl_threshold_exceeded": float(exceeded),
                 })
