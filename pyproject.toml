@@ -88,7 +88,7 @@ torch = [
     { index = "pypi", extra = "mps" },
     { index = "pytorch-cpu", extra = "cpu" },
 ]
-mpe2 = {git = "https://github.com/Farama-Foundation/MPE2.git"}
+mpe2 = { git = "https://github.com/Farama-Foundation/MPE2.git", rev = "147a8e88b669de9f0b06d1947c44d5c380c570bb" }
 
 [[tool.uv.index]]
 name = "pypi"
