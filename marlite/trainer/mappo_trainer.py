@@ -86,6 +86,7 @@ class MAPPOTrainer(OnPolicyTrainer):
         self.entropy_coef = entropy_coef
         self.vf_coef = vf_coef
         self.max_grad_norm = max_grad_norm
+        self.actor_auxiliary_objective = None
         if experimental_message_target_kl is not None and (
             not math.isfinite(experimental_message_target_kl)
             or experimental_message_target_kl <= 0
@@ -478,6 +479,12 @@ class MAPPOTrainer(OnPolicyTrainer):
                             if cosine is not None:
                                 message_metrics["message_rl_relation_cosine"] = cosine
                     actor_loss = actor_loss + ret_agent.get("auxiliary_loss", 0.0)
+
+                    if self.actor_auxiliary_objective is not None:
+                        extra_loss = self.actor_auxiliary_objective(self.eval_agent_group)
+                        if extra_loss.ndim != 0 or not torch.isfinite(extra_loss):
+                            raise ValueError("Actor auxiliary objective must return a finite scalar")
+                        actor_loss = actor_loss + extra_loss
 
                     # ---- Critic value loss (single timestep) ----
                     critic_loss = F.mse_loss(v_last, returns.detach())
