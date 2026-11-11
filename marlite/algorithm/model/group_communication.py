@@ -157,25 +157,34 @@ class GroupSetFusion(nn.Module):
         )
         self.norm = nn.LayerNorm(hidden_dim)
 
-    def forward(self, tokens, groups, alive):
+    def _fuse_members(self, members):
+        batch = members.shape[0]
+        inducing = self.inducing.unsqueeze(0).expand(batch, -1, -1)
+        queries = self.queries.unsqueeze(0).expand(batch, -1, -1)
+        induced, _ = self.induce_attention(
+            inducing, members, members, need_weights=False
+        )
+        induced = self.induce_norm(induced + inducing)
+        value, _ = self.attention(queries, induced, induced, need_weights=False)
+        return self.norm(value + queries)
+
+    def forward(self, tokens, groups, alive, *, singleton_groups=False):
         if groups.shape != tokens.shape[:2] or alive.shape != groups.shape:
             raise ValueError("Group and alive shapes must match batch/agent axes")
-        if torch.any(alive & ((groups < 0) | (groups >= tokens.shape[1]))):
-            raise ValueError("Alive agents require group IDs in [0, number of agents)")
         b, n, h = tokens.shape
+        if singleton_groups:
+            # The local policy assigns each agent its own slot. Batch those sets.
+            members = tokens.masked_fill(~alive.unsqueeze(-1), 0).reshape(b * n, 1, h)
+            memory = self._fuse_members(members).reshape(b, n, -1, h)
+            return memory.masked_fill(~alive[..., None, None], 0), alive
+        if torch.any(alive & ((groups < 0) | (groups >= n))):
+            raise ValueError("Alive agents require group IDs in [0, number of agents)")
         memory = tokens.new_zeros(b, n, self.queries.shape[0], h)
         valid = torch.zeros(b, n, dtype=torch.bool, device=tokens.device)
         for row in range(b):
             for group in groups[row, alive[row]].unique().tolist():
                 members = alive[row] & (groups[row] == group)
-                query = self.queries.unsqueeze(0)
-                selected = tokens[row, members].unsqueeze(0)
-                induced, _ = self.induce_attention(
-                    self.inducing.unsqueeze(0), selected, selected, need_weights=False
-                )
-                induced = self.induce_norm(induced + self.inducing.unsqueeze(0))
-                value, _ = self.attention(query, induced, induced, need_weights=False)
-                memory[row, group] = self.norm(value + query)[0]
+                memory[row, group] = self._fuse_members(tokens[row, members].unsqueeze(0))[0]
                 valid[row, group] = True
         return memory, valid
 

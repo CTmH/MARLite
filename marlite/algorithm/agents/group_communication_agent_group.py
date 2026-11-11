@@ -343,7 +343,9 @@ class GroupCommunicationAgentGroup(AgentGroup):
                 torch.cat((mean, torch.zeros_like(logvar)), -1)
             ).unsqueeze(-2)
         else:
-            memory, valid = self.fusion(tokens, group_indices, alive_mask)
+            memory, valid = self.fusion(
+                tokens, group_indices, alive_mask, singleton_groups=self.message_mode == "local"
+            )
             if baseline is not None:
                 memory, baseline_context = baseline.context(memory)
         context = memory.mean(-2)

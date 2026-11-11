@@ -533,3 +533,34 @@ def test_experimental_mappo_message_kl_stops_extra_passes(monkeypatch, tmp_path)
     assert metrics["message_policy_kl"] > trainer.experimental_message_target_kl
     assert metrics["message_ppo_passes"] == 1
     assert trainer.eval_agent_group.distillation_updates.item() == 1
+
+
+def test_local_actor_batched_singletons_match_sequential(monkeypatch):
+    torch.manual_seed(12)
+    actor = GroupCommunicationMAPPOAgentGroup(
+        dict.fromkeys(["a", "b", "c"], "shared"), 6, 5,
+        {"type": "Fixed", "group_ids": [0, 0, 0]},
+        hidden_dim=8, heads=2, slots=3, message_dim=4, message_mode="local",
+    )
+    obs = torch.randn(3, 3, 2, 6, requires_grad=True)
+    pad = torch.zeros(3, 3, 2, dtype=torch.bool)
+    alive = torch.tensor([[True, True, True], [True, False, True], [False, False, False]])
+    groups = torch.zeros_like(alive, dtype=torch.long)
+    fast = actor(obs, pad, alive, groups)
+    weights = torch.randn_like(fast[actor.output_key])
+    params = [obs, *(p for p in actor.parameters() if p.requires_grad)]
+    fast_grad = torch.autograd.grad((fast[actor.output_key] * weights).sum(), params, allow_unused=True)
+
+    fusion_forward = actor.fusion.forward
+
+    def sequential(tokens, groups, alive, *, singleton_groups):
+        assert singleton_groups
+        return fusion_forward(tokens, groups, alive)
+
+    monkeypatch.setattr(actor.fusion, "forward", sequential)
+    ref = actor(obs, pad, alive, groups)
+    ref_grad = torch.autograd.grad((ref[actor.output_key] * weights).sum(), params, allow_unused=True)
+    for key in (actor.output_key, "group_tokens", "group_valid", "message_codes"):
+        torch.testing.assert_close(fast[key], ref[key])
+    for actual, expected in zip(fast_grad, ref_grad, strict=True):
+        torch.testing.assert_close(actual, expected, atol=1e-6, rtol=1e-5)
