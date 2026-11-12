@@ -598,6 +598,7 @@ class MAPPOTrainer(OnPolicyTrainer):
         target_first_metric,
         batch_size=64,
         learning_times_per_iteration=1,
+        checkpoint_interval=None,
     ):
         """Run the on-policy MAPPO training loop.
 
@@ -621,12 +622,15 @@ class MAPPOTrainer(OnPolicyTrainer):
             Mini-batch size for PPO updates.
         learning_times_per_iteration : int
             Number of PPO epochs per iteration.
+        checkpoint_interval : int or None
+            Save model weights every N iterations with learning; None disables snapshots.
 
         Returns
         -------
         dict
             Best metrics achieved during training.
         """
+        self._validate_checkpoint_interval(checkpoint_interval)
         self.eval_episodes_to_replay_ratio = 1.0
 
         # Initial data collection
@@ -661,6 +665,7 @@ class MAPPOTrainer(OnPolicyTrainer):
                 logging.info(
                     f"Iteration {iteration}: Loss {train_result['loss']:.4f}"
                 )
+                self._save_periodic_checkpoint(iteration + 1, checkpoint_interval)
 
             # Clear buffer (on-policy: discard old data)
             self.replaybuffer = self.replaybuffer_config.create_replaybuffer()

@@ -119,6 +119,20 @@ class OnPolicyTrainer(Trainer):
                     ) / max(std, 1e-8)
         return dataset
 
+    @staticmethod
+    def _validate_checkpoint_interval(interval):
+        if interval is not None and (type(interval) is not int or interval <= 0):
+            raise ValueError("checkpoint_interval must be a positive integer or None")
+
+    def _save_periodic_checkpoint(self, iteration, interval):
+        """Save at a completed, one-based iteration boundary."""
+        if interval is None or iteration % interval:
+            return
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        name = f"checkpoint_{timestamp}_{iteration}"
+        self.save_current_model(name)
+        logging.info(f"Checkpoint saved at {name}")
+
     def save_current_model(self, checkpoint: str):
         """On-policy: save eval models only (no target networks)."""
         agent_path = os.path.join(self.checkpointdir, checkpoint, "agent")

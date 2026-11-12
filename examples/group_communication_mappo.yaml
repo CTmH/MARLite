@@ -103,6 +103,7 @@ trainer:
     ramp_start_step: 0
     ramp_steps: 10
   train_args:
+    # checkpoint_interval: 5  # Save weights every five training iterations.
     iterations: 1
     target_first_metric: 1000
     batch_size: 8
