@@ -109,3 +109,23 @@ def test_progressive_sender_replacement(stage, count):
     assert selected.sum().item() == count
     assert not (selected & ~alive).any()
     assert torch.equal(sender_replacement_mask(groups, alive, "all", stage, 0), alive)
+
+
+def test_attention_history_masks_padding_and_backpropagates(config):
+    config["agent_group"]["history_encoder"] = {
+        "model_type": "SimpleResAttSeqEnc", "input_dim": 64, "output_dim": 64,
+        "embed_dim": 64, "num_heads": 4, "max_seq_len": 4, "dropout": 0.0,
+    }
+    actor = AgentGroupConfig(**config["agent_group"]).get_agent_group()
+    observations = torch.randn(1, 8, 4, 9, 9, 29)
+    padding = torch.zeros(1, 8, 4, dtype=torch.bool)
+    padding[:, :, :2] = True
+    padding[:, -1] = True
+    encoded, decoded, _ = actor.encode_local(observations, padding)
+    modified = observations.clone()
+    modified[padding] = 123
+    torch.testing.assert_close(actor.encode_local(modified, padding)[0], encoded)
+    assert torch.equal(encoded[:, -1], torch.zeros_like(encoded[:, -1]))
+    decoded.square().mean().backward()
+    assert any(p.grad is not None and p.grad.abs().sum() > 0 for p in actor.history.parameters())
+    assert all(p.grad is None or torch.isfinite(p.grad).all() for p in actor.history.parameters())

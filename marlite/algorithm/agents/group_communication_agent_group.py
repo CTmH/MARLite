@@ -37,6 +37,7 @@ class DistilledGroupCommunicationMAPPOAgentGroup(AgentGroup):
         codec_encoder=None,
         codec_decoder=None,
         history_bias=True,
+        history_encoder=None,
         inducing_points=16,
         reader_heads=None,
         local_head=None,
@@ -72,7 +73,11 @@ class DistilledGroupCommunicationMAPPOAgentGroup(AgentGroup):
             if feature_extractor is None
             else ModelConfig(**feature_extractor).get_model()
         )
-        self.history = nn.GRUCell(hidden_dim, hidden_dim, bias=history_bias)
+        self.hidden_dim = hidden_dim
+        self.history = (
+            nn.GRUCell(hidden_dim, hidden_dim, bias=history_bias)
+            if history_encoder is None else ModelConfig(**history_encoder).get_model()
+        )
         self.codec = ScalarMessageCodec(
             hidden_dim, message_dim, bits,
             encoder=None if codec_encoder is None else ModelConfig(**codec_encoder).get_model(),
@@ -93,7 +98,7 @@ class DistilledGroupCommunicationMAPPOAgentGroup(AgentGroup):
             nn.Linear(hidden_dim, action_dim)
             if action_head is None else ModelConfig(**action_head).get_model()
         )
-        for network in (self.features, self.codec, self.local_head, self.action_head):
+        for network in (self.features, self.history, self.codec, self.local_head, self.action_head):
             for module in network.modules():
                 if isinstance(module, (nn.modules.batchnorm._BatchNorm, nn.RReLU)):
                     raise ValueError("Communication models require deterministic per-sample layers")
@@ -146,14 +151,25 @@ class DistilledGroupCommunicationMAPPOAgentGroup(AgentGroup):
             observations[..., list(self.mask_observation_channels)] = 0
         frames = observations.reshape(b * n * t, *observations.shape[3:])
         x = self.features(frames.flatten(1) if self.flatten_observation else frames)
-        if x.shape != (b * n * t, self.history.input_size):
+        if x.shape != (b * n * t, self.hidden_dim):
             raise ValueError("Feature extractor must output one hidden_dim vector per frame")
-        x = x.reshape(b * n, t, self.history.input_size)
-        h = x.new_zeros(b * n, self.history.hidden_size)
-        for step in range(t):
-            candidate = self.history(x[:, step], h)
-            h = torch.where(~traj_padding_mask[:, :, step].reshape(-1, 1), candidate, h)
-        h = h.reshape(b, n, -1)
+        x = x.reshape(b * n, t, self.hidden_dim)
+        padding = traj_padding_mask.reshape(b * n, t)
+        if isinstance(self.history, nn.GRUCell):
+            h = x.new_zeros(b * n, self.hidden_dim)
+            for step in range(t):
+                candidate = self.history(x[:, step], h)
+                h = torch.where(padding[:, step, None], h, candidate)
+        else:
+            # Keep one valid key for empty histories so attention softmax stays finite.
+            empty = padding.all(dim=1)
+            safe_padding = padding.clone()
+            safe_padding[:, 0] = safe_padding[:, 0] & ~empty
+            h = self.history(x.masked_fill(padding.unsqueeze(-1), 0), padding_mask=safe_padding)
+            if h.shape != (b * n, self.hidden_dim):
+                raise ValueError("History encoder must output one hidden_dim vector per sender")
+            h = h.masked_fill(empty.unsqueeze(-1), 0)
+        h = h.reshape(b, n, self.hidden_dim)
         if self.message_mode == "quantized":
             decoded, codes = self.codec(h)
             if decoded.shape != h.shape:

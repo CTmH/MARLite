@@ -35,6 +35,11 @@ for the MAgent2 dependency.
   and the local and action heads. The custom network fields accept existing
   ModelConfig specs. Actor submodules must be deterministic per sample for
   PPO replay. Group construction stays in `group_builder`.
+- To replace the history GRU, set `agent_group.history_encoder` to a ModelConfig
+  that accepts frame embeddings and a boolean padding mask. For the example's
+  four-frame windows use
+  `{model_type: SimpleResAttSeqEnc, input_dim: 64, output_dim: 64, embed_dim: 64, num_heads: 4, max_seq_len: 4, dropout: 0.0}`.
+  Use the same architecture when training or loading the teacher.
 - `trainer.teacher.source: train` uses the teacher's optional `trainer`,
   `critic`, `optimizer` and `lr_scheduler` overrides. Use
   `initial_actor_checkpoint` to initialize that training. Its final native
