@@ -1,4 +1,3 @@
-from marlite.algorithm.model.group_communication import ScalarMessageCodec, GroupSetFusion, RelationalNeuralProcess
 import torch
 import torch.nn as nn
 from absl import logging
@@ -27,16 +26,13 @@ from marlite.algorithm.model.resnet import (
 from marlite.algorithm.model.resnet import ResAttObsEnc, SimpleResAttObsEnc
 from marlite.algorithm.model.qmix_critic_model import QMixModel
 from marlite.algorithm.model.graphmix_critic_model import GraphMixModel
-from marlite.algorithm.model.hypernet import HyperNetwork, GeneralHyperNetwork, QMixHyperNetwork
+from marlite.algorithm.model.hypernet import HyperNetwork
 from marlite.algorithm.model.decoder import NearestDecoder
 from marlite.algorithm.model.qplex_transformation import QplexTransformation
 from marlite.algorithm.model.qplex_joint_attention import QplexJointAttention
 
 
 registered_models = {
-    "ScalarMessageCodec": ScalarMessageCodec,
-    "GroupSetFusion": GroupSetFusion,
-    "RelationalNeuralProcess": RelationalNeuralProcess,
     "RNN": GRUModel,  # For compatibility
     "GRU": GRUModel,
     "GCN": GCNModel,
@@ -61,8 +57,6 @@ registered_models = {
     "QMixModel": QMixModel,
     "GraphMixModel": GraphMixModel,
     "HyperNetwork": HyperNetwork,
-    "GeneralHyperNetwork": GeneralHyperNetwork,
-    "QMixHyperNetwork": QMixHyperNetwork,
     "NearestDecoder": NearestDecoder,
     "QplexTransformation": QplexTransformation,
     "QplexJointAttention": QplexJointAttention,

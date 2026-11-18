@@ -4,9 +4,7 @@ from marlite.algorithm.agents.graph_agent_group import GraphAgentGroup
 from marlite.algorithm.agents.mappo_agent_group import MAPPOAgentGroup
 from marlite.algorithm.agents.qtran_agent_group import QTRANAgentGroup
 from marlite.algorithm.agents.group_communication_agent_group import (
-    GroupCommunicationAgentGroup,
-    GroupCommunicationMAPPOAgentGroup,
-    GroupCommunicationQMIXAgentGroup,
+    DistilledGroupCommunicationMAPPOAgentGroup,
 )
 
 __all__ = [
@@ -15,7 +13,5 @@ __all__ = [
     "GraphAgentGroup",
     "MAPPOAgentGroup",
     "QTRANAgentGroup",
-    "GroupCommunicationAgentGroup",
-    "GroupCommunicationMAPPOAgentGroup",
-    "GroupCommunicationQMIXAgentGroup",
+    "DistilledGroupCommunicationMAPPOAgentGroup",
 ]

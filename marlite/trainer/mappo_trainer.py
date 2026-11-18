@@ -1,7 +1,5 @@
 from marlite.util.communication_training import (
     agent_training_forward,
-    advance_communication_step,
-    message_gradient_cosine,
 )
 """MAPPO Trainer — Multi-Agent PPO with on-policy training loop.
 
@@ -61,7 +59,7 @@ class MAPPOTrainer(OnPolicyTrainer):
         Coefficient for the value function loss in the combined loss.
     max_grad_norm : float
         Maximum gradient norm for clipping.
-    experimental_message_target_kl : float or None
+    message_target_kl : float or None
         Optional post-pass policy KL threshold for single-device group MAPPO.
         Quantized actors also report hard-code changes. None preserves the standard loop.
     **kwargs :
@@ -75,7 +73,7 @@ class MAPPOTrainer(OnPolicyTrainer):
         entropy_coef: float = 0.01,
         vf_coef: float = 0.5,
         max_grad_norm: float = 5.0,
-        experimental_message_target_kl: float | None = None,
+        message_target_kl: float | None = None,
         **kwargs,
     ):
         # Must be set before super().__init__() because _create_worker_group()
@@ -86,23 +84,22 @@ class MAPPOTrainer(OnPolicyTrainer):
         self.entropy_coef = entropy_coef
         self.vf_coef = vf_coef
         self.max_grad_norm = max_grad_norm
-        self.actor_auxiliary_objective = None
-        if experimental_message_target_kl is not None and (
-            not math.isfinite(experimental_message_target_kl)
-            or experimental_message_target_kl <= 0
+        if message_target_kl is not None and (
+            not math.isfinite(message_target_kl)
+            or message_target_kl <= 0
         ):
-            raise ValueError("experimental_message_target_kl must be finite and positive")
-        self.experimental_message_target_kl = experimental_message_target_kl
+            raise ValueError("message_target_kl must be finite and positive")
+        self.message_target_kl = message_target_kl
         super().__init__(**kwargs)
         if (
-            self.experimental_message_target_kl is not None
-            and getattr(self.eval_agent_group, "message_mode", None) not in ("quantized", "raw", "local")
+            self.message_target_kl is not None
+            and getattr(self.eval_agent_group, "message_mode", None) not in ("quantized", "raw")
         ):
-            raise ValueError("Experimental message KL requires a group communication actor")
-        if self.experimental_message_target_kl is not None:
+            raise ValueError("Message KL requires a group communication actor")
+        if self.message_target_kl is not None:
             self._message_rollout_device = self.rolloutmanager_config.config["device"]
             if not isinstance(self._message_rollout_device, str):
-                raise ValueError("Experimental message KL requires a single rollout device")
+                raise ValueError("Message KL requires a single rollout device")
         if isinstance(self.eval_critic, MixerCritic):
             raise TypeError(
                 "Critic subclass required, not Mixer subclass"
@@ -143,8 +140,8 @@ class MAPPOTrainer(OnPolicyTrainer):
         if not self.use_multi_gpu:
             return None
 
-        if self.experimental_message_target_kl is not None:
-            raise ValueError("Experimental message KL requires single-device MAPPO")
+        if self.message_target_kl is not None:
+            raise ValueError("Message KL requires single-device MAPPO")
         return MAPPOWorkerGroup(
             device_ids=self._get_device_ids(),
             agent_group_config=self.agent_group_config,
@@ -334,6 +331,15 @@ class MAPPOTrainer(OnPolicyTrainer):
         # training-device forwards before and after updates, not two backends.
         return dist, codes, metrics
 
+    def _minibatch_actor_objectives(self, actor_result, batch, observations, padding, alive, available):
+        return {}
+
+    def _actor_optimizers(self):
+        return (self.agent_optimizer,)
+
+    def _on_actor_update(self):
+        pass
+
     def _learn_single_gpu(
         self, sample_size, batch_size: int, times: int = 4
     ) -> dict[str, float]:
@@ -351,6 +357,8 @@ class MAPPOTrainer(OnPolicyTrainer):
         total_actor_loss = 0.0
         total_critic_loss = 0.0
         total_batches = 0
+        objective_totals = {}
+        actor_optimizers = self._actor_optimizers()
 
         self.eval_agent_group.to(self.train_device)
         self.eval_critic.to(self.train_device)
@@ -359,7 +367,7 @@ class MAPPOTrainer(OnPolicyTrainer):
         audit_batch = None
         message_metrics = {}
         clip_count, clip_total = 0, 0
-        if self.experimental_message_target_kl is not None and len(dataset):
+        if self.message_target_kl is not None and len(dataset):
             audit_loader = TrajectoryDataLoader(
                 dataset, batch_size=batch_size, shuffle=False, num_workers=0
             )
@@ -433,9 +441,10 @@ class MAPPOTrainer(OnPolicyTrainer):
 
                     # ---- PPO actor loss ----
                     avail_actions = batch["avail_actions"]
+                    available_last = avail_actions[:, -1] if isinstance(avail_actions, torch.Tensor) else None
                     dist = masked_categorical(
                         action_logits,
-                        avail_actions[:, -1] if isinstance(avail_actions, torch.Tensor) else None,
+                        available_last,
                         active_mask=alive_mask[:, -1],
                         actions=actions_last,
                     )
@@ -471,29 +480,31 @@ class MAPPOTrainer(OnPolicyTrainer):
                         clipped = (ratio.detach() - 1).abs() > self.clip_epsilon
                         clip_count += int((clipped & alive_mask[:, -1]).sum())
                         clip_total += int(alive_last_count)
-                        if total_batches == 0:
-                            cosine = message_gradient_cosine(
-                                actor_loss, ret_agent.get("relation_auxiliary_loss"),
-                                self.eval_agent_group.codec,
-                            )
-                            if cosine is not None:
-                                message_metrics["message_rl_relation_cosine"] = cosine
-                    actor_loss = actor_loss + ret_agent.get("auxiliary_loss", 0.0)
-
-                    if self.actor_auxiliary_objective is not None:
-                        extra_loss = self.actor_auxiliary_objective(self.eval_agent_group)
-                        if extra_loss.ndim != 0 or not torch.isfinite(extra_loss):
-                            raise ValueError("Actor auxiliary objective must return a finite scalar")
-                        actor_loss = actor_loss + extra_loss
+                    objectives = self._minibatch_actor_objectives(
+                        ret_agent, batch, observations_transposed,
+                        timestep_padding_mask_expanded, alive_mask[:, -1], available_last,
+                    )
+                    for name, loss in objectives.items():
+                        if loss.ndim != 0 or not torch.isfinite(loss):
+                            raise ValueError(f"Actor objective {name} must be a finite scalar")
+                        actor_loss = actor_loss + loss
+                        objective_totals[name] = objective_totals.get(name, 0.0) + float(loss.detach())
 
                     # ---- Critic value loss (single timestep) ----
                     critic_loss = F.mse_loss(v_last, returns.detach())
 
                     # ---- Backward pass: actor ----
-                    self.agent_optimizer.zero_grad()
+                    for optimizer in actor_optimizers:
+                        optimizer.zero_grad()
                     actor_loss.backward()
+                    actor_parameters = (
+                        parameter
+                        for optimizer in actor_optimizers
+                        for group in optimizer.param_groups
+                        for parameter in group["params"]
+                    )
                     torch.nn.utils.clip_grad_norm_(
-                        self.eval_agent_group.parameters(), max_norm=self.max_grad_norm
+                        actor_parameters, max_norm=self.max_grad_norm
                     )
 
                     # ---- Backward pass: critic ----
@@ -503,8 +514,9 @@ class MAPPOTrainer(OnPolicyTrainer):
                         self.eval_critic.parameters(), max_norm=self.max_grad_norm
                     )
 
-                    self.agent_optimizer.step()
-                    advance_communication_step(self.eval_agent_group)
+                    for optimizer in actor_optimizers:
+                        optimizer.step()
+                    self._on_actor_update()
                     # A disabled value objective must not update via optimizer
                     # momentum or weight decay either.
                     if self.vf_coef != 0:
@@ -522,7 +534,7 @@ class MAPPOTrainer(OnPolicyTrainer):
                 kl = float(torch.distributions.kl_divergence(old_dist, dist)[alive].mean())
                 if not math.isfinite(kl):
                     raise RuntimeError("Non-finite PPO hard-message policy KL")
-                exceeded = kl > self.experimental_message_target_kl
+                exceeded = kl > self.message_target_kl
                 message_metrics.update({
                     "message_policy_kl": kl,
                     "message_clip_fraction": clip_count / max(clip_total, 1),
@@ -536,7 +548,7 @@ class MAPPOTrainer(OnPolicyTrainer):
                     break
 
         if message_metrics:
-            logging.info("Experimental hard-message audit: %s", message_metrics)
+            logging.info("Hard-message audit: %s", message_metrics)
             audit = getattr(self, "rolloutmanager_config", None)
             if hasattr(audit, "record_diagnostics"):
                 audit.record_diagnostics(self.current_epoch, message_metrics)
@@ -551,6 +563,7 @@ class MAPPOTrainer(OnPolicyTrainer):
             "actor_loss": avg_actor,
             "critic_loss": avg_critic,
             **message_metrics,
+            **{name: total / max(total_batches, 1) for name, total in objective_totals.items()},
         }
 
     def _learn_multi_gpu(
@@ -670,12 +683,6 @@ class MAPPOTrainer(OnPolicyTrainer):
             # Clear buffer (on-policy: discard old data)
             self.replaybuffer = self.replaybuffer_config.create_replaybuffer()
 
-            # A bounded experiment learns from the last collected batch, then stops.
-            if getattr(self.rolloutmanager_config, "step_budget", None) is not None and (
-                self.rolloutmanager_config.collection_exhausted or iteration + 1 == iterations
-            ):
-                break
-
             # Collect fresh episodes with updated policy
             result = self.evaluate()
             metrics = {key: result[key]["mean"] for key in self.eval_metric_list}
@@ -714,8 +721,5 @@ class MAPPOTrainer(OnPolicyTrainer):
         logging.info(
             f"Best strategy: {yaml.dump(self.best_metrics, default_flow_style=False, sort_keys=False)}"
         )
-        if getattr(self.rolloutmanager_config, "step_budget", None) is None or any(
-            np.isfinite(metric) for metric in self.best_metrics.values()
-        ):
-            self.save_best_model()
+        self.save_best_model()
         return self.best_metrics

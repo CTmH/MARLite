@@ -35,23 +35,20 @@ develop = [
     "pytest-xdist>=3.8.0",
 ]
 
-# Select exactly one accelerator extra; pin versions here because uv.lock is ignored.
-# Apple Silicon: uv sync --locked --extra mps --extra develop
-# iu1iu5-local (AMD RX 7900 XT/XTX): uv sync --locked --extra rocm --extra develop
 cuda = [
-    "torch==2.14.1",
+    "torch>=2.8.0",
 ]
 
 rocm = [
-    "torch==2.15.0",
+    "torch>=2.8.0",
 ]
 
 mps = [
-    "torch==2.15.0",
+    "torch>=2.8.0",
 ]
 
 cpu = [
-    "torch==2.15.0",
+    "torch>=2.8.0",
 ]
 
 analysis = [
@@ -88,7 +85,7 @@ torch = [
     { index = "pypi", extra = "mps" },
     { index = "pytorch-cpu", extra = "cpu" },
 ]
-mpe2 = { git = "https://github.com/Farama-Foundation/MPE2.git", rev = "147a8e88b669de9f0b06d1947c44d5c380c570bb" }
+mpe2 = {git = "https://github.com/Farama-Foundation/MPE2.git"}
 
 [[tool.uv.index]]
 name = "pypi"

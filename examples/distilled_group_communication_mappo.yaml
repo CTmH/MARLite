@@ -1,7 +1,6 @@
-# Experimental C04 configuration; behavior and results are provisional.
-# CP03 pilot: local/raw paired runs; device selected by HIP_VISIBLE_DEVICES.
+# C04 on complementary pursuit. See docs/group_communication.md for ablations.
 agent_group:
-  type: GroupCommunicationMAPPO
+  type: DistilledGroupCommunicationMAPPO
   agent_list:
     pursuer_0: shared
     pursuer_1: shared
@@ -11,28 +10,11 @@ agent_group:
     pursuer_5: shared
     pursuer_6: shared
     pursuer_7: shared
-    pursuer_8: shared
-    pursuer_9: shared
-    pursuer_10: shared
-    pursuer_11: shared
-    pursuer_12: shared
-    pursuer_13: shared
-    pursuer_14: shared
-    pursuer_15: shared
-    pursuer_16: shared
-    pursuer_17: shared
-    pursuer_18: shared
-    pursuer_19: shared
-    pursuer_20: shared
-    pursuer_21: shared
-    pursuer_22: shared
-    pursuer_23: shared
-    pursuer_24: shared
   optimizer:
     type: Adam
     lr: 0.0003
     weight_decay: 0.0
-  message_map_size: 45
+  message_map_size: 25
   encoder_lr_scale: 0.25
   observation_dim: 2349
   action_dim: 29
@@ -41,11 +23,7 @@ agent_group:
   slots: 8
   message_dim: 32
   bits: 4
-  use_np: false
-  query_dim: 14
-  latent_dim: 8
-  hyper_rank: 0
-  message_mode: raw
+  message_mode: quantized
   group_builder:
     type: PartialMAgent
     binary_agent_id_dim:
@@ -63,36 +41,18 @@ agent_group:
     - 3
     comm_distance: 8
     valid_node_list:
-    - 100
-    - 101
-    - 102
-    - 103
-    - 104
-    - 105
-    - 106
-    - 107
-    - 108
-    - 109
-    - 110
-    - 111
-    - 112
-    - 113
-    - 114
-    - 115
-    - 116
-    - 117
-    - 118
-    - 119
-    - 120
-    - 121
-    - 122
-    - 123
-    - 124
+    - 25
+    - 26
+    - 27
+    - 28
+    - 29
+    - 30
+    - 31
+    - 32
     target_node_list: []
-    n_groups: 25
+    n_groups: 8
     n_workers: 1
     update_interval: 4
-  relation_targets: null
   feature_extractor:
     model_type: Custom
     layers:
@@ -117,13 +77,43 @@ agent_group:
     - type: Linear
       in_features: 144
       out_features: 64
+  inducing_points: 16
+  codec_encoder:
+    model_type: Custom
+    layers:
+    - type: Linear
+      in_features: 64
+      out_features: 32
+  codec_decoder:
+    model_type: Custom
+    layers:
+    - type: Linear
+      in_features: 32
+      out_features: 64
+    - type: GELU
+    - type: Linear
+      in_features: 64
+      out_features: 64
+  local_head:
+    model_type: Custom
+    layers:
+    - type: Linear
+      in_features: 128
+      out_features: 64
+    - type: GELU
+  action_head:
+    model_type: Custom
+    layers:
+    - type: Linear
+      in_features: 64
+      out_features: 29
 environment:
   module_name: marlite.environment
   env_name: complementary_pursuit
   env_params:
-    map_size: 45
-    n_pursuers: 25
-    n_evaders: 100
+    map_size: 25
+    n_pursuers: 8
+    n_evaders: 25
     minimap_mode: true
     extra_features: true
     max_cycles: 200
@@ -182,10 +172,11 @@ replay_buffer:
 analyzer:
   type: complementary
 trainer:
-  eval_metric_list: [capture_fraction]
-  type: MAPPO
+  eval_metric_list:
+  - capture_fraction
+  type: DistilledGroupCommunicationMAPPO
   gamma: 0.99
-  workdir: ./results/complementary_mappo_25v100
+  workdir: ./results/distilled_group_communication_mappo
   train_device: cuda:0
   clip_epsilon: 0.2
   gae_lambda: 0.95
@@ -196,10 +187,60 @@ trainer:
     type: fixed
     value: 1.0
   train_args:
-    iterations: 300
+    iterations: 50
     target_first_metric: 1.1
     batch_size: 32
     learning_times_per_iteration: 4
+    checkpoint_interval: 5
   seed: 42
   n_workers: 0
   sample_mode: ratio
+  teacher:
+    source: train
+    trainer:
+      train_args:
+        iterations: 50
+        target_first_metric: 1.1
+        batch_size: 32
+        learning_times_per_iteration: 4
+  offline:
+    enabled: true
+    train_episodes: 32
+    validation_episodes: 16
+    batch_size: 32
+    codec_updates: 600
+    policy_updates: 200
+    replacement: all
+    codec_optimizer:
+      type: Adam
+      lr: 0.001
+    policy_optimizer:
+      type: Adam
+      lr: 0.001
+  online_distillation:
+    enabled: true
+    weight: 0.1
+    decay_updates: 1000
+auxiliary_head:
+  enabled: true
+  model:
+    model_type: Custom
+    layers:
+    - type: Linear
+      in_features: 78
+      out_features: 64
+    - type: GELU
+    - type: Linear
+      in_features: 64
+      out_features: 1
+  label_provider:
+    type: ComplementaryAttackQueries
+    n_queries: 64
+    proposal: group_geometry
+  probe_updates: 600
+  codec_weight: 1.0
+  policy_weight: 1.0
+  online_weight: 0.1
+  optimizer:
+    type: Adam
+    lr: 0.0003

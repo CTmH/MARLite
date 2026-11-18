@@ -92,10 +92,15 @@ class TrajectoryDataset(Dataset):
         self.padding_attr = PADDING_ATTR
 
         attrs = resolve_required_attrs(required_attrs)
-        # Old saved episodes predate communication metadata.
-        if required_attrs is None:
-            attrs = [a for a in attrs if a not in ("message_codes", "snapshot_steps", "communication_bytes")
-                     or all(a in ep for ep in episode_buffer.values() if ep is not None)]
+        # ReplayBufferConfig may pass the already-resolved full profile.
+        # Older episodes loaded with that profile predate communication metadata.
+        if set(attrs) == set(resolve_required_attrs()):
+            communication_attrs = {"message_codes", "snapshot_steps", "communication_bytes"}
+            attrs = [
+                attr for attr in attrs
+                if attr not in communication_attrs
+                or all(attr in episode for episode in episode_buffer.values() if episode is not None)
+            ]
         self.array_attr = get_as_is_attrs(attrs)
         self.dict_attr = get_dict_attrs(attrs)
 

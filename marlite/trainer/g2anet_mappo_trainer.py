@@ -343,9 +343,7 @@ class GraphMAPPOTrainer(OnPolicyTrainer):
         target_first_metric,
         batch_size=64,
         learning_times_per_iteration=1,
-        checkpoint_interval=None,
     ):
-        self._validate_checkpoint_interval(checkpoint_interval)
         self.eval_episodes_to_replay_ratio = 1.0
         self.evaluate()
 
@@ -378,7 +376,6 @@ class GraphMAPPOTrainer(OnPolicyTrainer):
                 logging.info(
                     f"Iteration {iteration}: Loss {train_result['loss']:.4f}"
                 )
-                self._save_periodic_checkpoint(iteration + 1, checkpoint_interval)
 
             self.replaybuffer = self.replaybuffer_config.create_replaybuffer()
             result = self.evaluate()

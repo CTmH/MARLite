@@ -1,4 +1,4 @@
-"""Experimental training-only spatial queries for complementary pursuit."""
+"""Training-only spatial queries for complementary pursuit."""
 
 import math
 import torch

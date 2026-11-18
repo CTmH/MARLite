@@ -117,3 +117,53 @@ class SemiSupervisedMAPPOConfigProcessor(
             }
         )
         return trainer_kwargs, train_args, checkpoint
+
+
+class DistilledGroupCommunicationMAPPOConfigProcessor(MAPPOConfigProcessor):
+    """Resolve the raw teacher from the same policy schema as the student."""
+
+    def process(self, config):
+        config = deepcopy(config)
+        trainer = config["trainer"]
+        teacher = trainer.pop("teacher")
+        auxiliary_head = config.pop("auxiliary_head", None)
+        trainer_kwargs, train_args, checkpoint = super().process(config)
+
+        source = teacher.get("source")
+        allowed = {
+            "checkpoint": {"source", "actor_checkpoint"},
+            "train": {"source", "initial_actor_checkpoint", "trainer", "critic",
+                      "optimizer", "lr_scheduler"},
+        }
+        if source not in allowed or teacher.keys() - allowed[source]:
+            raise ValueError("trainer.teacher must configure either checkpoint or train source")
+        if source == "checkpoint" and not teacher.get("actor_checkpoint"):
+            raise ValueError("A teacher checkpoint source requires actor_checkpoint")
+
+        raw_config = deepcopy(config)
+        raw_config["agent_group"]["message_mode"] = "raw"
+        raw_actor, _, _ = self.parse_agent_group_config(raw_config)
+        teacher_training = None
+        if source == "train":
+            raw_trainer = raw_config["trainer"]
+            for key in ("offline", "online_distillation", "checkpoint"):
+                raw_trainer.pop(key, None)
+            raw_trainer.update(teacher.get("trainer", {}))
+            raw_trainer.update(type="MAPPO", workdir=f"{trainer['workdir']}/teacher")
+            if "checkpoint" in raw_trainer:
+                raise ValueError("Use teacher.initial_actor_checkpoint to initialize a teacher")
+            if "critic" in teacher:
+                raw_config["critic"] = teacher["critic"]
+            for key in ("optimizer", "lr_scheduler"):
+                if key in teacher:
+                    raw_config["agent_group"][key] = teacher[key]
+            kwargs, args, _ = super().process(raw_config)
+            if type(args.get("iterations")) is not int or args["iterations"] < 1:
+                raise ValueError("A trained teacher needs at least one MAPPO iteration")
+            teacher_training = (kwargs, args)
+
+        trainer_kwargs.update(
+            teacher=teacher, teacher_agent_config=raw_actor,
+            teacher_training=teacher_training, auxiliary_head=auxiliary_head,
+        )
+        return trainer_kwargs, train_args, checkpoint

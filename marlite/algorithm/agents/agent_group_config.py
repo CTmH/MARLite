@@ -1,6 +1,5 @@
 from marlite.algorithm.agents.group_communication_agent_group import (
-    GroupCommunicationMAPPOAgentGroup,
-    GroupCommunicationQMIXAgentGroup,
+    DistilledGroupCommunicationMAPPOAgentGroup,
 )
 from copy import deepcopy
 from typing import Dict, Any, Type
@@ -385,21 +384,14 @@ def _create_group_consensus_agent_group(
 
 
 
-def create_group_communication_mappo(config):
-    return GroupCommunicationMAPPOAgentGroup(
-        agent_model_dict=config.pop("agent_list"), **config
-    )
-
-
-def create_group_communication_qmix(config):
-    return GroupCommunicationQMIXAgentGroup(
+def create_distilled_group_communication_mappo(config):
+    return DistilledGroupCommunicationMAPPOAgentGroup(
         agent_model_dict=config.pop("agent_list"), **config
     )
 
 
 registered_agent_groups = {
-    "GroupCommunicationMAPPO": create_group_communication_mappo,
-    "GroupCommunicationQMIX": create_group_communication_qmix,
+    "DistilledGroupCommunicationMAPPO": create_distilled_group_communication_mappo,
     "QMIX": create_qmix_agent_group,
     "QTRAN": create_qtran_agent_group,
     "MAPPO": create_mappo_agent_group,

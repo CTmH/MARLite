@@ -407,7 +407,7 @@ def resolve_phases(
     if required_attrs is None or required_attrs == "full":
         return FULL_PHASES
     if isinstance(required_attrs, str):
-        if required_attrs in ("group_communication_qmix", "group_communication_mappo", "complementary_mappo", "complementary_qmix"):
+        if required_attrs in ("group_communication_mappo", "complementary_mappo"):
             from marlite.rollout.attribute_spec import resolve_required_attrs
             return _build_custom_phases(resolve_required_attrs(required_attrs))
         if required_attrs in PHASE_REGISTRY:

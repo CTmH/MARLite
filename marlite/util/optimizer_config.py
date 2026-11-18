@@ -16,8 +16,9 @@ class OptimizerConfig:
         if self.optimizer_type in registered_optimizers:
             optim_class = registered_optimizers[self.optimizer_type]
             if isinstance(params_dict, nn.Module):
-                if hasattr(params_dict,"optimizer_parameter_groups"):
-                    params_dict = params_dict.optimizer_parameter_groups(self.optimizer_kwargs.get("lr",.001))
+                if hasattr(params_dict, "optimizer_parameter_groups"):
+                    base_lr = self.optimizer_kwargs.get("lr", 0.001)
+                    params_dict = params_dict.optimizer_parameter_groups(base_lr)
                 else:
                     params_dict = params_dict.parameters()
             return optim_class(params_dict, **self.optimizer_kwargs)

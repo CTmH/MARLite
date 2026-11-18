@@ -1,7 +1,11 @@
 from typing import Dict, Type
 from marlite.config_processor.config_processor import ConfigProcessor
 from marlite.config_processor.qmix_config_processor import QMIXConfigProcessor, SemiSupervisedQMIXConfigProcessor
-from marlite.config_processor.mappo_config_processor import MAPPOConfigProcessor, SemiSupervisedMAPPOConfigProcessor
+from marlite.config_processor.mappo_config_processor import (
+    DistilledGroupCommunicationMAPPOConfigProcessor,
+    MAPPOConfigProcessor,
+    SemiSupervisedMAPPOConfigProcessor,
+)
 from marlite.config_processor.qtran_config_processor import QTRANConfigProcessor
 from marlite.config_processor.qplex_config_processor import QPLEXConfigProcessor
 
@@ -16,6 +20,7 @@ REGISTERED_PROCESSORS: Dict[str, Type[ConfigProcessor]] = {
     'GroupConsensusQMIX': QMIXConfigProcessor,
     'SSLGroupConsensusQMIX': SemiSupervisedQMIXConfigProcessor,
     'MAPPO': MAPPOConfigProcessor,
+    'DistilledGroupCommunicationMAPPO': DistilledGroupCommunicationMAPPOConfigProcessor,
     'SSLGroupConsensusMAPPO': SemiSupervisedMAPPOConfigProcessor,
     'GraphMAPPO': MAPPOConfigProcessor,
     'G2ANetMAPPO': MAPPOConfigProcessor,  # backward-compatible alias

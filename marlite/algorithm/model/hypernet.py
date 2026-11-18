@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from typing import List
 
 
-class GeneralHyperNetwork(nn.Module):
+class HyperNetwork(nn.Module):
     def __init__(
         self,
         cond_dim: int,
@@ -43,9 +43,6 @@ class GeneralHyperNetwork(nn.Module):
             self.hyper_ws.append(hyper_w)
             self.hyper_bs.append(hyper_b)
 
-    def _transform_weight(self, weight: torch.Tensor) -> torch.Tensor:
-        return weight
-
     def forward(self, x: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
         bs = x.shape[0]
         h = x
@@ -54,7 +51,7 @@ class GeneralHyperNetwork(nn.Module):
             in_dim = self.layer_dims[i]
             out_dim = self.layer_dims[i + 1]
 
-            w = self._transform_weight(self.hyper_ws[i](z))
+            w = torch.abs(self.hyper_ws[i](z))
             b = self.hyper_bs[i](z)
 
             w = w.view(bs, in_dim, out_dim)
@@ -68,14 +65,3 @@ class GeneralHyperNetwork(nn.Module):
                 h = F.elu(h)
 
         return h
-
-
-class QMixHyperNetwork(GeneralHyperNetwork):
-    """Hypernetwork with nonnegative generated weights for monotonic mixing."""
-
-    def _transform_weight(self, weight: torch.Tensor) -> torch.Tensor:
-        return weight.abs()
-
-
-# Preserve historical imports, configs and state-dict parameter names.
-HyperNetwork = QMixHyperNetwork
