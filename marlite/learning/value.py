@@ -8,6 +8,7 @@ import torch
 from torch import nn
 
 from marlite.algorithm.sequence_agent_group import DecisionInput
+from marlite.algorithm.components import validate_replay_modules
 from marlite.data import SequenceSlice, collate_sequences
 from marlite.communication.context import frame_context
 from marlite.util.value_learning import masked_action_values, qtran_constraint_terms
@@ -161,6 +162,7 @@ class ValueLearner:
         if any(identities[i] & identities[j] for i in range(3) for j in range(i)):
             raise ValueError("Actor, mixer and objective must own disjoint parameters")
         for module in modules:
+            validate_replay_modules(module)
             module.to(self.backend.device)
             self.backend.synchronize(module)
         if auxiliary is not None:

@@ -30,11 +30,13 @@ class ParallelCollector:
         self.context_provider = context_provider
 
     @torch.no_grad()
-    def collect_episode(self, actor, critic=None, *, seed, policy_version=0, stochastic=True, epsilon=0.):
+    def collect_episode(self, actor, critic=None, *, seed, policy_version=0, stochastic=True, epsilon=0., record_values=True):
         if not 0 <= epsilon <= 1:
             raise ValueError("epsilon must be in [0,1]")
-        if actor.output_kind == "logits" and critic is None:
+        if actor.output_kind == "logits" and critic is None and record_values:
             raise ValueError("PPO collection requires a value model")
+        if not record_values and critic is not None:
+            raise ValueError("Value-free inference must not supply a critic")
         actor_device = next(actor.parameters()).device
         critic_device = next(critic.parameters()).device if critic is not None else None
         actor_mode, critic_mode = actor.training, critic.training if critic is not None else None
@@ -54,7 +56,7 @@ class ParallelCollector:
         observations, infos = env.reset(seed=seed)
         provider = deepcopy(self.context_provider)
         if provider is not None and hasattr(provider, "reset"):
-            provider.reset()
+            provider.reset(seed=seed)
         agents = tuple(env.possible_agents)
         if not agents or not observations:
             raise ValueError("Reset must expose at least one observation")
@@ -117,7 +119,7 @@ class ParallelCollector:
                                 ("agent_reset", reset), ("available_actions", available),
                                 ("states", state)):
                 append(frames, name, value)
-            if actor.output_kind == "logits":
+            if actor.output_kind == "logits" and critic is not None:
                 # Off-policy targets reconstruct their own states; no behavior cache is needed.
                 for name, value in _snapshot(actor_state).items():
                     append(frames, "actor_state." + name, value)
@@ -182,7 +184,18 @@ class ParallelCollector:
             actor_state = output.state
             critic_state = value.state if critic is not None else {}
             observations, last_state = next_obs, state
+        metrics = {}
+        if callable(getattr(env, "episode_metrics", None)):
+            metrics = {str(name): float(datum) for name, datum in env.episode_metrics().items()}
+        elif isinstance(infos, dict):
+            for name in ("battle_won", "success"):
+                values = [float(info[name]) for info in infos.values() if isinstance(info, dict) and name in info]
+                if values:
+                    metrics[name] = sum(values) / len(values)
+        if any(not np.isfinite(datum) for datum in metrics.values()):
+            raise ValueError("Environment episode metrics must be finite scalars")
         return Episode(agents, {k: torch.stack(v) for k, v in frames.items()},
                        {k: torch.stack(v) for k, v in transitions.items()},
                        policy_version=policy_version, seed=seed,
-                       metadata={"privileged_communication": bool(getattr(provider, "uses_global_state", False))}).validate()
+                       metadata={"privileged_communication": bool(getattr(provider, "uses_global_state", False)),
+                                 "metrics": metrics}).validate()

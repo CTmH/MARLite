@@ -142,6 +142,15 @@ class SequenceDistillationTrainer(SequenceMAPPOTrainer):
         self.offline_train, self.offline_validation = {}, {}
         self.offline_metrics = {}
 
+    def adopt_teacher(self, actor_state, critic_state):
+        """Transfer an independently trained teacher before any student fitting."""
+        if self.learner.updates or any(self.offline_counters.values()) or self.offline_train:
+            raise ValueError("Teacher transfer must precede all student stages")
+        self.reference.actor.load_state_dict(actor_state, strict=True)
+        self.teacher_critic.load_state_dict(critic_state, strict=True)
+        self.reference.clear()
+        self._initialize_student()
+
     def _initialize_student(self):
         teacher, student = self.reference.actor, self.learner.actor
         for name in ("frame_encoder", "temporal", "message_encoder", "message_temporal",

@@ -1,0 +1,200 @@
+# Sequence API v3. Small examples, not tuned paper settings.
+version: 3
+recipe: c04
+seed: 42
+environment:
+  module: marlite.environment.complementary_pursuit
+  params:
+    map_size: 15
+    n_pursuers: 4
+    n_evaders: 8
+    wall_density: 0.0
+    minimap_mode: true
+    extra_features: true
+    max_cycles: 20
+defaults:
+  hidden_dim: 32
+  mixing_dim: 16
+  heads: 4
+  learning_rate: 0.0005
+collector:
+  max_steps: 20
+learner:
+  burn_in: 8
+  state_strategy: cached_burnin
+trainer:
+  sequence_length: 16
+  batch_sequences: 16
+  ppo_epochs: 4
+run:
+  iterations: 1000
+  train_episodes: 8
+  eval_episodes: 16
+  eval_interval: 10
+  checkpoint_interval: 50
+teacher:
+  source: train
+  trainer:
+    sequence_length: 16
+    batch_sequences: 16
+    ppo_epochs: 4
+  run:
+    iterations: 1000
+    train_episodes: 8
+    eval_episodes: 16
+    eval_interval: 10
+    checkpoint_interval: 50
+  online_distillation:
+    enabled: false
+    weight: 0.1
+    decay_updates: 1000
+offline:
+  train_episodes: 32
+  validation_episodes: 16
+  codec_updates: 600
+  policy_updates: 200
+  offline_batch_sequences: 32
+  replacement: all
+  probe_updates: 200
+  codec_aux_weight: 1.0
+  policy_aux_weight: 1.0
+communication_context:
+  type: StateBuilderContext
+  params:
+    builder:
+      type: PartialGroupMAgentBuilder
+      params:
+        binary_agent_id_dim:
+        - 5
+        - 6
+        - 7
+        - 8
+        - 9
+        - 10
+        - 11
+        - 12
+        - 13
+        - 14
+        agent_presence_dim:
+        - 3
+        comm_distance: 6
+        valid_node_list:
+        - 8
+        - 9
+        - 10
+        - 11
+        target_node_list: []
+        n_groups: 4
+        n_workers: 1
+        update_interval: 1
+actor:
+  type: SequenceAgentGroup
+  params:
+    frame_encoder:
+      type: Sequential
+      params:
+        layers:
+        - type: Permute
+          params:
+            dims:
+            - 0
+            - 3
+            - 1
+            - 2
+        - type: Conv2d
+          params:
+            in_channels: 29
+            out_channels: 16
+            kernel_size: 3
+            padding: 1
+        - type: GELU
+        - type: AdaptiveAvgPool2d
+          params:
+            output_size:
+            - 3
+            - 3
+        - type: Flatten
+          params:
+            start_dim: 1
+        - type: Linear
+          params:
+            in_features: 144
+            out_features: 32
+    temporal:
+      type: RecurrentGRU
+      params:
+        input_dim: 32
+        hidden_dim: 32
+    action_head:
+      type: Linear
+      params:
+        in_features: 32
+        out_features:
+          $dim: action_dim
+    readout:
+      type: Sequential
+      params:
+        layers:
+        - type: Linear
+          params:
+            in_features: 64
+            out_features: 32
+        - type: GELU
+    communication:
+      type: QuantizedCommunication
+      params:
+        codec:
+          type: ScalarMessageCodec
+          params:
+            hidden_dim: 32
+            message_dim: 32
+            bits: 4
+        header_bytes: 9
+        aggregation:
+          type: GroupSetCommunication
+          params:
+            fusion:
+              type: GroupSetFusion
+              params:
+                hidden_dim: 32
+                heads: 4
+                slots: 8
+                inducing_points: 16
+            reader:
+              type: MultiheadAttention
+              params:
+                embed_dim: 32
+                num_heads: 4
+                batch_first: true
+                dropout: 0.0
+            header_bytes: 9
+auxiliary:
+  objective:
+    type: RelationQueryObjective
+    params:
+      head:
+        type: QueryPredictionHead
+        params:
+          model:
+            type: Sequential
+            params:
+              layers:
+              - type: Linear
+                params:
+                  in_features: 46
+                  out_features: 32
+              - type: GELU
+              - type: Linear
+                params:
+                  in_features: 32
+                  out_features: 1
+      targets:
+        type: FrameQueryTargets
+        params:
+          provider:
+            type: ComplementaryAttackQueries
+            params:
+              n_queries: 16
+              proposal: group_geometry
+          seed: 42
+      weight: 0.1

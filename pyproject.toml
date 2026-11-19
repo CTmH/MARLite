@@ -27,7 +27,7 @@ where = ["."]
 include = ["marlite*"]
 
 [project.scripts]
-marlite = "main:main"
+marlite = "marlite.cli:main"
 
 [project.optional-dependencies]
 develop = [

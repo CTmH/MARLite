@@ -13,6 +13,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
+from marlite.algorithm.components import validate_replay_modules
 from .sequence import validate_optimizer_ownership
 
 
@@ -253,6 +254,7 @@ class AuxiliaryLearning:
         owned = {id(p) for module in modules for p in module.parameters()}
         if owned.intersection(map(id, self.objective.parameters())):
             raise ValueError("Auxiliary heads must not own actor/critic parameters")
+        validate_replay_modules(self.objective, scope="Auxiliary objective")
         self.objective.to(backend.device)
         backend.synchronize(self.objective)
         if self.mixer is not None:

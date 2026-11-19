@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 import torch
 from torch import Tensor, nn
 
+from marlite.algorithm.components import validate_replay_modules
 from marlite.algorithm.temporal import RecurrentState, TemporalEncoder, TemporalOutput
 
 
@@ -41,7 +42,7 @@ class SequenceAgentGroup(nn.Module):
                  action_head: nn.Module, output_kind="logits", *, communication=None,
                  message_encoder=None, message_source="history", join="concat",
                  readout=None, detach_messages=False, detach_fusion=False,
-                 message_temporal=None, message_projection=None):
+                 message_temporal=None, message_projection=None, rl_gate=1.):
         super().__init__()
         if output_kind not in ("logits", "q_values"):
             raise ValueError("output_kind must be logits or q_values")
@@ -61,14 +62,8 @@ class SequenceAgentGroup(nn.Module):
         self.readout = nn.Identity() if readout is None else readout
         self.detach_messages, self.detach_fusion = detach_messages, detach_fusion
         self.register_buffer("rl_gate", torch.tensor(1.))
-        # Behavior replay must not depend on batch composition or fresh noise.
-        for module in self.modules():
-            if isinstance(module, nn.modules.batchnorm._BatchNorm):
-                raise ValueError("Sequence policies require batch-independent normalization")
-            if isinstance(module, nn.modules.dropout._DropoutNd) and module.p:
-                raise ValueError("Sequence policy dropout must be zero")
-            if isinstance(getattr(module, "dropout", None), (int, float)) and module.dropout:
-                raise ValueError("Sequence policy dropout must be zero")
+        self.set_rl_gate(rl_gate)
+        validate_replay_modules(self, scope="Sequence policy")
 
     def initial_state(self, batch_size, n_agents, device, dtype):
         state = self.temporal.initial_state(batch_size, n_agents, device, dtype)

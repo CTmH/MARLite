@@ -6,6 +6,7 @@ import math
 import torch
 
 from marlite.algorithm.sequence_agent_group import DecisionInput
+from marlite.algorithm.components import validate_replay_modules
 from marlite.data import collate_sequences, SequenceSlice
 from marlite.communication.context import frame_context
 from marlite.util.action_distribution import masked_categorical
@@ -74,6 +75,8 @@ class MAPPOLearner:
         self.max_grad_norm, self.burn_in = max_grad_norm, burn_in
         self.state_strategy = state_strategy
         self.actor_updates = self.critic_updates = self.updates = 0
+        validate_replay_modules(actor, scope="Sequence actor")
+        validate_replay_modules(critic, scope="Sequence critic")
         self.actor.to(self.backend.device)
         self.critic.to(self.backend.device)
         self.backend.synchronize(self.actor)

@@ -15,12 +15,12 @@ Data-flow summary (``n_upsample = 2``, ``window_size = 9``)::
     (B, 128)  ── view ──►  (B, 32,  2,  2)    ← initial coarse feature map
       │
       │  Upsample(×2, nearest)                 ← pixel replication, no blur
-      │  Conv2d(32→32, 3×3, p=1) + BN + GELU   ← spatial refinement
+      │  Conv2d(32→32, 3×3, p=1) + GN + GELU   ← spatial refinement
       ▼
     (B, 32,  4,  4)
       │
       │  Upsample(×2, nearest)
-      │  Conv2d(32→32, 3×3, p=1) + BN + GELU
+      │  Conv2d(32→32, 3×3, p=1) + GN + GELU
       ▼
     (B, 32,  8,  8)
       │
@@ -117,7 +117,7 @@ class NearestDecoder(nn.Module):
             up_blocks.append(
                 nn.Conv2d(hid_channels, hid_channels, kernel_size=3, padding=1)
             )
-            up_blocks.append(nn.BatchNorm2d(hid_channels))
+            up_blocks.append(nn.GroupNorm(1, hid_channels))
             up_blocks.append(nn.GELU())
         self.upsampler = nn.Sequential(*up_blocks)
 

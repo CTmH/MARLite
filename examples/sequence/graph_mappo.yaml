@@ -1,0 +1,100 @@
+# Sequence API v3. Small examples, not tuned paper settings.
+version: 3
+recipe: mappo
+seed: 42
+environment:
+  module: mpe2.simple_spread_v3
+  params:
+    N: 3
+    max_cycles: 25
+    continuous_actions: false
+defaults:
+  hidden_dim: 32
+  mixing_dim: 16
+  heads: 4
+  learning_rate: 0.0005
+collector:
+  max_steps: 25
+learner:
+  burn_in: 8
+  state_strategy: cached_burnin
+trainer:
+  sequence_length: 16
+  batch_sequences: 16
+  ppo_epochs: 4
+run:
+  iterations: 1000
+  train_episodes: 8
+  eval_episodes: 16
+  eval_interval: 10
+  checkpoint_interval: 50
+actor:
+  type: SequenceAgentGroup
+  params:
+    frame_encoder:
+      type: Sequential
+      params:
+        layers:
+        - type: Flatten
+          params:
+            start_dim: 1
+        - type: Linear
+          params:
+            in_features:
+              $dim: observation_size
+            out_features: 32
+        - type: GELU
+    temporal:
+      type: RecurrentGRU
+      params:
+        input_dim: 32
+        hidden_dim: 32
+    action_head:
+      type: Linear
+      params:
+        in_features: 64
+        out_features:
+          $dim: action_dim
+    output_kind: logits
+    communication:
+      type: GraphCommunication
+      params:
+        graph_model:
+          type: DenseGraphModel
+          params:
+            layers:
+            - type: Sequential
+              params:
+                layers:
+                - type: Linear
+                  params:
+                    in_features: 32
+                    out_features: 32
+                - type: GELU
+            output:
+              type: Linear
+              params:
+                in_features: 32
+                out_features: 32
+        normalize: true
+        probabilistic: false
+    message_encoder:
+      type: Linear
+      params:
+        in_features: 32
+        out_features: 32
+communication_context:
+  type: FixedGraph
+  params:
+    n_agents:
+      $dim: n_agents
+    edges:
+    - - 0
+      - 1
+    - - 1
+      - 0
+    - - 1
+      - 2
+    - - 2
+      - 1
+    self_loops: true

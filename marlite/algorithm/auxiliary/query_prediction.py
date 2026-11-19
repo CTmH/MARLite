@@ -3,12 +3,15 @@
 import torch
 from torch import nn
 
+from marlite.algorithm.components import validate_replay_modules
+
 
 class QueryPredictionHead(nn.Module):
     """Predict a binary training-only query from group context and query features."""
 
     def __init__(self, model):
         super().__init__()
+        validate_replay_modules(model, scope="Query predictor")
         self.model = model
 
     def forward(self, context, queries):

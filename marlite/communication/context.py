@@ -1,12 +1,15 @@
 """Environment-side communication conditions, explicitly separate from policy features."""
 
+import random
+
+import numpy as np
 import torch
 
 
 class AllTogether:
     uses_global_state = False
 
-    def reset(self):
+    def reset(self, seed=None):
         pass
 
     def __call__(self, observations, state, alive, timestep):
@@ -21,7 +24,7 @@ class FixedGroups:
         if self.groups.ndim != 1 or (self.groups < 0).any():
             raise ValueError("Fixed groups must be a nonnegative vector")
 
-    def reset(self):
+    def reset(self, seed=None):
         pass
 
     def __call__(self, observations, state, alive, timestep):
@@ -42,7 +45,7 @@ class FixedGraph:
                 raise ValueError("Fixed edge references an unknown slot")
             self.adjacency[receiver, sender] = 1.
 
-    def reset(self):
+    def reset(self, seed=None):
         pass
 
     def __call__(self, observations, state, alive, timestep):
@@ -65,13 +68,34 @@ class StateBuilderContext:
             raise ValueError("State builder must emit groups or adjacency")
         self.builder, self.field = builder, field
         self.transpose_adjacency = transpose_adjacency
+        self.reset(seed=0)
 
-    def reset(self):
+    def reset(self, seed=None):
+        if isinstance(self.builder, torch.nn.Module):
+            self.builder.eval()  # Execution topology must honor its cache/update interval.
         if hasattr(self.builder, "reset"):
             self.builder.reset()
+        self.numpy_rng = np.random.RandomState(seed)
+        self.python_rng = random.Random(seed)
+        self.torch_rng = torch.Generator()
+        self.torch_rng.seed() if seed is None else self.torch_rng.manual_seed(seed)
 
     def __call__(self, observations, state, alive, timestep):
-        result = self.builder(state[None])
+        # Constructors may use legacy global CPU RNGs. Isolate them per episode
+        # without changing any GPU random stream or the caller's training RNG.
+        numpy_state, python_state, torch_state = np.random.get_state(), random.getstate(), torch.get_rng_state()
+        np.random.set_state(self.numpy_rng.get_state())
+        random.setstate(self.python_rng.getstate())
+        torch.set_rng_state(self.torch_rng.get_state())
+        try:
+            result = self.builder(state[None])
+        finally:
+            self.numpy_rng.set_state(np.random.get_state())
+            self.python_rng.setstate(random.getstate())
+            self.torch_rng.set_state(torch.get_rng_state())
+            np.random.set_state(numpy_state)
+            random.setstate(python_state)
+            torch.set_rng_state(torch_state)
         if isinstance(result, tuple):
             result = result[0]
         result = torch.as_tensor(result)[0].detach().cpu()

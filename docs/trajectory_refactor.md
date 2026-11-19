@@ -18,7 +18,7 @@ The legacy trainers remain runnable only while the new pipeline is being built.
 | R5 | QMIX, QPLEX, QTRAN sequence learners | Implemented; CPU, Gloo and real MPE2 short workflows validated |
 | R6 | Graph, messages, consensus, SSL and gradient mixers | Implemented; CPU and two-rank Gloo verified; GPU acceptance remains R9 |
 | R7 | C04 offline/online phases and all paper variants | Staged Python API implemented; CPU/Gloo verified; recipe configuration follows at R8 |
-| R8 | New YAML, CLI, analyzer, examples; remove old hierarchy | Pending |
+| R8 | New YAML, CLI, analyzer, examples; remove old hierarchy | New configuration/CLI/analyzer verified; legacy cleanup and adapter migration in progress |
 | R9 | Multi-environment, resume and performance acceptance | Pending |
 
 ## Migration inventory
@@ -283,3 +283,77 @@ only that functionally irrelevant parameter slice is excluded from numerical
 weight equality, with its invariance separately tested. Same-topology resume
 remains bitwise tested. Server GPU acceptance, YAML/CLI migration, experiment
 recipes and removal of legacy code/tests remain outstanding.
+
+
+## Configuration and entry-point migration (R8, first acceptance)
+
+The version-3 configuration selects five Python recipes and constructor-injected
+components. One lazy registry covers neural modules, communication, topology,
+labels, objectives and optimizers. Unknown types/arguments and injected-field
+replacement fail with paths. Bounded dimension references replace shape guesses;
+there is no eval or YAML training/loss/stage graph. Explicit initializers and
+strict checkpoint boundaries retain the original initialization semantics.
+
+All thirteen former trainer families have runnable composition examples under
+examples/sequence, with additional dual-path, G2ANet and pooled-attention cases.
+Sixteen MPE2 examples execute short training and actor-only evaluation workflows.
+A seventeenth example configures the native four-pursuer/eight-evader capture task,
+CNN, state-based groups and task-specific optional relation queries. This example
+still requires server-native acceptance; it is not counted as locally verified.
+
+The installed `marlite`, `python -m marlite`, and source-checkout main.py share
+train/validate/analyze commands. C04 may train its teacher with the same standard
+MAPPO recipe before transferring an independent frozen copy. Teacher fitting never
+runs during construction/validation. Offline phase optimizers, probe architecture,
+policy parameter groups, neural components and the RL gate are configurable.
+Invalid online iteration counts fail before potentially costly teacher fitting.
+
+Policy-only evaluation builds no critic, replay, teacher or training head. It loads
+actor weights independently of training world size and uses a held-out random
+stream. Exports are actual CPU tensor Episodes. Native environment metrics, action
+counts, graph edge counts and configured communication budgets have tensor-based
+summaries. Value-free episodes cannot accidentally enter PPO target preparation.
+Native metric extraction happens before closing the simulator. Simulator probes
+and collection belong only to rank 0, not one expensive simulator per learner.
+
+Runs save resolved YAML, dependency/Git provenance, file hashes and a source
+archive, including dirty source files. Full checkpoints validate configuration;
+only run limits/workdir may change on exact resume. Final checkpoints are saved
+regardless of periodic-checkpoint settings. A fresh run refuses an occupied run
+directory. The package entry point was reinstalled locally with --no-deps, leaving
+the existing Torch/environment packages unchanged.
+
+Topology constructors run in evaluation mode so configured update intervals work.
+Their Python/NumPy/CPU-Torch random streams are isolated and episode-seeded. A null
+experiment seed still shares ONE sampler stream between ranks. Implicit random
+activations/dropout and batch-dependent normalization are rejected consistently
+in actors, critics and auxiliary heads. NearestDecoder now uses GroupNorm instead
+of BatchNorm so padding and rank partitioning cannot change valid examples.
+
+R8 first acceptance: 292 passed, 1 skipped in the migrated regression matrix
+(local CPU, 2026-11-19). This includes installed CLI discovery, actual CLI
+train/resume/analyze, all five recipes under two-rank Gloo, independent teacher
+training, source/version artifacts and all sixteen short MPE2 example workflows.
+New configuration modules pass the formatter and E9/F checks. This is not yet an
+all-repository cleanup acceptance: old APIs/tests/examples still exist.
+
+A local native-MAgent2 attempt aborted with libomp duplicate-runtime initialization
+(exit 134) before its workflow could be verified. No KMP_DUPLICATE_LIB_OK workaround
+was enabled; its temporary output was removed. Native/GPU acceptance is moved to
+the authorized Linux server, whose inspected environment has Torch
+2.15.0+rocm7.14. Only read-only server inspection has occurred at this stage; no
+training queue or long experiment was started.
+
+### Remaining retirement dependencies
+
+Before deleting the old hierarchy, migrate remaining environment opponent
+controllers, heterogeneous observation/action padding and per-model routing;
+inspect the old AgentGroup variants rather than assuming shared-policy tests
+cover them. Preserve relevant initializer, environment and mathematical reference
+coverage while rewriting old API tests. Primitive package initializers still
+import old configuration factories and must be made independent. Retire old
+trainers/workers/WorkerGroups, datasets/replay/rollout/config processors, analyzer
+wrappers, superseded model wrappers, YAML examples and associated tests only after
+these dependencies have replacements. Pooled/masked model adapters need coverage
+for their mask/output conventions. Sparse recurrent-state snapshots, server GPU
+parity, native environments and measured sequence performance remain R9 work.

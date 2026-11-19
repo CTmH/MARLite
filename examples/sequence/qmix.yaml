@@ -1,0 +1,33 @@
+# Sequence API v3. Small examples, not tuned paper settings.
+version: 3
+recipe: qmix
+seed: 42
+environment:
+  module: mpe2.simple_spread_v3
+  params:
+    N: 3
+    max_cycles: 25
+    continuous_actions: false
+defaults:
+  hidden_dim: 32
+  mixing_dim: 16
+  heads: 4
+  learning_rate: 0.0005
+collector:
+  max_steps: 25
+learner:
+  burn_in: 16
+  state_strategy: zero_burnin
+trainer:
+  sequence_length: 16
+  batch_sequences: 16
+  updates_per_iteration: 4
+run:
+  iterations: 1000
+  train_episodes: 8
+  eval_episodes: 16
+  eval_interval: 10
+  checkpoint_interval: 50
+replay:
+  capacity: 256
+  sampling: uniform

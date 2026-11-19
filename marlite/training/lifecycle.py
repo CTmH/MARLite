@@ -47,7 +47,11 @@ class TrainingLifecycle:
         self.workdir = Path(workdir) if workdir is not None else None
         if learner.backend.distributed and self.workdir is None:
             raise ValueError("Distributed training requires a shared workdir")
-        self.rng = torch.Generator().manual_seed(derive_seed(seed, 30) if seed is not None else torch.seed())
+        sampler_seed = derive_seed(seed, 30)
+        if sampler_seed is None:
+            backend = learner.backend
+            sampler_seed = backend.broadcast_object(torch.seed() if backend.rank == 0 else None)
+        self.rng = torch.Generator().manual_seed(sampler_seed)
         self.iterations = self.collection_round = self.evaluation_round = self.test_round = self.policy_version = 0
         self.env_steps = self.agent_steps = 0
         self.best_reward = -float("inf")
@@ -190,6 +194,7 @@ class TrainingLifecycle:
         path.parent.mkdir(parents=True, exist_ok=True)
         state = {
             "schema_version": 2, "algorithm": self.algorithm, "spec": self._spec(),
+            "configuration": getattr(self, "configuration", None),
             "learner": self.learner.state_dict(), "extra": self._checkpoint_extra(),
             "rng_by_rank": self.learner.backend.gather_objects(_rng_state()),
             "world_size": self.learner.backend.world_size,
@@ -218,6 +223,8 @@ class TrainingLifecycle:
         state = torch.load(path, map_location="cpu", weights_only=True)
         if state.get("schema_version") != 2 or state.get("algorithm") != self.algorithm:
             raise ValueError("Checkpoint algorithm does not match this trainer")
+        if state.get("configuration") != getattr(self, "configuration", None):
+            raise ValueError("Checkpoint experiment configuration differs; only run limits/workdir may change")
         if state["spec"] != self._spec():
             raise ValueError("Checkpoint training specification differs from this trainer")
         if state["world_size"] != self.learner.backend.world_size:
