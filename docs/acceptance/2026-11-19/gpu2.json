@@ -1,0 +1,54 @@
+{
+  "world_size": 2,
+  "device": "cuda:0",
+  "torch": "2.15.0+rocm7.14",
+  "hip": "7.14.60850",
+  "same_topology_resume": "exact",
+  "recipes": {
+    "mappo": {
+      "updates": 4,
+      "actor_finite": true,
+      "output_max_abs_error": 0.0,
+      "identifiable_parameter_max_abs_error": 7.450580596923828e-09
+    },
+    "qmix": {
+      "updates": {
+        "updates": 4,
+        "actor_updates": 4,
+        "critic_updates": 4,
+        "objective_updates": 0
+      },
+      "actor_finite": true,
+      "output_max_abs_error": 0.0,
+      "identifiable_parameter_max_abs_error": 1.4901161193847656e-08
+    },
+    "qplex": {
+      "updates": {
+        "updates": 4,
+        "actor_updates": 4,
+        "critic_updates": 4,
+        "objective_updates": 0
+      },
+      "actor_finite": true,
+      "output_max_abs_error": 0.0,
+      "identifiable_parameter_max_abs_error": 1.4901161193847656e-08
+    },
+    "qtran": {
+      "updates": {
+        "updates": 4,
+        "actor_updates": 4,
+        "critic_updates": 4,
+        "objective_updates": 4
+      },
+      "actor_finite": true,
+      "output_max_abs_error": 0.0,
+      "identifiable_parameter_max_abs_error": 3.725290298461914e-09
+    },
+    "c04": {
+      "updates": 4,
+      "actor_finite": true,
+      "output_max_abs_error": 2.9802322387695312e-08,
+      "identifiable_parameter_max_abs_error": 7.059425115585327e-07
+    }
+  }
+}

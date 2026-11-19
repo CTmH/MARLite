@@ -1,0 +1,43 @@
+{
+  "device": "cuda:0",
+  "shape": [
+    4,
+    32,
+    32,
+    64
+  ],
+  "torch": "2.15.0+rocm7.14",
+  "models": {
+    "gru": {
+      "step_reference": {
+        "forward_backward_ms_median": 38.01239817403257,
+        "cuda_peak_allocated_bytes": 21227520
+      },
+      "fused_sequence": {
+        "forward_backward_ms_median": 8.195044938474894,
+        "cuda_peak_allocated_bytes": 16084992
+      },
+      "speedup": 4.638461223753425
+    },
+    "attention": {
+      "step_reference": {
+        "forward_backward_ms_median": 54.323081159964204,
+        "cuda_peak_allocated_bytes": 198476288
+      },
+      "fused_sequence": {
+        "forward_backward_ms_median": 3.52730811573565,
+        "cuda_peak_allocated_bytes": 108559872
+      },
+      "speedup": 15.400719012218943
+    }
+  },
+  "attention_cache_storage_example": {
+    "frames": 201,
+    "agents": 100,
+    "context": 128,
+    "hidden": 128,
+    "interval": 32,
+    "dense_bytes": 1319846400,
+    "sparse_bytes": 45964800
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "device": "cpu",
+  "shape": [
+    4,
+    32,
+    32,
+    64
+  ],
+  "torch": "2.15.0",
+  "models": {
+    "gru": {
+      "step_reference": {
+        "forward_backward_ms_median": 8.52874992415309,
+        "cuda_peak_allocated_bytes": null
+      },
+      "fused_sequence": {
+        "forward_backward_ms_median": 4.819333087652922,
+        "cuda_peak_allocated_bytes": null
+      },
+      "speedup": 1.769695053036208
+    },
+    "attention": {
+      "step_reference": {
+        "forward_backward_ms_median": 46.693500014953315,
+        "cuda_peak_allocated_bytes": null
+      },
+      "fused_sequence": {
+        "forward_backward_ms_median": 6.014582933858037,
+        "cuda_peak_allocated_bytes": null
+      },
+      "speedup": 7.763381190090582
+    }
+  },
+  "attention_cache_storage_example": {
+    "frames": 201,
+    "agents": 100,
+    "context": 128,
+    "hidden": 128,
+    "interval": 32,
+    "dense_bytes": 1319846400,
+    "sparse_bytes": 45964800
+  }
+}

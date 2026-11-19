@@ -1,0 +1,44 @@
+{
+  "world_size": 1,
+  "device": "cuda:0",
+  "torch": "2.15.0+rocm7.14",
+  "hip": "7.14.60850",
+  "same_topology_resume": "exact",
+  "recipes": {
+    "mappo": {
+      "updates": 4,
+      "actor_finite": true
+    },
+    "qmix": {
+      "updates": {
+        "updates": 4,
+        "actor_updates": 4,
+        "critic_updates": 4,
+        "objective_updates": 0
+      },
+      "actor_finite": true
+    },
+    "qplex": {
+      "updates": {
+        "updates": 4,
+        "actor_updates": 4,
+        "critic_updates": 4,
+        "objective_updates": 0
+      },
+      "actor_finite": true
+    },
+    "qtran": {
+      "updates": {
+        "updates": 4,
+        "actor_updates": 4,
+        "critic_updates": 4,
+        "objective_updates": 4
+      },
+      "actor_finite": true
+    },
+    "c04": {
+      "updates": 4,
+      "actor_finite": true
+    }
+  }
+}

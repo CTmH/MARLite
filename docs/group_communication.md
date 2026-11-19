@@ -18,7 +18,11 @@ These are interface examples, not paper hyperparameters.
 `teacher.source: train` uses a normal SequenceMAPPOTrainer and transfers its
 trained policy into a separate frozen reference before any student fitting.
 `teacher.source: checkpoint` requires a strict `teacher.actor.checkpoint` spec.
-Teacher and student AgentGroups never share mutable parameters or recurrent state.
+Both sources honor `offline.initialize_from_teacher`. The default copies compatible
+teacher modules before student fitting. For online-only training, set
+`offline.offline_enabled: false` and `offline.initialize_from_teacher: false` to keep
+the student's own initial parameters while retaining the teacher as a KL target.
+Teacher and student AgentGroups have independent parameters and recurrent state.
 
 The sender encoder receives only local history. Raw group fusion can be replaced
 with QuantizedCommunication, whose scalar codec uses exact hard integers in the

@@ -2,9 +2,8 @@
 
 Baseline: `7a54e00`; branch: `codex/trajectory-refactor`.
 
-This is an intentionally incompatible replacement. Historical experiments stay
-on the C04 branch. No old YAML, import, or checkpoint compatibility is promised.
-The legacy trainers remain runnable only while the new pipeline is being built.
+The sequence stack supersedes the legacy training, configuration and analysis
+interfaces. Historical YAML and checkpoints can be used on the C04 branch.
 
 ## Acceptance gates
 
@@ -12,14 +11,14 @@ The legacy trainers remain runnable only while the new pipeline is being built.
 | --- | --- | --- |
 | R0 | Migration inventory and mathematical reference tests | Inventory recorded; existing reference tests retained |
 | R1 | CPU tensor Episode, T+1 frames, continuous sequence slicing | Implemented; see test/test_sequence_contract.py |
-| R2 | Explicit state, step/sequence protocol, GRU and causal attention | Implemented: local composed AgentGroup, window wrapper, GRU and causal reference |
+| R2 | Explicit state, step/sequence protocol, GRU and causal attention | Composed AgentGroup, pooled history adapter, batched GRU and causal attention |
 | R3 | Shared multi-timestep MAPPO learner, fixed GAE, independent evaluation | Implemented; local API, CPU and real MPE2 short training validated |
-| R4 | torchrun and one explicit gradient reducer | CPU two-rank path validated; server GPU acceptance pending |
+| R4 | torchrun and one explicit gradient reducer | CPU/Gloo and ROCm single-, two- and three-device updates validated |
 | R5 | QMIX, QPLEX, QTRAN sequence learners | Implemented; CPU, Gloo and real MPE2 short workflows validated |
-| R6 | Graph, messages, consensus, SSL and gradient mixers | Implemented; CPU and two-rank Gloo verified; GPU acceptance remains R9 |
-| R7 | C04 offline/online phases and all paper variants | Staged Python API implemented; CPU/Gloo verified; recipe configuration follows at R8 |
-| R8 | New YAML, CLI, analyzer, examples; remove old hierarchy | New configuration/CLI/analyzer verified; legacy cleanup and adapter migration in progress |
-| R9 | Multi-environment, resume and performance acceptance | Pending |
+| R6 | Graph, messages, consensus, SSL and gradient mixers | Composition and losses tested on CPU, including two-rank Gloo with all four task mixers |
+| R7 | C04 offline/online phases and all paper variants | Staged recipe, optional objectives and sender replacement verified; native C04 training exercised on ROCm |
+| R8 | New YAML, CLI, analyzer, examples; remove old hierarchy | CLI, registry, analyzer and examples validated; legacy source and test fixtures removed |
+| R9 | Multi-environment, resume and performance acceptance | Native MAgent2, SMACv2 and SUMO, GPU parity/resume and encoder benchmarks passed |
 
 ## Migration inventory
 
@@ -39,9 +38,9 @@ The legacy trainers remain runnable only while the new pipeline is being built.
 | VAEGraphQMIX | QMIX learner + graph + VAE objectives |
 | DistilledGroupCommunicationMAPPO | Teacher/student AgentGroups + staged C04 recipe |
 
-Reference tests: test_multistep_training, test_mappo_minibatches,
-test_value_learning, test_loss_mixer, test_g2anet_policy_consistency,
-test_distilled_group_communication. Freeze RNG/noise for stochastic comparisons.
+Current reference tests are the sequence contract, MAPPO, value, communication,
+auxiliary, distillation and distributed suites under `test/`. Freeze RNG/noise
+for stochastic comparisons.
 New persistent recurrence is not numerically equivalent to the old zero-start
 sliding window. Compare objectives on stateless one-step batches first.
 
@@ -68,17 +67,17 @@ Temporal encoders use B,T,N,D, return every step, and accept caller-owned state.
 Collectors own state per environment, actor, critic, teacher and student. Clear
 state at reset/death/reappearance. Fix policy weights during collection rounds.
 No network stores implicit environment state. Attention has bounded per-agent
-cache; its step-based reference sequence path is causal, but is not yet a fused
-Transformer training implementation. Uninterrupted GRU chunks use one fused call.
+cache and batches causal queries within a training chunk. GRU batches uninterrupted
+intervals and handles resets or life changes at interval boundaries.
 
-Reconstruction defaults for the forthcoming learners: PPO cached_burnin (32
+Reconstruction defaults: PPO cached_burnin (32
 learning steps, 8 warmup); off-policy zero_burnin (32 learning, 32 warmup), with
 separate online/target reconstruction. Both are approximations. prefix_recompute
 replays the complete prefix under current parameters for each optimizer batch.
 Cache identity/version is a learner responsibility; never reuse student state
 for teacher or behavior state for target. Warmup runs without autograd.
 
-## Remaining implementation constraints
+## Implementation invariants
 
 Trainer owns stages; learners own algorithm models/optimizers. Communication
 components do not duplicate PPO or TD. QPLEX needs full action Q; QTRAN's V is
@@ -107,10 +106,9 @@ Final acceptance includes 1-vs-2/3-device gradient parity with uneven masks,
 checkpoint continuation, all paper switches, environment adapters, and measured
 time/memory. No long research training is part of this refactoring task.
 
-The replacement pipeline is executable through SequenceMAPPOTrainer's Python
-API, not yet through the old CLI/YAML. Do not send new configs to the old
-TrainerConfig. YAML/CLI replacement is R8. All-rank checkpoints must be called
-collectively. Pure on-policy data is removed after every completed distributed
+The sequence stack is available through `marlite`, `python -m marlite` and the
+Python trainer API. Use version-3 recipes. All ranks must call full checkpoint
+operations collectively. Pure on-policy data is removed after every completed distributed
 iteration; final inference does not sample a fictitious action.
 
 New tests are independent of old trainer fixtures. test_sequence_mappo covers
@@ -119,9 +117,12 @@ independent evaluation, exact continuation and real MPE2. test_sequence_distribu
 runs torchrun with two CPU/Gloo ranks, including empty/uneven partitions, unused
 parameters, full checkpoint continuation and single/global-batch comparison.
 macOS tests force IPv4 loopback rendezvous to avoid broken IPv6 reverse DNS.
-This is not yet GPU validation or a completed migration of the remaining methods.
 
-## Foundation validation (2026-11-19)
+## Migration history
+
+The following sections record intermediate results at each implementation stage.
+
+### Foundation validation (2026-11-19)
 
 73 passed, 1 skipped across test_sequence_contract, test_return_estimation,
 test_value_learning, test_loss_mixer, and test_mappo_minibatches on local CPU.
@@ -358,7 +359,7 @@ these dependencies have replacements. Pooled/masked model adapters need coverage
 for their mask/output conventions. Sparse recurrent-state snapshots, server GPU
 parity, native environments and measured sequence performance remain R9 work.
 
-## R8 retirement and R9 sequence execution (current, 2026-11-19)
+## R8 retirement and R9 sequence execution (2026-11-19)
 
 The legacy trainer/worker/WorkerGroup, rollout, replaybuffer, configuration
 processor, analyzer, AgentGroup and critic hierarchies are removed. Their old
@@ -398,18 +399,53 @@ full Transformer. Existing positional pooled encoders remain available through
 WindowEncoder. Fused mask memory scales with B*N*heads*T*(context+T); use bounded
 training chunks. Step/sequence outputs, state, gradients and causality are tested.
 
-Local full-repository regression: **598 passed, 4 skipped**, 33.64 s. The skips
-are the three opt-in native simulator modules and a two-GPU reference test.
-All source/tests pass Ruff E9/F and the common 100-column formatter. This replaces
-selected-suite acceptance with actual whole-repository acceptance after cleanup.
+The real SMACv2 training test exposed a short-chunk edge case. A live bootstrap
+frame was sent through PPO action replay with a padded action. The learner now
+intersects the live-agent mask with the real-transition mask. The regression test
+uses a legal-action mask that forbids the padded action.
 
-Local CPU performance (4,32,32,64 inputs, two threads, live/dead/reset slots,
-three timed forward+backward repetitions after two warmups): GRU 8.16 -> 4.69 ms
-(1.74x); causal attention 44.42 -> 5.64 ms (7.87x). These are small synthetic
-measurements, not environment training throughput or a hardware-general promise.
-Reproduce with `python -m test.acceptance.sequence_performance`.
+## Final acceptance (2026-11-19)
 
-Server-native tests, single-vs-two/three GPU parity, GPU memory/time measurements
-and remaining native dependency issues are still pending at this commit. The
-server has unrelated running research jobs; acceptance uses an isolated worktree,
-small batches and bounded runs without modifying their environment or outputs.
+The local full suite passed **604 tests** with four platform or opt-in skips at
+`24a4ccd`. The real MPE2 examples, CLI, Python configuration, standalone evaluation
+and checkpoint continuation run in that suite. Ruff E9/F, the 100-column
+formatter and Git whitespace checks passed. The Linux full suite passed **598
+tests** at `bb901b2`, with four MPS-specific tests and three opt-in simulator
+modules skipped. The simulator modules were run separately.
+
+On Linux/ROCm, the opt-in native suite passed **32 tests** at `bb901b2`. The suite exercises
+MAgent2's native rules and wrappers, including end-to-end C04 on small
+complementary pursuit with GRU and SimpleResAttSeqEnc. It also exercises MAPPO
+and QPLEX collection and an optimizer update on SMACv2 5v5 and a SUMO 4×4 grid.
+The C04 tests verify teacher training, offline probe/codec/policy stages,
+online updating and exact continuation. Separate CPU/Gloo tests exercise
+optional auxiliary loss, optional online distillation, simultaneous/progressive
+replacement and bypassing offline training. At `24a4ccd`, five targeted
+server cases passed, including both native C04 runs and tests for loading a
+teacher checkpoint and honoring the student initialization switch.
+
+The one-, two- and three-GPU comparison at `bb901b2` uses the same batches for MAPPO, QMIX,
+QPLEX, QTRAN and C04, including uneven live-agent counts and empty rank slices.
+It compares trained parameters and outputs across topologies and checks exact
+same-topology checkpoint continuation. Maximum absolute differences were
+2.98e-8 for policy outputs and 1.54e-6 for identifiable actor/critic parameters.
+Execution uses the same training classes under `torchrun`, with rank count
+set at launch.
+
+CPU and ROCm measurements below use four 32-step sequences with 32 agents and
+64 features, including inactive slots and resets. Times are median forward and
+backward times over five runs after two warmups. Peak GPU allocation is measured
+by PyTorch. The comparison measures sequence encoder kernels on this workload.
+
+| Encoder | CPU step → batch | ROCm step → batch | ROCm peak step → batch |
+| --- | ---: | ---: | ---: |
+| GRU | 8.53 → 4.82 ms (1.77×) | 38.01 → 8.20 ms (4.64×) | 20.24 → 15.34 MiB |
+| Causal attention | 46.69 → 6.01 ms (7.76×) | 54.32 → 3.53 ms (15.40×) | 189.28 → 103.53 MiB |
+
+The measured size and rollout limits are those of acceptance workloads.
+Reports are archived in [docs/acceptance/2026-11-19](acceptance/2026-11-19/).
+Reproduce the multi-device comparison with `python -m test.acceptance.learner_parity`
+on one GPU, then `torchrun --standalone --nproc-per-node=2 -m test.acceptance.learner_parity`
+with the single-GPU result passed as `--reference`. Repeat with three ranks.
+Use `python -m test.acceptance.sequence_performance --device cuda --output perf.json`
+for the encoder benchmark.
