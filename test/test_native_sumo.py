@@ -35,3 +35,42 @@ def test_native_heterogeneous_traffic_lights():
         assert env.state().shape[0] == len(env.possible_agents)
     finally:
         env.close()
+
+
+@pytest.mark.parametrize("recipe", ["mappo", "qplex"])
+def test_sumo_real_collection_and_sequence_update(tmp_path, recipe):
+    from marlite.configuration.recipe import build_experiment
+    import torch
+
+    fixture = Path(sumo_rl.__file__).parent / "nets" / "RESCO" / "grid4x4"
+    config = {
+        "version": 3,
+        "recipe": recipe,
+        "seed": 42,
+        "environment": {
+            "module": "sumo_rl",
+            "params": {
+                "net_file": os.environ.get("MARLITE_SUMO_NET", str(fixture / "grid4x4.net.xml")),
+                "route_file": os.environ.get(
+                    "MARLITE_SUMO_ROUTES", str(fixture / "grid4x4_1.rou.xml")
+                ),
+                "use_gui": False,
+                "num_seconds": 60,
+            },
+            "wrappers": [{"type": "SUMOWrapper"}, {"type": "PadAgentView"}],
+        },
+        "defaults": {"hidden_dim": 8, "mixing_dim": 4, "heads": 2},
+        "collector": {"max_steps": 3},
+        "trainer": {"sequence_length": 2, "batch_sequences": 2},
+        "run": {"iterations": 1, "train_episodes": 1, "eval_interval": None},
+    }
+    if recipe == "mappo":
+        config["trainer"]["ppo_epochs"] = 1
+    else:
+        config["trainer"]["updates_per_iteration"] = 1
+    experiment = build_experiment(
+        config, workdir=tmp_path / recipe, device=os.environ.get("MARLITE_ACCEPTANCE_DEVICE", "cpu")
+    )
+    experiment.run()
+    learner = experiment.trainer.learner
+    assert learner.updates > 0 and all(torch.isfinite(p).all() for p in learner.actor.parameters())
