@@ -15,7 +15,7 @@ from marlite.trainer.distilled_group_communication_mappo_trainer import (
     DistilledGroupCommunicationMAPPOTrainer,
 )
 from marlite.trainer.ssl_gc_mappo_trainer import SSLGroupConsensusMAPPOTrainer
-from marlite.trainer.g2anet_mappo_trainer import GraphMAPPOTrainer
+from marlite.trainer.graph_mappo_trainer import GraphMAPPOTrainer
 from marlite.config_processor import REGISTERED_PROCESSORS
 
 REGISTERED_TRAINERS: Dict[str, Type[Trainer]] = {
@@ -32,7 +32,6 @@ REGISTERED_TRAINERS: Dict[str, Type[Trainer]] = {
     'DistilledGroupCommunicationMAPPO': DistilledGroupCommunicationMAPPOTrainer,
     'SSLGroupConsensusMAPPO': SSLGroupConsensusMAPPOTrainer,
     'GraphMAPPO': GraphMAPPOTrainer,
-    'G2ANetMAPPO': GraphMAPPOTrainer,  # backward-compatible alias
 }
 
 class TrainerConfig:

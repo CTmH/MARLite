@@ -14,12 +14,13 @@ class ComplementaryAnalyzer(Analyzer):
                 [e["capture_fraction"] for e in episodes]
             )
         }
-        results["communication_bytes"] = self._calculate_statistics(
-            [
-                sum(sum(step.values()) for step in e["communication_bytes"])
-                for e in episodes
-            ]
-        )
+        if all("communication_bytes" in episode for episode in episodes):
+            results["communication_bytes"] = self._calculate_statistics(
+                [
+                    sum(sum(step.values()) for step in e["communication_bytes"])
+                    for e in episodes
+                ]
+            )
         for key in ("effective_hit_rate", "missed_attack_rate"):
             results[key] = self._calculate_statistics([e[key] for e in episodes])
         results.update(super().__call__(episodes))
