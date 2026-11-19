@@ -41,8 +41,9 @@ class ExecutionBackend:
         parameters = tuple(dict.fromkeys(parameters))
         if not self.distributed or not parameters:
             return
-        used = torch.tensor([p.grad is not None for p in parameters],
-                            device=self.device, dtype=torch.int32)
+        used = torch.tensor(
+            [p.grad is not None for p in parameters], device=self.device, dtype=torch.int32
+        )
         dist.all_reduce(used, op=dist.ReduceOp.MAX)
         for index, parameter in enumerate(parameters):
             if used[index]:

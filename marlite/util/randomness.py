@@ -63,7 +63,9 @@ def preserve_rng_state(cuda_devices=None):
     mps_state = torch.mps.get_rng_state() if torch.backends.mps.is_available() else None
     devices = []
     if torch.cuda.is_initialized():
-        devices = list(range(torch.cuda.device_count())) if cuda_devices is None else list(cuda_devices)
+        devices = (
+            list(range(torch.cuda.device_count())) if cuda_devices is None else list(cuda_devices)
+        )
     try:
         with torch.random.fork_rng(devices=devices):
             yield

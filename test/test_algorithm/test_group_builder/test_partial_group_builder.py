@@ -40,12 +40,13 @@ def make_binary_id_little_endian(agent_id: int, num_bits: int = 10):
 
     Layout: LSB first (consistent with ``extract_agent_positions_batch``).
     """
-    binary_str = format(agent_id, f'0{num_bits}b')
+    binary_str = format(agent_id, f"0{num_bits}b")
     return [int(x) for x in reversed(binary_str)]
 
 
-def build_grid_state(agents, height=H, width=W, channels=C,
-                     binary_dim=BINARY_DIM, presence_dim=PRESENCE_DIM):
+def build_grid_state(
+    agents, height=H, width=W, channels=C, binary_dim=BINARY_DIM, presence_dim=PRESENCE_DIM
+):
     """Build a single MAgent-style grid state.
 
     Args:
@@ -65,8 +66,9 @@ def build_grid_state(agents, height=H, width=W, channels=C,
     return state
 
 
-def build_vector_state(agents, n_agents=N_AGENTS_DEFAULT, feature_dim=15,
-                       coord_dim=(5, 6), hp_dim=1):
+def build_vector_state(
+    agents, n_agents=N_AGENTS_DEFAULT, feature_dim=15, coord_dim=(5, 6), hp_dim=1
+):
     """Build a single MAgent2-style vector state of shape (N, F).
 
     Args:
@@ -102,14 +104,19 @@ class TestBuildPartialGroupsUtility(unittest.TestCase):
         )
 
     def test_two_clusters_produce_two_groups(self):
-        coords = self._coords([
-            (5, 5), (5, 6),                  # cluster A
-            (30, 30), (30, 31), (31, 30),   # cluster B
-        ])
+        coords = self._coords(
+            [
+                (5, 5),
+                (5, 6),  # cluster A
+                (30, 30),
+                (30, 31),
+                (31, 30),  # cluster B
+            ]
+        )
         labels = build_partial_groups(
             coords_with_id=coords,
             comm_distance=10,
-            distance_metric='cityblock',
+            distance_metric="cityblock",
             n_groups=2,
             valid_node_list=[0, 1, 2, 3, 4],
             target_node_list=[],
@@ -127,7 +134,7 @@ class TestBuildPartialGroupsUtility(unittest.TestCase):
         labels = build_partial_groups(
             coords_with_id=coords,
             comm_distance=10,
-            distance_metric='cityblock',
+            distance_metric="cityblock",
             n_groups=3,
             valid_node_list=[0, 1, 2],
             target_node_list=[],
@@ -140,7 +147,7 @@ class TestBuildPartialGroupsUtility(unittest.TestCase):
         labels = build_partial_groups(
             coords_with_id=coords,
             comm_distance=1,
-            distance_metric='cityblock',
+            distance_metric="cityblock",
             n_groups=4,
             valid_node_list=[0, 1, 2, 3],
             target_node_list=[],
@@ -154,7 +161,7 @@ class TestBuildPartialGroupsUtility(unittest.TestCase):
         labels = build_partial_groups(
             coords_with_id=coords,
             comm_distance=10,
-            distance_metric='cityblock',
+            distance_metric="cityblock",
             n_groups=2,
             valid_node_list=[0, 1, 2, 3, 4],
             target_node_list=[],
@@ -170,7 +177,7 @@ class TestBuildPartialGroupsUtility(unittest.TestCase):
         labels = build_partial_groups(
             coords_with_id=np.zeros((0, 3), dtype=np.int64),
             comm_distance=10,
-            distance_metric='cityblock',
+            distance_metric="cityblock",
             n_groups=2,
             valid_node_list=[0, 1, 2, 3],
             target_node_list=[],
@@ -182,7 +189,7 @@ class TestBuildPartialGroupsUtility(unittest.TestCase):
         labels = build_partial_groups(
             coords_with_id=coords,
             comm_distance=10,
-            distance_metric='cityblock',
+            distance_metric="cityblock",
             n_groups=1,
             valid_node_list=[0, 1, 2],
             target_node_list=[],
@@ -198,7 +205,7 @@ class TestBuildPartialGroupsUtility(unittest.TestCase):
         labels = build_partial_groups(
             coords_with_id=coords,
             comm_distance=10,
-            distance_metric='cityblock',
+            distance_metric="cityblock",
             n_groups=20,
             valid_node_list=[0, 1, 2, 3],
             target_node_list=[],
@@ -213,26 +220,32 @@ class TestBuildPartialGroupsUtility(unittest.TestCase):
         labels = build_partial_groups(
             coords_with_id=coords,
             comm_distance=10,
-            distance_metric='cityblock',
+            distance_metric="cityblock",
             n_groups=5,
             valid_node_list=[0, 1, 2, 3],
             target_node_list=[],
         )
         unique = sorted(set(int(x) for x in labels if x >= 0))
-        self.assertEqual(unique, list(range(len(unique))),
-            "Actual communities < n_groups: labels should be 0, 1, ... (no gaps)")
+        self.assertEqual(
+            unique,
+            list(range(len(unique))),
+            "Actual communities < n_groups: labels should be 0, 1, ... (no gaps)",
+        )
 
     def test_target_nodes_in_detection_not_in_output(self):
         # valid: agents 0, 1; target: agent 100
-        coords = np.array([
-            [0, 5, 5],
-            [1, 5, 6],
-            [100, 5, 7],
-        ], dtype=np.int64)
+        coords = np.array(
+            [
+                [0, 5, 5],
+                [1, 5, 6],
+                [100, 5, 7],
+            ],
+            dtype=np.int64,
+        )
         labels = build_partial_groups(
             coords_with_id=coords,
             comm_distance=10,
-            distance_metric='cityblock',
+            distance_metric="cityblock",
             n_groups=2,
             valid_node_list=[0, 1],
             target_node_list=[100],
@@ -245,28 +258,38 @@ class TestBuildPartialGroupsUtility(unittest.TestCase):
     def test_target_node_participates_in_community_detection(self):
         # A target node sitting between two clusters changes the
         # community partition compared to running detection without it.
-        coords_no_target = np.array([
-            [0, 5, 5], [1, 5, 6],
-            [2, 30, 30], [3, 30, 31],
-        ], dtype=np.int64)
+        coords_no_target = np.array(
+            [
+                [0, 5, 5],
+                [1, 5, 6],
+                [2, 30, 30],
+                [3, 30, 31],
+            ],
+            dtype=np.int64,
+        )
         labels_no_target = build_partial_groups(
             coords_with_id=coords_no_target,
             comm_distance=30,
-            distance_metric='cityblock',
+            distance_metric="cityblock",
             n_groups=2,
             valid_node_list=[0, 1, 2, 3],
             target_node_list=[],
         )
         # With a target node bridging the two clusters
-        coords_with_target = np.array([
-            [0, 5, 5], [1, 5, 6],
-            [2, 30, 30], [3, 30, 31],
-            [100, 5, 30],  # target, bridges cluster A and B
-        ], dtype=np.int64)
+        coords_with_target = np.array(
+            [
+                [0, 5, 5],
+                [1, 5, 6],
+                [2, 30, 30],
+                [3, 30, 31],
+                [100, 5, 30],  # target, bridges cluster A and B
+            ],
+            dtype=np.int64,
+        )
         labels_with_target = build_partial_groups(
             coords_with_id=coords_with_target,
             comm_distance=30,
-            distance_metric='cityblock',
+            distance_metric="cityblock",
             n_groups=2,
             valid_node_list=[0, 1, 2, 3],
             target_node_list=[100],
@@ -281,8 +304,9 @@ class TestBuildPartialGroupsUtility(unittest.TestCase):
             if v >= 0:
                 self.assertIn(int(v), unique)
         # With a bridging target the partition merges into at most 2 groups
-        self.assertLessEqual(len(unique), 2,
-            f"Bridging target should keep groups <= 2, got {unique}")
+        self.assertLessEqual(
+            len(unique), 2, f"Bridging target should keep groups <= 2, got {unique}"
+        )
         # Without a target the partition can split into more isolated pieces
         # (in practice greedy_modularity may still merge them, so we don't
         # assert a specific size — only that with_target produces the right
@@ -296,9 +320,9 @@ class TestBuildPartialGroupsUtility(unittest.TestCase):
         labels = build_partial_groups(
             coords_with_id=coords,
             comm_distance=10,
-            distance_metric='cityblock',
+            distance_metric="cityblock",
             n_groups=2,
-            valid_node_list=[0, 1],   # request agents 0, 1 explicitly
+            valid_node_list=[0, 1],  # request agents 0, 1 explicitly
             target_node_list=[],
         )
         # Two valid nodes -> length-2 output
@@ -311,7 +335,7 @@ class TestBuildPartialGroupsUtility(unittest.TestCase):
         labels = build_partial_groups(
             coords_with_id=coords,
             comm_distance=10,
-            distance_metric='cityblock',
+            distance_metric="cityblock",
             n_groups=2,
             valid_node_list=[0, 1],
             target_node_list=[],
@@ -323,13 +347,12 @@ class TestBuildPartialGroupsUtility(unittest.TestCase):
 #  Tests for PartialGroupMAgentBuilder (grid state)
 # =============================================================================
 class TestPartialGroupMAgentBuilder(unittest.TestCase):
-
     def setUp(self):
         self.n_agent = N_AGENTS_DEFAULT
         self.binary_agent_id_dim = BINARY_DIM
         self.agent_presence_dim = PRESENCE_DIM
         self.comm_distance = COMM_DISTANCE
-        self.distance_metric = 'cityblock'
+        self.distance_metric = "cityblock"
         self.valid_node_list = list(range(N_VALID_DEFAULT))
         self.target_node_list = list(range(N_VALID_DEFAULT, self.n_agent))
 
@@ -376,8 +399,11 @@ class TestPartialGroupMAgentBuilder(unittest.TestCase):
             unique = sorted({int(x) for x in row.tolist() if x >= 0})
             # Consecutive from 0
             if unique:
-                self.assertEqual(unique, list(range(len(unique))),
-                    f"Labels should be consecutive from 0, got {unique}")
+                self.assertEqual(
+                    unique,
+                    list(range(len(unique))),
+                    f"Labels should be consecutive from 0, got {unique}",
+                )
 
     def test_forward_empty_state(self):
         """An all-zero state means no agents are present. The full
@@ -390,8 +416,9 @@ class TestPartialGroupMAgentBuilder(unittest.TestCase):
 
         self.assertEqual(result.shape, (batch_size, len(self.valid_node_list)))
         for row in result:
-            self.assertTrue(torch.all(row == -1),
-                f"Empty state should yield all -1, got {row.tolist()}")
+            self.assertTrue(
+                torch.all(row == -1), f"Empty state should yield all -1, got {row.tolist()}"
+            )
 
     def test_forward_channel_first(self):
         """When ``channel_first=True`` the input is ``(B, C, H, W)`` and the
@@ -426,10 +453,14 @@ class TestPartialGroupMAgentBuilder(unittest.TestCase):
     def test_two_clusters_two_groups(self):
         """Two spatially separated clusters -> two groups, each containing
         the agents in that cluster."""
-        state = build_grid_state([
-            (5, 5, 0), (5, 6, 1),                 # cluster A
-            (40, 40, 2), (40, 41, 3),             # cluster B
-        ])
+        state = build_grid_state(
+            [
+                (5, 5, 0),
+                (5, 6, 1),  # cluster A
+                (40, 40, 2),
+                (40, 41, 3),  # cluster B
+            ]
+        )
         states = np.expand_dims(state, 0)
         result = self.builder(torch.from_numpy(states).float())
         # Each cluster is its own community
@@ -438,9 +469,14 @@ class TestPartialGroupMAgentBuilder(unittest.TestCase):
         self.assertNotEqual(result[0, 0], result[0, 2])
 
     def test_all_agents_close_single_group(self):
-        state = build_grid_state([
-            (5, 5, 0), (5, 6, 1), (6, 5, 2), (6, 6, 3),
-        ])
+        state = build_grid_state(
+            [
+                (5, 5, 0),
+                (5, 6, 1),
+                (6, 5, 2),
+                (6, 6, 3),
+            ]
+        )
         result = self.builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         alive = result[0] >= 0
         # All alive agents share the same group
@@ -451,14 +487,19 @@ class TestPartialGroupMAgentBuilder(unittest.TestCase):
         """Agent 2 is absent (no presence channels set) -> -1 label."""
         # All alive agents are placed close together so they form a single
         # community; agent 2 is dead and gets -1.
-        state = build_grid_state([
-            (5, 5, 0), (5, 6, 1), (5, 7, 3),  # cluster; agent 2 dead
-        ])
+        state = build_grid_state(
+            [
+                (5, 5, 0),
+                (5, 6, 1),
+                (5, 7, 3),  # cluster; agent 2 dead
+            ]
+        )
         result = self.builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         self.assertEqual(result[0, 2].item(), -1)
         for i in [0, 1, 3]:
-            self.assertGreaterEqual(result[0, i], 0,
-                f"Agent {i} should have a non-negative group label")
+            self.assertGreaterEqual(
+                result[0, i], 0, f"Agent {i} should have a non-negative group label"
+            )
         # Agents 0, 1, 3 are in the same cluster -> same group
         self.assertEqual(result[0, 0], result[0, 1])
         self.assertEqual(result[0, 1], result[0, 3])
@@ -474,35 +515,44 @@ class TestPartialGroupMAgentBuilder(unittest.TestCase):
         # Single agent is its own community -> label 0
         self.assertEqual(result[0, 0].item(), 0)
         for i in range(1, len(self.valid_node_list)):
-            self.assertEqual(result[0, i].item(), -1,
-                f"Agent {i} is not present, should be -1")
+            self.assertEqual(result[0, i].item(), -1, f"Agent {i} is not present, should be -1")
 
     def test_target_nodes_excluded_from_output(self):
         """Agents in ``target_node_list`` participate in community detection
         but should NOT appear in the output labels."""
         # Place target nodes right between two valid clusters so that
         # without their help, the two clusters would be separate.
-        state = build_grid_state([
-            (5, 5, 0), (5, 6, 1),                  # valid cluster A
-            (40, 40, 2), (40, 41, 3),              # valid cluster B
-            (5, 7, N_VALID_DEFAULT),               # target near A (different pos)
-            (40, 38, N_VALID_DEFAULT + 1),         # target near B (different pos)
-        ])
+        state = build_grid_state(
+            [
+                (5, 5, 0),
+                (5, 6, 1),  # valid cluster A
+                (40, 40, 2),
+                (40, 41, 3),  # valid cluster B
+                (5, 7, N_VALID_DEFAULT),  # target near A (different pos)
+                (40, 38, N_VALID_DEFAULT + 1),  # target near B (different pos)
+            ]
+        )
         result = self.builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         # Output is only for valid nodes
         self.assertEqual(result.shape, (1, len(self.valid_node_list)))
         # Valid agents are alive
         for i in range(4):
-            self.assertGreaterEqual(result[0, i], 0,
-                f"Valid agent {i} should have a non-negative group label")
+            self.assertGreaterEqual(
+                result[0, i], 0, f"Valid agent {i} should have a non-negative group label"
+            )
 
     def test_channel_robustness_extra_features_ignored(self):
         """Channels 15-36 (extra features, hp, last-action) are not part of
         the agent id/presence detection; setting them should not change
         group assignments."""
-        state_base = build_grid_state([
-            (5, 5, 0), (5, 6, 1), (40, 40, 2), (40, 41, 3),
-        ])
+        state_base = build_grid_state(
+            [
+                (5, 5, 0),
+                (5, 6, 1),
+                (40, 40, 2),
+                (40, 41, 3),
+            ]
+        )
         state_noisy = state_base.copy()
         # Fill extra channels with random noise
         rng = np.random.default_rng(0)
@@ -518,9 +568,14 @@ class TestPartialGroupMAgentBuilder(unittest.TestCase):
         self.builder.reset()
 
         # Place a non-trivial layout
-        state_with_agents = build_grid_state([
-            (5, 5, 0), (5, 6, 1), (40, 40, 2), (40, 41, 3),
-        ])
+        state_with_agents = build_grid_state(
+            [
+                (5, 5, 0),
+                (5, 6, 1),
+                (40, 40, 2),
+                (40, 41, 3),
+            ]
+        )
         empty_state = build_grid_state([])
 
         # First call -> compute
@@ -536,9 +591,14 @@ class TestPartialGroupMAgentBuilder(unittest.TestCase):
     def test_no_cache_in_training_mode(self):
         self.builder.train()
         self.builder.reset()
-        state = build_grid_state([
-            (5, 5, 0), (5, 6, 1), (40, 40, 2), (40, 41, 3),
-        ])
+        state = build_grid_state(
+            [
+                (5, 5, 0),
+                (5, 6, 1),
+                (40, 40, 2),
+                (40, 41, 3),
+            ]
+        )
         r1 = self.builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         r2 = self.builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         np.testing.assert_array_equal(r1.numpy(), r2.numpy())
@@ -549,10 +609,14 @@ class TestPartialGroupMAgentBuilder(unittest.TestCase):
         # Batch 0: two agents in the same cluster -> same group
         # Batch 1: four agents in two clusters -> two different groups
         state_a = build_grid_state([(5, 5, 0), (5, 6, 1)])
-        state_b = build_grid_state([
-            (5, 5, 0), (5, 6, 1),
-            (40, 40, 2), (40, 41, 3),
-        ])
+        state_b = build_grid_state(
+            [
+                (5, 5, 0),
+                (5, 6, 1),
+                (40, 40, 2),
+                (40, 41, 3),
+            ]
+        )
         states = np.stack([state_a, state_b], axis=0)
         result = self.builder(torch.from_numpy(states).float())
         self.assertEqual(result.shape, (2, len(self.valid_node_list)))
@@ -618,7 +682,7 @@ class TestPartialGroupMAgentBuilder(unittest.TestCase):
             distance_metric=self.distance_metric,
             n_workers=1,
             n_groups=4,
-            dtype='int8',
+            dtype="int8",
         )
         state = build_grid_state([(5, 5, 0), (5, 6, 1)])
         result = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
@@ -629,7 +693,6 @@ class TestPartialGroupMAgentBuilder(unittest.TestCase):
 #  Tests for PartialGroupVectorStateBuilder (vector state)
 # =============================================================================
 class TestPartialGroupVectorStateBuilder(unittest.TestCase):
-
     N_AGENTS = N_AGENTS_DEFAULT
     F_DIM = 15
     COORD_DIMS = (5, 6)
@@ -639,7 +702,7 @@ class TestPartialGroupVectorStateBuilder(unittest.TestCase):
         self.coord_dim = [int(self.COORD_DIMS[0]), int(self.COORD_DIMS[1])]
         self.hp_dim = int(self.HP_DIM)
         self.comm_distance = COMM_DISTANCE
-        self.distance_metric = 'cityblock'
+        self.distance_metric = "cityblock"
         self.valid_node_list = list(range(N_VALID_DEFAULT))
         self.target_node_list = list(range(N_VALID_DEFAULT, self.N_AGENTS))
 
@@ -690,8 +753,10 @@ class TestPartialGroupVectorStateBuilder(unittest.TestCase):
     def test_two_clusters_two_groups(self):
         state = build_vector_state(
             [(0, 5, 5), (1, 5, 6), (2, 40, 40), (3, 40, 41)],
-            n_agents=self.N_AGENTS, feature_dim=self.F_DIM,
-            coord_dim=self.COORD_DIMS, hp_dim=self.hp_dim,
+            n_agents=self.N_AGENTS,
+            feature_dim=self.F_DIM,
+            coord_dim=self.COORD_DIMS,
+            hp_dim=self.hp_dim,
         )
         result = self.builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         self.assertEqual(result[0, 0], result[0, 1])
@@ -701,8 +766,10 @@ class TestPartialGroupVectorStateBuilder(unittest.TestCase):
     def test_all_agents_close_single_group(self):
         state = build_vector_state(
             [(0, 5, 5), (1, 5, 6), (2, 6, 5), (3, 6, 6)],
-            n_agents=self.N_AGENTS, feature_dim=self.F_DIM,
-            coord_dim=self.COORD_DIMS, hp_dim=self.hp_dim,
+            n_agents=self.N_AGENTS,
+            feature_dim=self.F_DIM,
+            coord_dim=self.COORD_DIMS,
+            hp_dim=self.hp_dim,
         )
         result = self.builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         alive = result[0] >= 0
@@ -713,8 +780,10 @@ class TestPartialGroupVectorStateBuilder(unittest.TestCase):
         # Agent 2 has hp=0 -> dead
         state = build_vector_state(
             [(0, 5, 5), (1, 5, 6), (3, 5, 7)],  # all alive in one cluster
-            n_agents=self.N_AGENTS, feature_dim=self.F_DIM,
-            coord_dim=self.COORD_DIMS, hp_dim=self.hp_dim,
+            n_agents=self.N_AGENTS,
+            feature_dim=self.F_DIM,
+            coord_dim=self.COORD_DIMS,
+            hp_dim=self.hp_dim,
         )
         # Make agent 2 dead by clearing its hp
         state[2, self.hp_dim] = 0
@@ -734,8 +803,10 @@ class TestPartialGroupVectorStateBuilder(unittest.TestCase):
     def test_single_survivor(self):
         state = build_vector_state(
             [(0, 5, 5)],
-            n_agents=self.N_AGENTS, feature_dim=self.F_DIM,
-            coord_dim=self.COORD_DIMS, hp_dim=self.hp_dim,
+            n_agents=self.N_AGENTS,
+            feature_dim=self.F_DIM,
+            coord_dim=self.COORD_DIMS,
+            hp_dim=self.hp_dim,
         )
         result = self.builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         # Single agent is its own community -> label 0
@@ -746,13 +817,17 @@ class TestPartialGroupVectorStateBuilder(unittest.TestCase):
     def test_target_nodes_excluded_from_output(self):
         state = build_vector_state(
             [
-                (0, 5, 5), (1, 5, 6),                 # valid cluster A
-                (2, 40, 40), (3, 40, 41),             # valid cluster B
-                (N_VALID_DEFAULT, 5, 7),              # target near A (diff pos)
-                (N_VALID_DEFAULT + 1, 40, 38),        # target near B (diff pos)
+                (0, 5, 5),
+                (1, 5, 6),  # valid cluster A
+                (2, 40, 40),
+                (3, 40, 41),  # valid cluster B
+                (N_VALID_DEFAULT, 5, 7),  # target near A (diff pos)
+                (N_VALID_DEFAULT + 1, 40, 38),  # target near B (diff pos)
             ],
-            n_agents=self.N_AGENTS, feature_dim=self.F_DIM,
-            coord_dim=self.COORD_DIMS, hp_dim=self.hp_dim,
+            n_agents=self.N_AGENTS,
+            feature_dim=self.F_DIM,
+            coord_dim=self.COORD_DIMS,
+            hp_dim=self.hp_dim,
         )
         result = self.builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         self.assertEqual(result.shape, (1, len(self.valid_node_list)))
@@ -765,8 +840,10 @@ class TestPartialGroupVectorStateBuilder(unittest.TestCase):
         graph builder for vector states."""
         state = build_vector_state(
             [(0, 5, 5), (1, 5, 6), (2, 6, 5)],
-            n_agents=self.N_AGENTS, feature_dim=self.F_DIM,
-            coord_dim=self.COORD_DIMS, hp_dim=self.hp_dim,
+            n_agents=self.N_AGENTS,
+            feature_dim=self.F_DIM,
+            coord_dim=self.COORD_DIMS,
+            hp_dim=self.hp_dim,
         )
         # Manually set agent 2 hp to 0 to simulate a dead agent
         state[2, self.hp_dim] = 0
@@ -778,8 +855,10 @@ class TestPartialGroupVectorStateBuilder(unittest.TestCase):
         filling other feature columns with random noise must be a no-op."""
         state_base = build_vector_state(
             [(0, 5, 5), (1, 5, 6), (2, 40, 40), (3, 40, 41)],
-            n_agents=self.N_AGENTS, feature_dim=self.F_DIM,
-            coord_dim=self.COORD_DIMS, hp_dim=self.hp_dim,
+            n_agents=self.N_AGENTS,
+            feature_dim=self.F_DIM,
+            coord_dim=self.COORD_DIMS,
+            hp_dim=self.hp_dim,
         )
         state_noisy = state_base.copy()
         rng = np.random.default_rng(0)
@@ -800,8 +879,10 @@ class TestPartialGroupVectorStateBuilder(unittest.TestCase):
         self.builder.reset()
         state_with_agents = build_vector_state(
             [(0, 5, 5), (1, 5, 6), (2, 40, 40), (3, 40, 41)],
-            n_agents=self.N_AGENTS, feature_dim=self.F_DIM,
-            coord_dim=self.COORD_DIMS, hp_dim=self.hp_dim,
+            n_agents=self.N_AGENTS,
+            feature_dim=self.F_DIM,
+            coord_dim=self.COORD_DIMS,
+            hp_dim=self.hp_dim,
         )
         empty_state = np.zeros((self.N_AGENTS, self.F_DIM), dtype=np.float32)
 
@@ -817,8 +898,10 @@ class TestPartialGroupVectorStateBuilder(unittest.TestCase):
         self.builder.reset()
         state = build_vector_state(
             [(0, 5, 5), (1, 5, 6)],
-            n_agents=self.N_AGENTS, feature_dim=self.F_DIM,
-            coord_dim=self.COORD_DIMS, hp_dim=self.hp_dim,
+            n_agents=self.N_AGENTS,
+            feature_dim=self.F_DIM,
+            coord_dim=self.COORD_DIMS,
+            hp_dim=self.hp_dim,
         )
         r1 = self.builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         r2 = self.builder(torch.from_numpy(np.expand_dims(state, 0)).float())
@@ -829,13 +912,17 @@ class TestPartialGroupVectorStateBuilder(unittest.TestCase):
     def test_batch_independence(self):
         state_a = build_vector_state(
             [(0, 5, 5), (1, 5, 6)],
-            n_agents=self.N_AGENTS, feature_dim=self.F_DIM,
-            coord_dim=self.COORD_DIMS, hp_dim=self.hp_dim,
+            n_agents=self.N_AGENTS,
+            feature_dim=self.F_DIM,
+            coord_dim=self.COORD_DIMS,
+            hp_dim=self.hp_dim,
         )
         state_b = build_vector_state(
             [(0, 5, 5), (1, 5, 6), (2, 40, 40), (3, 40, 41)],
-            n_agents=self.N_AGENTS, feature_dim=self.F_DIM,
-            coord_dim=self.COORD_DIMS, hp_dim=self.hp_dim,
+            n_agents=self.N_AGENTS,
+            feature_dim=self.F_DIM,
+            coord_dim=self.COORD_DIMS,
+            hp_dim=self.hp_dim,
         )
         states = np.stack([state_a, state_b], axis=0)
         result = self.builder(torch.from_numpy(states).float())
@@ -854,8 +941,10 @@ class TestPartialGroupVectorStateBuilder(unittest.TestCase):
         self.builder.eval()
         state = build_vector_state(
             [(0, 5, 5), (1, 5, 6)],
-            n_agents=self.N_AGENTS, feature_dim=self.F_DIM,
-            coord_dim=self.COORD_DIMS, hp_dim=self.hp_dim,
+            n_agents=self.N_AGENTS,
+            feature_dim=self.F_DIM,
+            coord_dim=self.COORD_DIMS,
+            hp_dim=self.hp_dim,
         )
         self.builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         self.assertIsNotNone(self.builder.cached_labels)
@@ -866,8 +955,10 @@ class TestPartialGroupVectorStateBuilder(unittest.TestCase):
     def test_dtype_int16_by_default(self):
         state = build_vector_state(
             [(0, 5, 5), (1, 5, 6)],
-            n_agents=self.N_AGENTS, feature_dim=self.F_DIM,
-            coord_dim=self.COORD_DIMS, hp_dim=self.hp_dim,
+            n_agents=self.N_AGENTS,
+            feature_dim=self.F_DIM,
+            coord_dim=self.COORD_DIMS,
+            hp_dim=self.hp_dim,
         )
         result = self.builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         self.assertEqual(result.dtype, torch.int16)
@@ -882,12 +973,14 @@ class TestPartialGroupVectorStateBuilder(unittest.TestCase):
             distance_metric=self.distance_metric,
             n_workers=1,
             n_groups=4,
-            dtype='int8',
+            dtype="int8",
         )
         state = build_vector_state(
             [(0, 5, 5), (1, 5, 6)],
-            n_agents=self.N_AGENTS, feature_dim=self.F_DIM,
-            coord_dim=self.COORD_DIMS, hp_dim=self.hp_dim,
+            n_agents=self.N_AGENTS,
+            feature_dim=self.F_DIM,
+            coord_dim=self.COORD_DIMS,
+            hp_dim=self.hp_dim,
         )
         result = builder(torch.from_numpy(np.expand_dims(state, 0)).float())
         self.assertEqual(result.dtype, torch.int8)
@@ -896,10 +989,10 @@ class TestPartialGroupVectorStateBuilder(unittest.TestCase):
 # =============================================================================
 #  Tests for GroupBuilderConfig registration
 # =============================================================================
-class TestPartialGroupBuilderConfig(unittest.TestCase):
-
+class TestPartialGroupBuilderRegistry(unittest.TestCase):
     def test_partial_magent_registered(self):
-        from marlite.algorithm.group_builder.group_builder_config import GroupBuilderConfig
+        from marlite.configuration.catalog import default_registry
+
         config = {
             "type": "PartialMAgent",
             "binary_agent_id_dim": BINARY_DIM,
@@ -910,11 +1003,20 @@ class TestPartialGroupBuilderConfig(unittest.TestCase):
             "n_groups": 4,
             "n_workers": 1,
         }
-        builder = GroupBuilderConfig(**config).get_group_builder()
+        builder = default_registry().build(
+            {
+                "type": {
+                    "PartialMAgent": "PartialGroupMAgentBuilder",
+                    "PartialVectorState": "PartialGroupVectorStateBuilder",
+                }[config["type"]],
+                "params": {k: v for k, v in config.items() if k != "type"},
+            }
+        )
         self.assertIsInstance(builder, PartialGroupMAgentBuilder)
 
     def test_partial_vector_state_registered(self):
-        from marlite.algorithm.group_builder.group_builder_config import GroupBuilderConfig
+        from marlite.configuration.catalog import default_registry
+
         config = {
             "type": "PartialVectorState",
             "coord_dim": [int(VEC_COORD_DIMS[0]), int(VEC_COORD_DIMS[1])],
@@ -925,13 +1027,22 @@ class TestPartialGroupBuilderConfig(unittest.TestCase):
             "n_groups": 4,
             "n_workers": 1,
         }
-        builder = GroupBuilderConfig(**config).get_group_builder()
+        builder = default_registry().build(
+            {
+                "type": {
+                    "PartialMAgent": "PartialGroupMAgentBuilder",
+                    "PartialVectorState": "PartialGroupVectorStateBuilder",
+                }[config["type"]],
+                "params": {k: v for k, v in config.items() if k != "type"},
+            }
+        )
         self.assertIsInstance(builder, PartialGroupVectorStateBuilder)
 
     def test_invalid_type_raises(self):
-        from marlite.algorithm.group_builder.group_builder_config import GroupBuilderConfig
+        from marlite.configuration.catalog import default_registry
+
         with self.assertRaises(ValueError):
-            GroupBuilderConfig(type="DefinitelyNotABuilder")
+            default_registry().build({"type": "DefinitelyNotABuilder"})
 
 
 if __name__ == "__main__":

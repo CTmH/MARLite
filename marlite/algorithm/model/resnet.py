@@ -1,26 +1,23 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from marlite.algorithm.model.self_attention import SelfAttentionLearnablePE, SelfAttentionFixedPE, SelfAttention
-from marlite.algorithm.model.attention_model import AttentionModel
-from marlite.algorithm.model.masked_model import MaskedModel
+from marlite.algorithm.model.self_attention import (
+    SelfAttentionFixedPE,
+)
 
 
 class ResidualMLP(nn.Module):
     def __init__(self, input_dim: int, hidden_dim: int = 64):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            nn.GELU(),
-            nn.Linear(hidden_dim, input_dim)
+            nn.Linear(input_dim, hidden_dim), nn.GELU(), nn.Linear(hidden_dim, input_dim)
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return x + self.net(x)
 
 
-class ResAttMaskedProbEnc(MaskedModel):
-
+class ResAttMaskedProbEnc(nn.Module):
     def __init__(self, input_dim, output_dim, embed_dim, num_heads, max_seq_len, dropout=0.1):
         super(ResAttMaskedProbEnc, self).__init__()
         self.res_att_enc = SimpleResAttEnc(input_dim, embed_dim, num_heads, max_seq_len, dropout)
@@ -43,8 +40,7 @@ class ResAttMaskedProbEnc(MaskedModel):
         return output
 
 
-class ResAttMaskedStateEnc(MaskedModel):
-
+class ResAttMaskedStateEnc(nn.Module):
     def __init__(self, input_dim, embed_dim, num_heads, max_seq_len, dropout=0.1):
         super(ResAttMaskedStateEnc, self).__init__()
         self.res_att_enc = ResAttEnc(input_dim, embed_dim, num_heads, max_seq_len, dropout)
@@ -65,7 +61,6 @@ class ResAttMaskedStateEnc(MaskedModel):
 
 
 class ResAttStateEnc(nn.Module):
-
     def __init__(self, input_dim, embed_dim, num_heads, max_seq_len, dropout=0.1):
         super(ResAttStateEnc, self).__init__()
         self.res_att_enc = ResAttEnc(input_dim, embed_dim, num_heads, max_seq_len, dropout)
@@ -78,7 +73,7 @@ class ResAttStateEnc(nn.Module):
         Returns:
             Global embedding of shape [batch_size, embed_dim]
         """
-        key_padding_mask = torch.zeros((x.size(0),x.size(1)), dtype=torch.bool, device=x.device)
+        key_padding_mask = torch.zeros((x.size(0), x.size(1)), dtype=torch.bool, device=x.device)
         return self.res_att_enc(x, key_padding_mask=key_padding_mask)
 
 
@@ -108,14 +103,13 @@ class ResAttObsEnc(nn.Module):
         return output
 
 
-class ResAttSeqEnc(AttentionModel):
-
+class ResAttSeqEnc(nn.Module):
     def __init__(self, input_dim, output_dim, embed_dim, num_heads, max_seq_len, dropout=0.1):
         super(ResAttSeqEnc, self).__init__()
         self.res_att_enc = ResAttEnc(input_dim, embed_dim, num_heads, max_seq_len, dropout)
         self.linear = nn.Linear(embed_dim, output_dim)
 
-    def forward(self, x: torch.Tensor, padding_mask:torch.Tensor=None):
+    def forward(self, x: torch.Tensor, padding_mask: torch.Tensor = None):
         """
         Args:
             x: Input tensor of shape [batch_size, seq_len(n_agents), input_dim]
@@ -130,11 +124,12 @@ class ResAttSeqEnc(AttentionModel):
 
 
 class ResAttEnc(nn.Module):
-
     def __init__(self, input_dim, embed_dim, num_heads, max_seq_len, dropout=0.1):
         super(ResAttEnc, self).__init__()
         self.linear = nn.Linear(input_dim, embed_dim)
-        self.attention = SelfAttentionFixedPE(embed_dim, num_heads, max_seq_len=max_seq_len, dropout=dropout, batch_first=True)
+        self.attention = SelfAttentionFixedPE(
+            embed_dim, num_heads, max_seq_len=max_seq_len, dropout=dropout, batch_first=True
+        )
         self.attention_weights = nn.Linear(embed_dim, 1)
 
         # Layer normalization for stability
@@ -147,12 +142,12 @@ class ResAttEnc(nn.Module):
             nn.Linear(embed_dim, embed_dim * 4),
             nn.GELU(),
             nn.Dropout(dropout),
-            nn.Linear(embed_dim * 4, embed_dim)
+            nn.Linear(embed_dim * 4, embed_dim),
         )
 
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x: torch.Tensor, key_padding_mask:torch.Tensor):
+    def forward(self, x: torch.Tensor, key_padding_mask: torch.Tensor):
         """
         Args:
             x: Input tensor of shape [batch_size, seq_len(n_agents), input_dim]
@@ -183,8 +178,7 @@ class ResAttEnc(nn.Module):
         return output
 
 
-class SimpleResAttMaskedStateEnc(MaskedModel):
-
+class SimpleResAttMaskedStateEnc(nn.Module):
     def __init__(self, input_dim, embed_dim, num_heads, max_seq_len, dropout=0.1):
         super(SimpleResAttMaskedStateEnc, self).__init__()
         self.res_att_enc = SimpleResAttEnc(input_dim, embed_dim, num_heads, max_seq_len, dropout)
@@ -205,7 +199,6 @@ class SimpleResAttMaskedStateEnc(MaskedModel):
 
 
 class SimpleResAttStateEnc(nn.Module):
-
     def __init__(self, input_dim, embed_dim, num_heads, max_seq_len, dropout=0.1):
         super(SimpleResAttStateEnc, self).__init__()
         self.res_att_enc = SimpleResAttEnc(input_dim, embed_dim, num_heads, max_seq_len, dropout)
@@ -218,11 +211,11 @@ class SimpleResAttStateEnc(nn.Module):
         Returns:
             Global embedding of shape [batch_size, embed_dim]
         """
-        key_padding_mask = torch.zeros((x.size(0),x.size(1)), dtype=torch.bool, device=x.device)
+        key_padding_mask = torch.zeros((x.size(0), x.size(1)), dtype=torch.bool, device=x.device)
         return self.res_att_enc(x, key_padding_mask=key_padding_mask)
 
 
-class SimpleResAttObsEnc(AttentionModel):
+class SimpleResAttObsEnc(nn.Module):
     """
     Observation encoder that uses a simple residual attention encoder.
     Uses `create_key_padding_mask` to automatically generate key_padding_mask
@@ -248,14 +241,13 @@ class SimpleResAttObsEnc(AttentionModel):
         return output
 
 
-class SimpleResAttSeqEnc(AttentionModel):
-
+class SimpleResAttSeqEnc(nn.Module):
     def __init__(self, input_dim, output_dim, embed_dim, num_heads, max_seq_len, dropout=0.1):
         super(SimpleResAttSeqEnc, self).__init__()
         self.res_att_enc = SimpleResAttEnc(input_dim, embed_dim, num_heads, max_seq_len, dropout)
         self.linear = nn.Linear(embed_dim, output_dim)
 
-    def forward(self, x: torch.Tensor, padding_mask:torch.Tensor=None):
+    def forward(self, x: torch.Tensor, padding_mask: torch.Tensor = None):
         """
         Args:
             x: Input tensor of shape [batch_size, seq_len(n_agents), input_dim]
@@ -268,12 +260,14 @@ class SimpleResAttSeqEnc(AttentionModel):
         output = self.linear(F.gelu(h))
         return output
 
-class SimpleResAttEnc(nn.Module):
 
+class SimpleResAttEnc(nn.Module):
     def __init__(self, input_dim, embed_dim, num_heads, max_seq_len, dropout=0.1):
         super(SimpleResAttEnc, self).__init__()
         self.linear1 = nn.Linear(input_dim, embed_dim)
-        self.attention = SelfAttentionFixedPE(embed_dim, num_heads, max_seq_len=max_seq_len, dropout=dropout, batch_first=True)
+        self.attention = SelfAttentionFixedPE(
+            embed_dim, num_heads, max_seq_len=max_seq_len, dropout=dropout, batch_first=True
+        )
         self.attention_weights = nn.Linear(embed_dim, 1)
 
         # Layer normalization for stability
@@ -283,7 +277,7 @@ class SimpleResAttEnc(nn.Module):
 
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x: torch.Tensor, key_padding_mask:torch.Tensor=None):
+    def forward(self, x: torch.Tensor, key_padding_mask: torch.Tensor = None):
         """
         Args:
             x: Input tensor of shape [batch_size, seq_len(n_agents), input_dim]

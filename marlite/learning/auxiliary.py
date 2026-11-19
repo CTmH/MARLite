@@ -21,7 +21,7 @@ from .sequence import validate_optimizer_ownership
 class AuxiliaryTerm:
     total: torch.Tensor
     count: torch.Tensor
-    weight: float = 1.
+    weight: float = 1.0
 
 
 @dataclass
@@ -45,7 +45,9 @@ def reparameterization_noise(batch, reference, update, seed):
             identity = f"{seed}:{update}:{source.episode_id}:{start + t}".encode()
             key = int.from_bytes(hashlib.blake2b(identity, digest_size=8).digest(), "little")
             generator = torch.Generator().manual_seed(key)
-            noise[b, t] = torch.randn(reference.shape[2:], generator=generator, dtype=reference.dtype)
+            noise[b, t] = torch.randn(
+                reference.shape[2:], generator=generator, dtype=reference.dtype
+            )
     return noise.to(reference.device)
 
 
@@ -80,7 +82,9 @@ class ObservationTargets:
         gid = groups.reshape(b * t, n).masked_fill(~alive.reshape(b * t, n), 0)
         index = gid[..., None].expand_as(flat)
         target = flat.new_zeros(b * t, valid.shape[-1], flat.shape[-1]).scatter_add_(1, index, flat)
-        count = flat.new_zeros(b * t, valid.shape[-1]).scatter_add_(1, gid, alive.reshape(b * t, n).float())
+        count = flat.new_zeros(b * t, valid.shape[-1]).scatter_add_(
+            1, gid, alive.reshape(b * t, n).float()
+        )
         target = target / count.clamp_min(1)[..., None]
         return Targets(target.reshape(b, t, valid.shape[-1], *obs.shape[3:]), valid)
 
@@ -96,12 +100,23 @@ class ConstructorTargets:
     receiver. Only detached topology is used to construct training labels.
     """
 
-    def __init__(self, constructor, topology="groups", *, mask_is_padding=False,
-                 time_axis=False, graph_source="behavior"):
+    def __init__(
+        self,
+        constructor,
+        topology="groups",
+        *,
+        mask_is_padding=False,
+        time_axis=False,
+        graph_source="behavior",
+    ):
         if topology not in ("groups", "graph") or graph_source not in ("behavior", "current"):
             raise ValueError("Invalid constructor topology/source")
         self.constructor, self.topology = constructor, topology
-        self.mask_is_padding, self.time_axis, self.graph_source = mask_is_padding, time_axis, graph_source
+        self.mask_is_padding, self.time_axis, self.graph_source = (
+            mask_is_padding,
+            time_axis,
+            graph_source,
+        )
 
     @torch.no_grad()
     def __call__(self, batch, diagnostics, length):
@@ -114,10 +129,15 @@ class ConstructorTargets:
             topology = diagnostics["groups"][:, :length].flatten(0, 1).detach().cpu().numpy()
         else:
             key = "behavior.adjacency"
-            adjacency = (diagnostics["adjacency"][:, :length] if self.graph_source == "current" else
-                         batch.transitions.get(key, batch.frames.get("context.adjacency")))
+            adjacency = (
+                diagnostics["adjacency"][:, :length]
+                if self.graph_source == "current"
+                else batch.transitions.get(key, batch.frames.get("context.adjacency"))
+            )
             if adjacency is None or adjacency.shape[1] < length:
-                raise ValueError("Graph targets require recorded or explicitly selected current adjacency")
+                raise ValueError(
+                    "Graph targets require recorded or explicitly selected current adjacency"
+                )
             adjacency = adjacency[:, :length].flatten(0, 1).detach().cpu()
             topology = [[(matrix != 0).nonzero().flip(-1).T.numpy()] for matrix in adjacency]
         values, valid = self.constructor.process(obs, states, topology, alive)
@@ -131,8 +151,10 @@ class ConstructorTargets:
         b = batch.filled.shape[0]
         if values.shape[0] != b * length or valid.shape[0] != b * length:
             raise ValueError("Constructor must label every requested frame")
-        return Targets(values.reshape(b, length, *values.shape[1:]).to(batch.filled.device),
-                       valid.reshape(b, length, *valid.shape[1:]).to(batch.filled.device))
+        return Targets(
+            values.reshape(b, length, *values.shape[1:]).to(batch.filled.device),
+            valid.reshape(b, length, *valid.shape[1:]).to(batch.filled.device),
+        )
 
 
 class ReconstructionObjective(nn.Module):
@@ -145,18 +167,37 @@ class ReconstructionObjective(nn.Module):
     Group weighting can count each group once or weight by its live members.
     """
 
-    def __init__(self, decoder, targets, *, source="group", variational=False,
-                 reconstruction="mse", group_kl=0., agent_kl=0., group_weighting="groups",
-                 noise_seed=0):
+    def __init__(
+        self,
+        decoder,
+        targets,
+        *,
+        source="group",
+        variational=False,
+        reconstruction="mse",
+        group_kl=0.0,
+        agent_kl=0.0,
+        group_weighting="groups",
+        noise_seed=0,
+    ):
         super().__init__()
         if source not in ("agent", "group", "features"):
             raise ValueError("Unknown representation source")
         if variational and source == "features":
             raise ValueError("Variational reconstruction needs explicit Gaussian parameters")
-        if not isinstance(reconstruction, nn.Module) and reconstruction not in ("mse", "bce", "bce_logits"):
+        if not isinstance(reconstruction, nn.Module) and reconstruction not in (
+            "mse",
+            "bce",
+            "bce_logits",
+        ):
             raise ValueError("Unknown reconstruction objective")
-        if isinstance(reconstruction, nn.Module) and getattr(reconstruction, "reduction", None) != "none":
-            raise ValueError("Custom reconstruction losses must return one loss per unit (reduction=none)")
+        if (
+            isinstance(reconstruction, nn.Module)
+            and getattr(reconstruction, "reduction", None) != "none"
+        ):
+            raise ValueError(
+                "Custom reconstruction losses must return one loss per unit (reduction=none)"
+            )
         if group_weighting not in ("groups", "agents"):
             raise ValueError("Unknown group population weighting")
         if not all(math.isfinite(v) and v >= 0 for v in (group_kl, agent_kl)):
@@ -169,23 +210,36 @@ class ReconstructionObjective(nn.Module):
     def forward(self, output, batch, update=0, **context):
         length = batch.loss_mask.shape[1]
         diagnostics = output.diagnostics
-        source = (diagnostics["local_state_estimates"] if self.source == "features" else
-                  diagnostics[self.source + "_mu"])[:, :length]
+        source = (
+            diagnostics["local_state_estimates"]
+            if self.source == "features"
+            else diagnostics[self.source + "_mu"]
+        )[:, :length]
         if self.variational:
             log_var = diagnostics[self.source + "_log_var"][:, :length]
             noise = reparameterization_noise(batch, source, update, self.noise_seed)
-            source = source + (.5 * log_var).exp() * noise
-        valid_units = (diagnostics["group_valid"][:, :length] if self.source == "group" else
-                       batch.frames["alive"][:, :length])
+            source = source + (0.5 * log_var).exp() * noise
+        valid_units = (
+            diagnostics["group_valid"][:, :length]
+            if self.source == "group"
+            else batch.frames["alive"][:, :length]
+        )
         target = self.targets(batch, diagnostics, length)
         target_values = target.values.to(source)
-        prediction = self.decoder(source.flatten(0, 2)).reshape(*source.shape[:3], *target_values.shape[3:])
+        prediction = self.decoder(source.flatten(0, 2)).reshape(
+            *source.shape[:3], *target_values.shape[3:]
+        )
         if prediction.shape != target_values.shape or target.valid.dtype != torch.bool:
-            raise ValueError("Reconstruction targets must match predictions and use boolean validity")
-        if target.valid.shape[:3] != source.shape[:3] or tuple(target_values.shape[:target.valid.ndim]) != tuple(target.valid.shape):
+            raise ValueError(
+                "Reconstruction targets must match predictions and use boolean validity"
+            )
+        if target.valid.shape[:3] != source.shape[:3] or tuple(
+            target_values.shape[: target.valid.ndim]
+        ) != tuple(target.valid.shape):
             raise ValueError("Target validity must describe leading target axes")
         valid = target.valid & (valid_units & batch.loss_mask[..., None]).reshape(
-            *valid_units.shape, *([1] * (target.valid.ndim - 3)))
+            *valid_units.shape, *([1] * (target.valid.ndim - 3))
+        )
         # Invalid padding must not introduce NaNs or invalid BCE labels.
         mask = valid.reshape(*valid.shape, *([1] * (prediction.ndim - valid.ndim)))
         prediction = prediction.masked_fill(~mask, 0)
@@ -196,9 +250,11 @@ class ReconstructionObjective(nn.Module):
             # entity axes; the remaining target axes are feature channels.
             units = math.prod(source.shape[:3])
             entities = math.prod(valid.shape[3:])
-            error = self.reconstruction(prediction.reshape(units, entities, -1),
-                                        target_values.reshape(units, entities, -1),
-                                        valid.reshape(units, entities))
+            error = self.reconstruction(
+                prediction.reshape(units, entities, -1),
+                target_values.reshape(units, entities, -1),
+                valid.reshape(units, entities),
+            )
             if error.shape != (units,):
                 raise ValueError("Custom reconstruction must return a vector over B*T*U units")
             error = error.reshape(source.shape[:3])
@@ -209,7 +265,9 @@ class ReconstructionObjective(nn.Module):
             elif self.reconstruction == "bce":
                 error = F.binary_cross_entropy(prediction, target_values, reduction="none")
             else:
-                error = F.binary_cross_entropy_with_logits(prediction, target_values, reduction="none")
+                error = F.binary_cross_entropy_with_logits(
+                    prediction, target_values, reduction="none"
+                )
             if error.ndim > valid.ndim:
                 error = error.flatten(valid.ndim).mean(-1)
             weights = valid.to(source)
@@ -228,10 +286,15 @@ class ReconstructionObjective(nn.Module):
                 continue
             mean = diagnostics[level + "_mu"][:, :length]
             log_var = diagnostics[level + "_log_var"][:, :length]
-            unit_valid = (diagnostics["group_valid"][:, :length] if level == "group" else
-                          batch.frames["alive"][:, :length]) & batch.loss_mask[..., None]
-            kl = .5 * (mean.square() + log_var.exp() - 1 - log_var).mean(-1)
-            terms[level + "_kl"] = AuxiliaryTerm(kl[unit_valid].sum(), unit_valid.sum(), coefficient)
+            unit_valid = (
+                diagnostics["group_valid"][:, :length]
+                if level == "group"
+                else batch.frames["alive"][:, :length]
+            ) & batch.loss_mask[..., None]
+            kl = 0.5 * (mean.square() + log_var.exp() - 1 - log_var).mean(-1)
+            terms[level + "_kl"] = AuxiliaryTerm(
+                kl[unit_valid].sum(), unit_valid.sum(), coefficient
+            )
         return terms
 
 
@@ -304,22 +367,36 @@ class AuxiliaryLearning:
             rl_loss = rl_loss.detach()
         if not self.mixer.weights[1]:
             ssl_loss = ssl_loss.detach()
-        return self.mixer((rl_loss, ssl_loss), parameters=parameters,
-                          distributed=backend.distributed, distributed_reduction="sum")
+        return self.mixer(
+            (rl_loss, ssl_loss),
+            parameters=parameters,
+            distributed=backend.distributed,
+            distributed_reduction="sum",
+        )
 
     def step(self, backend, max_grad_norm, active):
         backend.reduce_gradients(self.objective.parameters())
-        if self.optimizer is not None and active and any(p.grad is not None for p in self.objective.parameters()):
+        stepped = False
+        if (
+            self.optimizer is not None
+            and active
+            and any(p.grad is not None for p in self.objective.parameters())
+        ):
             torch.nn.utils.clip_grad_norm_(self.objective.parameters(), max_grad_norm)
             self.optimizer.step()
+            stepped = True
         if active:
             self.updates += 1
+        return stepped
 
     def state_dict(self):
-        return {"objective": self.objective.state_dict(), "updates": self.updates,
-                "start_update": self.start_update,
-                "optimizer": None if self.optimizer is None else self.optimizer.state_dict(),
-                "mixer": None if self.mixer is None else self.mixer.state_dict()}
+        return {
+            "objective": self.objective.state_dict(),
+            "updates": self.updates,
+            "start_update": self.start_update,
+            "optimizer": None if self.optimizer is None else self.optimizer.state_dict(),
+            "mixer": None if self.mixer is None else self.mixer.state_dict(),
+        }
 
     def load_state_dict(self, state):
         if state["start_update"] != self.start_update:

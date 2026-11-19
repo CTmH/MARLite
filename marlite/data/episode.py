@@ -40,6 +40,7 @@ class Episode:
     policy_version: int = 0
     seed: int | None = None
     metadata: dict = field(default_factory=dict)
+    state_snapshots: dict[str, Tensor] = field(default_factory=dict)
 
     @property
     def length(self):
@@ -48,7 +49,10 @@ class Episode:
     def validate(self):
         if not self.agent_ids or len(set(self.agent_ids)) != len(self.agent_ids):
             raise ValueError("agent_ids must be nonempty and unique")
-        for fields, required in ((self.frames, FRAME_FIELDS), (self.transitions, TRANSITION_FIELDS)):
+        for fields, required in (
+            (self.frames, FRAME_FIELDS),
+            (self.transitions, TRANSITION_FIELDS),
+        ):
             if missing := required.keys() - fields.keys():
                 raise ValueError(f"Missing episode fields: {sorted(missing)}")
             for name, value in fields.items():
@@ -56,7 +60,11 @@ class Episode:
                     raise TypeError(f"{name} must be a time-indexed tensor")
                 if value.device.type != "cpu" or value.requires_grad:
                     raise ValueError("Stored episodes must contain detached CPU tensors")
-                if name in required and required[name] is not None and value.dtype != required[name]:
+                if (
+                    name in required
+                    and required[name] is not None
+                    and value.dtype != required[name]
+                ):
                     raise TypeError(f"Incorrect dtype for {name}: {value.dtype}")
                 if value.is_floating_point() and not torch.isfinite(value).all():
                     raise ValueError(f"Nonfinite episode field: {name}")
@@ -107,6 +115,33 @@ class Episode:
                 raise ValueError(f"{name} must be T,N")
         if "old_value" in self.frames and self.frames["old_value"].shape != (t + 1,):
             raise ValueError("old_value must contain one team value per frame")
+        if self.state_snapshots:
+            steps = self.state_snapshots.get("steps")
+            if (
+                not isinstance(steps, Tensor)
+                or steps.dtype != torch.int64
+                or steps.ndim != 1
+                or not steps.numel()
+                or steps[0] != 0
+                or steps[-1] > t
+                or not (steps[1:] > steps[:-1]).all()
+            ):
+                raise ValueError("Recurrent snapshot steps must be ordered from frame zero")
+            for name, value in self.state_snapshots.items():
+                if not isinstance(value, Tensor) or value.ndim == 0:
+                    raise TypeError("Recurrent snapshots must be time-indexed tensors")
+                if (
+                    value.shape[0] != steps.numel()
+                    or value.device.type != "cpu"
+                    or value.requires_grad
+                ):
+                    raise ValueError(
+                        "Recurrent snapshots require detached CPU tensors at each saved step"
+                    )
+                if name != "steps" and not name.startswith(("actor_state.", "critic_state.")):
+                    raise ValueError("Unknown recurrent snapshot owner")
+                if value.is_floating_point() and not torch.isfinite(value).all():
+                    raise ValueError("Nonfinite recurrent snapshot")
         return self
 
     def return_masks(self):
@@ -119,15 +154,19 @@ class Episode:
 
     def state_dict(self):
         return {
-            "schema_version": 2, "agent_ids": self.agent_ids,
-            "frames": self.frames, "transitions": self.transitions,
-            "policy_version": self.policy_version, "seed": self.seed,
+            "schema_version": 3,
+            "agent_ids": self.agent_ids,
+            "frames": self.frames,
+            "transitions": self.transitions,
+            "policy_version": self.policy_version,
+            "seed": self.seed,
             "metadata": self.metadata,
+            "state_snapshots": self.state_snapshots,
         }
 
     @classmethod
     def from_state_dict(cls, state):
         state = dict(state)
-        if state.pop("schema_version", None) != 2:
+        if state.pop("schema_version", None) != 3:
             raise ValueError("Unsupported episode schema")
         return cls(**state).validate()

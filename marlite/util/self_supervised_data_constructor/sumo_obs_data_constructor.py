@@ -1,7 +1,9 @@
 import numpy as np
 from typing import Optional, Tuple, List
 from concurrent.futures import ProcessPoolExecutor
-from marlite.util.self_supervised_data_constructor.self_supervised_data_constructor import SelfSupervisedDataConstructor
+from marlite.util.self_supervised_data_constructor.self_supervised_data_constructor import (
+    SelfSupervisedDataConstructor,
+)
 import numba
 from numba import jit
 import sys
@@ -46,10 +48,12 @@ def get_incoming_neighbors_numba(edge_indices_t, alive_agents, agent_idx):
     # and source != agent_idx (exclude self-loop) and source is alive
     in_edge_count = 0
     for i in range(len(target_agents)):
-        if (target_agents[i] == agent_idx and
-            source_agents[i] != agent_idx and
-            source_agents[i] < len(is_alive) and
-            is_alive[source_agents[i]]):
+        if (
+            target_agents[i] == agent_idx
+            and source_agents[i] != agent_idx
+            and source_agents[i] < len(is_alive)
+            and is_alive[source_agents[i]]
+        ):
             in_edge_count += 1
 
     if in_edge_count == 0:
@@ -59,10 +63,12 @@ def get_incoming_neighbors_numba(edge_indices_t, alive_agents, agent_idx):
 
     idx = 0
     for i in range(len(target_agents)):
-        if (target_agents[i] == agent_idx and
-            source_agents[i] != agent_idx and
-            source_agents[i] < len(is_alive) and
-            is_alive[source_agents[i]]):
+        if (
+            target_agents[i] == agent_idx
+            and source_agents[i] != agent_idx
+            and source_agents[i] < len(is_alive)
+            and is_alive[source_agents[i]]
+        ):
             in_edge_sources[idx] = source_agents[i]
             idx += 1
 
@@ -148,8 +154,9 @@ def gather_observations_numba(observations_t, agent_idx, neighbor_indices, max_e
 
 
 @jit(nopython=True, cache=True)
-def process_single_agent_sumo_numba(observations_np, edge_indices_np, alive_mask_np,
-                                    agent_idx, max_entities_perception):
+def process_single_agent_sumo_numba(
+    observations_np, edge_indices_np, alive_mask_np, agent_idx, max_entities_perception
+):
     """
     Numba-accelerated function to process a single agent across all time steps for SUMO.
 
@@ -168,7 +175,9 @@ def process_single_agent_sumo_numba(observations_np, edge_indices_np, alive_mask
     seq_len, n_agents, feature_dim = observations_np.shape
 
     # Initialize result arrays
-    agent_result = np.zeros((seq_len, max_entities_perception, feature_dim), dtype=observations_np.dtype)
+    agent_result = np.zeros(
+        (seq_len, max_entities_perception, feature_dim), dtype=observations_np.dtype
+    )
     agent_mask = np.zeros((seq_len, max_entities_perception), dtype=numba.boolean)
 
     # Process each time step
@@ -186,7 +195,9 @@ def process_single_agent_sumo_numba(observations_np, edge_indices_np, alive_mask
 
         # Get incoming neighbors (agents that send information TO this agent)
         # Only include neighbors that are alive
-        incoming_neighbors = get_incoming_neighbors_numba(edge_indices_t, alive_agents_at_t, agent_idx)
+        incoming_neighbors = get_incoming_neighbors_numba(
+            edge_indices_t, alive_agents_at_t, agent_idx
+        )
 
         # Sort neighbors by index, remove duplicates, and truncate
         # We can have at most max_entities_perception - 1 neighbors (since self takes one slot)
@@ -215,14 +226,10 @@ def _create_shared_memory_arrays(observations, alive_mask):
     shm_obs = shared_memory.SharedMemory(create=True, size=observations.nbytes)
     shm_alive = shared_memory.SharedMemory(create=True, size=alive_mask.nbytes)
 
-    obs_arr = np.ndarray(
-        observations.shape, dtype=observations.dtype, buffer=shm_obs.buf
-    )
+    obs_arr = np.ndarray(observations.shape, dtype=observations.dtype, buffer=shm_obs.buf)
     obs_arr[:] = observations[:]
 
-    alive_arr = np.ndarray(
-        alive_mask.shape, dtype=alive_mask.dtype, buffer=shm_alive.buf
-    )
+    alive_arr = np.ndarray(alive_mask.shape, dtype=alive_mask.dtype, buffer=shm_alive.buf)
     alive_arr[:] = alive_mask[:]
 
     return shm_obs, shm_alive, obs_arr, alive_arr
@@ -235,16 +242,12 @@ def _cleanup_shared_memory(shm_obs, shm_alive):
     shm_alive.unlink()
 
 
-def _sumo_worker_init(
-    shm_obs_name, obs_shape, obs_dtype, shm_alive_name, alive_shape, alive_dtype
-):
+def _sumo_worker_init(shm_obs_name, obs_shape, obs_dtype, shm_alive_name, alive_shape, alive_dtype):
     global _worker_obs_shm, _worker_alive_shm, _worker_obs, _worker_alive
     _worker_obs_shm = shared_memory.SharedMemory(name=shm_obs_name)
     _worker_alive_shm = shared_memory.SharedMemory(name=shm_alive_name)
     _worker_obs = np.ndarray(obs_shape, dtype=obs_dtype, buffer=_worker_obs_shm.buf)
-    _worker_alive = np.ndarray(
-        alive_shape, dtype=alive_dtype, buffer=_worker_alive_shm.buf
-    )
+    _worker_alive = np.ndarray(alive_shape, dtype=alive_dtype, buffer=_worker_alive_shm.buf)
 
 
 def _sumo_worker_process_batch(args):
@@ -254,9 +257,7 @@ def _sumo_worker_process_batch(args):
         obs = _worker_obs[idx]
         alive = _worker_alive[idx]
         edges = edge_indices_list[idx]
-        result, mask = _process_single_sample(
-            (obs, edges, alive, max_entities_perception)
-        )
+        result, mask = _process_single_sample((obs, edges, alive, max_entities_perception))
         results.append((result, mask))
     return results
 
@@ -282,16 +283,17 @@ def _process_single_sample(args):
         for t in range(seq_len):
             edge_array_t = edge_indices_np[t]
             if len(edge_array_t.shape) == 2 and edge_array_t.shape[1] > 0:
-                edge_indices_array[t, :, :edge_array_t.shape[1]] = edge_array_t
+                edge_indices_array[t, :, : edge_array_t.shape[1]] = edge_array_t
 
-    result = np.zeros((seq_len, n_agents, max_entities_perception, feature_dim), dtype=observations_np.dtype)
+    result = np.zeros(
+        (seq_len, n_agents, max_entities_perception, feature_dim), dtype=observations_np.dtype
+    )
     mask = np.zeros((seq_len, n_agents, max_entities_perception), dtype=bool)
 
     for agent_idx in range(n_agents):
         # Process each agent using numba-accelerated function
         agent_result, agent_mask = process_single_agent_sumo_numba(
-            observations_np, edge_indices_array, alive_mask_np,
-            agent_idx, max_entities_perception
+            observations_np, edge_indices_array, alive_mask_np, agent_idx, max_entities_perception
         )
         result[:, agent_idx, :, :] = agent_result
         mask[:, agent_idx, :] = agent_mask
@@ -311,8 +313,14 @@ class SumoObsDataConstructor(SelfSupervisedDataConstructor):
     - Information flows from source agents to target agents
     """
 
-    def __init__(self, max_entities_perception: int, with_time_seq: bool = False, n_workers: int = 0,
-                 include_features: Optional[List[int]] = None, exclude_features: Optional[List[int]] = None):
+    def __init__(
+        self,
+        max_entities_perception: int,
+        with_time_seq: bool = False,
+        n_workers: int = 0,
+        include_features: Optional[List[int]] = None,
+        exclude_features: Optional[List[int]] = None,
+    ):
         """
         Initialize the SUMO environment's observation data constructor.
 
@@ -329,8 +337,13 @@ class SumoObsDataConstructor(SelfSupervisedDataConstructor):
         self.exclude_features = exclude_features if exclude_features is not None else []
         self.include_features = include_features if include_features is not None else []
 
-    def process(self, observations: np.ndarray, states: Optional[np.ndarray],
-                edge_indices: List[List[np.ndarray]], alive_mask: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    def process(
+        self,
+        observations: np.ndarray,
+        states: Optional[np.ndarray],
+        edge_indices: List[List[np.ndarray]],
+        alive_mask: np.ndarray,
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Process the input data to construct self-supervised learning data for SUMO.
 
@@ -348,9 +361,11 @@ class SumoObsDataConstructor(SelfSupervisedDataConstructor):
         """
         # Validate input dimensions
         if len(observations.shape) != 4:
-            raise ValueError(f"Expected observations to have 4 dimensions "
-                           f"(batch_size, seq_len, n_agents, feature_dim), "
-                           f"got {len(observations.shape)}")
+            raise ValueError(
+                f"Expected observations to have 4 dimensions "
+                f"(batch_size, seq_len, n_agents, feature_dim), "
+                f"got {len(observations.shape)}"
+            )
 
         batch_size, seq_len, n_agents, feature_dim = observations.shape
 
@@ -363,17 +378,17 @@ class SumoObsDataConstructor(SelfSupervisedDataConstructor):
             seq_len = 1
 
         # Prepare result and mask arrays
-        result = np.zeros((batch_size, seq_len, n_agents, self.max_entities_perception, feature_dim),
-                          dtype=observations.dtype)
+        result = np.zeros(
+            (batch_size, seq_len, n_agents, self.max_entities_perception, feature_dim),
+            dtype=observations.dtype,
+        )
         mask = np.zeros((batch_size, seq_len, n_agents, self.max_entities_perception), dtype=bool)
 
         # Parallel or sequential processing
         if self.n_workers > 1:
             n_workers = min(self.n_workers, batch_size)
             if n_workers >= 1:
-                shm_obs, shm_alive, _, _ = _create_shared_memory_arrays(
-                    observations, alive_mask
-                )
+                shm_obs, shm_alive, _, _ = _create_shared_memory_arrays(observations, alive_mask)
                 try:
                     # Divide batch among workers
                     base_samples = batch_size // n_workers
@@ -418,12 +433,14 @@ class SumoObsDataConstructor(SelfSupervisedDataConstructor):
             # else: batch_size == 0, nothing to process; result/mask stay zeros
         else:
             for batch_idx in range(batch_size):
-                processed_sample, mask_batch = _process_single_sample((
-                    observations[batch_idx],
-                    edge_indices[batch_idx],
-                    alive_mask[batch_idx],
-                    self.max_entities_perception
-                ))
+                processed_sample, mask_batch = _process_single_sample(
+                    (
+                        observations[batch_idx],
+                        edge_indices[batch_idx],
+                        alive_mask[batch_idx],
+                        self.max_entities_perception,
+                    )
+                )
                 result[batch_idx] = processed_sample
                 mask[batch_idx] = mask_batch
 
@@ -437,7 +454,9 @@ class SumoObsDataConstructor(SelfSupervisedDataConstructor):
             valid_include_features = [f for f in self.include_features if 0 <= f < result.shape[-1]]
             result = result[..., valid_include_features]
         elif self.exclude_features:
-            remaining_features = [f for f in range(result.shape[-1]) if f not in self.exclude_features]
+            remaining_features = [
+                f for f in range(result.shape[-1]) if f not in self.exclude_features
+            ]
             result = result[..., remaining_features]
 
         return result, mask

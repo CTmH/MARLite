@@ -114,9 +114,7 @@ class NearestDecoder(nn.Module):
         up_blocks: list[nn.Module] = []
         for _ in range(n_upsample):
             up_blocks.append(nn.Upsample(scale_factor=2, mode="nearest"))
-            up_blocks.append(
-                nn.Conv2d(hid_channels, hid_channels, kernel_size=3, padding=1)
-            )
+            up_blocks.append(nn.Conv2d(hid_channels, hid_channels, kernel_size=3, padding=1))
             up_blocks.append(nn.GroupNorm(1, hid_channels))
             up_blocks.append(nn.GELU())
         self.upsampler = nn.Sequential(*up_blocks)
@@ -129,9 +127,7 @@ class NearestDecoder(nn.Module):
         #     copies of input pixels.
         #     Shape:  (B, C, H, W)  →  (B, C, window_size, window_size)
         # ------------------------------------------------------------------
-        self.to_target = nn.Upsample(
-            size=(window_size, window_size), mode="nearest"
-        )
+        self.to_target = nn.Upsample(size=(window_size, window_size), mode="nearest")
 
         # ------------------------------------------------------------------
         # 4.  Channel projection:  hid_channels  →  out_channels  via 1×1

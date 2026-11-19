@@ -17,16 +17,17 @@ class ComplementaryAttackQueries:
     query_dim = 14
 
     def __init__(
-        self, n_queries=64, evader_hp=5.0, effective_damage=10.0,
-        ineffective_damage=0.2, proposal="uniform",
+        self,
+        n_queries=64,
+        evader_hp=5.0,
+        effective_damage=10.0,
+        ineffective_damage=0.2,
+        proposal="uniform",
     ):
         if type(n_queries) is not int or n_queries < 1:
             raise ValueError("n_queries must be positive")
         if (
-            not all(
-                math.isfinite(v)
-                for v in (evader_hp, effective_damage, ineffective_damage)
-            )
+            not all(math.isfinite(v) for v in (evader_hp, effective_damage, ineffective_damage))
             or evader_hp <= 0
             or effective_damage < 0
             or ineffective_damage < 0
@@ -61,10 +62,7 @@ class ComplementaryAttackQueries:
             -1,
         )
         offsets = torch.tensor(ATTACK_OFFSETS, device=device)
-        positions = (
-            target.unsqueeze(-2)
-            + offsets[torch.randint(12, (*shape, 3), device=device)]
-        )
+        positions = target.unsqueeze(-2) + offsets[torch.randint(12, (*shape, 3), device=device)]
         modes = torch.randint(2, (*shape, 3), device=device)
         counts = torch.randint(1, 4, shape, device=device)
         active = torch.arange(3, device=device) < counts.unsqueeze(-1)
@@ -89,7 +87,8 @@ class ComplementaryAttackQueries:
         )
 
         x, y = torch.meshgrid(
-            torch.arange(width, device=device), torch.arange(height, device=device),
+            torch.arange(width, device=device),
+            torch.arange(height, device=device),
             indexing="ij",
         )
         cells = torch.stack((x.flatten(), y.flatten()), dim=-1)
@@ -151,9 +150,7 @@ class ComplementaryAttackQueries:
         mask = valid.unsqueeze(-1) & ((kind == 0) | unique)
         damage = torch.where(effective, self.effective_damage, self.ineffective_damage)
         tolerance = (
-            8
-            * torch.finfo(torch.float32).eps
-            * torch.maximum(hp.abs(), damage).clamp_min(1)
+            8 * torch.finfo(torch.float32).eps * torch.maximum(hp.abs(), damage).clamp_min(1)
         )
         ambiguous = exists & present.any(-1) & ((hp - damage).abs() <= tolerance)
         mask &= ~((kind == 2) & ambiguous)

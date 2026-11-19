@@ -1,10 +1,10 @@
 from absl import logging
 from typing import Dict, Any, Tuple, List
 import numpy as np
-from collections import deque
 from pettingzoo.utils import BaseParallelWrapper, ParallelEnv
-from marlite.algorithm.agents.agent_group_config import AgentGroupConfig
-from marlite.util.env_util import obs_preprocess, precompute_manhattan_offsets, ensure_all_agents_present
+from gymnasium.spaces import Box
+from marlite.environment.controllers import RandomController
+from marlite.util.env_util import precompute_manhattan_offsets
 from marlite.algorithm.graph_builder.graph_util import binary_to_decimal
 
 
@@ -13,7 +13,7 @@ class MAgentWrapper(BaseParallelWrapper):
 
     This wrapper provides a common interface for handling opponent agents in multi-agent
     environments. It supports:
-    - Observation history management for opponent agents
+    - Episode-seeded opponent controllers with caller-owned recurrent state
     - Action concatenation between agent and opponent actions
     - Vectorized observation processing (closest agents by Manhattan distance)
     - Channel-first format conversion
@@ -33,33 +33,30 @@ class MAgentWrapper(BaseParallelWrapper):
     BINARY_AGENT_ID_START = 5
     BINARY_AGENT_ID_END = 14  # 5-14: 10 channels
     ONE_HOT_ACTION_START = 15
-    ONE_HOT_ACTION_END = 35   # 15-35: 21 channels
+    ONE_HOT_ACTION_END = 35  # 15-35: 21 channels
     LAST_REWARD_CHANNEL = 36
 
     OBSERVATION_OBSTACLE_CHANNEL = 0
     OBSERVATION_TEAM_0_PRESENCE_CHANNEL = 1
     OBSERVATION_TEAM_1_PRESENCE_CHANNEL = 4
-    #OBSERVATION_AGENT_POSITION_Y = 31
-    #OBSERVATION_AGENT_POSITION_X = 32
+    # OBSERVATION_AGENT_POSITION_Y = 31
+    # OBSERVATION_AGENT_POSITION_X = 32
 
     def __init__(
-            self,
-            env: ParallelEnv,
-            opponent_agent_group_config: Dict[str, Any],
-            opp_obs_queue_len: int,
-            channel_first: bool = False,
-            vector_state: bool = False,
-            vector_observation: bool = False,
-            max_vector_observation_records: int = 8,
-            win_bonus_factor: float = 0.0
-            ):
+        self,
+        env: ParallelEnv,
+        opponent=None,
+        channel_first: bool = False,
+        vector_state: bool = False,
+        vector_observation: bool = False,
+        max_vector_observation_records: int = 8,
+        win_bonus_factor: float = 0.0,
+    ):
         """Initialize the wrapper with opponent agent configuration.
 
         Args:
             env: The base environment to wrap
-            opponent_agent_group_config: Configuration for opponent agents
-                (should contain parameters needed to initialize AgentGroupConfig)
-            opp_obs_queue_len: Length of observation history queue for opponents
+            opponent: Seeded controller with reset() and actions() methods.
             channel_first: Whether to transpose observations to channel-first format
                 (H, W, C) -> (C, H, W)
             vector_state: If True, state() will output a matrix of shape (n_agent, feature_dim)
@@ -72,10 +69,7 @@ class MAgentWrapper(BaseParallelWrapper):
                 win_bonus_factor * (max_cycles - steps_used) / max_cycles, rewarding faster
                 victories. Victory is defined by _check_victory() (default: all opponents dead).
         """
-        self.opponent_agent_group_config = opponent_agent_group_config
-        self.opponent_agent_group_config = AgentGroupConfig(**self.opponent_agent_group_config)
-        self.opponent_agent_group = self.opponent_agent_group_config.get_agent_group()
-        self.opp_obs_queue_len = opp_obs_queue_len
+        self.opponent = RandomController() if opponent is None else opponent
         self.channel_first = channel_first
         self.vector_state = vector_state
         super().__init__(env=env)
@@ -87,7 +81,7 @@ class MAgentWrapper(BaseParallelWrapper):
         # Early-win bonus configuration
         self.win_bonus_factor = win_bonus_factor
         self._step_count = 0
-        max_cycles = getattr(self.env, 'max_cycles', None)
+        max_cycles = getattr(self.env, "max_cycles", None)
         if win_bonus_factor != 0 and max_cycles is None:
             raise ValueError(
                 "win_bonus_factor is set but the wrapped environment has no "
@@ -101,25 +95,43 @@ class MAgentWrapper(BaseParallelWrapper):
         self.action_spaces = {}
 
         self.opponent_observations = {}
-        self.opponent_actions = {}
         self.possible_opponent_agents = []
-        self.opponent_observation_history = deque(maxlen=self.opp_obs_queue_len)  # Queue to store opponent's observations
 
         self._n_env_possible_agents = len(self.env.possible_agents)
         self.manhattan_offsets = precompute_manhattan_offsets(2)
 
         # env.possible_agents = [team0_0..team0_N, team1_0..team1_M]
         # Find where team 1 begins (row offset for vectorized state).
-        team0_prefix = self.env.possible_agents[0].rsplit('_', 1)[0]
+        team0_prefix = self.env.possible_agents[0].rsplit("_", 1)[0]
         for i, name in enumerate(self.env.possible_agents):
-            if name.rsplit('_', 1)[0] != team0_prefix:
+            if name.rsplit("_", 1)[0] != team0_prefix:
                 self._start_team1 = i
                 break
         else:
             self._start_team1 = self._n_env_possible_agents
 
-        self.opponent_avail_actions = {}
-        self.default_opponent_obs = {}
+    def _configure_team(self, prefix, opponent_prefix):
+        """Expose transformed spaces, not the raw simulator's image spaces."""
+        self.possible_agents = [a for a in self.env.possible_agents if a.startswith(prefix)]
+        self._possible_agents_set = set(self.possible_agents)
+        self.possible_opponent_agents = [
+            a for a in self.env.possible_agents if a.startswith(opponent_prefix)
+        ]
+        self.action_spaces = {a: self.env.action_space(a) for a in self.possible_agents}
+        self.observation_spaces = {}
+        for agent in self.possible_agents:
+            shape = self.env.observation_space(agent).shape
+            if self.vector_agent_observation:
+                shape = (self.max_vector_observation_records, shape[-1] + 2)
+            elif self.channel_first:
+                shape = (shape[2], shape[0], shape[1])
+            self.observation_spaces[agent] = Box(-np.inf, np.inf, shape, dtype=np.float16)
+
+    def observation_space(self, agent):
+        return self.observation_spaces[agent]
+
+    def action_space(self, agent):
+        return self.action_spaces[agent]
 
     @property
     def agents(self) -> List[str]:
@@ -172,23 +184,6 @@ class MAgentWrapper(BaseParallelWrapper):
         """
         return len(self.opponent_agents) == 0
 
-    def _concat_action_dict(self, agent_actions: Dict[str, Any], opponent_actions: Dict[str, Any]) -> Dict[str, Any]:
-        """Concatenate agent actions with opponent actions.
-
-        Combines actions from both agent and opponent sides into a single dictionary
-        that can be passed to the underlying environment's step() method.
-
-        Args:
-            agent_actions: Actions from the agent side (keys are agent names)
-            opponent_actions: Actions from the opponent side (keys are opponent agent names)
-
-        Returns:
-            Combined dictionary of all actions, with keys being all agents in the environment
-        """
-        combined_actions = agent_actions | opponent_actions
-        combined_actions = {agent: combined_actions.get(agent, 0) for agent in self.env.agents}
-        return combined_actions
-
     def _process_observations(self, observations: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
         """Process observations according to wrapper configuration.
 
@@ -208,11 +203,15 @@ class MAgentWrapper(BaseParallelWrapper):
         if self.vector_agent_observation:
             for agent in observations.keys():
                 # (H, W, C) -> (n_units, n_channels)
-                processed_observations[agent] = self._vectorize_observation(observations[agent]).astype(np.float16)
+                processed_observations[agent] = self._vectorize_observation(
+                    observations[agent]
+                ).astype(np.float16)
         elif self.channel_first:
             for agent in observations.keys():
                 # (H, W, C) -> (C, H, W)
-                processed_observations[agent] = np.transpose(observations[agent], (2, 0, 1)).astype(np.float16)
+                processed_observations[agent] = np.transpose(observations[agent], (2, 0, 1)).astype(
+                    np.float16
+                )
         else:
             for agent in observations.keys():
                 processed_observations[agent] = observations[agent].astype(np.float16)
@@ -280,7 +279,9 @@ class MAgentWrapper(BaseParallelWrapper):
 
         # Create result matrix - extend C dimension by 2 for relative position info (dy, dx)
         max_records = self.max_vector_observation_records
-        result = np.zeros((max_records, C + 2), dtype=np.float16)  # Add 2 channels for relative position
+        result = np.zeros(
+            (max_records, C + 2), dtype=np.float16
+        )  # Add 2 channels for relative position
 
         # Fill with closest entities (obstacles and agents) + normalized relative position info
         n_entities = min(len(sorted_positions), max_records)
@@ -324,7 +325,7 @@ class MAgentWrapper(BaseParallelWrapper):
 
         for pos in team_0_positions:
             y, x = pos
-            binary_id = state[y, x, self.BINARY_AGENT_ID_START:self.BINARY_AGENT_ID_END+1]
+            binary_id = state[y, x, self.BINARY_AGENT_ID_START : self.BINARY_AGENT_ID_END + 1]
             agent_id = binary_to_decimal(binary_id)
             agent_positions.append((y, x))
             agent_ids.append(agent_id)
@@ -336,14 +337,16 @@ class MAgentWrapper(BaseParallelWrapper):
 
         for pos in team_1_positions:
             y, x = pos
-            binary_id = state[y, x, self.BINARY_AGENT_ID_START:self.BINARY_AGENT_ID_END+1]
+            binary_id = state[y, x, self.BINARY_AGENT_ID_START : self.BINARY_AGENT_ID_END + 1]
             agent_id = binary_to_decimal(binary_id)
             agent_positions.append((y, x))
             agent_ids.append(agent_id)
             agent_team.append(1)
 
         action_space = self.ONE_HOT_ACTION_END - self.ONE_HOT_ACTION_START + 1
-        feature_dim = 1 + 1 + 1 + 2 + action_space + len(self.manhattan_offsets) * 3 # hp + team + last_reward + coords + action + nearby
+        feature_dim = (
+            1 + 1 + 1 + 2 + action_space + len(self.manhattan_offsets) * 3
+        )  # hp + team + last_reward + coords + action + nearby
         if not agent_ids:
             # No agents found, return empty matrix
             return np.zeros((self._n_env_possible_agents, feature_dim), dtype=np.float16)
@@ -363,7 +366,11 @@ class MAgentWrapper(BaseParallelWrapper):
                 logging.warning(
                     "Vectorize state: agent_id %d out of bounds (max %d). "
                     "Skipping agent at (y=%d, x=%d) team=%d.",
-                    agent_id, self._n_env_possible_agents, y, x, team,
+                    agent_id,
+                    self._n_env_possible_agents,
+                    y,
+                    x,
+                    team,
                 )
                 continue
 
@@ -385,7 +392,9 @@ class MAgentWrapper(BaseParallelWrapper):
 
             nearby_idx_start = 5 + action_space
             # One-hot action (21 features)
-            feature_matrix[agent_id, 5:nearby_idx_start] = state[y, x, self.ONE_HOT_ACTION_START:self.ONE_HOT_ACTION_END+1]
+            feature_matrix[agent_id, 5:nearby_idx_start] = state[
+                y, x, self.ONE_HOT_ACTION_START : self.ONE_HOT_ACTION_END + 1
+            ]
 
             # Nearby features (12 features)
             for i, (dx, dy) in enumerate(self.manhattan_offsets):
@@ -404,12 +413,13 @@ class MAgentWrapper(BaseParallelWrapper):
 
         return feature_matrix
 
-    def step(self, actions: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, float], Dict[str, bool], Dict[str, bool], Dict[str, Any]]:
+    def step(
+        self, actions: Dict[str, Any]
+    ) -> Tuple[Dict[str, Any], Dict[str, float], Dict[str, bool], Dict[str, bool], Dict[str, Any]]:
         """Execute one step in the environment with opponent actions.
 
         This method handles the complete step cycle including:
-        - Processing opponent observation history
-        - Generating opponent actions using the opponent agent group
+        - Generating opponent actions from current observations and controller state
         - Combining agent and opponent actions
         - Executing the step in the underlying environment
         - Processing observations for the agent side only
@@ -425,27 +435,44 @@ class MAgentWrapper(BaseParallelWrapper):
                 - Truncations for agents (dictionary mapping agent names to truncation flags)
                 - Additional info (dictionary mapping agent names to info dictionaries)
         """
-        opp_obs = list(self.opponent_observation_history)
-        opp_obs, traj_padding_mask = obs_preprocess(opp_obs, self.possible_opponent_agents, self.opp_obs_queue_len)
-        alive_opponent = self.opponent_agents
-        self.opponent_actions = self.opponent_agent_group.act(opp_obs,
-                                                              self.env.state(),
-                                                              self.opponent_avail_actions,
-                                                              traj_padding_mask,
-                                                              alive_opponent,
-                                                              epsilon=0.0)
-        combined_actions = self._concat_action_dict(actions, self.opponent_actions)  # Combine actions with opponent's actions
+        if set(actions) != set(self.agents):
+            raise ValueError("Actions must contain exactly the live controlled agents")
+        available = {agent: self.env.action_space(agent) for agent in self.possible_opponent_agents}
+        opponent_actions = self.opponent.actions(
+            self.opponent_observations, available, self.opponent_agents, self.env.state()
+        )
+        if set(opponent_actions) != set(self.opponent_agents):
+            raise ValueError("Opponent controller must return exactly the live opponent actions")
+        combined_actions = dict(actions) | opponent_actions
         observations, rewards, terminations, truncations, infos = self.env.step(combined_actions)
 
-        self.opponent_observations = {agent: observations[agent] for agent in observations.keys() if agent in self.possible_opponent_agents}
-        self.opponent_observations = ensure_all_agents_present(self.opponent_observations, self.default_opponent_obs)
-        self.opponent_observation_history.append(self.opponent_observations)
+        self.opponent_observations = {
+            agent: observations[agent]
+            for agent in observations.keys()
+            if agent in self.possible_opponent_agents
+        }
 
-        agent_observations = {agent: observations[agent] for agent in observations.keys() if agent in self._possible_agents_set}
-        agent_rewards = {agent: rewards[agent] for agent in rewards.keys() if agent in self._possible_agents_set}
-        agent_terminations = {agent: terminations[agent] for agent in terminations.keys() if agent in self._possible_agents_set}
-        agent_truncations = {agent: truncations[agent] for agent in truncations.keys() if agent in self._possible_agents_set}
-        agent_infos = {agent: infos[agent] for agent in infos.keys() if agent in self._possible_agents_set}
+        agent_observations = {
+            agent: observations[agent]
+            for agent in observations.keys()
+            if agent in self._possible_agents_set
+        }
+        agent_rewards = {
+            agent: rewards[agent] for agent in rewards.keys() if agent in self._possible_agents_set
+        }
+        agent_terminations = {
+            agent: terminations[agent]
+            for agent in terminations.keys()
+            if agent in self._possible_agents_set
+        }
+        agent_truncations = {
+            agent: truncations[agent]
+            for agent in truncations.keys()
+            if agent in self._possible_agents_set
+        }
+        agent_infos = {
+            agent: infos[agent] for agent in infos.keys() if agent in self._possible_agents_set
+        }
 
         self._step_count += 1
         if self.win_bonus_factor != 0 and self._check_victory():
@@ -456,7 +483,9 @@ class MAgentWrapper(BaseParallelWrapper):
 
         return agent_observations, agent_rewards, agent_terminations, agent_truncations, agent_infos
 
-    def reset(self, seed: int = None, options: Dict[str, Any] = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    def reset(
+        self, seed: int = None, options: Dict[str, Any] = None
+    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """Reset the environment and initialize opponent observation history.
 
         This method resets the underlying environment and initializes the opponent
@@ -473,11 +502,18 @@ class MAgentWrapper(BaseParallelWrapper):
         """
         observations, infos = self.env.reset(seed=seed, options=options)
         self._step_count = 0
-        self.opponent_observations = {agent: observations[agent] for agent in self.possible_opponent_agents}
-        self.opponent_observation_history.clear()
-        self.opponent_observation_history.append(self.opponent_observations)
-        agent_observations = {agent: observations[agent] for agent in observations.keys() if agent in self._possible_agents_set}
-        agent_infos = {agent: infos[agent] for agent in infos.keys() if agent in self._possible_agents_set}
+        self.opponent.reset(seed=seed, agents=self.possible_opponent_agents)
+        self.opponent_observations = {
+            agent: observations[agent] for agent in self.possible_opponent_agents
+        }
+        agent_observations = {
+            agent: observations[agent]
+            for agent in observations.keys()
+            if agent in self._possible_agents_set
+        }
+        agent_infos = {
+            agent: infos[agent] for agent in infos.keys() if agent in self._possible_agents_set
+        }
 
         agent_observations = self._process_observations(agent_observations)
 
@@ -520,25 +556,23 @@ class AdversarialPursuitPredator(MAgentWrapper):
     """
 
     # Channel indices for state tensor
-    ONE_HOT_ACTION_END = 27   # 15-27: 13 channels
+    ONE_HOT_ACTION_END = 27  # 15-27: 13 channels
     LAST_REWARD_CHANNEL = 28
 
     def __init__(
-            self,
-            env: ParallelEnv,
-            opponent_agent_group_config: Dict[str, Any],
-            opp_obs_queue_len: int,
-            channel_first: bool = False,
-            vector_state: bool = False,
-            vector_observation: bool = False,
-            max_vector_observation_records: int = 8
-            ):
+        self,
+        env: ParallelEnv,
+        opponent=None,
+        channel_first: bool = False,
+        vector_state: bool = False,
+        vector_observation: bool = False,
+        max_vector_observation_records: int = 8,
+    ):
         """Initialize the predator wrapper.
 
         Args:
             env: The base environment to wrap
-            opponent_agent_group_config: Configuration for prey agents
-            opp_obs_queue_len: Length of observation history queue for prey
+            opponent: Controller for prey agents.
             channel_first: Whether to transpose observations to channel-first format
             vector_state: If True, state() will output vectorized state representation
             vector_observation: If True, observations will be vectorized
@@ -546,20 +580,14 @@ class AdversarialPursuitPredator(MAgentWrapper):
         """
         super().__init__(
             env,
-            opponent_agent_group_config,
-            opp_obs_queue_len,
+            opponent,
             channel_first,
             vector_state,
             vector_observation,
-            max_vector_observation_records)
+            max_vector_observation_records,
+        )
 
-        self.possible_agents = [agent for agent in self.env.possible_agents if agent.startswith('predator_')]
-        self.observation_spaces = {agent: self.env.observation_space(agent) for agent in self.possible_agents}
-        self.action_spaces = {agent: self.env.action_space(agent) for agent in self.possible_agents}
-        self.possible_opponent_agents = [agent for agent in self.env.possible_agents if agent.startswith('prey_')]
-        self.opponent_avail_actions = {agent: self.env.action_spaces[agent] for agent in self.possible_opponent_agents}
-        self.default_opponent_obs = {agent: np.zeros(self.env.observation_space(agent).shape, dtype=np.float16) for agent in self.possible_opponent_agents}
-        self._possible_agents_set = set(self.possible_agents)
+        self._configure_team("predator_", "prey_")
 
 
 class AdversarialPursuitPrey(MAgentWrapper):
@@ -574,25 +602,23 @@ class AdversarialPursuitPrey(MAgentWrapper):
     """
 
     # Channel indices for state tensor
-    ONE_HOT_ACTION_END = 27   # 15-27: 13 channels
+    ONE_HOT_ACTION_END = 27  # 15-27: 13 channels
     LAST_REWARD_CHANNEL = 28
 
     def __init__(
-            self,
-            env: ParallelEnv,
-            opponent_agent_group_config: Dict[str, Any],
-            opp_obs_queue_len: int,
-            channel_first: bool = False,
-            vector_state: bool = False,
-            vector_observation: bool = False,
-            max_vector_observation_records: int = 8
-            ):
+        self,
+        env: ParallelEnv,
+        opponent=None,
+        channel_first: bool = False,
+        vector_state: bool = False,
+        vector_observation: bool = False,
+        max_vector_observation_records: int = 8,
+    ):
         """Initialize the prey wrapper.
 
         Args:
             env: The base environment to wrap
-            opponent_agent_group_config: Configuration for predator agents
-            opp_obs_queue_len: Length of observation history queue for predators
+            opponent: Controller for predator agents.
             channel_first: Whether to transpose observations to channel-first format
             vector_state: If True, state() will output vectorized state representation
             vector_observation: If True, observations will be vectorized
@@ -600,20 +626,14 @@ class AdversarialPursuitPrey(MAgentWrapper):
         """
         super().__init__(
             env,
-            opponent_agent_group_config,
-            opp_obs_queue_len,
+            opponent,
             channel_first,
             vector_state,
             vector_observation,
-            max_vector_observation_records)
+            max_vector_observation_records,
+        )
 
-        self.possible_agents = [agent for agent in self.env.possible_agents if agent.startswith('prey_')]
-        self.observation_spaces = {agent: self.env.observation_space(agent) for agent in self.possible_agents}
-        self.action_spaces = {agent: self.env.action_space(agent) for agent in self.possible_agents}
-        self.possible_opponent_agents = [agent for agent in self.env.possible_agents if agent.startswith('predator_')]
-        self.opponent_avail_actions = {agent: self.env.action_spaces[agent] for agent in self.possible_opponent_agents}
-        self.default_opponent_obs = {agent: np.zeros(self.env.observation_space(agent).shape, dtype=np.float16) for agent in self.possible_opponent_agents}
-        self._possible_agents_set = set(self.possible_agents)
+        self._configure_team("prey_", "predator_")
 
 
 class BattleWrapper(MAgentWrapper):
@@ -628,22 +648,20 @@ class BattleWrapper(MAgentWrapper):
     """
 
     def __init__(
-            self,
-            env: ParallelEnv,
-            opponent_agent_group_config: Dict[str, Any],
-            opp_obs_queue_len: int,
-            channel_first: bool = False,
-            vector_state: bool = False,
-            vector_observation: bool = False,
-            max_vector_observation_records: int = 8,
-            win_bonus_factor: float = 0.0
-            ):
+        self,
+        env: ParallelEnv,
+        opponent=None,
+        channel_first: bool = False,
+        vector_state: bool = False,
+        vector_observation: bool = False,
+        max_vector_observation_records: int = 8,
+        win_bonus_factor: float = 0.0,
+    ):
         """Initialize the battle wrapper.
 
         Args:
             env: The base environment to wrap
-            opponent_agent_group_config: Configuration for blue team agents
-            opp_obs_queue_len: Length of observation history queue for blue team
+            opponent: Controller for the blue team.
             channel_first: Whether to transpose observations to channel-first format
             vector_state: If True, state() will output vectorized state representation
             vector_observation: If True, observations will be vectorized
@@ -653,20 +671,12 @@ class BattleWrapper(MAgentWrapper):
         """
         super().__init__(
             env,
-            opponent_agent_group_config,
-            opp_obs_queue_len,
+            opponent,
             channel_first,
             vector_state,
             vector_observation,
             max_vector_observation_records,
-            win_bonus_factor=win_bonus_factor)
+            win_bonus_factor=win_bonus_factor,
+        )
 
-        self.possible_agents = [agent for agent in self.env.possible_agents if agent.startswith('red_')]
-        self.observation_spaces = {agent: self.env.observation_space(agent) for agent in self.possible_agents}
-        self.action_spaces = {agent: self.env.action_space(agent) for agent in self.possible_agents}
-        self.possible_opponent_agents = [agent for agent in self.env.possible_agents if agent.startswith('blue_')]
-        self.opponent_avail_actions = {agent: self.env.action_spaces[agent] for agent in self.possible_opponent_agents}
-        for agent in self.possible_opponent_agents:
-            temp_var = self.env.observation_space(agent)
-        self.default_opponent_obs = {agent: np.zeros(self.env.observation_space(agent).shape, dtype=np.float16) for agent in self.possible_opponent_agents}
-        self._possible_agents_set = set(self.possible_agents)
+        self._configure_team("red_", "blue_")

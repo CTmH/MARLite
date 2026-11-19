@@ -12,7 +12,9 @@ from marlite.learning.backend import ExecutionBackend
 def initialize_backend(device="auto", timeout_seconds=120):
     """One process/device; torchrun supplies rank and rendezvous environment."""
     if device == "auto":
-        device = f"cuda:{int(os.environ.get('LOCAL_RANK', 0))}" if torch.cuda.is_available() else "cpu"
+        device = (
+            f"cuda:{int(os.environ.get('LOCAL_RANK', 0))}" if torch.cuda.is_available() else "cpu"
+        )
     target = torch.device(device)
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
     world = int(os.environ.get("WORLD_SIZE", 1))
@@ -27,6 +29,7 @@ def initialize_backend(device="auto", timeout_seconds=120):
             raise ValueError("Use --device cuda/auto under torchrun, one learner per local GPU")
         torch.cuda.set_device(target)
     if "RANK" in os.environ and not dist.is_initialized():
-        dist.init_process_group("nccl" if target.type == "cuda" else "gloo",
-                                timeout=timedelta(seconds=timeout_seconds))
+        dist.init_process_group(
+            "nccl" if target.type == "cuda" else "gloo", timeout=timedelta(seconds=timeout_seconds)
+        )
     return ExecutionBackend(target)

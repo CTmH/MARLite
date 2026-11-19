@@ -5,7 +5,7 @@ from marlite.util.scheduler import (
     LinearScheduler,
     LogarithmicScheduler,
 )
-from marlite.util.scheduler_config import SchedulerConfig, registered_schedulers
+from marlite.configuration.catalog import default_registry
 
 
 class TestSchedulers(unittest.TestCase):
@@ -55,31 +55,18 @@ class TestSchedulers(unittest.TestCase):
         self.assertEqual(scheduler.get_value(0), -0.5)
         self.assertEqual(scheduler.get_value(100), -0.5)
 
-    def test_scheduler_config_builds_registered_schedulers(self):
-        linear = SchedulerConfig(
-            type="linear",
-            start_value=1.0,
-            end_value=0.0,
-            ramp_start_step=3,
-            ramp_steps=7,
-        ).get_scheduler()
-        logarithmic = SchedulerConfig(
-            type="logarithmic",
-            start_value=0.0,
-            end_value=1.0,
-            ramp_start_step=0,
-            ramp_steps=10,
-            curve_rate=4.0,
-        ).get_scheduler()
-        fixed = SchedulerConfig(type="fixed", value=3.0).get_scheduler()
-
-        self.assertIsInstance(linear, LinearScheduler)
-        self.assertIsInstance(logarithmic, LogarithmicScheduler)
-        self.assertIsInstance(fixed, FixedScheduler)
-        self.assertEqual(
-            set(registered_schedulers), {"linear", "logarithmic", "fixed"}
-        )
-
-
-if __name__ == "__main__":
-    unittest.main()
+    def test_registry_builds_scalar_schedules(self):
+        for name, params, cls in [
+            (
+                "LinearScheduler",
+                dict(start_value=1.0, end_value=0.0, ramp_start_step=3, ramp_steps=7),
+                LinearScheduler,
+            ),
+            (
+                "LogarithmicScheduler",
+                dict(start_value=0.0, end_value=1.0, ramp_start_step=0, ramp_steps=10),
+                LogarithmicScheduler,
+            ),
+            ("FixedScheduler", dict(value=3.0), FixedScheduler),
+        ]:
+            self.assertIsInstance(default_registry().build({"type": name, "params": params}), cls)

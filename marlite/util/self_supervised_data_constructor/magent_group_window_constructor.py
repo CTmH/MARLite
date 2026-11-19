@@ -1,5 +1,5 @@
 import numpy as np
-from typing import Optional, List
+from typing import List
 from concurrent.futures import ProcessPoolExecutor
 from multiprocessing.shared_memory import SharedMemory
 
@@ -17,9 +17,7 @@ def _group_window_chunk_worker(args):
         state_last = np.ndarray(shape, dtype=dtype, buffer=shm.buf)
         results = []
         for b in chunk_ids:
-            r, m = constructor._process_single(
-                state_last[b], grouping[b], alive_last[b]
-            )
+            r, m = constructor._process_single(state_last[b], grouping[b], alive_last[b])
             results.append((r, m))
         return results
     finally:
@@ -122,17 +120,12 @@ class MagentGroupWindowConstructor:
 
         shm = SharedMemory(create=True, size=state_last.nbytes)
         try:
-            shm_array = np.ndarray(
-                state_last.shape, dtype=state_last.dtype, buffer=shm.buf
-            )
+            shm_array = np.ndarray(state_last.shape, dtype=state_last.dtype, buffer=shm.buf)
             np.copyto(shm_array, state_last)
 
             sample_ids = list(range(batch_size))
             chunk_size = (batch_size + n_workers - 1) // n_workers
-            chunks = [
-                sample_ids[i : i + chunk_size]
-                for i in range(0, batch_size, chunk_size)
-            ]
+            chunks = [sample_ids[i : i + chunk_size] for i in range(0, batch_size, chunk_size)]
             args = [
                 (
                     shm.name,
@@ -147,9 +140,7 @@ class MagentGroupWindowConstructor:
             ]
 
             with ProcessPoolExecutor(max_workers=n_workers) as executor:
-                chunk_results = list(
-                    executor.map(_group_window_chunk_worker, args)
-                )
+                chunk_results = list(executor.map(_group_window_chunk_worker, args))
 
             if self.channel_first:
                 out_shape = (
@@ -260,7 +251,7 @@ class MagentGroupWindowConstructor:
                     padded = np.zeros((len(self.selected_channels), K, K), dtype=st.dtype)
                     h_crop = y_end_clamped - y_start_clamped
                     w_crop = x_end_clamped - x_start_clamped
-                    padded[:, pad_top:pad_top + h_crop, pad_left:pad_left + w_crop] = crop
+                    padded[:, pad_top : pad_top + h_crop, pad_left : pad_left + w_crop] = crop
                     crop = padded
                 # Ensure final size
                 if crop.shape[1] != K or crop.shape[2] != K:
@@ -277,7 +268,7 @@ class MagentGroupWindowConstructor:
                     padded = np.zeros((K, K, len(self.selected_channels)), dtype=st.dtype)
                     h_crop = y_end_clamped - y_start_clamped
                     w_crop = x_end_clamped - x_start_clamped
-                    padded[pad_top:pad_top + h_crop, pad_left:pad_left + w_crop] = crop
+                    padded[pad_top : pad_top + h_crop, pad_left : pad_left + w_crop] = crop
                     crop = padded
                 if crop.shape[0] != K or crop.shape[1] != K:
                     final_crop = np.zeros((K, K, len(self.selected_channels)), dtype=st.dtype)
@@ -321,5 +312,6 @@ class MagentGroupWindowConstructor:
         powers = 2 ** np.arange(len(self.binary_agent_id_dim), dtype=binary_ids.dtype)
         agent_ids = np.dot(binary_ids, powers).astype(int)
 
-        return {int(aid.item()): (int(y.item()), int(x.item()))
-                for aid, y, x in zip(agent_ids, ys, xs)}
+        return {
+            int(aid.item()): (int(y.item()), int(x.item())) for aid, y, x in zip(agent_ids, ys, xs)
+        }

@@ -1,6 +1,5 @@
 """Actual torchrun/Gloo training, including empty-rank and uneven-mask batches."""
 
-
 import pytest
 import torch
 import torch.distributed as dist
@@ -16,7 +15,7 @@ def test_torchrun_matches_single_global_batches(tmp_path, batch_sequences):
     trainer.batch_sequences = batch_sequences
     trainer.run(1, train_episodes=2, eval_episodes=2, checkpoint_interval=None)
     expected = trainer.learner.state_dict()
-    code = '''
+    code = """
 import os
 from pathlib import Path
 import torch
@@ -63,7 +62,7 @@ try:
         assert not list((root / "run" / "rollouts").glob("round_*"))
 finally:
     dist.destroy_process_group()
-'''
+"""
     run_torchrun(tmp_path, code, TEST_BATCH_SEQUENCES=str(batch_sequences))
     actual = torch.load(tmp_path / "result.pt", weights_only=True)
     for component in ("actor", "critic"):

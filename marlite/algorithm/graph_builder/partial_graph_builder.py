@@ -1,15 +1,14 @@
 import numpy as np
 import torch
-import networkx as nx
-from typing import Union, Tuple, List
-from numpy import ndarray
-from copy  import deepcopy
-from networkx.algorithms.community import greedy_modularity_communities
-from scipy.spatial.distance import cdist
+from typing import Tuple, List
+from copy import deepcopy
 from concurrent.futures import ProcessPoolExecutor
 
 from marlite.algorithm.graph_builder.graph_builder import GraphBuilder
-from marlite.algorithm.graph_builder.graph_util import extract_agent_positions_batch, binary_to_decimal, build_partial_graph
+from marlite.algorithm.graph_builder.graph_util import (
+    extract_agent_positions_batch,
+    build_partial_graph,
+)
 
 '''
 class PartialGraphMAgentBuilder(GraphBuilder):
@@ -205,21 +204,23 @@ class PartialGraphMAgentBuilder(GraphBuilder):
         self.cached_edge_indices = None
         return self
 '''
+
+
 # TODO
 class PartialGraphMAgentBuilder(GraphBuilder):
-
     def __init__(
-            self,
-            binary_agent_id_dim: List[int],
-            agent_presence_dim: List[int],
-            comm_distance: int,
-            valid_node_list: List[int],
-            target_node_list: List[int],
-            distance_metric: str = 'cityblock',
-            n_workers: int = 8,
-            n_subgraphs=2,
-            update_interval: int = 1,
-            channel_first: bool = False):
+        self,
+        binary_agent_id_dim: List[int],
+        agent_presence_dim: List[int],
+        comm_distance: int,
+        valid_node_list: List[int],
+        target_node_list: List[int],
+        distance_metric: str = "cityblock",
+        n_workers: int = 8,
+        n_subgraphs=2,
+        update_interval: int = 1,
+        channel_first: bool = False,
+    ):
         super().__init__()
         self.binary_agent_id_dim = binary_agent_id_dim
         self.agent_presence_dim = agent_presence_dim
@@ -242,22 +243,25 @@ class PartialGraphMAgentBuilder(GraphBuilder):
             states = np.transpose(states, (0, 2, 3, 1))
 
         if not self.training:
-            if (self.step_counter % self.update_interval != 0
+            if (
+                self.step_counter % self.update_interval != 0
                 and self.cached_adj_matrix is not None
-                and self.cached_edge_indices is not None):
+                and self.cached_edge_indices is not None
+            ):
                 self.step_counter += 1
-                return torch.from_numpy(deepcopy(self.cached_adj_matrix)), deepcopy(self.cached_edge_indices)
+                return torch.from_numpy(deepcopy(self.cached_adj_matrix)), deepcopy(
+                    self.cached_edge_indices
+                )
 
-        batched_coords_with_id = extract_agent_positions_batch(states, self.binary_agent_id_dim, self.agent_presence_dim)
+        batched_coords_with_id = extract_agent_positions_batch(
+            states, self.binary_agent_id_dim, self.agent_presence_dim
+        )
 
         bs = states.shape[0]
         use_multi_process = bs > 1 and self.n_workers > 1
         if use_multi_process:
             with ProcessPoolExecutor(max_workers=self.n_workers) as executor:
-                results = list(executor.map(
-                    self._process_single_graph,
-                    batched_coords_with_id
-                ))
+                results = list(executor.map(self._process_single_graph, batched_coords_with_id))
         else:
             results = []
             for coords in batched_coords_with_id:
@@ -283,7 +287,7 @@ class PartialGraphMAgentBuilder(GraphBuilder):
             distance_metric=self.distance_metric,
             n_subgraphs=self.n_subgraphs,
             valid_node_list=self.valid_node_list,
-            target_node_list = self.target_node_list,
+            target_node_list=self.target_node_list,
         )
 
     def reset(self):
@@ -291,6 +295,7 @@ class PartialGraphMAgentBuilder(GraphBuilder):
         self.cached_adj_matrix = None
         self.cached_edge_indices = None
         return self
+
 
 # TODO
 class PartialGraphVectorStateBuilder(GraphBuilder):
@@ -300,16 +305,17 @@ class PartialGraphVectorStateBuilder(GraphBuilder):
     """
 
     def __init__(
-            self,
-            coord_dim: List[int],
-            hp_dim: int,
-            comm_distance: int,
-            valid_node_list: List[int],
-            target_node_list: List[int],
-            distance_metric: str = 'cityblock',
-            n_workers: int = 8,
-            n_subgraphs=2,
-            update_interval: int = 1):
+        self,
+        coord_dim: List[int],
+        hp_dim: int,
+        comm_distance: int,
+        valid_node_list: List[int],
+        target_node_list: List[int],
+        distance_metric: str = "cityblock",
+        n_workers: int = 8,
+        n_subgraphs=2,
+        update_interval: int = 1,
+    ):
         super().__init__()
         self.coord_dim = coord_dim
         self.hp_dim = hp_dim
@@ -329,11 +335,15 @@ class PartialGraphVectorStateBuilder(GraphBuilder):
         states = states.cpu().numpy()
 
         if not self.training:
-            if (self.step_counter % self.update_interval != 0
+            if (
+                self.step_counter % self.update_interval != 0
                 and self.cached_adj_matrix is not None
-                and self.cached_edge_indices is not None):
+                and self.cached_edge_indices is not None
+            ):
                 self.step_counter += 1
-                return torch.from_numpy(deepcopy(self.cached_adj_matrix)), deepcopy(self.cached_edge_indices)
+                return torch.from_numpy(deepcopy(self.cached_adj_matrix)), deepcopy(
+                    self.cached_edge_indices
+                )
 
         batched_coords_with_id = []
         bs = states.shape[0]
@@ -346,10 +356,7 @@ class PartialGraphVectorStateBuilder(GraphBuilder):
         use_multi_process = bs > 1 and self.n_workers > 1
         if use_multi_process:
             with ProcessPoolExecutor(max_workers=self.n_workers) as executor:
-                results = list(executor.map(
-                    self._process_single_graph,
-                    batched_coords_with_id
-                ))
+                results = list(executor.map(self._process_single_graph, batched_coords_with_id))
         else:
             results = []
             for coords in batched_coords_with_id:
@@ -375,7 +382,7 @@ class PartialGraphVectorStateBuilder(GraphBuilder):
             distance_metric=self.distance_metric,
             n_subgraphs=self.n_subgraphs,
             valid_node_list=self.valid_node_list,
-            target_node_list = self.target_node_list,
+            target_node_list=self.target_node_list,
         )
 
     def reset(self):

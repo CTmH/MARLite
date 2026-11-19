@@ -1,8 +1,4 @@
-"""Composed AgentGroup contract for the replacement sequence learner pipeline.
-
-This module intentionally does not inherit the legacy three/five-argument
-AgentGroup forward API. The legacy hierarchy is removed after migration.
-"""
+"""Functional sequence AgentGroup composed from independent neural components."""
 
 from dataclasses import dataclass, field
 
@@ -38,11 +34,24 @@ class SequenceAgentGroup(nn.Module):
     step() returns B,N,A; forward_sequence() returns B,T,N,A. Neither samples.
     """
 
-    def __init__(self, frame_encoder: nn.Module, temporal: TemporalEncoder,
-                 action_head: nn.Module, output_kind="logits", *, communication=None,
-                 message_encoder=None, message_source="history", join="concat",
-                 readout=None, detach_messages=False, detach_fusion=False,
-                 message_temporal=None, message_projection=None, rl_gate=1.):
+    def __init__(
+        self,
+        frame_encoder: nn.Module,
+        temporal: TemporalEncoder,
+        action_head: nn.Module,
+        output_kind="logits",
+        *,
+        communication=None,
+        message_encoder=None,
+        message_source="history",
+        join="concat",
+        readout=None,
+        detach_messages=False,
+        detach_fusion=False,
+        message_temporal=None,
+        message_projection=None,
+        rl_gate=1.0,
+    ):
         super().__init__()
         if output_kind not in ("logits", "q_values"):
             raise ValueError("output_kind must be logits or q_values")
@@ -54,14 +63,16 @@ class SequenceAgentGroup(nn.Module):
             raise ValueError("Message source must be history, frame or observation")
         if join not in ("concat", "replace", "add"):
             raise ValueError("Unknown local/communication join")
-        if communication is None and (message_temporal is not None or message_projection is not None):
+        if communication is None and (
+            message_temporal is not None or message_projection is not None
+        ):
             raise ValueError("A message temporal branch requires communication")
         self.communication, self.message_encoder = communication, message_encoder
         self.message_temporal, self.message_projection = message_temporal, message_projection
         self.message_source, self.join = message_source, join
         self.readout = nn.Identity() if readout is None else readout
         self.detach_messages, self.detach_fusion = detach_messages, detach_fusion
-        self.register_buffer("rl_gate", torch.tensor(1.))
+        self.register_buffer("rl_gate", torch.tensor(1.0))
         self.set_rl_gate(rl_gate)
         validate_replay_modules(self, scope="Sequence policy")
 
@@ -70,8 +81,14 @@ class SequenceAgentGroup(nn.Module):
         if any(key.startswith("message.") for key in state):
             raise ValueError("Local temporal state uses the reserved message prefix")
         if self.message_temporal is not None:
-            state.update({"message." + key: value for key, value in
-                          self.message_temporal.initial_state(batch_size, n_agents, device, dtype).items()})
+            state.update(
+                {
+                    "message." + key: value
+                    for key, value in self.message_temporal.initial_state(
+                        batch_size, n_agents, device, dtype
+                    ).items()
+                }
+            )
         return state
 
     def _encode(self, inputs, sequence):
@@ -85,7 +102,12 @@ class SequenceAgentGroup(nn.Module):
             raise TypeError("Policy validity and reset masks must be bool")
         mask = inputs.alive.reshape(*shape, *([1] * (inputs.observations.ndim - axes)))
         obs = inputs.observations.masked_fill(~mask, 0)
-        encoded = self.frame_encoder(obs.flatten(0, axes - 1))
+        frames = obs.flatten(0, axes - 1)
+        encoded = (
+            self.frame_encoder.encode_frames(frames, inputs.alive.flatten())
+            if hasattr(self.frame_encoder, "encode_frames")
+            else self.frame_encoder(frames)
+        )
         if encoded.ndim != 2:
             raise ValueError("Frame encoder must output one vector per frame")
         return encoded.reshape(*shape, -1)
@@ -116,18 +138,30 @@ class SequenceAgentGroup(nn.Module):
                 source = frames
             else:
                 axes = inputs.alive.ndim
-                mask = inputs.alive.reshape(*inputs.alive.shape,
-                                            *([1] * (inputs.observations.ndim - axes)))
+                mask = inputs.alive.reshape(
+                    *inputs.alive.shape, *([1] * (inputs.observations.ndim - axes))
+                )
                 source = inputs.observations.masked_fill(~mask, 0)
             leading = inputs.alive.shape
-            messages = (source if self.message_encoder is None else
-                        self.message_encoder(source.reshape(-1, *source.shape[len(leading):])))
+            if self.message_encoder is None:
+                messages = source
+            else:
+                flat = source.reshape(-1, *source.shape[len(leading) :])
+                messages = (
+                    self.message_encoder.encode_frames(flat, inputs.alive.flatten())
+                    if hasattr(self.message_encoder, "encode_frames")
+                    else self.message_encoder(flat)
+                )
             messages = messages.reshape(*leading, -1)
             if self.message_temporal is not None:
-                message_state = {key.removeprefix("message."): value for key, value in state.items()
-                                 if key.startswith("message.")}
-                result = getattr(self.message_temporal, method)(messages, message_state,
-                                                                inputs.alive, inputs.reset)
+                message_state = {
+                    key.removeprefix("message."): value
+                    for key, value in state.items()
+                    if key.startswith("message.")
+                }
+                result = getattr(self.message_temporal, method)(
+                    messages, message_state, inputs.alive, inputs.reset
+                )
                 messages = result.features
                 next_state.update({"message." + key: value for key, value in result.state.items()})
             if for_action and self.message_projection is not None:
@@ -162,16 +196,27 @@ class SequenceAgentGroup(nn.Module):
                 if local.shape != fused.shape:
                     raise ValueError("Additive communication must match local features")
                 encoded = local + fused
-        encoded = self.readout(encoded).masked_fill(~alive[..., None], 0)
-        values = self.action_head(encoded)
+        encoded = (
+            self.readout.forward_masked(encoded, alive)
+            if hasattr(self.readout, "forward_masked")
+            else self.readout(encoded)
+        ).masked_fill(~alive[..., None], 0)
+        values = (
+            self.action_head.forward_masked(encoded, alive)
+            if hasattr(self.action_head, "forward_masked")
+            else self.action_head(encoded)
+        )
         if values.ndim != encoded.ndim or values.shape[:-1] != encoded.shape[:-1]:
             raise ValueError("Action head must preserve batch/time/agent axes")
-        return PolicyOutput(values.masked_fill(~alive[..., None], 0), encoded,
-                            state, self.output_kind, diagnostics)
+        return PolicyOutput(
+            values.masked_fill(~alive[..., None], 0), encoded, state, self.output_kind, diagnostics
+        )
 
     def step(self, inputs: DecisionInput, recurrent_state):
         result, messages = self._features(inputs, recurrent_state, sequence=False, for_action=True)
-        return self.decode_actions(result.features, messages, inputs.alive, inputs.context, state=result.state)
+        return self.decode_actions(
+            result.features, messages, inputs.alive, inputs.context, state=result.state
+        )
 
     def encode_sequence(self, inputs: DecisionInput, initial_state):
         """Reconstruct both temporal branches without communication/actions."""
@@ -180,7 +225,9 @@ class SequenceAgentGroup(nn.Module):
 
     def forward_sequence(self, inputs: DecisionInput, initial_state):
         result, messages = self._features(inputs, initial_state, sequence=True, for_action=True)
-        return self.decode_actions(result.features, messages, inputs.alive, inputs.context, state=result.state)
+        return self.decode_actions(
+            result.features, messages, inputs.alive, inputs.context, state=result.state
+        )
 
     def forward(self, inputs: DecisionInput, initial_state):
         return self.forward_sequence(inputs, initial_state)

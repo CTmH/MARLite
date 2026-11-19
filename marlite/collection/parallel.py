@@ -1,12 +1,14 @@
 """Collect complete ParallelEnv episodes under one immutable policy version."""
 
 from copy import deepcopy
+import logging
 
 import numpy as np
 import torch
 
 from marlite.algorithm.sequence_agent_group import DecisionInput
 from marlite.data import Episode
+from marlite.environment.errors import RetryPolicy, recoverable_errors
 from marlite.util.action_distribution import masked_categorical
 from marlite.util.value_learning import masked_action_values
 
@@ -23,14 +25,36 @@ class ParallelCollector:
     once at this boundary; observation dictionaries may contain action_mask.
     """
 
-    def __init__(self, env_factory, max_steps=200, device="cpu", context_provider=None):
+    def __init__(
+        self,
+        env_factory,
+        max_steps=200,
+        device="cpu",
+        context_provider=None,
+        state_snapshot_interval=32,
+        retry=None,
+    ):
         if type(max_steps) is not int or max_steps < 1:
             raise ValueError("max_steps must be positive")
         self.env_factory, self.max_steps, self.device = env_factory, max_steps, torch.device(device)
+        if type(state_snapshot_interval) is not int or state_snapshot_interval < 1:
+            raise ValueError("state_snapshot_interval must be a positive integer")
+        self.state_snapshot_interval = state_snapshot_interval
         self.context_provider = context_provider
+        self.retry = RetryPolicy(**(retry or {}))
 
     @torch.no_grad()
-    def collect_episode(self, actor, critic=None, *, seed, policy_version=0, stochastic=True, epsilon=0., record_values=True):
+    def collect_episode(
+        self,
+        actor,
+        critic=None,
+        *,
+        seed,
+        policy_version=0,
+        stochastic=True,
+        epsilon=0.0,
+        record_values=True,
+    ):
         if not 0 <= epsilon <= 1:
             raise ValueError("epsilon must be in [0,1]")
         if actor.output_kind == "logits" and critic is None and record_values:
@@ -40,14 +64,42 @@ class ParallelCollector:
         actor_device = next(actor.parameters()).device
         critic_device = next(critic.parameters()).device if critic is not None else None
         actor_mode, critic_mode = actor.training, critic.training if critic is not None else None
-        env = self.env_factory()
         try:
             actor.eval().to(self.device)
             if critic is not None:
                 critic.eval().to(self.device)
-            return self._collect(env, actor, critic, seed, policy_version, stochastic, epsilon)
+            for attempt in range(self.retry.max_retries + 1):
+                env = None
+                retry = False
+                try:
+                    env = self.env_factory()
+                    return self._collect(
+                        env, actor, critic, seed, policy_version, stochastic, epsilon
+                    )
+                except Exception as error:
+                    if (
+                        not isinstance(error, recoverable_errors(env))
+                        or attempt == self.retry.max_retries
+                    ):
+                        raise
+                    retry = True
+                    logging.warning(
+                        "Discarding interrupted episode; retry %d/%d: %s",
+                        attempt + 1,
+                        self.retry.max_retries,
+                        error,
+                    )
+                finally:
+                    if env is not None:
+                        try:
+                            env.close()
+                        except recoverable_errors(env):
+                            logging.warning(
+                                "Disconnected environment failed to close", exc_info=True
+                            )
+                if retry:
+                    self.retry.wait(attempt)
         finally:
-            env.close()
             actor.to(actor_device).train(actor_mode)
             if critic is not None:
                 critic.to(critic_device).train(critic_mode)
@@ -72,9 +124,11 @@ class ParallelCollector:
             rng.seed()
         else:
             rng.manual_seed(seed)
-        frames, transitions = {}, {}
+        frames, transitions, snapshots = {}, {}, {}
         actor_state = actor.initial_state(1, len(agents), self.device, torch.float32)
-        critic_state = critic.initial_state(1, self.device, torch.float32) if critic is not None else {}
+        critic_state = (
+            critic.initial_state(1, self.device, torch.float32) if critic is not None else {}
+        )
         alive = {a: a in env.agents for a in agents}
         previous_alive = {a: False for a in agents}
         dead = {a: False for a in agents}
@@ -99,7 +153,9 @@ class ParallelCollector:
                     masks.append(np.ones(action_dim, dtype=bool))
             obs = torch.as_tensor(np.stack(obs_values), dtype=torch.float32)
             active = torch.tensor([alive[a] for a in agents], dtype=torch.bool)
-            reset = torch.tensor([alive[a] and not previous_alive[a] for a in agents], dtype=torch.bool)
+            reset = torch.tensor(
+                [alive[a] and not previous_alive[a] for a in agents], dtype=torch.bool
+            )
             available = torch.as_tensor(np.stack(masks), dtype=torch.bool)
             try:
                 state = torch.as_tensor(np.asarray(env.state()), dtype=torch.float32)
@@ -115,42 +171,64 @@ class ParallelCollector:
             context.update(sampled)
             for name, datum in context.items():
                 append(frames, "context." + name, datum)
-            for name, value in (("observations", obs), ("alive", active),
-                                ("agent_reset", reset), ("available_actions", available),
-                                ("states", state)):
+            for name, value in (
+                ("observations", obs),
+                ("alive", active),
+                ("agent_reset", reset),
+                ("available_actions", available),
+                ("states", state),
+            ):
                 append(frames, name, value)
-            if actor.output_kind == "logits" and critic is not None:
-                # Off-policy targets reconstruct their own states; no behavior cache is needed.
-                for name, value in _snapshot(actor_state).items():
-                    append(frames, "actor_state." + name, value)
-            for name, value in _snapshot(critic_state).items():
-                append(frames, "critic_state." + name, value)
+            # Cache sparsely on CPU. Learning windows carry no cache tensors;
+            # warmup starts at the nearest saved boundary before the requested prefix.
+            if critic is not None and timestep % self.state_snapshot_interval == 0:
+                append(snapshots, "steps", torch.tensor(timestep))
+                for owner, recurrent in (
+                    ("actor_state.", actor_state),
+                    ("critic_state.", critic_state),
+                ):
+                    for name, cached in _snapshot(recurrent).items():
+                        append(snapshots, owner + name, cached)
             team_valid = active.any().reshape(1).to(self.device)
             team_reset = torch.tensor([timestep == 0], device=self.device)
             if critic is not None:
-                value = critic.step(state[None].to(self.device), critic_state, team_valid, team_reset)
+                value = critic.step(
+                    state[None].to(self.device), critic_state, team_valid, team_reset
+                )
                 append(frames, "old_value", value.values[0])
             if episode_end:
                 break  # No fictitious action or communication at the bootstrap frame.
-            inputs = DecisionInput(obs[None].to(self.device), active[None].to(self.device),
-                                   reset[None].to(self.device),
-                                   {key: value[None].to(self.device) for key, value in context.items()})
+            inputs = DecisionInput(
+                obs[None].to(self.device),
+                active[None].to(self.device),
+                reset[None].to(self.device),
+                {key: value[None].to(self.device) for key, value in context.items()},
+            )
             output = actor.step(inputs, actor_state)
             for name, datum in output.diagnostics.items():
                 if name.startswith("record."):
                     append(transitions, "behavior." + name.removeprefix("record."), datum[0])
             log_prob = None
             if actor.output_kind == "logits":
-                dist = masked_categorical(output.values[0], available.to(self.device), active.to(self.device))
-                actions = (torch.multinomial(dist.probs.cpu(), 1, generator=rng).squeeze(-1)
-                           if stochastic else dist.probs.argmax(-1).cpu())
+                dist = masked_categorical(
+                    output.values[0], available.to(self.device), active.to(self.device)
+                )
+                actions = (
+                    torch.multinomial(dist.probs.cpu(), 1, generator=rng).squeeze(-1)
+                    if stochastic
+                    else dist.probs.argmax(-1).cpu()
+                )
                 log_prob = dist.log_prob(actions.to(self.device)).cpu().masked_fill(~active, 0)
             else:
-                feasible = masked_action_values(output.values[0], available.to(self.device), active.to(self.device))
+                feasible = masked_action_values(
+                    output.values[0], available.to(self.device), active.to(self.device)
+                )
                 actions = feasible.argmax(-1).cpu()
                 if stochastic and epsilon:
                     safe_available = available | ~active[:, None]
-                    random_actions = torch.multinomial(safe_available.float(), 1, generator=rng).squeeze(-1)
+                    random_actions = torch.multinomial(
+                        safe_available.float(), 1, generator=rng
+                    ).squeeze(-1)
                     explore = torch.rand(len(agents), generator=rng) < epsilon
                     actions = torch.where(explore, random_actions, actions)
                 actions = actions.masked_fill(~active, 0)
@@ -161,18 +239,28 @@ class ParallelCollector:
                 # A reappearing slot is a new life, not a permanently dead unit.
                 if a in env.agents and a in next_obs and not terms.get(a, False):
                     dead[a] = False
-            terminal = all(dead.values())
-            episode_end = (terminal or not env.agents or timestep + 1 >= self.max_steps
-                           or all(dead[a] or truncs.get(a, False) for a in agents))
-            survivor = {a: not dead[a] and (episode_end or a in env.agents) for a in agents}
+            # Unborn/inactive possible slots are not surviving agents. Consider
+            # only the previous/current live population when recognizing death.
+            relevant = [a for a in agents if alive[a] or a in env.agents]
+            terminal = bool(relevant) and all(dead[a] for a in relevant)
+            episode_end = (
+                terminal
+                or not env.agents
+                or timestep + 1 >= self.max_steps
+                or all(dead[a] or truncs.get(a, False) for a in agents)
+            )
+            survivor = {
+                a: not dead[a] and (a in env.agents or (episode_end and alive[a])) for a in agents
+            }
             if not terminal and any(survivor[a] and a not in next_obs for a in agents):
                 raise ValueError("Missing final observation; refusing a stale bootstrap")
             entries = {
                 "actions": actions,
-                "rewards": torch.tensor([reward.get(a, 0.) for a in agents], dtype=torch.float32),
+                "rewards": torch.tensor([reward.get(a, 0.0) for a in agents], dtype=torch.float32),
                 "agent_terminated": torch.tensor([dead[a] for a in agents]),
-                "agent_truncated": torch.tensor([bool(truncs.get(a, False) or (episode_end and not terminal))
-                                                  for a in agents]),
+                "agent_truncated": torch.tensor(
+                    [bool(truncs.get(a, False) or (episode_end and not terminal)) for a in agents]
+                ),
                 "terminated": torch.tensor(terminal),
                 "truncated": torch.tensor(episode_end and not terminal),
             }
@@ -189,13 +277,24 @@ class ParallelCollector:
             metrics = {str(name): float(datum) for name, datum in env.episode_metrics().items()}
         elif isinstance(infos, dict):
             for name in ("battle_won", "success"):
-                values = [float(info[name]) for info in infos.values() if isinstance(info, dict) and name in info]
+                values = [
+                    float(info[name])
+                    for info in infos.values()
+                    if isinstance(info, dict) and name in info
+                ]
                 if values:
                     metrics[name] = sum(values) / len(values)
         if any(not np.isfinite(datum) for datum in metrics.values()):
             raise ValueError("Environment episode metrics must be finite scalars")
-        return Episode(agents, {k: torch.stack(v) for k, v in frames.items()},
-                       {k: torch.stack(v) for k, v in transitions.items()},
-                       policy_version=policy_version, seed=seed,
-                       metadata={"privileged_communication": bool(getattr(provider, "uses_global_state", False)),
-                                 "metrics": metrics}).validate()
+        return Episode(
+            agents,
+            {k: torch.stack(v) for k, v in frames.items()},
+            {k: torch.stack(v) for k, v in transitions.items()},
+            policy_version=policy_version,
+            seed=seed,
+            state_snapshots={k: torch.stack(v) for k, v in snapshots.items()},
+            metadata={
+                "privileged_communication": bool(getattr(provider, "uses_global_state", False)),
+                "metrics": metrics,
+            },
+        ).validate()

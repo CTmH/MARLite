@@ -133,3 +133,42 @@ rewards, lengths, per-agent action counts, communication budgets, graph edge cou
 and native environment metrics when available. Exports contain CPU tensor Episodes,
 not legacy dictionaries. The critic is not constructed during policy evaluation,
 which permits changes to central-state shape when the actor's schema still fits.
+
+## Learning-rate schedules and heterogeneous agents
+
+Schedulers are optional, owned by each optimizer role. A binding selects an
+`update` event (the default) or an explicit held-out `validation` event:
+
+```yaml
+schedulers:
+  actor:
+    scheduler: {type: StepLR, params: {step_size: 1000, gamma: 0.5}}
+  critic:
+    scheduler: {type: ReduceLROnPlateau, params: {mode: max, patience: 10}}
+    event: validation
+    metric: reward_mean
+```
+
+Update schedules advance after that optimizer actually steps. Plateau schedules
+require a named, globally reduced metric; other schedulers omit `metric`.
+Validation schedules do not advance without intervening optimizer updates.
+Standalone evaluation and final testing never alter learning rates. All scheduler
+states/counters are checkpointed. `teacher.schedulers` and `offline.schedulers`
+use the same schema; offline roles are `probe`, `codec`, `policy`, with validation
+at stage completion. Top-level roles are actor/critic/objective/auxiliary; an
+absent optimizer cannot have a scheduler.
+
+Heterogeneous environments can explicitly wrap `PadAgentView`. It pads flattened
+local observations (optionally appending feature validity) and discrete actions.
+For private or role-shared networks, compose `RoutedFrames`, `RoutedTemporal`
+and `RoutedHead` with one stable role per agent slot. Each role owns its modules
+and recurrent state. No loss, optimizer or trainer subclass is needed. Roles
+without valid samples retain `grad=None`, including AdamW momentum/decay behavior.
+Flat feature-prefix lengths are explicit; convolutional roles should receive an
+appropriate structured observation adapter instead of silently reshaping padding.
+
+`GaussianParameters` adapts tuple-returning encoders. `MaskedPool` specifies the
+wrapped model's mask keyword, True convention and output convention explicitly.
+For example, `ResAttMaskedProbEnc` accepts `alive_mask=True` and returns one
+concatenated tensor, not a tuple. `WindowEncoder(use_padding_mask: false)` adapts
+plain CNN/sequential history models; these remain finite-window encoders.

@@ -4,14 +4,15 @@ import torch.nn.functional as F
 from torch import Tensor
 from typing import Tuple
 
-class G2ANetAttention(nn.Module):
 
+class G2ANetAttention(nn.Module):
     def __init__(
-            self,
-            n_agents: int,
-            add_self_loop: bool = False,
-            input_dim: int = None,
-            hidden_dim: int = 64):
+        self,
+        n_agents: int,
+        add_self_loop: bool = False,
+        input_dim: int = None,
+        hidden_dim: int = 64,
+    ):
         super().__init__()
         self.add_self_loop = add_self_loop
         self.input_dim = input_dim
@@ -20,10 +21,7 @@ class G2ANetAttention(nn.Module):
 
         # Hard attention (using bidirectional LSTM)
         self.hard_attention = nn.LSTM(
-            input_size=2 * input_dim,
-            hidden_size=hidden_dim,
-            bidirectional=True,
-            batch_first=True
+            input_size=2 * input_dim, hidden_size=hidden_dim, bidirectional=True, batch_first=True
         )
         self.hard_attention_fc = nn.Linear(2 * hidden_dim, 1)
 
@@ -31,13 +29,13 @@ class G2ANetAttention(nn.Module):
         self.W_q = nn.Linear(input_dim, hidden_dim, bias=False)
         self.W_k = nn.Linear(input_dim, hidden_dim, bias=False)
 
-    def forward(self, encoded_obs: Tensor, alive_mask: Tensor=None) -> Tuple[Tensor, Tensor]:
+    def forward(self, encoded_obs: Tensor, alive_mask: Tensor = None) -> Tuple[Tensor, Tensor]:
         # observations shape: (batch_size, n_agents, obs_dim)
         batch_size, n_agents, obs_dim = encoded_obs.shape
 
         if alive_mask is not None:
             encoded_obs = encoded_obs.masked_fill(
-                ~alive_mask.to(device=encoded_obs.device, dtype=torch.bool).unsqueeze(-1), 0.
+                ~alive_mask.to(device=encoded_obs.device, dtype=torch.bool).unsqueeze(-1), 0.0
             )
 
         # Prepare pairs for hard attention: [h_i, h_j] for all i,j
@@ -58,8 +56,11 @@ class G2ANetAttention(nn.Module):
         binary_gate = (probability >= 0.5).to(probability.dtype)
         gates = binary_gate + (probability - probability.detach())
 
-        live = (torch.ones((batch_size, n_agents), device=encoded_obs.device, dtype=torch.bool)
-                if alive_mask is None else alive_mask.to(device=encoded_obs.device, dtype=torch.bool))
+        live = (
+            torch.ones((batch_size, n_agents), device=encoded_obs.device, dtype=torch.bool)
+            if alive_mask is None
+            else alive_mask.to(device=encoded_obs.device, dtype=torch.bool)
+        )
         valid = live.unsqueeze(2) & live.unsqueeze(1)
         diagonal = torch.eye(n_agents, device=encoded_obs.device, dtype=torch.bool).unsqueeze(0)
         gates = gates.masked_fill(diagonal, 1.0 if self.add_self_loop else 0.0)
@@ -67,7 +68,7 @@ class G2ANetAttention(nn.Module):
 
         query = self.W_q(encoded_obs)
         key = self.W_k(encoded_obs)
-        scores = torch.matmul(query, key.transpose(1, 2)) / self.hidden_dim ** 0.5
+        scores = torch.matmul(query, key.transpose(1, 2)) / self.hidden_dim**0.5
         valid = valid & (torch.ones_like(diagonal) if self.add_self_loop else ~diagonal)
         # Empty rows (dead or isolated agents) remain finite and send no messages.
         scores = scores.masked_fill(~valid, torch.finfo(scores.dtype).min)

@@ -1,44 +1,6 @@
 import numpy as np
-from typing import Tuple, Dict, Any
+from typing import Dict, Any
 
-'''
-def obs_preprocess(observations: list, agent_model_dict: dict, models: dict, rnn_traj_len: int) -> Dict[str, Any]:
-        agents = agent_model_dict.keys()
-        processed_obs = {agent : [] for agent in agents}
-        for agent, model_name in agent_model_dict.items():
-            if isinstance(models[model_name], TimeSeqModel):
-                obs_len = len(observations)
-                if obs_len < rnn_traj_len:
-                    padding_length = rnn_traj_len - obs_len
-                    obs_padding = [np.zeros_like(observations[-1][agent]) for _ in range(padding_length)]
-                    obs = obs_padding + [o[agent] for o in observations[-rnn_traj_len:]]
-                else:
-                    obs = [o[agent] for o in observations[-rnn_traj_len:]]
-            else:
-                obs = [observations[-1].get(agent)]
-            processed_obs[agent] = np.array(obs)
-        return processed_obs
-'''
-def obs_preprocess(observations: list, agents: list, rnn_traj_len: int) -> Tuple[Dict[str, Any], np.ndarray]:
-        processed_obs = {agent : [] for agent in agents}
-        obs_len = len(observations)
-        for agent in agents:
-            if obs_len < rnn_traj_len:
-                padding_length = rnn_traj_len - obs_len
-                obs_padding = [np.zeros_like(observations[-1][agent]) for _ in range(padding_length)]
-                obs = obs_padding + [o[agent] for o in observations[-rnn_traj_len:]]
-            else:
-                obs = [o[agent] for o in observations[-rnn_traj_len:]]
-
-            processed_obs[agent] = np.array(obs)
-        if obs_len < rnn_traj_len:
-            padding_length = rnn_traj_len - obs_len
-            traj_padding_mask = np.array([True] * padding_length
-                                         + [False] * len(observations[-rnn_traj_len:]), dtype=np.bool)
-        else:
-            traj_padding_mask = np.zeros(rnn_traj_len, dtype=np.bool)
-
-        return processed_obs, traj_padding_mask
 
 def ensure_all_agents_present(data_dict: dict, default_values: dict) -> Dict[str, Any]:
     """
@@ -63,11 +25,12 @@ def ensure_all_agents_present(data_dict: dict, default_values: dict) -> Dict[str
                 result[agent] = np.zeros_like(first_default)
     return result
 
+
 def precompute_manhattan_offsets(dist: int):
-        """Precompute offsets for positions with Manhattan distance."""
-        offsets = []
-        for dx in range(-dist, dist+1):
-            for dy in range(-dist, dist+1):
-                if abs(dx) + abs(dy) <= dist and (dx != 0 or dy != 0):
-                    offsets.append((dx, dy))
-        return np.array(offsets, dtype=int)
+    """Precompute offsets for positions with Manhattan distance."""
+    offsets = []
+    for dx in range(-dist, dist + 1):
+        for dy in range(-dist, dist + 1):
+            if abs(dx) + abs(dy) <= dist and (dx != 0 or dy != 0):
+                offsets.append((dx, dy))
+    return np.array(offsets, dtype=int)

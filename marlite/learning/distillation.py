@@ -9,7 +9,6 @@ from torch import nn
 from torch.nn import functional as F
 
 from marlite.algorithm.sequence_agent_group import DecisionInput
-from marlite.algorithm.auxiliary.query_prediction import QueryPredictionHead
 from marlite.communication.context import frame_context
 from marlite.util.action_distribution import masked_categorical
 from marlite.util.communication_curriculum import sender_replacement_mask
@@ -35,7 +34,9 @@ class FrozenPolicyReference:
 
     def __init__(self, actor, capacity=16):
         if type(capacity) is not int or capacity < 1 or actor.output_kind != "logits":
-            raise ValueError("A frozen reference needs a categorical actor and positive cache capacity")
+            raise ValueError(
+                "A frozen reference needs a categorical actor and positive cache capacity"
+            )
         self.actor = actor.requires_grad_(False).eval()
         self.capacity, self.cache = capacity, OrderedDict()
 
@@ -49,14 +50,18 @@ class FrozenPolicyReference:
         key = id(episode)
         if key not in self.cache:
             device = next(self.actor.parameters()).device
-            inputs = DecisionInput(episode.frames["observations"][None].to(device),
-                                   episode.frames["alive"][None].to(device),
-                                   episode.frames["agent_reset"][None].to(device),
-                                   frame_context(episode.frames, batched=False, device=device))
+            inputs = DecisionInput(
+                episode.frames["observations"][None].to(device),
+                episode.frames["alive"][None].to(device),
+                episode.frames["agent_reset"][None].to(device),
+                frame_context(episode.frames, batched=False, device=device),
+            )
             state = self.actor.initial_state(1, len(episode.agent_ids), device, torch.float32)
             result = self.actor.forward_sequence(inputs, state)
-            values = {"local": result.diagnostics["local_features"][0].detach().cpu().clone(),
-                      "logits": result.values[0].detach().cpu().clone()}
+            values = {
+                "local": result.diagnostics["local_features"][0].detach().cpu().clone(),
+                "logits": result.values[0].detach().cpu().clone(),
+            }
             self.cache[key] = (episode, values)
             if len(self.cache) > self.capacity:
                 self.cache.popitem(last=False)
@@ -73,13 +78,13 @@ class FrozenPolicyReference:
             for name, tensor in values.items():
                 if name not in result:
                     result[name] = tensor.new_zeros(len(batch.sources), length, *tensor.shape[1:])
-                selected = tensor[start:start + length]
-                result[name][row, :selected.shape[0]] = selected
+                selected = tensor[start : start + length]
+                result[name][row, : selected.shape[0]] = selected
         device = batch.filled.device
         return {name: tensor.to(device) for name, tensor in result.items()}
 
 
-def action_kl_term(prediction, target, batch, weight=1.):
+def action_kl_term(prediction, target, batch, weight=1.0):
     """KL(teacher || student) over live learning frames, with legal-action masks."""
     length = batch.loss_mask.shape[1]
     alive = batch.frames["alive"][:, :length] & batch.loss_mask[..., None]
@@ -93,14 +98,19 @@ def action_kl_term(prediction, target, batch, weight=1.):
 class ActionDistillationObjective(nn.Module):
     """Optional online teacher loss with update-count-based linear decay."""
 
-    def __init__(self, reference, weight=.1, decay_updates=1000):
+    def __init__(self, reference, weight=0.1, decay_updates=1000):
         super().__init__()
-        if not math.isfinite(weight) or weight < 0 or type(decay_updates) is not int or decay_updates < 1:
+        if (
+            not math.isfinite(weight)
+            or weight < 0
+            or type(decay_updates) is not int
+            or decay_updates < 1
+        ):
             raise ValueError("Invalid online distillation schedule")
         self.reference, self.weight, self.decay_updates = reference, weight, decay_updates
 
     def forward(self, output, batch, update=0, *, episodes=None, sources=None):
-        weight = self.weight * max(0., 1 - update / self.decay_updates)
+        weight = self.weight * max(0.0, 1 - update / self.decay_updates)
         if not weight:
             return {}
         target = self.reference.batch(batch, episodes, batch.loss_mask.shape[1])["logits"]
@@ -142,15 +152,24 @@ class FrameQueryTargets:
         result = {}
         for row in range(valid.shape[0]):
             for time in range(length):
-                frame = {key: batch.frames[name][row:row + 1, time:time + 1].detach().cpu()
-                         for key, name in (("states", "states"), ("observations", "observations"),
-                                           ("alive_mask", "alive"), ("group_indices", "context.groups"))}
-                generator = torch.Generator().manual_seed(_frame_seed(
-                    batch, row, time, update if self.resample_each_update else 0, self.seed))
+                frame = {
+                    key: batch.frames[name][row : row + 1, time : time + 1].detach().cpu()
+                    for key, name in (
+                        ("states", "states"),
+                        ("observations", "observations"),
+                        ("alive_mask", "alive"),
+                        ("group_indices", "context.groups"),
+                    )
+                }
+                generator = torch.Generator().manual_seed(
+                    _frame_seed(
+                        batch, row, time, update if self.resample_each_update else 0, self.seed
+                    )
+                )
                 with torch.random.fork_rng(devices=[]):
                     # set_rng_state affects CPU only; manual_seed would also seed GPUs.
                     torch.set_rng_state(generator.get_state())
-                    targets = self.provider(frame, valid[row:row + 1, time], "cpu")
+                    targets = self.provider(frame, valid[row : row + 1, time], "cpu")
                 for name, tensor in targets.items():
                     if name not in result:
                         result[name] = tensor.new_empty(*valid.shape[:2], *tensor.shape[1:])
@@ -161,7 +180,7 @@ class FrameQueryTargets:
 class RelationQueryObjective(nn.Module):
     """Optional task prediction trains only its head and the upstream group context."""
 
-    def __init__(self, head, targets, weight=1.):
+    def __init__(self, head, targets, weight=1.0):
         super().__init__()
         if not math.isfinite(weight) or weight < 0:
             raise ValueError("Query loss weight must be finite and nonnegative")
@@ -181,7 +200,11 @@ class RelationQueryObjective(nn.Module):
         labels = targets["relation_labels"].to(representation)
         valid = targets["relation_mask"]
         group_valid = diagnostics["group_valid"][:, :length] & batch.loss_mask[..., None]
-        if valid.dtype != torch.bool or valid.shape != labels.shape or queries.shape[:-1] != labels.shape:
+        if (
+            valid.dtype != torch.bool
+            or valid.shape != labels.shape
+            or queries.shape[:-1] != labels.shape
+        ):
             raise ValueError("Query targets need matching axes and boolean validity")
         if labels.shape[:3] != group_valid.shape:
             raise ValueError("Query targets must match time and group axes")
@@ -199,8 +222,14 @@ def replacement_senders(batch, groups, alive, *, mode, stage, update, seed=0):
     for row in range(alive.shape[0]):
         for time in range(alive.shape[1]):
             generator = torch.Generator().manual_seed(_frame_seed(batch, row, time, update, seed))
-            chosen = sender_replacement_mask(groups[row, time][None].cpu(), alive[row, time][None].cpu(),
-                                               mode, stage, update, generator=generator)
+            chosen = sender_replacement_mask(
+                groups[row, time][None].cpu(),
+                alive[row, time][None].cpu(),
+                mode,
+                stage,
+                update,
+                generator=generator,
+            )
             selected[row, time] = chosen[0].to(selected.device)
     return selected
 
@@ -215,5 +244,7 @@ def codec_distillation(reference, codec, batch, episodes, selected):
     if selected.shape != alive.shape or selected.dtype != torch.bool:
         raise ValueError("Sender replacements must be boolean B,T,N")
     messages = torch.where((selected & alive)[..., None], decoded, local)
-    predicted = reference.actor.decode_actions(local, messages, alive, frame_context(batch.frames, stop=length))
+    predicted = reference.actor.decode_actions(
+        local, messages, alive, frame_context(batch.frames, stop=length)
+    )
     return predicted, action_kl_term(predicted.values, target["logits"], batch)

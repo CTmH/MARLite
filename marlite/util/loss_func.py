@@ -44,7 +44,9 @@ class PITLoss(LossMixer):
         )  # Small positive value for numerical stability
         self.register_buffer("step", torch.zeros(1, dtype=torch.long))
 
-    def forward(self, losses, parameters=None, distributed=False, distributed_reduction="mean") -> torch.Tensor:
+    def forward(
+        self, losses, parameters=None, distributed=False, distributed_reduction="mean"
+    ) -> torch.Tensor:
         """
         Compute the PIT loss for multiple tasks.
 
@@ -135,9 +137,7 @@ class InfoNCELoss(_Loss):
 
             # Create mask to exclude positive pairs
             mask = ~torch.eye(batch_size, dtype=torch.bool, device=query.device)
-            negative_similarities = similarity_matrix[mask].view(
-                batch_size, batch_size - 1
-            )
+            negative_similarities = similarity_matrix[mask].view(batch_size, batch_size - 1)
 
         else:
             # Use provided negatives
@@ -148,12 +148,8 @@ class InfoNCELoss(_Loss):
 
             # Compute negative similarities
             negative_similarities = F.cosine_similarity(
-                query.unsqueeze(1)
-                .expand(-1, num_negatives, -1)
-                .reshape(-1, query.size(-1)),
-                negatives.unsqueeze(0)
-                .expand(batch_size, -1, -1)
-                .reshape(-1, negatives.size(-1)),
+                query.unsqueeze(1).expand(-1, num_negatives, -1).reshape(-1, query.size(-1)),
+                negatives.unsqueeze(0).expand(batch_size, -1, -1).reshape(-1, negatives.size(-1)),
                 dim=1,
             ).view(batch_size, num_negatives)
 
@@ -162,9 +158,7 @@ class InfoNCELoss(_Loss):
         negative_similarities = negative_similarities / self.temperature
 
         # Concatenate positive and negative similarities
-        logits = torch.cat(
-            [positive_similarity.unsqueeze(1), negative_similarities], dim=1
-        )
+        logits = torch.cat([positive_similarity.unsqueeze(1), negative_similarities], dim=1)
 
         # Labels: 0 for positive (first position)
         labels = torch.zeros(batch_size, dtype=torch.long, device=query.device)
@@ -282,8 +276,9 @@ class ChamferDistanceLoss(ReconstructionLoss):
         forward = distances.masked_fill(~mask[:, None, :], torch.inf).min(2).values
         backward = distances.masked_fill(~mask[:, :, None], torch.inf).min(1).values
         count = mask.sum(1).clamp_min(1)
-        loss_per_batch = (forward.masked_fill(~mask, 0).sum(1)
-                          + backward.masked_fill(~mask, 0).sum(1)) / count
+        loss_per_batch = (
+            forward.masked_fill(~mask, 0).sum(1) + backward.masked_fill(~mask, 0).sum(1)
+        ) / count
 
         # Apply reduction
         if self.reduction == "none":
@@ -412,9 +407,7 @@ class PointSetMSELoss(ReconstructionLoss):
         if mask is not None:
             # Validate mask shape
             if mask.shape != (B, N):
-                raise ValueError(
-                    f"Mask shape mismatch: expected {(B, N)}, got {mask.shape}"
-                )
+                raise ValueError(f"Mask shape mismatch: expected {(B, N)}, got {mask.shape}")
 
             # Convert mask to float and zero out invalid points
             mask_float = mask.float()
@@ -438,8 +431,7 @@ class PointSetMSELoss(ReconstructionLoss):
             return loss_per_batch.sum()  # scalar
         else:
             raise ValueError(
-                f"Invalid reduction type: {self.reduction}. "
-                f"Expected 'none', 'mean', or 'sum'."
+                f"Invalid reduction type: {self.reduction}. Expected 'none', 'mean', or 'sum'."
             )
 
 

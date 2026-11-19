@@ -1,12 +1,11 @@
 import numpy as np
 import torch
 import unittest
-from magent2.environments import adversarial_pursuit_v4
-from marlite.algorithm.graph_builder import GraphBuilderConfig
+from marlite.configuration.catalog import default_registry
 from marlite.algorithm.graph_builder.magent_graph_builder import MAgentVecStateGraphBuilder
 
-class TestMAgentGraphBuilder(unittest.TestCase):
 
+class TestMAgentGraphBuilder(unittest.TestCase):
     def test_process_batch_normal_case(self):
         config = {
             "type": "MAgent",
@@ -14,27 +13,55 @@ class TestMAgentGraphBuilder(unittest.TestCase):
             "agent_presence_dim": [1],
             "comm_distance": 3,
             "distance_metric": "cityblock",
-            "valid_node_list": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24]
+            "valid_node_list": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9,
+                10,
+                11,
+                12,
+                13,
+                14,
+                15,
+                16,
+                17,
+                18,
+                19,
+                20,
+                21,
+                22,
+                23,
+                24,
+            ],
         }
         bs = 5
-        n_predators = len(config['valid_node_list'])
-        env = adversarial_pursuit_v4.parallel_env(map_size=45, minimap_mode=False, tag_penalty=-0.2,
-        max_cycles=500, extra_features=True, render_mode='rgb_array')
-        obs = env.reset()
-        state = env.state()
+        n_predators = len(config["valid_node_list"])
+        state = np.zeros((45, 45, 29), dtype=np.float32)
+        state[2, 2, 1] = 1
         states = np.stack([state for _ in range(bs)])
-        # Create instance of GraphBuilderConfig
-        builder_config = GraphBuilderConfig(**config)
+        # Create instance of component registry
+        builder_config = default_registry().build(
+            {
+                "type": "MAgentGraphBuilder",
+                "params": {k: v for k, v in config.items() if k != "type"},
+            }
+        )
 
         # Call get_graph_builder method
-        graph_builder = builder_config.get_graph_builder()
+        graph_builder = builder_config
         adj_matrix, edge_index = graph_builder(torch.from_numpy(states).float())
         self.assertEqual(adj_matrix.shape, np.zeros((bs, n_predators, n_predators)).shape)
         self.assertEqual(len(edge_index), bs)
 
 
 class TestMAgentVecStateGraphBuilder(unittest.TestCase):
-
     def setUp(self):
         """Set up test fixtures before each test method."""
         # Create a simple test configuration
@@ -43,16 +70,18 @@ class TestMAgentVecStateGraphBuilder(unittest.TestCase):
         self.team_dim = 3  # Fourth dimension is team
         self.selected_teams = [1, 2]  # We want to include teams 1 and 2
         self.comm_distance = 5.0
-        self.distance_metric = 'euclidean'
+        self.distance_metric = "euclidean"
 
         # Create a sample state with 4 agents
         # Format: [x, y, hp, team]
-        self.sample_state = np.array([
-            [0.0, 0.0, 10.0, 1],  # Agent 0: team 1, hp 10
-            [3.0, 4.0, 5.0, 1],   # Agent 1: team 1, hp 5
-            [10.0, 10.0, 0.0, 2], # Agent 2: team 2, hp 0 (should be filtered out)
-            [1.0, 1.0, 8.0, 2]    # Agent 3: team 2, hp 8
-        ])
+        self.sample_state = np.array(
+            [
+                [0.0, 0.0, 10.0, 1],  # Agent 0: team 1, hp 10
+                [3.0, 4.0, 5.0, 1],  # Agent 1: team 1, hp 5
+                [10.0, 10.0, 0.0, 2],  # Agent 2: team 2, hp 0 (should be filtered out)
+                [1.0, 1.0, 8.0, 2],  # Agent 3: team 2, hp 8
+            ]
+        )
 
         # Create the graph builder
         self.graph_builder = MAgentVecStateGraphBuilder(
@@ -61,7 +90,7 @@ class TestMAgentVecStateGraphBuilder(unittest.TestCase):
             team_dim=self.team_dim,
             selected_teams=self.selected_teams,
             comm_distance=self.comm_distance,
-            distance_metric=self.distance_metric
+            distance_metric=self.distance_metric,
         )
 
     def test_initialization(self):
@@ -71,16 +100,18 @@ class TestMAgentVecStateGraphBuilder(unittest.TestCase):
         self.assertEqual(self.graph_builder.team_dim, 3)
         self.assertEqual(self.graph_builder.selected_teams, [1, 2])
         self.assertEqual(self.graph_builder.comm_distance, 5.0)
-        self.assertEqual(self.graph_builder.distance_metric, 'euclidean')
+        self.assertEqual(self.graph_builder.distance_metric, "euclidean")
         self.assertEqual(self.graph_builder.n_workers, 0)  # Default value
 
     def test_process_single_batch_no_candidates(self):
         """Test processing when no agents belong to selected teams."""
         # Create state with no agents in selected teams
-        state_no_candidates = np.array([
-            [0.0, 0.0, 10.0, 3],  # Agent 0: team 3 (not selected)
-            [3.0, 4.0, 5.0, 4],   # Agent 1: team 4 (not selected)
-        ])
+        state_no_candidates = np.array(
+            [
+                [0.0, 0.0, 10.0, 3],  # Agent 0: team 3 (not selected)
+                [3.0, 4.0, 5.0, 4],  # Agent 1: team 4 (not selected)
+            ]
+        )
 
         adj_matrix, edge_indices = self.graph_builder._process_single_sample(state_no_candidates)
 
@@ -91,10 +122,12 @@ class TestMAgentVecStateGraphBuilder(unittest.TestCase):
     def test_process_single_batch_no_valid_agents(self):
         """Test processing when agents exist but none are valid (hp <= 0)."""
         # Create state with agents in selected teams but all with hp <= 0
-        state_no_valid = np.array([
-            [0.0, 0.0, 0.0, 1],   # Agent 0: team 1, hp 0 (invalid)
-            [3.0, 4.0, 0.0, 2],   # Agent 1: team 2, hp 0 (invalid)
-        ])
+        state_no_valid = np.array(
+            [
+                [0.0, 0.0, 0.0, 1],  # Agent 0: team 1, hp 0 (invalid)
+                [3.0, 4.0, 0.0, 2],  # Agent 1: team 2, hp 0 (invalid)
+            ]
+        )
 
         adj_matrix, edge_indices = self.graph_builder._process_single_sample(state_no_valid)
 
@@ -106,10 +139,12 @@ class TestMAgentVecStateGraphBuilder(unittest.TestCase):
     def test_process_single_batch_single_agent(self):
         """Test processing when only one valid agent exists."""
         # Create state with only one valid agent
-        state_single = np.array([
-            [0.0, 0.0, 10.0, 1],  # Agent 0: team 1, hp 10 (valid)
-            [3.0, 4.0, 0.0, 2],   # Agent 1: team 2, hp 0 (invalid)
-        ])
+        state_single = np.array(
+            [
+                [0.0, 0.0, 10.0, 1],  # Agent 0: team 1, hp 10 (valid)
+                [3.0, 4.0, 0.0, 2],  # Agent 1: team 2, hp 0 (invalid)
+            ]
+        )
 
         adj_matrix, edge_indices = self.graph_builder._process_single_sample(state_single)
 
@@ -124,10 +159,12 @@ class TestMAgentVecStateGraphBuilder(unittest.TestCase):
     def test_process_single_batch_multiple_agents_no_connections(self):
         """Test processing when multiple agents exist but no connections within distance."""
         # Create state with agents far apart
-        state_far_apart = np.array([
-            [0.0, 0.0, 10.0, 1],  # Agent 0: team 1, hp 10
-            [10.0, 10.0, 5.0, 2], # Agent 1: team 2, hp 5
-        ])
+        state_far_apart = np.array(
+            [
+                [0.0, 0.0, 10.0, 1],  # Agent 0: team 1, hp 10
+                [10.0, 10.0, 5.0, 2],  # Agent 1: team 2, hp 5
+            ]
+        )
 
         # Set a small communication distance
         builder_small_dist = MAgentVecStateGraphBuilder(
@@ -136,7 +173,7 @@ class TestMAgentVecStateGraphBuilder(unittest.TestCase):
             team_dim=self.team_dim,
             selected_teams=self.selected_teams,
             comm_distance=1.0,  # Very small distance
-            distance_metric=self.distance_metric
+            distance_metric=self.distance_metric,
         )
 
         adj_matrix, edge_indices = builder_small_dist._process_single_sample(state_far_apart)
@@ -152,12 +189,14 @@ class TestMAgentVecStateGraphBuilder(unittest.TestCase):
     def test_process_single_batch_multiple_agents_with_connections(self):
         """Test processing when multiple agents exist and some are connected."""
         # Create state with agents close enough to connect
-        state_close = np.array([
-            [0.0, 0.0, 10.0, 1],  # Agent 0: team 1, hp 10
-            [3.0, 4.0, 5.0, 1],   # Agent 1: team 1, hp 5
-            [10.0, 10.0, 0.0, 2], # Agent 2: team 2, hp 0 (should be filtered out)
-            [1.0, 1.0, 8.0, 2]    # Agent 3: team 2, hp 8
-        ])
+        state_close = np.array(
+            [
+                [0.0, 0.0, 10.0, 1],  # Agent 0: team 1, hp 10
+                [3.0, 4.0, 5.0, 1],  # Agent 1: team 1, hp 5
+                [10.0, 10.0, 0.0, 2],  # Agent 2: team 2, hp 0 (should be filtered out)
+                [1.0, 1.0, 8.0, 2],  # Agent 3: team 2, hp 8
+            ]
+        )
 
         adj_matrix, edge_indices = self.graph_builder._process_single_sample(state_close)
 
@@ -183,7 +222,9 @@ class TestMAgentVecStateGraphBuilder(unittest.TestCase):
         # Test with a batch containing one state
         batch_states = np.array([self.sample_state])
 
-        adj_matrices, edge_indices_list = self.graph_builder.forward(torch.from_numpy(batch_states).float())
+        adj_matrices, edge_indices_list = self.graph_builder.forward(
+            torch.from_numpy(batch_states).float()
+        )
 
         # Should return one adjacency matrix and one edge index list
         self.assertEqual(len(adj_matrices), 1)
@@ -201,12 +242,11 @@ class TestMAgentVecStateGraphBuilder(unittest.TestCase):
     def test_forward_method_multiple_batches(self):
         """Test the forward method with multiple batches."""
         # Test with a batch containing two states
-        batch_states = np.array([
-            self.sample_state,
-            self.sample_state
-        ])
+        batch_states = np.array([self.sample_state, self.sample_state])
 
-        adj_matrices, edge_indices_list = self.graph_builder.forward(torch.from_numpy(batch_states).float())
+        adj_matrices, edge_indices_list = self.graph_builder.forward(
+            torch.from_numpy(batch_states).float()
+        )
 
         # Should return two adjacency matrices and two edge index lists
         self.assertEqual(len(adj_matrices), 2)
@@ -219,10 +259,12 @@ class TestMAgentVecStateGraphBuilder(unittest.TestCase):
     def test_edge_indices_bidirectional(self):
         """Test that edge indices are bidirectional."""
         # Create a simple case with two agents that should connect
-        simple_state = np.array([
-            [0.0, 0.0, 10.0, 1],  # Agent 0: team 1, hp 10
-            [1.0, 1.0, 5.0, 1],   # Agent 1: team 1, hp 5
-        ])
+        simple_state = np.array(
+            [
+                [0.0, 0.0, 10.0, 1],  # Agent 0: team 1, hp 10
+                [1.0, 1.0, 5.0, 1],  # Agent 1: team 1, hp 5
+            ]
+        )
 
         adj_matrix, edge_indices = self.graph_builder._process_single_sample(simple_state)
 
@@ -244,11 +286,13 @@ class TestMAgentVecStateGraphBuilder(unittest.TestCase):
     def test_team_filtering(self):
         """Test that team filtering works correctly."""
         # Create state with agents from different teams
-        team_test_state = np.array([
-            [0.0, 0.0, 10.0, 1],  # Agent 0: team 1 (selected)
-            [3.0, 4.0, 5.0, 2],   # Agent 1: team 2 (selected)
-            [6.0, 8.0, 8.0, 3],   # Agent 2: team 3 (not selected)
-        ])
+        team_test_state = np.array(
+            [
+                [0.0, 0.0, 10.0, 1],  # Agent 0: team 1 (selected)
+                [3.0, 4.0, 5.0, 2],  # Agent 1: team 2 (selected)
+                [6.0, 8.0, 8.0, 3],  # Agent 2: team 3 (not selected)
+            ]
+        )
 
         # Create builder that only selects teams 1 and 2
         team_builder = MAgentVecStateGraphBuilder(
@@ -257,7 +301,7 @@ class TestMAgentVecStateGraphBuilder(unittest.TestCase):
             team_dim=self.team_dim,
             selected_teams=[1, 2],
             comm_distance=self.comm_distance,
-            distance_metric=self.distance_metric
+            distance_metric=self.distance_metric,
         )
 
         adj_matrix, edge_indices = team_builder._process_single_sample(team_test_state)
@@ -276,11 +320,13 @@ class TestMAgentVecStateGraphBuilder(unittest.TestCase):
     def test_hp_filtering(self):
         """Test that HP filtering works correctly."""
         # Create state with agents having different HP values
-        hp_test_state = np.array([
-            [0.0, 0.0, 10.0, 1],  # Agent 0: team 1, hp 10 (valid)
-            [3.0, 4.0, 0.0, 1],   # Agent 1: team 1, hp 0 (invalid)
-            [6.0, 8.0, 5.0, 1],   # Agent 2: team 1, hp 5 (valid)
-        ])
+        hp_test_state = np.array(
+            [
+                [0.0, 0.0, 10.0, 1],  # Agent 0: team 1, hp 10 (valid)
+                [3.0, 4.0, 0.0, 1],  # Agent 1: team 1, hp 0 (invalid)
+                [6.0, 8.0, 5.0, 1],  # Agent 2: team 1, hp 5 (valid)
+            ]
+        )
 
         adj_matrix, edge_indices = self.graph_builder._process_single_sample(hp_test_state)
 
@@ -296,5 +342,5 @@ class TestMAgentVecStateGraphBuilder(unittest.TestCase):
         self.assertEqual(adj_matrix[2, 0], 0)  # No connection
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

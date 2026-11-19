@@ -1,18 +1,24 @@
 import numpy as np
 import torch
 import unittest
-from marlite.algorithm.graph_builder.partial_graph_builder import PartialGraphMAgentBuilder, PartialGraphVectorStateBuilder
-from marlite.algorithm.graph_builder.graph_util import extract_agent_positions_batch, build_partial_graph
+from marlite.algorithm.graph_builder.partial_graph_builder import (
+    PartialGraphMAgentBuilder,
+    PartialGraphVectorStateBuilder,
+)
+from marlite.algorithm.graph_builder.graph_util import (
+    extract_agent_positions_batch,
+    build_partial_graph,
+)
+
 
 class TestPartialGraphMAgentBuilder(unittest.TestCase):
-
     def setUp(self):
         """Set up test fixtures before each test method."""
         self.n_agent = 25
         self.binary_agent_id_dim = [5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
         self.agent_presence_dim = [1, 3]
         self.comm_distance = 10
-        self.distance_metric = 'cityblock'
+        self.distance_metric = "cityblock"
         self.valid_node_list = list(range(12))
         self.target_node_list = list(range(12, self.n_agent))  # New target node list
 
@@ -27,7 +33,7 @@ class TestPartialGraphMAgentBuilder(unittest.TestCase):
             n_workers=1,  # Use single worker for testing
             n_subgraphs=5,
             update_interval=5,
-            channel_first=False
+            channel_first=False,
         )
 
         # Reset builder to initial state
@@ -35,7 +41,7 @@ class TestPartialGraphMAgentBuilder(unittest.TestCase):
 
     def _create_binary_id_little_endian(self, agent_id, num_bits=10):
         """Create binary ID using little-endian format (LSB first)"""
-        binary_str = format(agent_id, f'0{num_bits}b')  # Get binary representation
+        binary_str = format(agent_id, f"0{num_bits}b")  # Get binary representation
         # Reverse the string to get little-endian (LSB first)
         return [int(x) for x in reversed(binary_str)]
 
@@ -61,7 +67,9 @@ class TestPartialGraphMAgentBuilder(unittest.TestCase):
                 states[b, i, j, self.agent_presence_dim] = 1
 
                 # Set binary agent ID using little-endian format
-                binary_id = self._create_binary_id_little_endian(agent_id, len(self.binary_agent_id_dim))
+                binary_id = self._create_binary_id_little_endian(
+                    agent_id, len(self.binary_agent_id_dim)
+                )
                 for k, bit in enumerate(binary_id):
                     states[b, i, j, self.binary_agent_id_dim[k]] = bit
 
@@ -128,7 +136,9 @@ class TestPartialGraphMAgentBuilder(unittest.TestCase):
                 states[b, i, j, self.agent_presence_dim] = 1
 
                 # Set binary agent ID using little-endian format
-                binary_id = self._create_binary_id_little_endian(agent_id, len(self.binary_agent_id_dim))
+                binary_id = self._create_binary_id_little_endian(
+                    agent_id, len(self.binary_agent_id_dim)
+                )
                 for k, bit in enumerate(binary_id):
                     states[b, i, j, self.binary_agent_id_dim[k]] = bit
 
@@ -137,7 +147,9 @@ class TestPartialGraphMAgentBuilder(unittest.TestCase):
 
         # Subsequent calls within update interval - should return cached results
         for i in range(self.builder.update_interval - 1):
-            adj_matrix_2, edge_index_2 = self.builder(torch.from_numpy(np.zeros_like(states)).float())
+            adj_matrix_2, edge_index_2 = self.builder(
+                torch.from_numpy(np.zeros_like(states)).float()
+            )
 
             # Should be equal to first result (cached)
             np.testing.assert_array_equal(adj_matrix_1.cpu().numpy(), adj_matrix_2.cpu().numpy())
@@ -164,7 +176,7 @@ class TestPartialGraphMAgentBuilder(unittest.TestCase):
             n_subgraphs=5,
             valid_node_list=self.valid_node_list,
             target_node_list=self.target_node_list,
-            update_interval=5
+            update_interval=5,
         )
 
         # Create test states
@@ -174,10 +186,10 @@ class TestPartialGraphMAgentBuilder(unittest.TestCase):
         states = np.zeros((batch_size, height, width, channels), dtype=np.float32)
         # Add agents
         for b in range(batch_size):
-            states[b, b*10, b*10, self.agent_presence_dim] = 1
+            states[b, b * 10, b * 10, self.agent_presence_dim] = 1
             # Set binary ID using little-endian
             binary_id = self._create_binary_id_little_endian(1, len(self.binary_agent_id_dim))
-            states[b, b*10, b*10, self.binary_agent_id_dim[0]] = binary_id[0]
+            states[b, b * 10, b * 10, self.binary_agent_id_dim[0]] = binary_id[0]
 
         # Process states
         adj_matrix, edge_index = builder_seq.forward(torch.from_numpy(states).float())
@@ -198,13 +210,15 @@ class TestPartialGraphMAgentBuilder(unittest.TestCase):
         # Format: [agent_id, coord_y, coord_x]
         test_positions = [
             [[1, 10, 10], [3, 20, 20]],  # Batch 0: agents with IDs 1 and 3
-            [[5, 15, 15], [1, 25, 25]]   # Batch 1: agents with IDs 5 and 1
+            [[5, 15, 15], [1, 25, 25]],  # Batch 1: agents with IDs 5 and 1
         ]
 
         for b, positions in enumerate(test_positions):
             for agent_id, i, j in positions:
                 states[b, i, j, self.agent_presence_dim] = 1
-                binary_id = self._create_binary_id_little_endian(agent_id, len(self.binary_agent_id_dim))
+                binary_id = self._create_binary_id_little_endian(
+                    agent_id, len(self.binary_agent_id_dim)
+                )
                 for k, bit in enumerate(binary_id):
                     states[b, i, j, self.binary_agent_id_dim[k]] = bit
 
@@ -229,21 +243,13 @@ class TestPartialGraphMAgentBuilder(unittest.TestCase):
 
         # Define parameters
         comm_distance = 100  # Communication threshold
-        distance_metric = 'cityblock'
+        distance_metric = "cityblock"
 
         # Community 1: tightly clustered around (10, 10)
-        community1_coords = np.array([
-            [0, 1, 1],
-            [1, 2, 1],
-            [2, 2, 2]
-        ])
+        community1_coords = np.array([[0, 1, 1], [1, 2, 1], [2, 2, 2]])
 
         # Community 2: tightly clustered around (30, 30)
-        community2_coords = np.array([
-            [3, 30, 30],
-            [4, 30, 31],
-            [5, 31, 31]
-        ])
+        community2_coords = np.array([[3, 30, 30], [4, 30, 31], [5, 31, 31]])
 
         # Combine all coordinates
         coords_with_id = np.vstack([community1_coords, community2_coords])  # Shape: (6, 3)
@@ -261,7 +267,7 @@ class TestPartialGraphMAgentBuilder(unittest.TestCase):
             distance_metric=distance_metric,
             n_subgraphs=n_subgraphs,
             valid_node_list=valid_node_list,
-            target_node_list=target_node_list
+            target_node_list=target_node_list,
         )
 
         expected_size = max(valid_node_list) + 1
@@ -298,13 +304,12 @@ class TestPartialGraphMAgentBuilder(unittest.TestCase):
 
 
 class TestPartialGraphVectorStateBuilder(unittest.TestCase):
-
     def setUp(self):
         """Set up test fixtures before each test method."""
         self.coord_dim = [5, 6]  # Coordinate dimensions in feature space
         self.hp_dim = 1  # Health point dimension
         self.comm_distance = 10
-        self.distance_metric = 'cityblock'
+        self.distance_metric = "cityblock"
         self.valid_node_list = list(range(12))
         self.target_node_list = list(range(12, 25))  # New target node list
 
@@ -318,7 +323,7 @@ class TestPartialGraphVectorStateBuilder(unittest.TestCase):
             distance_metric=self.distance_metric,
             n_workers=1,  # Use single worker for testing
             n_subgraphs=5,
-            update_interval=5
+            update_interval=5,
         )
 
         # Reset builder to initial state
@@ -420,7 +425,9 @@ class TestPartialGraphVectorStateBuilder(unittest.TestCase):
 
         # Subsequent calls within update interval - should return cached results
         for i in range(self.builder.update_interval - 1):
-            adj_matrix_2, edge_index_2 = self.builder(torch.from_numpy(np.zeros_like(states)).float())
+            adj_matrix_2, edge_index_2 = self.builder(
+                torch.from_numpy(np.zeros_like(states)).float()
+            )
 
             # Should be equal to first result (cached)
             np.testing.assert_array_equal(adj_matrix_1.cpu().numpy(), adj_matrix_2.cpu().numpy())
@@ -436,5 +443,5 @@ class TestPartialGraphVectorStateBuilder(unittest.TestCase):
             self.assertFalse(np.array_equal(adj_matrix_3.cpu().numpy(), adj_matrix_1.cpu().numpy()))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

@@ -13,15 +13,17 @@ class ScalarMessageCodec(nn.Module):
     def __init__(self, hidden_dim, message_dim=32, bits=4, *, encoder=None, decoder=None):
         super().__init__()
         if bits not in (1, 2, 4, 8) or message_dim <= 0 or message_dim * bits % 8:
-            raise ValueError(
-                "Messages must contain a whole number of bytes; bits must divide 8"
-            )
+            raise ValueError("Messages must contain a whole number of bytes; bits must divide 8")
         self.bits, self.message_dim = bits, message_dim
         self.encoder = encoder if encoder is not None else nn.Linear(hidden_dim, message_dim)
-        self.decoder = decoder if decoder is not None else nn.Sequential(
-            nn.Linear(message_dim, hidden_dim),
-            nn.GELU(),
-            nn.Linear(hidden_dim, hidden_dim),
+        self.decoder = (
+            decoder
+            if decoder is not None
+            else nn.Sequential(
+                nn.Linear(message_dim, hidden_dim),
+                nn.GELU(),
+                nn.Linear(hidden_dim, hidden_dim),
+            )
         )
 
         self.register_buffer("_decode_dtype", torch.empty(0), persistent=False)
@@ -30,7 +32,9 @@ class ScalarMessageCodec(nn.Module):
         levels = (1 << self.bits) - 1
         soft = (self.encoder(features).tanh() + 1) * levels / 2
         if soft.shape != (*features.shape[:-1], self.message_dim):
-            raise ValueError("Codec encoder must preserve leading axes and output message_dim codes")
+            raise ValueError(
+                "Codec encoder must preserve leading axes and output message_dim codes"
+            )
         hard = soft.round()
         # Exact integer forward values, including at rounding boundaries. The
         # algebraically equivalent soft+(hard-soft).detach() can lose an ULP and
@@ -61,10 +65,7 @@ class ScalarMessageCodec(nn.Module):
         return (pieces << shift).sum(-1).to(torch.uint8)
 
     def unpack(self, payload):
-        if (
-            payload.dtype != torch.uint8
-            or payload.shape[-1] != self.message_dim * self.bits // 8
-        ):
+        if payload.dtype != torch.uint8 or payload.shape[-1] != self.message_dim * self.bits // 8:
             raise ValueError("Invalid packed payload")
         shifts = torch.arange(8 // self.bits, device=payload.device) * self.bits
         return (
@@ -82,26 +83,20 @@ class GroupSetFusion(nn.Module):
 
     def __init__(self, hidden_dim=128, heads=4, slots=8, inducing_points=16):
         super().__init__()
-        self.inducing = nn.Parameter(
-            torch.randn(inducing_points, hidden_dim) / hidden_dim**0.5
-        )
+        self.inducing = nn.Parameter(torch.randn(inducing_points, hidden_dim) / hidden_dim**0.5)
         self.induce_attention = nn.MultiheadAttention(
             hidden_dim, heads, batch_first=True, dropout=0
         )
         self.induce_norm = nn.LayerNorm(hidden_dim)
         self.queries = nn.Parameter(torch.randn(slots, hidden_dim) / hidden_dim**0.5)
-        self.attention = nn.MultiheadAttention(
-            hidden_dim, heads, batch_first=True, dropout=0
-        )
+        self.attention = nn.MultiheadAttention(hidden_dim, heads, batch_first=True, dropout=0)
         self.norm = nn.LayerNorm(hidden_dim)
 
     def _fuse_members(self, members):
         batch = members.shape[0]
         inducing = self.inducing.unsqueeze(0).expand(batch, -1, -1)
         queries = self.queries.unsqueeze(0).expand(batch, -1, -1)
-        induced, _ = self.induce_attention(
-            inducing, members, members, need_weights=False
-        )
+        induced, _ = self.induce_attention(inducing, members, members, need_weights=False)
         induced = self.induce_norm(induced + inducing)
         value, _ = self.attention(queries, induced, induced, need_weights=False)
         return self.norm(value + queries)

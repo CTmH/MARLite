@@ -17,12 +17,8 @@ class PopulationEnv(NativeEnv):
         if not 0 <= wall_density < 1:
             raise ValueError("wall_density must lie in [0,1)")
         map_size = kwargs.get("map_size", 45)
-        if n_pursuers + n_evaders > (map_size - 2) ** 2 - int(
-            map_size**2 * wall_density
-        ):
-            raise ValueError(
-                "Requested population exceeds conservative free-cell capacity"
-            )
+        if n_pursuers + n_evaders > (map_size - 2) ** 2 - int(map_size**2 * wall_density):
+            raise ValueError("Requested population exceeds conservative free-cell capacity")
         if n_pursuers + n_evaders > 1024:
             raise ValueError("Native 10-bit entity IDs require at most 1024 entities")
         self.n_pursuers, self.n_evaders = n_pursuers, n_evaders
@@ -59,14 +55,10 @@ class ComplementaryPursuit(BaseParallelWrapper):
         if prey_policy not in ("random", "local_escape"):
             raise ValueError("Unknown fixed prey policy")
         self.prey_policy = prey_policy
-        self.possible_agents = [
-            a for a in env.possible_agents if a.startswith("pursuer_")
-        ]
+        self.possible_agents = [a for a in env.possible_agents if a.startswith("pursuer_")]
         self.agents = self.possible_agents[:]
         self.rng = np.random.default_rng()
-        self.observation_spaces = {
-            a: env.observation_space(a) for a in self.possible_agents
-        }
+        self.observation_spaces = {a: env.observation_space(a) for a in self.possible_agents}
         self.action_spaces = {a: env.action_space(a) for a in self.possible_agents}
         if any(space.n != 29 for space in self.action_spaces.values()):
             raise ValueError("Expected complementary-pursuit's 29-action schema")
@@ -87,14 +79,10 @@ class ComplementaryPursuit(BaseParallelWrapper):
         observations, infos = self.env.reset(seed=seed, options=options)
         self.agents = self.possible_agents[:]
         self.captured = 0
-        self.effective_hits = self.ineffective_hits = self.missed_attacks = (
-            self.attack_count
-        ) = 0
+        self.effective_hits = self.ineffective_hits = self.missed_attacks = self.attack_count = 0
         self._observations = observations
         self.initial_evaders = self.env.env.get_num(self.env.handles[0])
-        return self._filter_observations(observations), {
-            a: infos[a] for a in self.agents
-        }
+        return self._filter_observations(observations), {a: infos[a] for a in self.agents}
 
     def training_snapshot(self):
         """Privileged pre-step entity data for label validation; never an actor input."""
@@ -109,9 +97,7 @@ class ComplementaryPursuit(BaseParallelWrapper):
         initial_hp = self.env._ezpickle_kwargs["evader_hp"]
         evaders = {
             int(i): (*p, float(h) * initial_hp)
-            for i, p, h in zip(
-                native.get_agent_id(evader), native.get_pos(evader), normalized_hp
-            )
+            for i, p, h in zip(native.get_agent_id(evader), native.get_pos(evader), normalized_hp)
         }
         return pursuers, evaders
 
@@ -131,16 +117,12 @@ class ComplementaryPursuit(BaseParallelWrapper):
             raise ValueError("Actions include an inactive or non-pursuer agent")
         previous = self.agents[:]
         evaders = [a for a in self.env.agents if a.startswith("evader_")]
-        complete = {
-            a: int(self.rng.integers(self.env.action_space(a).n)) for a in evaders
-        }
+        complete = {a: int(self.rng.integers(self.env.action_space(a).n)) for a in evaders}
         if self.prey_policy == "local_escape":
             from marlite.environment.complementary_events import local_escape_action
 
             complete = {
-                a: local_escape_action(
-                    self._observations[a], self.rng, self.env.minimap_mode
-                )
+                a: local_escape_action(self._observations[a], self.rng, self.env.minimap_mode)
                 for a in evaders
             }
         complete.update(actions)
@@ -163,14 +145,10 @@ class ComplementaryPursuit(BaseParallelWrapper):
         remaining = self.env.env.get_num(self.env.handles[0])
         captures = len(evaders) - remaining
         # HP is exposed normalized; one-ULP reconstruction can straddle zero HP.
-        definite = sum(
-            e["captured"] and not e["capture_boundary"] for e in events.values()
-        )
+        definite = sum(e["captured"] and not e["capture_boundary"] for e in events.values())
         possible = sum(e["captured"] or e["capture_boundary"] for e in events.values())
         if not definite <= captures <= possible:
-            raise RuntimeError(
-                "Attack label model disagrees with native capture events"
-            )
+            raise RuntimeError("Attack label model disagrees with native capture events")
         self.captured += captures
         self._observations = obs
         self.agents = [a for a in self.env.agents if a in self.action_spaces]

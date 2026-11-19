@@ -81,9 +81,7 @@ class MagentVecStateGroupFeaturesConstructor:
         if self.n_workers > 1:
             return self._process_parallel(state_last, grouping, alive_last)
 
-        result = np.zeros(
-            (batch_size, self.n_groups, self.N_FEATURES), dtype=np.float16
-        )
+        result = np.zeros((batch_size, self.n_groups, self.N_FEATURES), dtype=np.float16)
         padding_mask = np.ones((batch_size, self.n_groups), dtype=bool)
         for b in range(batch_size):
             r, m = self._process_single(state_last[b], grouping[b], alive_last[b])
@@ -102,17 +100,12 @@ class MagentVecStateGroupFeaturesConstructor:
 
         shm = SharedMemory(create=True, size=state_last.nbytes)
         try:
-            shm_array = np.ndarray(
-                state_last.shape, dtype=state_last.dtype, buffer=shm.buf
-            )
+            shm_array = np.ndarray(state_last.shape, dtype=state_last.dtype, buffer=shm.buf)
             np.copyto(shm_array, state_last)
 
             sample_ids = list(range(batch_size))
             chunk_size = (batch_size + n_workers - 1) // n_workers
-            chunks = [
-                sample_ids[i : i + chunk_size]
-                for i in range(0, batch_size, chunk_size)
-            ]
+            chunks = [sample_ids[i : i + chunk_size] for i in range(0, batch_size, chunk_size)]
             args = [
                 (
                     shm.name,
@@ -129,9 +122,7 @@ class MagentVecStateGroupFeaturesConstructor:
             with ProcessPoolExecutor(max_workers=n_workers) as executor:
                 chunk_results = list(executor.map(_process_chunk_worker, args))
 
-            result = np.zeros(
-                (batch_size, self.n_groups, self.N_FEATURES), dtype=np.float16
-            )
+            result = np.zeros((batch_size, self.n_groups, self.N_FEATURES), dtype=np.float16)
             padding_mask = np.ones((batch_size, self.n_groups), dtype=bool)
             for chunk, chunk_result in zip(chunks, chunk_results):
                 chunk_arr, chunk_mask = chunk_result
@@ -184,15 +175,20 @@ class MagentVecStateGroupFeaturesConstructor:
             our_hps_g = our_hps[gmask]
             our_cy, our_cx = our_in_g.mean(axis=0)
 
-            seen_en = self._collect_observed_enemies(
-                our_in_g, en_coords_all, en_alive
-            )
+            seen_en = self._collect_observed_enemies(our_in_g, en_coords_all, en_alive)
             en_coords = en_coords_all[seen_en]
             en_hps_g = en_hps[seen_en]
 
             result[gid] = self._compute_features(
-                our_in_g, our_hps_g, our_cy, our_cx,
-                en_coords, en_hps_g, our_st, gmask, K,
+                our_in_g,
+                our_hps_g,
+                our_cy,
+                our_cx,
+                en_coords,
+                en_hps_g,
+                our_st,
+                gmask,
+                K,
             )
 
         return result, padding_mask
@@ -209,8 +205,16 @@ class MagentVecStateGroupFeaturesConstructor:
         return np.array(sorted(seen), dtype=int)
 
     def _compute_features(
-        self, our_coords, our_hps, our_cy, our_cx,
-        en_coords, en_hps, our_st, gmask, K,
+        self,
+        our_coords,
+        our_hps,
+        our_cy,
+        our_cx,
+        en_coords,
+        en_hps,
+        our_st,
+        gmask,
+        K,
     ):
         our_count = len(our_coords)
         en_count = len(en_coords)
@@ -248,9 +252,7 @@ class MagentVecStateGroupFeaturesConstructor:
                     bias = self._nearby_start + i * 3 + 2
                     obstacle_hits += our_st[idx, bias]
                     total_probes += 1
-            feat_obs_density = (
-                obstacle_hits / total_probes if total_probes > 0 else 0.0
-            )
+            feat_obs_density = obstacle_hits / total_probes if total_probes > 0 else 0.0
         else:
             feat_obs_density = 0.0
 
@@ -263,9 +265,7 @@ class MagentVecStateGroupFeaturesConstructor:
 
         # Nearest our agent distance
         if our_count > 1:
-            group_dists = np.sqrt(
-                ((our_coords - [our_cy, our_cx]) ** 2).sum(axis=1)
-            )
+            group_dists = np.sqrt(((our_coords - [our_cy, our_cx]) ** 2).sum(axis=1))
             feat_nearest_our = group_dists.min() / K
         else:
             feat_nearest_our = 1.0
@@ -338,9 +338,7 @@ def _process_chunk_worker(args):
         )
         padding_mask = np.zeros((len(chunk_ids), constructor.n_groups), dtype=bool)
         for i, b in enumerate(chunk_ids):
-            r, m = constructor._process_single(
-                state_last[b], grouping[b], alive_last[b]
-            )
+            r, m = constructor._process_single(state_last[b], grouping[b], alive_last[b])
             result[i] = r
             padding_mask[i] = m
         return result, padding_mask

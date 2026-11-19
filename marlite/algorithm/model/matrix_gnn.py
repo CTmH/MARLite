@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
+
 class MatrixGCNModel(nn.Module):
     """
     A graph neural network designed for multi-agent reinforcement learning.
@@ -30,10 +31,9 @@ class MatrixGCNModel(nn.Module):
         self.num_layers = num_layers
 
         # Stacked linear layers for message passing
-        self.layers = nn.ModuleList([
-            nn.Linear(input_dim if i == 0 else hidden_dim, hidden_dim)
-            for i in range(num_layers)
-        ])
+        self.layers = nn.ModuleList(
+            [nn.Linear(input_dim if i == 0 else hidden_dim, hidden_dim) for i in range(num_layers)]
+        )
 
         # Final output projection
         self.output_layer = nn.Linear(hidden_dim, output_dim)
@@ -59,8 +59,8 @@ class MatrixGCNModel(nn.Module):
         for i in range(self.num_layers):
             # Graph convolution: h = A @ W @ h
             h = torch.matmul(weight_adj_matrix, h)  # (B, N, D_in) -> (B, N, D_in)
-            h = self.layers[i](h)                # (B, N, D_in) -> (B, N, D_hid)
-            h = self.activation(h)               # Apply non-linearity
+            h = self.layers[i](h)  # (B, N, D_in) -> (B, N, D_hid)
+            h = self.activation(h)  # Apply non-linearity
 
         # Final output projection
         out = self.output_layer(h)  # (B, N, D_hid) -> (B, N, D_out)

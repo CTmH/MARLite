@@ -108,5 +108,5 @@ url = "https://download.pytorch.org/whl/cpu"
 default = false
 
 [tool.pytest.ini_options]
-addopts = "-n auto --import-mode=importlib"
+addopts = "--import-mode=importlib"
 testpaths = ["test"]

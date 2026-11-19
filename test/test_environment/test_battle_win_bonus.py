@@ -17,10 +17,9 @@ class MockBattleEnv:
     """
 
     def __init__(self, n_red=2, n_blue=2, max_cycles=100, no_max_cycles=False):
-        self.possible_agents = (
-            [f"red_{i}" for i in range(n_red)]
-            + [f"blue_{i}" for i in range(n_blue)]
-        )
+        self.possible_agents = [f"red_{i}" for i in range(n_red)] + [
+            f"blue_{i}" for i in range(n_blue)
+        ]
         self.agents = self.possible_agents[:]
         self._obs_shape = (3, 3, 2)
         self.observation_spaces = {
@@ -57,27 +56,19 @@ class MockBattleEnv:
             self.draw_at is not None and self.frames >= self.draw_at
         )
         if terminal:
-            observations = {
-                a: np.zeros(self._obs_shape, dtype=np.float32) for a in self.agents
-            }
+            observations = {a: np.zeros(self._obs_shape, dtype=np.float32) for a in self.agents}
             if self.draw_at is not None and self.frames >= self.draw_at:
                 rewards = {}
             else:
-                rewards = {
-                    a: 1.0 for a in self.agents if a.startswith("red_")
-                }
+                rewards = {a: 1.0 for a in self.agents if a.startswith("red_")}
             terminations = {a: True for a in self.agents}
             truncations = {a: False for a in self.agents}
             infos = {a: {} for a in self.agents}
             self.agents = []
             return observations, rewards, terminations, truncations, infos
 
-        observations = {
-            a: np.zeros(self._obs_shape, dtype=np.float32) for a in self.agents
-        }
-        rewards = {
-            a: (1.0 if a.startswith("red_") else 0.0) for a in self.agents
-        }
+        observations = {a: np.zeros(self._obs_shape, dtype=np.float32) for a in self.agents}
+        rewards = {a: (1.0 if a.startswith("red_") else 0.0) for a in self.agents}
         terminations = {a: False for a in self.agents}
         truncations = {a: False for a in self.agents}
         infos = {a: {} for a in self.agents}
@@ -85,7 +76,6 @@ class MockBattleEnv:
 
 
 class TestBattleWinBonus(unittest.TestCase):
-
     def _make_wrapper(
         self,
         max_cycles=100,
@@ -94,19 +84,11 @@ class TestBattleWinBonus(unittest.TestCase):
         win_bonus_factor=0.0,
         no_max_cycles=False,
     ):
-        env = MockBattleEnv(
-            n_red=2, n_blue=2, max_cycles=max_cycles, no_max_cycles=no_max_cycles
-        )
+        env = MockBattleEnv(n_red=2, n_blue=2, max_cycles=max_cycles, no_max_cycles=no_max_cycles)
         env.victory_at = victory_at
         env.draw_at = draw_at
-        opponent_agent_group_config = {
-            "type": "Random",
-            "agent_list": {"blue_0": "random1", "blue_1": "random1"},
-        }
         return BattleWrapper(
             env=env,
-            opponent_agent_group_config=opponent_agent_group_config,
-            opp_obs_queue_len=2,
             win_bonus_factor=win_bonus_factor,
         )
 
@@ -115,7 +97,7 @@ class TestBattleWinBonus(unittest.TestCase):
         wrapper.reset()
         last_rewards = {}
         for _ in range(n):
-            _, last_rewards, _, _, _ = wrapper.step({})
+            _, last_rewards, _, _, _ = wrapper.step({a: 0 for a in wrapper.agents})
         return last_rewards
 
     def test_early_win_bonus(self):
@@ -132,8 +114,8 @@ class TestBattleWinBonus(unittest.TestCase):
 
         wrapper.reset()
         for _ in range(victory_at - 1):
-            wrapper.step({})
-        _, win_rewards, _, _, _ = wrapper.step({})
+            wrapper.step({a: 0 for a in wrapper.agents})
+        _, win_rewards, _, _, _ = wrapper.step({a: 0 for a in wrapper.agents})
 
         self.assertEqual(set(win_rewards), {"red_0", "red_1"})
         for reward in win_rewards.values():
@@ -148,9 +130,7 @@ class TestBattleWinBonus(unittest.TestCase):
             self.assertAlmostEqual(reward, 1.0)
 
     def test_victory_at_max_cycles_yields_zero_bonus(self):
-        wrapper = self._make_wrapper(
-            max_cycles=100, victory_at=100, win_bonus_factor=10.0
-        )
+        wrapper = self._make_wrapper(max_cycles=100, victory_at=100, win_bonus_factor=10.0)
         rewards = self._run_steps(wrapper, 100)
         for reward in rewards.values():
             self.assertAlmostEqual(reward, 1.0)
@@ -162,16 +142,12 @@ class TestBattleWinBonus(unittest.TestCase):
             self.assertAlmostEqual(reward, 1.0)
 
     def test_draw_awards_no_bonus(self):
-        wrapper = self._make_wrapper(
-            max_cycles=100, draw_at=40, win_bonus_factor=10.0
-        )
+        wrapper = self._make_wrapper(max_cycles=100, draw_at=40, win_bonus_factor=10.0)
         rewards = self._run_steps(wrapper, 40)
         self.assertEqual(rewards, {})
 
     def test_step_counter_resets(self):
-        wrapper = self._make_wrapper(
-            max_cycles=100, victory_at=40, win_bonus_factor=10.0
-        )
+        wrapper = self._make_wrapper(max_cycles=100, victory_at=40, win_bonus_factor=10.0)
         self._run_steps(wrapper, 40)
         self.assertEqual(wrapper._step_count, 40)
         wrapper.reset()

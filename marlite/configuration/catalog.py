@@ -57,6 +57,20 @@ def default_registry():
     ):
         registry.register(name, factory)
     families = {
+        "marlite.algorithm.adapters": ["GaussianParameters", "MaskedPool"],
+        "marlite.algorithm.routing": ["RoutedFrames", "RoutedTemporal", "RoutedHead"],
+        "marlite.environment.padding": ["PadAgentView"],
+        "marlite.environment.controllers": [
+            "RandomController",
+            "PreyEscapeController",
+            "BattleController",
+            "FrozenPolicyController",
+        ],
+        "marlite.environment.magent_wrapper": [
+            "AdversarialPursuitPredator",
+            "AdversarialPursuitPrey",
+            "BattleWrapper",
+        ],
         "marlite.algorithm.temporal": [
             "FrameEncoder",
             "RecurrentGRU",
@@ -137,6 +151,7 @@ def default_registry():
             "InfoNCELoss",
         ],
         "marlite.util.loss_mixer": ["WeightedSumLoss", "EMAGradNormLoss", "PCGradLoss"],
+        "marlite.util.scheduler": ["FixedScheduler", "LinearScheduler", "LogarithmicScheduler"],
         "marlite.util.communication_training": ["StateThresholdQueries"],
         "marlite.util.complementary_targets": ["ComplementaryAttackQueries"],
         "marlite.algorithm.group_builder.fixed_group_builder": ["FixedGroupBuilder"],
@@ -185,4 +200,6 @@ def default_registry():
             registry.register(name, (module, name))
     for name in ("Adam", "AdamW", "SGD", "RMSprop"):
         registry.register(name, getattr(torch.optim, name))
+    for name in ("StepLR", "OneCycleLR", "ReduceLROnPlateau", "ExponentialLR", "CosineAnnealingLR"):
+        registry.register(name, getattr(torch.optim.lr_scheduler, name))
     return registry

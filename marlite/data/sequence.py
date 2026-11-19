@@ -45,9 +45,13 @@ class SequenceBatch:
         return SequenceBatch(
             {k: v.to(device) for k, v in self.frames.items()},
             {k: v.to(device) for k, v in self.transitions.items()},
-            *(getattr(self, key).to(device) for key in
-              ("filled", "loss_mask", "bootstrap_mask", "trace_mask")),
-            self.sources, self.frame_start.to(device), self.learning_start.to(device),
+            *(
+                getattr(self, key).to(device)
+                for key in ("filled", "loss_mask", "bootstrap_mask", "trace_mask")
+            ),
+            self.sources,
+            self.frame_start.to(device),
+            self.learning_start.to(device),
         )
 
 
@@ -55,8 +59,10 @@ def partition_episode(episode_id, episode, length=32, burn_in=8, future=0):
     """Each transition is a learning target exactly once; short tails are kept."""
     if type(length) is not int or length < 1:
         raise ValueError("Sequence length must be positive")
-    return [SequenceSlice(episode_id, start, length, burn_in, future)
-            for start in range(0, episode.length, length)]
+    return [
+        SequenceSlice(episode_id, start, length, burn_in, future)
+        for start in range(0, episode.length, length)
+    ]
 
 
 def collate_sequences(episodes: dict[int, Episode], sources):
@@ -91,10 +97,10 @@ def collate_sequences(episodes: dict[int, Episode], sources):
             ):
                 raise ValueError("A batch requires matching field specifications")
     size = max(end - begin for _, begin, _, end in segments)
-    frames = {k: v.new_zeros(len(sources), size + 1, *v.shape[1:])
-              for k, v in first.frames.items()
-              if not k.startswith(("actor_state.", "critic_state."))}
-    transitions = {k: v.new_zeros(len(sources), size, *v.shape[1:]) for k, v in first.transitions.items()}
+    frames = {k: v.new_zeros(len(sources), size + 1, *v.shape[1:]) for k, v in first.frames.items()}
+    transitions = {
+        k: v.new_zeros(len(sources), size, *v.shape[1:]) for k, v in first.transitions.items()
+    }
     filled = torch.zeros(len(sources), size, dtype=torch.bool)
     learning, bootstrap, trace = (torch.zeros_like(filled) for _ in range(3))
     starts, offsets = [], []
@@ -102,11 +108,11 @@ def collate_sequences(episodes: dict[int, Episode], sources):
         episode, begin, learn_end, end = segment
         count = end - begin
         for key, value in frames.items():
-            value[row, :count + 1] = episode.frames[key][begin:end + 1]
+            value[row, : count + 1] = episode.frames[key][begin : end + 1]
         for key, value in transitions.items():
             value[row, :count] = episode.transitions[key][begin:end]
         filled[row, :count] = True
-        learning[row, source.start - begin:learn_end - begin] = True
+        learning[row, source.start - begin : learn_end - begin] = True
         boot, cont = episode.return_masks()
         bootstrap[row, :count] = boot[begin:end]
         trace[row, :count] = cont[begin:end]
@@ -114,5 +120,14 @@ def collate_sequences(episodes: dict[int, Episode], sources):
         trace[row, count - 1] = False
         starts.append(begin)
         offsets.append(source.start - begin)
-    return SequenceBatch(frames, transitions, filled, learning, bootstrap, trace,
-                         sources, torch.tensor(starts), torch.tensor(offsets))
+    return SequenceBatch(
+        frames,
+        transitions,
+        filled,
+        learning,
+        bootstrap,
+        trace,
+        sources,
+        torch.tensor(starts),
+        torch.tensor(offsets),
+    )

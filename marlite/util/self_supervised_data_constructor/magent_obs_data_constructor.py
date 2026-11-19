@@ -1,10 +1,9 @@
 import numpy as np
-from typing import Optional, Tuple, List, Type, Any
+from typing import Optional, Tuple, List
 from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import shared_memory
 import multiprocessing as mp
 import sys
-import os
 from marlite.util.self_supervised_data_constructor.self_supervised_data_constructor import (
     SelfSupervisedDataConstructor,
 )
@@ -103,40 +102,30 @@ def _process_single_agent_numba(
     max_observed_entities = observations_np.shape[2]
     feature_dim = observations_np.shape[3]
 
-    result = np.zeros(
-        (seq_len, max_entities_perception, feature_dim), dtype=observations_np.dtype
-    )
+    result = np.zeros((seq_len, max_entities_perception, feature_dim), dtype=observations_np.dtype)
     mask = np.zeros((seq_len, max_entities_perception), dtype=bool)
 
     for t in range(seq_len):
         alive_agents_at_t = np.where(alive_mask_np[t, :])[0]
         edge_indices_t = edge_indices_np[t]
 
-        self_obs = np.empty(
-            (max_observed_entities, feature_dim), dtype=observations_np.dtype
-        )
+        self_obs = np.empty((max_observed_entities, feature_dim), dtype=observations_np.dtype)
         self_obs[:, :] = observations_np[t, agent_idx, :, :]
 
-        neighbor_agents = get_alive_neighbors_numba(
-            edge_indices_t, alive_agents_at_t, agent_idx
-        )
+        neighbor_agents = get_alive_neighbors_numba(edge_indices_t, alive_agents_at_t, agent_idx)
 
         total_entities = max_observed_entities * (1 + len(neighbor_agents))
 
-        all_entities = np.empty(
-            (total_entities, feature_dim), dtype=observations_np.dtype
-        )
+        all_entities = np.empty((total_entities, feature_dim), dtype=observations_np.dtype)
 
         entity_idx = 0
-        all_entities[entity_idx : entity_idx + max_observed_entities, :] = self_obs[
-            :, :
-        ]
+        all_entities[entity_idx : entity_idx + max_observed_entities, :] = self_obs[:, :]
         entity_idx += max_observed_entities
 
         for neighbor_idx in neighbor_agents:
-            all_entities[entity_idx : entity_idx + max_observed_entities, :] = (
-                observations_np[t, neighbor_idx, :, :]
-            )
+            all_entities[entity_idx : entity_idx + max_observed_entities, :] = observations_np[
+                t, neighbor_idx, :, :
+            ]
             entity_idx += max_observed_entities
 
         non_zero_mask = np.sum(np.abs(all_entities), axis=1) > 0
@@ -144,13 +133,9 @@ def _process_single_agent_numba(
 
         unique_entities = remove_duplicates_numba(clean_entities)
         sorted_entities = sort_entities_by_distance_angle_numba(unique_entities)
-        final_entities, final_mask = pad_or_truncate_numba(
-            sorted_entities, max_entities_perception
-        )
+        final_entities, final_mask = pad_or_truncate_numba(sorted_entities, max_entities_perception)
 
-        result[t, :max_entities_perception, :] = final_entities[
-            :max_entities_perception, :
-        ]
+        result[t, :max_entities_perception, :] = final_entities[:max_entities_perception, :]
         mask[t, :max_entities_perception] = final_mask[:max_entities_perception]
 
     return result, mask
@@ -164,14 +149,10 @@ def _create_shared_memory_arrays(observations, alive_mask):
     shm_obs = shared_memory.SharedMemory(create=True, size=observations.nbytes)
     shm_alive = shared_memory.SharedMemory(create=True, size=alive_mask.nbytes)
 
-    obs_arr = np.ndarray(
-        observations.shape, dtype=observations.dtype, buffer=shm_obs.buf
-    )
+    obs_arr = np.ndarray(observations.shape, dtype=observations.dtype, buffer=shm_obs.buf)
     obs_arr[:] = observations[:]
 
-    alive_arr = np.ndarray(
-        alive_mask.shape, dtype=alive_mask.dtype, buffer=shm_alive.buf
-    )
+    alive_arr = np.ndarray(alive_mask.shape, dtype=alive_mask.dtype, buffer=shm_alive.buf)
     alive_arr[:] = alive_mask[:]
 
     return shm_obs, shm_alive, obs_arr, alive_arr
@@ -184,16 +165,12 @@ def _cleanup_shared_memory(shm_obs, shm_alive):
     shm_alive.unlink()
 
 
-def _worker_init(
-    shm_obs_name, obs_shape, obs_dtype, shm_alive_name, alive_shape, alive_dtype
-):
+def _worker_init(shm_obs_name, obs_shape, obs_dtype, shm_alive_name, alive_shape, alive_dtype):
     global _worker_obs_shm, _worker_alive_shm, _worker_obs, _worker_alive
     _worker_obs_shm = shared_memory.SharedMemory(name=shm_obs_name)
     _worker_alive_shm = shared_memory.SharedMemory(name=shm_alive_name)
     _worker_obs = np.ndarray(obs_shape, dtype=obs_dtype, buffer=_worker_obs_shm.buf)
-    _worker_alive = np.ndarray(
-        alive_shape, dtype=alive_dtype, buffer=_worker_alive_shm.buf
-    )
+    _worker_alive = np.ndarray(alive_shape, dtype=alive_dtype, buffer=_worker_alive_shm.buf)
 
 
 def _worker_process_batch(args):
@@ -203,9 +180,7 @@ def _worker_process_batch(args):
         obs = _worker_obs[idx]
         alive = _worker_alive[idx]
         edges = edge_indices_list[idx]
-        result, mask = _process_single_sample(
-            (obs, edges, alive, max_entities_perception)
-        )
+        result, mask = _process_single_sample((obs, edges, alive, max_entities_perception))
         results.append((result, mask))
     return results
 
@@ -307,18 +282,14 @@ class MagentObsDataConstructor(SelfSupervisedDataConstructor):
 
         if not self.with_time_seq:
             processed_observations = processed_observations[:, [-1], :, :, :]
-            edge_indices = [
-                [batch_edge_indices[-1]] for batch_edge_indices in edge_indices
-            ]
+            edge_indices = [[batch_edge_indices[-1]] for batch_edge_indices in edge_indices]
             seq_len = 1
 
         result = np.zeros(
             (batch_size, seq_len, n_agents, self.max_entities_perception, feature_dim),
             dtype=processed_observations.dtype,
         )
-        mask = np.zeros(
-            (batch_size, seq_len, n_agents, self.max_entities_perception), dtype=bool
-        )
+        mask = np.zeros((batch_size, seq_len, n_agents, self.max_entities_perception), dtype=bool)
 
         if self.n_workers > 1:
             n_workers = min(self.n_workers, batch_size)
@@ -334,11 +305,7 @@ class MagentObsDataConstructor(SelfSupervisedDataConstructor):
                     worker_args = []
                     for worker_id in range(n_workers):
                         start_idx = worker_id * base_samples + min(worker_id, extra_samples)
-                        end_idx = (
-                            start_idx
-                            + base_samples
-                            + (1 if worker_id < extra_samples else 0)
-                        )
+                        end_idx = start_idx + base_samples + (1 if worker_id < extra_samples else 0)
                         if start_idx >= batch_size:
                             break
                         batch_indices = list(range(start_idx, end_idx))
@@ -390,9 +357,7 @@ class MagentObsDataConstructor(SelfSupervisedDataConstructor):
             mask = mask.squeeze(1)
 
         if self.include_features:
-            valid_include_features = [
-                f for f in self.include_features if 0 <= f < result.shape[-1]
-            ]
+            valid_include_features = [f for f in self.include_features if 0 <= f < result.shape[-1]]
             result = result[..., valid_include_features]
         elif self.exclude_features:
             remaining_features = [
@@ -478,8 +443,6 @@ class MagentImageObsDataConstructor(MagentObsDataConstructor):
 
         batch_size, seq_len, n_agents, H, W, C = observations.shape
         L = H * W
-        reshaped_observations = observations.reshape(
-            batch_size, seq_len, n_agents, L, C
-        )
+        reshaped_observations = observations.reshape(batch_size, seq_len, n_agents, L, C)
 
         return reshaped_observations

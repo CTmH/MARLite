@@ -3,13 +3,11 @@ import torch
 import numpy as np
 from marlite.algorithm.graph_builder.graph_builder import GraphBuilder
 
-class RandomGroupGraphBuilder(GraphBuilder):
 
+class RandomGroupGraphBuilder(GraphBuilder):
     def __init__(
-            self,
-            num_groups: int,
-            valid_node_list: Union[list, None] = None,
-            add_self_loop: bool = True):
+        self, num_groups: int, valid_node_list: Union[list, None] = None, add_self_loop: bool = True
+    ):
         super().__init__()
         if valid_node_list is None:
             raise ValueError("valid_node_list must be provided for RandomGroupGraphBuilder")

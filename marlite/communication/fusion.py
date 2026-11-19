@@ -16,7 +16,7 @@ def gaussian(parameters):
     if parameters.shape[-1] % 2:
         raise ValueError("Gaussian parameters must contain mean and log variance")
     mean, log_var = parameters.chunk(2, -1)
-    return mean, log_var.clamp(-10., 10.)
+    return mean, log_var.clamp(-10.0, 10.0)
 
 
 def draw_latent(mean, log_var, context, sampled):
@@ -24,13 +24,17 @@ def draw_latent(mean, log_var, context, sampled):
         return mean
     noise = context.get("latent_noise")
     if noise is None or noise.shape != mean.shape or not torch.isfinite(noise).all():
-        raise ValueError("Sampled policy latents require recorded finite latent_noise of matching shape")
-    return mean + (.5 * log_var).exp() * noise
+        raise ValueError(
+            "Sampled policy latents require recorded finite latent_noise of matching shape"
+        )
+    return mean + (0.5 * log_var).exp() * noise
 
 
 class MaskedMeanPool(nn.Module):
     def forward(self, tokens, alive):
-        return tokens.masked_fill(~alive[..., None], 0).sum(-2) / alive.sum(-1, keepdim=True).clamp_min(1)
+        return tokens.masked_fill(~alive[..., None], 0).sum(-2) / alive.sum(
+            -1, keepdim=True
+        ).clamp_min(1)
 
 
 class MaskedMaxPool(nn.Module):
@@ -44,8 +48,8 @@ class AttentionPool(nn.Module):
 
     def __init__(self, hidden_dim, heads=4):
         super().__init__()
-        self.query = nn.Parameter(torch.randn(1, 1, hidden_dim) / hidden_dim ** .5)
-        self.attention = nn.MultiheadAttention(hidden_dim, heads, dropout=0., batch_first=True)
+        self.query = nn.Parameter(torch.randn(1, 1, hidden_dim) / hidden_dim**0.5)
+        self.attention = nn.MultiheadAttention(hidden_dim, heads, dropout=0.0, batch_first=True)
         self.norm = nn.LayerNorm(hidden_dim)
 
     def forward(self, tokens, alive):
@@ -71,7 +75,11 @@ class SetCommunication(nn.Module):
 
     def sample_context(self, alive, generator):
         if self.sampled_policy:
-            return {"latent_noise": torch.randn(*alive.shape[:-1], 1, self.latent_dim, generator=generator)}
+            return {
+                "latent_noise": torch.randn(
+                    *alive.shape[:-1], 1, self.latent_dim, generator=generator
+                )
+            }
         return {}
 
     def forward(self, messages, alive, context, *, queries=None):
@@ -89,12 +97,16 @@ class SetCommunication(nn.Module):
         summary = draw_latent(mean, log_var, context, self.sampled_policy)
         summary = summary.masked_fill(~group_valid[..., None], 0)
         per_agent = summary.expand(*leading, n, -1).masked_fill(~alive[..., None], 0)
-        return CommunicationOutput(per_agent, {
-            "group_mu": mean.masked_fill(~group_valid[..., None], 0),
-            "group_log_var": log_var.masked_fill(~group_valid[..., None], 0),
-            "group_sample": summary, "group_valid": group_valid,
-            "aggregated_msg": summary[..., 0, :],
-        })
+        return CommunicationOutput(
+            per_agent,
+            {
+                "group_mu": mean.masked_fill(~group_valid[..., None], 0),
+                "group_log_var": log_var.masked_fill(~group_valid[..., None], 0),
+                "group_sample": summary,
+                "group_valid": group_valid,
+                "aggregated_msg": summary[..., 0, :],
+            },
+        )
 
 
 class GaussianConsensus(nn.Module):
@@ -109,7 +121,12 @@ class GaussianConsensus(nn.Module):
         super().__init__()
         if mode not in ("ae", "sample_mean", "bayesian", "ci"):
             raise ValueError("Unsupported consensus rule")
-        if type(n_groups) is not int or n_groups < 1 or type(latent_dim) is not int or latent_dim < 1:
+        if (
+            type(n_groups) is not int
+            or n_groups < 1
+            or type(latent_dim) is not int
+            or latent_dim < 1
+        ):
             raise ValueError("Group and latent capacities must be positive")
         if mode == "ae" and sampled_policy:
             raise ValueError("AE consensus has no stochastic latent")
@@ -118,8 +135,11 @@ class GaussianConsensus(nn.Module):
 
     def sample_context(self, alive, generator):
         if self.sampled_policy:
-            return {"latent_noise": torch.randn(*alive.shape[:-1], self.n_groups, self.latent_dim,
-                                                generator=generator)}
+            return {
+                "latent_noise": torch.randn(
+                    *alive.shape[:-1], self.n_groups, self.latent_dim, generator=generator
+                )
+            }
         return {}
 
     def forward(self, messages, alive, context, *, queries=None):
@@ -156,29 +176,46 @@ class GaussianConsensus(nn.Module):
         else:
             scores = lv if self.mode == "sample_mean" else -lv
             maximum = mu.new_full(capacity, -torch.inf).scatter_reduce_(
-                1, index, scores.masked_fill(~live[..., None], -torch.inf), reduce="amax", include_self=True)
+                1,
+                index,
+                scores.masked_fill(~live[..., None], -torch.inf),
+                reduce="amax",
+                include_self=True,
+            )
             maximum = maximum.masked_fill(~valid[..., None], 0)
             scaled = (scores - maximum.gather(1, index)).exp().masked_fill(~live[..., None], 0)
             mass = grouped_sum(scaled)
             if self.mode == "sample_mean":
-                group_lv = maximum + mass.clamp_min(1e-12).log() - 2 * count.clamp_min(1)[..., None].log()
+                group_lv = (
+                    maximum + mass.clamp_min(1e-12).log() - 2 * count.clamp_min(1)[..., None].log()
+                )
             elif self.mode == "bayesian":
                 group_mean = grouped_sum(scaled * mu) / mass.clamp_min(1e-12)
                 group_lv = -maximum - mass.clamp_min(1e-12).log()
             else:
                 squared_mass = grouped_sum(scaled.square())
                 group_mean = grouped_sum(scaled.square() * mu) / squared_mass.clamp_min(1e-12)
-                group_lv = -maximum - squared_mass.clamp_min(1e-12).log() + mass.clamp_min(1e-12).log()
-        group_mean = group_mean.masked_fill(~valid[..., None], 0).reshape(*leading, self.n_groups, -1)
+                group_lv = (
+                    -maximum - squared_mass.clamp_min(1e-12).log() + mass.clamp_min(1e-12).log()
+                )
+        group_mean = group_mean.masked_fill(~valid[..., None], 0).reshape(
+            *leading, self.n_groups, -1
+        )
         group_lv = group_lv.masked_fill(~valid[..., None], 0).reshape_as(group_mean)
         group_valid = valid.reshape(*leading, self.n_groups)
         sample = draw_latent(group_mean, group_lv, context, self.sampled_policy)
         sample = sample.masked_fill(~group_valid[..., None], 0)
         selected = sample.flatten(0, len(leading) - 1).gather(1, index)
         selected = selected.reshape(*alive.shape, self.latent_dim).masked_fill(~alive[..., None], 0)
-        return CommunicationOutput(selected, {
-            "agent_mu": mean.masked_fill(~alive[..., None], 0),
-            "agent_log_var": log_var.masked_fill(~alive[..., None], 0),
-            "group_mu": group_mean, "group_log_var": group_lv,
-            "group_sample": sample, "group_valid": group_valid, "groups": groups,
-        })
+        return CommunicationOutput(
+            selected,
+            {
+                "agent_mu": mean.masked_fill(~alive[..., None], 0),
+                "agent_log_var": log_var.masked_fill(~alive[..., None], 0),
+                "group_mu": group_mean,
+                "group_log_var": group_lv,
+                "group_sample": sample,
+                "group_valid": group_valid,
+                "groups": groups,
+            },
+        )

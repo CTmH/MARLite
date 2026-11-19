@@ -120,11 +120,10 @@ class _GradientLoss(WeightedSumLoss):
         for loss in losses:
             gradients = (
                 torch.autograd.grad(loss, parameters, retain_graph=True, allow_unused=True)
-                if loss.requires_grad else (None,) * len(parameters)
+                if loss.requires_grad
+                else (None,) * len(parameters)
             )
-            flags = torch.tensor(
-                [g is not None for g in gradients], device=parameters[0].device
-            )
+            flags = torch.tensor([g is not None for g in gradients], device=parameters[0].device)
             flat = torch.cat(
                 [
                     (g.detach() if g is not None else torch.zeros_like(p)).reshape(-1)
@@ -155,9 +154,7 @@ class EMAGradNormLoss(_GradientLoss):
     Otherwise target_ratio sets the weighted SSL/RL gradient-norm ratio.
     """
 
-    def __init__(
-        self, alpha=0.9, target_ratio=1.0, min_weight=0.0, max_weight=10.0, **kwargs
-    ):
+    def __init__(self, alpha=0.9, target_ratio=1.0, min_weight=0.0, max_weight=10.0, **kwargs):
         super().__init__(**kwargs)
         if not math.isfinite(alpha) or not 0 <= alpha < 1:
             raise ValueError("alpha must be in [0, 1)")
@@ -177,7 +174,9 @@ class EMAGradNormLoss(_GradientLoss):
         values = self._loss_vector(losses)
         weight = self.weights[1].detach().clone()
         if torch.is_grad_enabled() and self.training and self.weights.prod() > 0:
-            _, _, gradients = self._shared_gradients(losses, parameters, distributed, distributed_reduction)
+            _, _, gradients = self._shared_gradients(
+                losses, parameters, distributed, distributed_reduction
+            )
             if gradients:
                 norms = torch.stack([g.norm() for g in gradients])
                 if torch.isfinite(norms).all() and (norms > self.eps).all():
@@ -188,9 +187,15 @@ class EMAGradNormLoss(_GradientLoss):
                             self.norm_ema.copy_(norms)
                             self.initialized.fill_(True)
                         weight = (
-                            self.target_ratio * self.weights[0] * self.norm_ema[0]
-                            / self.norm_ema[1].clamp_min(self.eps)
-                        ).clamp(self.min_weight, self.max_weight).clone()
+                            (
+                                self.target_ratio
+                                * self.weights[0]
+                                * self.norm_ema[0]
+                                / self.norm_ema[1].clamp_min(self.eps)
+                            )
+                            .clamp(self.min_weight, self.max_weight)
+                            .clone()
+                        )
         elif self.initialized:
             weight = self.effective_ssl_weight.detach().clone()
         if self.training:
@@ -213,7 +218,9 @@ class PCGradLoss(_GradientLoss):
         result = self._reduce(values)
         if not torch.is_grad_enabled() or not self.training or self.weights.prod() == 0:
             return result
-        shared, local, averaged = self._shared_gradients(losses, parameters, distributed, distributed_reduction)
+        shared, local, averaged = self._shared_gradients(
+            losses, parameters, distributed, distributed_reduction
+        )
         if not shared:
             return result
         scale = self.weights / (2 if self.reduction == "mean" else 1)
@@ -222,7 +229,8 @@ class PCGradLoss(_GradientLoss):
         # Each projection uses the ORIGINAL other-task gradient, not its projection.
         conflict = dot.clamp(max=0)
         projected = (
-            first + second
+            first
+            + second
             - conflict / second.square().sum().clamp_min(self.eps) * second
             - conflict / first.square().sum().clamp_min(self.eps) * first
         )

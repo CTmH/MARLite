@@ -8,18 +8,21 @@ from copy import deepcopy
 from marlite.algorithm.graph_builder.graph_builder import GraphBuilder
 from marlite.algorithm.graph_builder.graph_util import binary_to_decimal
 
-class MAgentGraphBuilder(GraphBuilder):
 
+class MAgentGraphBuilder(GraphBuilder):
     def __init__(
-            self,
-            binary_agent_id_dim: list,
-            agent_presence_dim: list,
-            comm_distance: float,
-            distance_metric: str = 'cityblock',
-            n_workers: int = 0,
-            valid_node_list: Union[list, None] = None, # Suggestion: Add valid_node_list, otherwise isolated nodes will be ignored in the node mapping.
-            update_interval: int = 1,
-            channel_first: bool = False):
+        self,
+        binary_agent_id_dim: list,
+        agent_presence_dim: list,
+        comm_distance: float,
+        distance_metric: str = "cityblock",
+        n_workers: int = 0,
+        valid_node_list: Union[
+            list, None
+        ] = None,  # Suggestion: Add valid_node_list, otherwise isolated nodes will be ignored in the node mapping.
+        update_interval: int = 1,
+        channel_first: bool = False,
+    ):
         super().__init__()
         self.binary_agent_id_dim = binary_agent_id_dim
         self.agent_presence_dim = agent_presence_dim
@@ -36,23 +39,32 @@ class MAgentGraphBuilder(GraphBuilder):
 
     @staticmethod
     def _process_sample(
-            sample_state,
-            binary_agent_id_dim: list,
-            agent_presence_dim: list,
-            comm_distance: int,
-            distance_metric: str,
-            valid_node_list: Union[list, None] = None):
+        sample_state,
+        binary_agent_id_dim: list,
+        agent_presence_dim: list,
+        comm_distance: int,
+        distance_metric: str,
+        valid_node_list: Union[list, None] = None,
+    ):
         """Process a single batch item"""
         binary_agent_id = sample_state[:, :, binary_agent_id_dim]
-        agent_positions = np.apply_along_axis(binary_to_decimal, -1, binary_agent_id).astype(np.int64)
+        agent_positions = np.apply_along_axis(binary_to_decimal, -1, binary_agent_id).astype(
+            np.int64
+        )
         agent_presence = sample_state[:, :, agent_presence_dim]
         agent_presence = agent_presence.astype(np.int64)
         agent_presence = agent_presence.sum(axis=-1)
-        agent_positions = agent_positions * agent_presence + agent_presence - np.ones_like(agent_presence)
+        agent_positions = (
+            agent_positions * agent_presence + agent_presence - np.ones_like(agent_presence)
+        )
         threshold = comm_distance
 
-        valid_elements = {val: (i, j) for i, row in enumerate(agent_positions)
-                         for j, val in enumerate(row) if val >= 0}
+        valid_elements = {
+            val: (i, j)
+            for i, row in enumerate(agent_positions)
+            for j, val in enumerate(row)
+            if val >= 0
+        }
         sorted_ids = sorted(valid_elements.keys())
         sorted_ids = np.array(sorted_ids, dtype=np.int64)
         coords = np.array([valid_elements[k] for k in sorted_ids], dtype=np.int64)
@@ -61,10 +73,13 @@ class MAgentGraphBuilder(GraphBuilder):
         if valid_node_list is None:
             valid_node_list = sorted_ids.tolist()
         node_mapping = {old_id: new_id for new_id, old_id in enumerate(valid_node_list)}
-        map_func = np.vectorize(lambda x: node_mapping.get(x))
+        selected = np.array([key in node_mapping for key in sorted_ids], dtype=bool)
+        sorted_ids, coords = sorted_ids[selected], coords[selected]
+
+        def map_func(ids):
+            return np.fromiter((node_mapping[int(i)] for i in ids), dtype=np.int64)
 
         if len(coords) > 0:
-
             distances = cdist(coords, coords, metric=distance_metric)
 
             mask = (distances <= threshold) & (np.triu(np.ones_like(distances, dtype=bool), k=1))
@@ -81,7 +96,8 @@ class MAgentGraphBuilder(GraphBuilder):
             adj_matrix[mapped_rows, mapped_cols] = 1
             adj_matrix[mapped_cols, mapped_rows] = 1
         else:
-            raise ValueError("No valid nodes found in the state.")
+            adj_matrix = np.zeros((len(valid_node_list), len(valid_node_list)), dtype=np.int64)
+            edge_index = np.empty((2, 0), dtype=np.int64)
 
         return adj_matrix, edge_index
 
@@ -92,35 +108,44 @@ class MAgentGraphBuilder(GraphBuilder):
         bs = states.shape[0]
         if not self.training:
             self.step_counter += 1
-            if (self.step_counter % self.update_interval != 0
+            if (
+                self.step_counter % self.update_interval != 0
                 and self.cached_adj_matrix is not None
-                and self.cached_edge_indices is not None):
-                return torch.from_numpy(deepcopy(self.cached_adj_matrix)), deepcopy(self.cached_edge_indices)
+                and self.cached_edge_indices is not None
+            ):
+                return torch.from_numpy(deepcopy(self.cached_adj_matrix)), deepcopy(
+                    self.cached_edge_indices
+                )
 
         n_workers = min(bs, self.n_workers)
 
         # Process batches in parallel
         if n_workers > 1:
             with ProcessPoolExecutor(max_workers=n_workers) as executor:
-                results = list(executor.map(
-                    self._process_sample,
-                    [states[b] for b in range(bs)],
-                    [self.binary_agent_id_dim] * bs,
-                    [self.agent_presence_dim] * bs,
-                    [self.comm_distance] * bs,
-                    [self.distance_metric] * bs,
-                    [self.valid_node_list] * bs
-                ))
+                results = list(
+                    executor.map(
+                        self._process_sample,
+                        [states[b] for b in range(bs)],
+                        [self.binary_agent_id_dim] * bs,
+                        [self.agent_presence_dim] * bs,
+                        [self.comm_distance] * bs,
+                        [self.distance_metric] * bs,
+                        [self.valid_node_list] * bs,
+                    )
+                )
         else:
             # Single process fallback
-            results = [self._process_sample(
-                states[b],
-                self.binary_agent_id_dim,
-                self.agent_presence_dim,
-                self.comm_distance,
-                self.distance_metric,
-                self.valid_node_list
-            ) for b in range(bs)]
+            results = [
+                self._process_sample(
+                    states[b],
+                    self.binary_agent_id_dim,
+                    self.agent_presence_dim,
+                    self.comm_distance,
+                    self.distance_metric,
+                    self.valid_node_list,
+                )
+                for b in range(bs)
+            ]
 
         batch_adj_matrix, batch_edge_indices = zip(*results)
         batch_adj_matrix = np.array(batch_adj_matrix)
@@ -138,6 +163,7 @@ class MAgentGraphBuilder(GraphBuilder):
         self.cached_edge_indices = None
         return self
 
+
 class MAgentVecStateGraphBuilder(GraphBuilder):
     """
     A graph builder for states with shape (batch_size, n_agents, feature_dim).
@@ -145,15 +171,16 @@ class MAgentVecStateGraphBuilder(GraphBuilder):
     """
 
     def __init__(
-            self,
-            coord_dims: Tuple[int, int],
-            hp_dim: int,
-            team_dim: int,
-            selected_teams: List[int],
-            comm_distance: float,
-            distance_metric: str = 'euclidean',
-            update_interval: int = 1,
-            n_workers: int = 0):
+        self,
+        coord_dims: Tuple[int, int],
+        hp_dim: int,
+        team_dim: int,
+        selected_teams: List[int],
+        comm_distance: float,
+        distance_metric: str = "euclidean",
+        update_interval: int = 1,
+        n_workers: int = 0,
+    ):
         """
         Initialize the FeatureAgentGraphBuilder.
 
@@ -207,7 +234,7 @@ class MAgentVecStateGraphBuilder(GraphBuilder):
         max_id = np.max(candidate_agent_ids)
 
         # Create adjacency matrix (size based on max original agent ID)
-        adj_matrix = np.zeros((max_id+1, max_id+1), dtype=np.int64)
+        adj_matrix = np.zeros((max_id + 1, max_id + 1), dtype=np.int64)
 
         # Create mask for valid agents (HP > 0 and in selected teams)
         valid_mask = (hps > 0) & candidate_mask
@@ -258,20 +285,23 @@ class MAgentVecStateGraphBuilder(GraphBuilder):
 
         if not self.training:
             self.step_counter += 1
-            if (self.step_counter % self.update_interval != 0
+            if (
+                self.step_counter % self.update_interval != 0
                 and self.cached_adj_matrix is not None
-                and self.cached_edge_indices is not None):
-                return torch.from_numpy(deepcopy(self.cached_adj_matrix)), deepcopy(self.cached_edge_indices)
+                and self.cached_edge_indices is not None
+            ):
+                return torch.from_numpy(deepcopy(self.cached_adj_matrix)), deepcopy(
+                    self.cached_edge_indices
+                )
 
         n_workers = min(bs, self.n_workers)
 
         # Process batches in parallel
         if n_workers > 1:
             with ProcessPoolExecutor(max_workers=n_workers) as executor:
-                results = list(executor.map(
-                    self._process_single_sample,
-                    [states[b] for b in range(bs)]
-                ))
+                results = list(
+                    executor.map(self._process_single_sample, [states[b] for b in range(bs)])
+                )
         else:
             # Single process fallback
             results = [self._process_single_sample(states[b]) for b in range(bs)]

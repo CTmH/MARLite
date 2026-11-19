@@ -1,6 +1,5 @@
 import unittest
 import torch
-import torch.nn.functional as F
 from marlite.util.loss_func import ChamferDistanceLoss, PointSetMSELoss
 
 
@@ -112,7 +111,6 @@ class TestChamferDistanceLoss(unittest.TestCase):
     def test_computational_correctness(self):
         """Test that Chamfer Distance computation is mathematically correct for simple case."""
         # Simple 2D case
-        batch_size, n_points, feature_dim = 1, 2, 2
 
         # Two points: (0,0) and (1,1)
         pred = torch.tensor([[[0.0, 0.0], [1.0, 1.0]]], dtype=torch.float32)
@@ -129,16 +127,12 @@ class TestChamferDistanceLoss(unittest.TestCase):
         # Backward: (1 + 1) / 2 = 1
         # Total: 1 + 1 = 2
 
-        expected_loss = torch.tensor([2.0])  # Expected Chamfer distance
-
         # Check that loss is computed correctly (allowing for small numerical errors)
         self.assertAlmostEqual(loss.item(), 2.0, places=5)
 
     def test_backward_pass(self):
         """Test that gradients can be computed through the loss."""
-        pred = torch.randn(
-            self.batch_size, self.n_points, self.feature_dim, requires_grad=True
-        )
+        pred = torch.randn(self.batch_size, self.n_points, self.feature_dim, requires_grad=True)
         target = torch.randn(self.batch_size, self.n_points, self.feature_dim)
 
         loss_fn = ChamferDistanceLoss(reduction="mean")
@@ -330,9 +324,7 @@ class TestPointSetMSELoss(unittest.TestCase):
 
     def test_backward_pass(self):
         """Test that gradients can be computed through the loss."""
-        pred = torch.randn(
-            self.batch_size, self.n_points, self.feature_dim, requires_grad=True
-        )
+        pred = torch.randn(self.batch_size, self.n_points, self.feature_dim, requires_grad=True)
         target = torch.zeros(self.batch_size, self.n_points, self.feature_dim)
         mask = torch.tensor(
             [

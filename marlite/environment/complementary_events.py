@@ -12,17 +12,13 @@ ATTACK_OFFSETS = tuple(
 MOVE_OFFSETS = ((0, -1), (-1, 0), (0, 0), (1, 0), (0, 1))
 
 
-def attack_outcomes(
-    pursuers, evaders, actions, effective_damage=10.0, ineffective_damage=0.2
-):
+def attack_outcomes(pursuers, evaders, actions, effective_damage=10.0, ineffective_damage=0.2):
     """Return target events and missed attackers without mutating a simulator.
 
     pursuers maps actor names to (x,y); evaders maps native IDs to (x,y,hp).
     Events distinguish complementary hits from lethal hits, including solo kills.
     """
-    if not all(
-        np.isfinite(d) and d >= 0 for d in (effective_damage, ineffective_damage)
-    ):
+    if not all(np.isfinite(d) and d >= 0 for d in (effective_damage, ineffective_damage)):
         raise ValueError("Damage must be finite and nonnegative")
     by_position = {tuple(v[:2]): key for key, v in evaders.items()}
     hits, missed = {}, []
@@ -54,9 +50,7 @@ def attack_outcomes(
             "captured": evaders[target][2] - damage <= 0,
             "capture_boundary": abs(evaders[target][2] - damage)
             <= 8 * np.finfo(np.float32).eps * max(1.0, abs(evaders[target][2]), damage),
-            "critical": tuple(
-                a for a, m in attackers if effective and modes.count(m) == 1
-            ),
+            "critical": tuple(a for a, m in attackers if effective and modes.count(m) == 1),
         }
     return events, tuple(missed)
 

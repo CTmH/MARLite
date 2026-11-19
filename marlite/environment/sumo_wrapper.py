@@ -1,4 +1,4 @@
-from typing import Dict, Any, Tuple, List
+from typing import Dict, Any, Tuple
 import numpy as np
 from pettingzoo.utils import BaseParallelWrapper
 
@@ -10,7 +10,6 @@ class SUMOWrapper(BaseParallelWrapper):
 
     def __init__(self, env):
         super().__init__(env)
-        self.env.reset()
         self.agents = self.env.agents
         self.possible_agents = self.env.possible_agents
         self._state_matrix = np.array([]).reshape(0, 0)  # Cache for the state matrix
@@ -19,8 +18,9 @@ class SUMOWrapper(BaseParallelWrapper):
         self.num_features = 0
         for agent in self.possible_agents:
             space = self.env.observation_space(agent)
-            self.num_features = max(self.num_features, space.shape[0])
-
+            if hasattr(space, "spaces"):
+                space = space["observation"]
+            self.num_features = max(self.num_features, int(np.prod(space.shape)))
 
     def _observations_to_matrix(self, observations: Dict[str, np.ndarray]) -> np.ndarray:
         """
@@ -42,16 +42,18 @@ class SUMOWrapper(BaseParallelWrapper):
         for i, agent in enumerate(self.possible_agents):
             if agent in observations and observations[agent] is not None:
                 obs = observations[agent]
-                # Handle case where observation is shorter than num_features
-                if len(obs) <= self.num_features:
-                    state_matrix[i, :len(obs)] = obs
-                else:
-                    # Truncate if observation is longer (should not happen normally)
-                    state_matrix[i] = obs[:self.num_features]
+                if isinstance(obs, dict):
+                    obs = obs["observation"]
+                obs = np.asarray(obs).reshape(-1)
+                if len(obs) > self.num_features:
+                    raise ValueError("Observation exceeds the declared SUMO feature width")
+                state_matrix[i, : len(obs)] = obs
 
         return state_matrix
 
-    def reset(self, seed: int = None, options: Dict[str, Any] = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    def reset(
+        self, seed: int = None, options: Dict[str, Any] = None
+    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """
         Reset the environment and cache the state matrix.
 
@@ -72,12 +74,10 @@ class SUMOWrapper(BaseParallelWrapper):
 
         return observations, infos
 
-    def step(self, actions: Dict[str, Any]) -> Tuple[
-        Dict[str, np.ndarray],
-        Dict[str, float],
-        Dict[str, bool],
-        Dict[str, bool],
-        Dict[str, Any]
+    def step(
+        self, actions: Dict[str, Any]
+    ) -> Tuple[
+        Dict[str, np.ndarray], Dict[str, float], Dict[str, bool], Dict[str, bool], Dict[str, Any]
     ]:
         """
         Take a step in the environment and cache the state matrix.

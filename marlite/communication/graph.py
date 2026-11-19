@@ -13,14 +13,26 @@ class GraphCommunication(nn.Module):
     autograd; recorded availability can restrict them, never replace them.
     """
 
-    def __init__(self, graph_model, *, learned_graph=None, normalize=True,
-                 probabilistic=False, latent_dim=None, sampled_policy=False):
+    def __init__(
+        self,
+        graph_model,
+        *,
+        learned_graph=None,
+        normalize=True,
+        probabilistic=False,
+        latent_dim=None,
+        sampled_policy=False,
+    ):
         super().__init__()
         if sampled_policy and (not probabilistic or latent_dim is None):
             raise ValueError("Sampled graph latents need a Gaussian width")
         self.graph_model, self.learned_graph = graph_model, learned_graph
         self.normalize = normalize
-        self.probabilistic, self.latent_dim, self.sampled_policy = probabilistic, latent_dim, sampled_policy
+        self.probabilistic, self.latent_dim, self.sampled_policy = (
+            probabilistic,
+            latent_dim,
+            sampled_policy,
+        )
 
     def sample_context(self, alive, generator):
         if self.sampled_policy:
@@ -34,7 +46,11 @@ class GraphCommunication(nn.Module):
         valid = live[:, :, None] & live[:, None, :]
         external = context.get("adjacency")
         if external is not None:
-            if external.shape != (*alive.shape, n) or not torch.isfinite(external).all() or (external < 0).any():
+            if (
+                external.shape != (*alive.shape, n)
+                or not torch.isfinite(external).all()
+                or (external < 0).any()
+            ):
                 raise ValueError("Adjacency must be finite nonnegative ...,N,N")
             external = external.reshape(-1, n, n).to(flat)
         if self.learned_graph is None:
@@ -50,8 +66,10 @@ class GraphCommunication(nn.Module):
         if self.normalize:
             adjacency = adjacency / adjacency.sum(-1, keepdim=True).clamp_min(1e-8)
         result = self.graph_model(flat, adjacency).reshape(*alive.shape, -1)
-        diagnostics = {"adjacency": adjacency.reshape(*leading, n, n),
-                       "record.adjacency": adjacency.reshape(*leading, n, n)}
+        diagnostics = {
+            "adjacency": adjacency.reshape(*leading, n, n),
+            "record.adjacency": adjacency.reshape(*leading, n, n),
+        }
         if self.probabilistic:
             mean, log_var = gaussian(result)
             if self.latent_dim is not None and mean.shape[-1] != self.latent_dim:

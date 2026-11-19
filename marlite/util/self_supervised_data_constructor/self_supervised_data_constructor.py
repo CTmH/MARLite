@@ -18,8 +18,13 @@ class SelfSupervisedDataConstructor(ABC):
         self.n_workers = n_workers
 
     @abstractmethod
-    def process(self, observations: np.ndarray, states: Optional[np.ndarray],
-                edge_indices: np.ndarray, alive_mask: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    def process(
+        self,
+        observations: np.ndarray,
+        states: Optional[np.ndarray],
+        edge_indices: np.ndarray,
+        alive_mask: np.ndarray,
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Process the input data to construct self-supervised learning data.
 

@@ -296,15 +296,9 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
         # Check mask: agent0 has 4 real entities at time 0, 2 real entities at time 1
         # agent1 has 2 real entities at each time step
         expected_mask_agent0_t0 = np.array([True, True, True, True, False], dtype=bool)
-        expected_mask_agent0_t1 = np.array(
-            [True, True, False, False, False], dtype=bool
-        )
-        expected_mask_agent1_t0 = np.array(
-            [True, True, False, False, False], dtype=bool
-        )
-        expected_mask_agent1_t1 = np.array(
-            [True, True, False, False, False], dtype=bool
-        )
+        expected_mask_agent0_t1 = np.array([True, True, False, False, False], dtype=bool)
+        expected_mask_agent1_t0 = np.array([True, True, False, False, False], dtype=bool)
+        expected_mask_agent1_t1 = np.array([True, True, False, False, False], dtype=bool)
         np.testing.assert_array_equal(mask[0, 0, 0], expected_mask_agent0_t0)
         np.testing.assert_array_equal(mask[0, 1, 0], expected_mask_agent0_t1)
         np.testing.assert_array_equal(mask[0, 0, 1], expected_mask_agent1_t0)
@@ -774,7 +768,10 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
             [
                 [
                     [
-                        [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0],],
+                        [
+                            [1.0, 2.0, 3.0],
+                            [4.0, 5.0, 6.0],
+                        ],
                         # agent 0: two entities at time 0
                         [[7.0, 8.0, 9.0], [0.0, 0.0, 0.0]],
                     ],  # agent 1: one real + one zero-padded at time 0
@@ -1007,7 +1004,7 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
                 [
                     [
                         [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]],
-                          # agent 0: two entities at time 0
+                        # agent 0: two entities at time 0
                         [[7.0, 8.0, 9.0], [0.0, 0.0, 0.0]],
                     ],  # agent 1: one real + one zero-padded at time 0
                 ]
@@ -1270,7 +1267,10 @@ class TestMagentVecObsDataConstructor(unittest.TestCase):
             [
                 [
                     [
-                        [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0],],
+                        [
+                            [1.0, 2.0, 3.0],
+                            [4.0, 5.0, 6.0],
+                        ],
                         # agent 0: two entities at time 0
                         [[7.0, 8.0, 9.0], [0.0, 0.0, 0.0]],
                     ],  # agent 1: one real + one zero-padded at time 0

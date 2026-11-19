@@ -39,11 +39,17 @@ class GroupSetCommunication(nn.Module):
         memory = memory.reshape(*leading, *memory.shape[1:])
         valid = valid.reshape(*leading, -1)
         size = messages.shape[-1] * messages.element_size() + self.header_bytes
-        return CommunicationOutput(features, {
-            "group_tokens": memory, "group_valid": valid, "groups": groups,
-            "relation_context": memory.mean(-2), "decoded_messages": messages,
-            "record.communication_bytes": alive.to(torch.long) * size,
-        })
+        return CommunicationOutput(
+            features,
+            {
+                "group_tokens": memory,
+                "group_valid": valid,
+                "groups": groups,
+                "relation_context": memory.mean(-2),
+                "decoded_messages": messages,
+                "record.communication_bytes": alive.to(torch.long) * size,
+            },
+        )
 
 
 class QuantizedCommunication(nn.Module):
@@ -83,8 +89,11 @@ class QuantizedCommunication(nn.Module):
         decoded = decoded.masked_fill(~alive[..., None], 0)
         result = self.aggregation(decoded, alive, context, queries=queries)
         size = self.codec.message_dim * self.codec.bits // 8 + self.header_bytes
-        result.diagnostics.update({
-            "message_codes": codes, "record.message_codes": codes,
-            "record.communication_bytes": alive.to(torch.long) * size,
-        })
+        result.diagnostics.update(
+            {
+                "message_codes": codes,
+                "record.message_codes": codes,
+                "record.communication_bytes": alive.to(torch.long) * size,
+            }
+        )
         return result

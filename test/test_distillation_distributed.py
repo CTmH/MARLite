@@ -12,17 +12,26 @@ from test.test_sequence_distillation import distillation_trainer, distillation_p
 
 @pytest.mark.skipif(not dist.is_gloo_available(), reason="Gloo unavailable")
 def test_c04_stages_match_single_and_resume_in_two_ranks(tmp_path):
-    cases = [dict(relation=False, replacement="all"),
-             dict(relation=True, replacement="progressive"),
-             dict(relation=True, online_weight=0.),
-             dict(offline_enabled=False)]
+    cases = [
+        dict(relation=False, replacement="all"),
+        dict(relation=True, replacement="progressive"),
+        dict(relation=True, online_weight=0.0),
+        dict(offline_enabled=False),
+    ]
     expected = []
     for case in cases:
         trainer = distillation_trainer(**case)
         trainer.train_iteration(2)
-        expected.append((deepcopy(trainer.learner.state_dict()), deepcopy(trainer.offline_metrics),
-                         distillation_probe(trainer.learner.actor)))
-    run_torchrun(tmp_path, '''
+        expected.append(
+            (
+                deepcopy(trainer.learner.state_dict()),
+                deepcopy(trainer.offline_metrics),
+                distillation_probe(trainer.learner.actor),
+            )
+        )
+    run_torchrun(
+        tmp_path,
+        """
 import os
 from pathlib import Path
 from copy import deepcopy
@@ -59,7 +68,9 @@ try:
         torch.save(results, root / "result.pt")
 finally:
     dist.destroy_process_group()
-''', timeout=150)
+""",
+        timeout=150,
+    )
     actual = torch.load(tmp_path / "result.pt", weights_only=True)
 
     def assert_close_tree(first, second, path="root"):

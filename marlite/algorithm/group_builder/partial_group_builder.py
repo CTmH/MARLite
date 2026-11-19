@@ -29,18 +29,19 @@ class PartialGroupMAgentBuilder(GroupBuilder):
     """
 
     def __init__(
-            self,
-            binary_agent_id_dim: List[int],
-            agent_presence_dim: List[int],
-            comm_distance: int,
-            valid_node_list: List[int],
-            target_node_list: List[int],
-            distance_metric: str = 'cityblock',
-            n_workers: int = 8,
-            n_groups: int = 2,
-            update_interval: int = 1,
-            channel_first: bool = False,
-            dtype: str = 'int16'):
+        self,
+        binary_agent_id_dim: List[int],
+        agent_presence_dim: List[int],
+        comm_distance: int,
+        valid_node_list: List[int],
+        target_node_list: List[int],
+        distance_metric: str = "cityblock",
+        n_workers: int = 8,
+        n_groups: int = 2,
+        update_interval: int = 1,
+        channel_first: bool = False,
+        dtype: str = "int16",
+    ):
         super().__init__(dtype=dtype)
         self.binary_agent_id_dim = binary_agent_id_dim
         self.agent_presence_dim = agent_presence_dim
@@ -62,8 +63,7 @@ class PartialGroupMAgentBuilder(GroupBuilder):
             states = np.transpose(states, (0, 2, 3, 1))
 
         if not self.training:
-            if (self.step_counter % self.update_interval != 0
-                and self.cached_labels is not None):
+            if self.step_counter % self.update_interval != 0 and self.cached_labels is not None:
                 self.step_counter += 1
                 return torch.from_numpy(deepcopy(self.cached_labels).astype(self.dtype))
 
@@ -75,10 +75,7 @@ class PartialGroupMAgentBuilder(GroupBuilder):
         use_multi_process = bs > 1 and self.n_workers > 1
         if use_multi_process:
             with ProcessPoolExecutor(max_workers=self.n_workers) as executor:
-                results = list(executor.map(
-                    self._process_sample,
-                    batched_coords_with_id
-                ))
+                results = list(executor.map(self._process_sample, batched_coords_with_id))
         else:
             results = []
             for coords in batched_coords_with_id:
@@ -128,17 +125,18 @@ class PartialGroupVectorStateBuilder(GroupBuilder):
     """
 
     def __init__(
-            self,
-            coord_dim: List[int],
-            hp_dim: int,
-            comm_distance: int,
-            valid_node_list: List[int],
-            target_node_list: List[int],
-            distance_metric: str = 'cityblock',
-            n_workers: int = 8,
-            n_groups: int = 2,
-            update_interval: int = 1,
-            dtype: str = 'int16'):
+        self,
+        coord_dim: List[int],
+        hp_dim: int,
+        comm_distance: int,
+        valid_node_list: List[int],
+        target_node_list: List[int],
+        distance_metric: str = "cityblock",
+        n_workers: int = 8,
+        n_groups: int = 2,
+        update_interval: int = 1,
+        dtype: str = "int16",
+    ):
         super().__init__(dtype=dtype)
         self.coord_dim = coord_dim
         self.hp_dim = hp_dim
@@ -157,8 +155,7 @@ class PartialGroupVectorStateBuilder(GroupBuilder):
         states = states.cpu().numpy()
 
         if not self.training:
-            if (self.step_counter % self.update_interval != 0
-                and self.cached_labels is not None):
+            if self.step_counter % self.update_interval != 0 and self.cached_labels is not None:
                 self.step_counter += 1
                 return torch.from_numpy(deepcopy(self.cached_labels).astype(self.dtype))
 
@@ -174,10 +171,7 @@ class PartialGroupVectorStateBuilder(GroupBuilder):
         use_multi_process = bs > 1 and self.n_workers > 1
         if use_multi_process:
             with ProcessPoolExecutor(max_workers=self.n_workers) as executor:
-                results = list(executor.map(
-                    self._process_sample,
-                    batched_coords_with_id
-                ))
+                results = list(executor.map(self._process_sample, batched_coords_with_id))
         else:
             results = []
             for coords in batched_coords_with_id:

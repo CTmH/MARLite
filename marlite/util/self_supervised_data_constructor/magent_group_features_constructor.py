@@ -1,5 +1,5 @@
 import numpy as np
-from typing import Optional, List
+from typing import List
 from concurrent.futures import ProcessPoolExecutor
 from multiprocessing.shared_memory import SharedMemory
 
@@ -17,9 +17,7 @@ def _group_features_chunk_worker(args):
         state_last = np.ndarray(shape, dtype=dtype, buffer=shm.buf)
         results = []
         for b in chunk_ids:
-            r, m = constructor._process_single(
-                state_last[b], grouping[b], alive_last[b]
-            )
+            r, m = constructor._process_single(state_last[b], grouping[b], alive_last[b])
             results.append((r, m))
         return results
     finally:
@@ -119,7 +117,6 @@ class MagentGroupFeaturesConstructor:
 
         batch_size = state_last.shape[0]
         alive_last = alive_mask[:, -1]
-        K = self.window_size
 
         result = np.zeros((batch_size, self.n_groups, self.N_FEATURES), dtype=np.float16)
         padding_mask = np.zeros((batch_size, self.n_groups), dtype=bool)
@@ -143,17 +140,12 @@ class MagentGroupFeaturesConstructor:
 
         shm = SharedMemory(create=True, size=state_last.nbytes)
         try:
-            shm_array = np.ndarray(
-                state_last.shape, dtype=state_last.dtype, buffer=shm.buf
-            )
+            shm_array = np.ndarray(state_last.shape, dtype=state_last.dtype, buffer=shm.buf)
             np.copyto(shm_array, state_last)
 
             sample_ids = list(range(batch_size))
             chunk_size = (batch_size + n_workers - 1) // n_workers
-            chunks = [
-                sample_ids[i : i + chunk_size]
-                for i in range(0, batch_size, chunk_size)
-            ]
+            chunks = [sample_ids[i : i + chunk_size] for i in range(0, batch_size, chunk_size)]
             args = [
                 (
                     shm.name,
@@ -168,13 +160,9 @@ class MagentGroupFeaturesConstructor:
             ]
 
             with ProcessPoolExecutor(max_workers=n_workers) as executor:
-                chunk_results = list(
-                    executor.map(_group_features_chunk_worker, args)
-                )
+                chunk_results = list(executor.map(_group_features_chunk_worker, args))
 
-            result = np.zeros(
-                (batch_size, self.n_groups, self.N_FEATURES), dtype=np.float16
-            )
+            result = np.zeros((batch_size, self.n_groups, self.N_FEATURES), dtype=np.float16)
             padding_mask = np.zeros((batch_size, self.n_groups), dtype=bool)
             for chunk, chunk_result in zip(chunks, chunk_results):
                 for i, b in enumerate(chunk):
@@ -238,8 +226,9 @@ class MagentGroupFeaturesConstructor:
             x_end = x_start + K
 
             # Get window data from state
-            window = self._crop_window(st, y_start, x_start, y_end, x_end,
-                                        H_map, W_map, self.channel_first)
+            window = self._crop_window(
+                st, y_start, x_start, y_end, x_end, H_map, W_map, self.channel_first
+            )
 
             # Extract per-channel data from window
             features = self._compute_features(
@@ -268,9 +257,10 @@ class MagentGroupFeaturesConstructor:
             if pad_top > 0 or pad_bottom > 0 or pad_left > 0 or pad_right > 0:
                 h_c = y_e - y_s
                 w_c = x_e - x_s
-                padded = np.zeros((C, h_c + pad_top + pad_bottom, w_c + pad_left + pad_right),
-                                  dtype=st.dtype)
-                padded[:, pad_top:pad_top + h_c, pad_left:pad_left + w_c] = crop
+                padded = np.zeros(
+                    (C, h_c + pad_top + pad_bottom, w_c + pad_left + pad_right), dtype=st.dtype
+                )
+                padded[:, pad_top : pad_top + h_c, pad_left : pad_left + w_c] = crop
                 return padded
             return crop
         else:
@@ -279,9 +269,10 @@ class MagentGroupFeaturesConstructor:
             if pad_top > 0 or pad_bottom > 0 or pad_left > 0 or pad_right > 0:
                 h_c = y_e - y_s
                 w_c = x_e - x_s
-                padded = np.zeros((h_c + pad_top + pad_bottom, w_c + pad_left + pad_right, C),
-                                  dtype=st.dtype)
-                padded[pad_top:pad_top + h_c, pad_left:pad_left + w_c] = crop
+                padded = np.zeros(
+                    (h_c + pad_top + pad_bottom, w_c + pad_left + pad_right, C), dtype=st.dtype
+                )
+                padded[pad_top : pad_top + h_c, pad_left : pad_left + w_c] = crop
                 return padded
             return crop
 
@@ -301,17 +292,17 @@ class MagentGroupFeaturesConstructor:
         """
         if channel_first:
             # window: (C, K, K)
-            our_pres = window[self.our_team_presence_dim]       # (K, K)
-            our_hp   = window[self.our_team_hp_dim]              # (K, K)
-            en_pres  = window[self.enemy_team_presence_dim]      # (K, K)
-            en_hp    = window[self.enemy_team_hp_dim]            # (K, K)
-            obstacle = window[self.obstacle_dim]                 # (K, K)
+            our_pres = window[self.our_team_presence_dim]  # (K, K)
+            our_hp = window[self.our_team_hp_dim]  # (K, K)
+            en_pres = window[self.enemy_team_presence_dim]  # (K, K)
+            en_hp = window[self.enemy_team_hp_dim]  # (K, K)
+            obstacle = window[self.obstacle_dim]  # (K, K)
         else:
             # window: (K, K, C)
             our_pres = window[:, :, self.our_team_presence_dim]
-            our_hp   = window[:, :, self.our_team_hp_dim]
-            en_pres  = window[:, :, self.enemy_team_presence_dim]
-            en_hp    = window[:, :, self.enemy_team_hp_dim]
+            our_hp = window[:, :, self.our_team_hp_dim]
+            en_pres = window[:, :, self.enemy_team_presence_dim]
+            en_hp = window[:, :, self.enemy_team_hp_dim]
             obstacle = window[:, :, self.obstacle_dim]
 
         # Masks
@@ -438,26 +429,29 @@ class MagentGroupFeaturesConstructor:
         else:
             feat_en_hp_spatial = 1.0
 
-        return np.array([
-            feat_our_density,
-            feat_our_hp_mean,
-            feat_our_hp_std,
-            feat_our_total_hp,
-            feat_our_dispersion,
-            feat_en_density,
-            feat_en_hp_mean,
-            feat_en_hp_std,
-            feat_en_total_hp,
-            feat_en_dispersion,
-            feat_obs_density,
-            feat_group_size,
-            feat_nearest_en,
-            feat_nearest_our,
-            feat_border_prox,
-            feat_ratio,
-            feat_our_hp_spatial,
-            feat_en_hp_spatial,
-        ], dtype=np.float16)
+        return np.array(
+            [
+                feat_our_density,
+                feat_our_hp_mean,
+                feat_our_hp_std,
+                feat_our_total_hp,
+                feat_our_dispersion,
+                feat_en_density,
+                feat_en_hp_mean,
+                feat_en_hp_std,
+                feat_en_total_hp,
+                feat_en_dispersion,
+                feat_obs_density,
+                feat_group_size,
+                feat_nearest_en,
+                feat_nearest_our,
+                feat_border_prox,
+                feat_ratio,
+                feat_our_hp_spatial,
+                feat_en_hp_spatial,
+            ],
+            dtype=np.float16,
+        )
 
     def _extract_positions(self, state_single: np.ndarray) -> dict:
         """Extract agent positions from a single state grid.
@@ -485,5 +479,6 @@ class MagentGroupFeaturesConstructor:
         binary_ids = binary_ids[ys, xs]  # (n_agents, n_bits)
         powers = 2 ** np.arange(len(self.binary_agent_id_dim), dtype=binary_ids.dtype)
         agent_ids = np.dot(binary_ids, powers).astype(int)
-        return {int(aid.item()): (int(y.item()), int(x.item()))
-                for aid, y, x in zip(agent_ids, ys, xs)}
+        return {
+            int(aid.item()): (int(y.item()), int(x.item())) for aid, y, x in zip(agent_ids, ys, xs)
+        }

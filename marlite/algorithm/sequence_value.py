@@ -51,8 +51,9 @@ class TeamSequenceEncoder(nn.Module):
         features = self.frame_encoder(masked.flatten(0, 1))
         if features.ndim != 2:
             raise ValueError("Value frame encoder must produce one vector per frame")
-        result = self.temporal.forward_sequence(features.reshape(b, t, 1, -1), initial_state,
-                                                valid[..., None], reset[..., None])
+        result = self.temporal.forward_sequence(
+            features.reshape(b, t, 1, -1), initial_state, valid[..., None], reset[..., None]
+        )
         return StateFeatures(result.features[..., 0, :], result.state)
 
 
@@ -83,7 +84,9 @@ class SequenceValue(nn.Module):
         return ValueOutput(values[..., 0].masked_fill(~valid, 0), result.state)
 
     def step(self, states, recurrent_state, valid, reset):
-        result = self.forward_sequence(states[:, None], recurrent_state, valid[:, None], reset[:, None])
+        result = self.forward_sequence(
+            states[:, None], recurrent_state, valid[:, None], reset[:, None]
+        )
         return ValueOutput(result.values[:, 0], result.state)
 
     def forward(self, states, initial_state, valid, reset):

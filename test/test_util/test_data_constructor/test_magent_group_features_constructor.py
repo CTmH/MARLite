@@ -308,12 +308,14 @@ class TestMagentGroupFeaturesConstructor(unittest.TestCase):
             f = result[0, g]
             # Densities should be in [0, 1]
             for i in [0, 5, 10, 11]:
-                self.assertTrue(0.0 <= float(f[i]) <= 1.0,
-                                f"Feature {i} ({float(f[i])}) should be in [0, 1]")
+                self.assertTrue(
+                    0.0 <= float(f[i]) <= 1.0, f"Feature {i} ({float(f[i])}) should be in [0, 1]"
+                )
             # Nearest distances should be in [0, 1] (normalized by K)
             for i in [12, 13]:
-                self.assertTrue(0.0 <= float(f[i]) <= 1.0,
-                                f"Feature {i} ({float(f[i])}) should be in [0, 1]")
+                self.assertTrue(
+                    0.0 <= float(f[i]) <= 1.0, f"Feature {i} ({float(f[i])}) should be in [0, 1]"
+                )
             # Border proximity should be in [0, 1]
             self.assertTrue(0.0 <= float(f[14]) <= 1.0)
             # Ratio should be in [0, 1]
@@ -366,7 +368,6 @@ class TestMagentGroupFeaturesConstructor(unittest.TestCase):
         self.assertLess(float(f[14]), 0.5, "Should be close to border")
         self.assertGreater(float(f[14]), 0.0, "Should not be at exact border")
 
-
     def test_parallel_vs_sequential_consistency(self):
         """Ensure n_workers=0 and n_workers=2 produce identical feature vectors."""
         for channel_first in (False, True):
@@ -398,12 +399,8 @@ class TestMagentGroupFeaturesConstructor(unittest.TestCase):
                 n_workers=2,
             )
 
-            result_seq, mask_seq = constructor_seq.process(
-                obs, states, grouping, alive_mask
-            )
-            result_par, mask_par = constructor_par.process(
-                obs, states, grouping, alive_mask
-            )
+            result_seq, mask_seq = constructor_seq.process(obs, states, grouping, alive_mask)
+            result_par, mask_par = constructor_par.process(obs, states, grouping, alive_mask)
 
             np.testing.assert_array_equal(result_seq, result_par)
             np.testing.assert_array_equal(mask_seq, mask_par)

@@ -37,7 +37,11 @@ class TinyParallel:
         for i, a in enumerate(self.possible_agents):
             if a in agents:
                 obs = np.array([self.latent, self.time / 10, float(i)], dtype=np.float32)
-                result[a] = {"observation": obs, "action_mask": np.array([1, 1, 0], dtype=bool)} if self.mask else obs
+                result[a] = (
+                    {"observation": obs, "action_mask": np.array([1, 1, 0], dtype=bool)}
+                    if self.mask
+                    else obs
+                )
         return result
 
     def reset(self, seed=None):
@@ -55,7 +59,7 @@ class TinyParallel:
         self.time += 1
         terminal = self.time >= self.limit
         terms = {a: terminal or (self.death and a == "a" and self.time >= 2) for a in before}
-        rewards = {a: 1. + float(actions[a] == 1) for a in before}
+        rewards = {a: 1.0 + float(actions[a] == 1) for a in before}
         self.agents = [a for a in before if not terms[a]]
         observations = self._obs(self.agents)
         if self.missing_final and self.time == 2:
@@ -67,18 +71,36 @@ class TinyParallel:
         self.closed = True
 
 
-def make_trainer(*, recurrent=True, factory=TinyParallel, max_steps=4, state_strategy="cached_burnin",
-                 vf_coef=.5, workdir=None):
+def make_trainer(
+    *,
+    recurrent=True,
+    factory=TinyParallel,
+    max_steps=4,
+    state_strategy="cached_burnin",
+    vf_coef=0.5,
+    workdir=None,
+):
     torch.manual_seed(10)
     temporal = RecurrentGRU if recurrent else FrameEncoder
     actor = SequenceAgentGroup(nn.Linear(3, 8), temporal(8, 8), nn.Linear(8, 3))
     critic = SequenceValue(nn.Linear(3, 8), temporal(8, 8), nn.Linear(8, 1))
-    learner = MAPPOLearner(actor, critic, torch.optim.Adam(actor.parameters(), lr=.001),
-                           torch.optim.Adam(critic.parameters(), lr=.001), burn_in=2,
-                           state_strategy=state_strategy, vf_coef=vf_coef)
-    return SequenceMAPPOTrainer(learner, ParallelCollector(factory, max_steps=max_steps),
-                                sequence_length=2, batch_sequences=2, ppo_epochs=2,
-                                workdir=workdir)
+    learner = MAPPOLearner(
+        actor,
+        critic,
+        torch.optim.Adam(actor.parameters(), lr=0.001),
+        torch.optim.Adam(critic.parameters(), lr=0.001),
+        burn_in=2,
+        state_strategy=state_strategy,
+        vf_coef=vf_coef,
+    )
+    return SequenceMAPPOTrainer(
+        learner,
+        ParallelCollector(factory, max_steps=max_steps),
+        sequence_length=2,
+        batch_sequences=2,
+        ppo_epochs=2,
+        workdir=workdir,
+    )
 
 
 def test_collection_death_timeout_and_actual_final_frame():
@@ -86,12 +108,12 @@ def test_collection_death_timeout_and_actual_final_frame():
     ep = trainer.collect(1)[0]
     assert ep.length == 4 and ep.frames["states"].shape == (5, 3)
     assert ep.transitions["truncated"][-1] and not ep.transitions["terminated"][-1]
-    assert ep.frames["states"][-1, 1].item() == pytest.approx(.4)
+    assert ep.frames["states"][-1, 1].item() == pytest.approx(0.4)
     assert ep.frames["alive"][:, 0].tolist() == [True, True, False, False, False]
     assert ep.transitions["rewards"][1, 0] > 0  # Death-transition reward retained.
     assert ep.transitions["rewards"][2, 0] == 0
-    assert ep.frames["actor_state.h"].shape == (5, 2, 1, 8)
-    assert ep.frames["critic_state.h"].shape == (5, 1, 1, 8)
+    assert ep.state_snapshots["actor_state.h"].shape == (1, 2, 1, 8)
+    assert ep.state_snapshots["critic_state.h"].shape == (1, 1, 1, 8)
     assert ep.return_masks()[0][-1]
     trainer = make_trainer(max_steps=8)
     terminal = trainer.collect(1)[0]
@@ -119,14 +141,16 @@ def test_ppo_behavior_replay_ratio_one_and_fixed_labels(recurrent, strategy):
     original = [p.clone() for p in trainer.learner.actor.parameters()]
     result = trainer.learner.update(prepared, sources)
     assert all(np.isfinite(v) for v in result.values())
-    assert any(not torch.equal(p, old) for p, old in zip(trainer.learner.actor.parameters(), original))
+    assert any(
+        not torch.equal(p, old) for p, old in zip(trainer.learner.actor.parameters(), original)
+    )
     assert torch.equal(labels, prepared[0].transitions["value_targets"])
     for key in before:
         torch.testing.assert_close(before[key], episodes[0].transitions[key])
 
 
 def test_hand_computed_stateless_objective_and_disabled_value_optimizer():
-    trainer = make_trainer(recurrent=False, vf_coef=0.)
+    trainer = make_trainer(recurrent=False, vf_coef=0.0)
     learner = trainer.learner
     episodes = prepare_ppo_targets(trainer.collect(1), normalize=False)
     ep = episodes[0]
@@ -234,14 +258,28 @@ def test_real_mpe2_short_training(tmp_path):
         action_dim = env.action_space(env.possible_agents[0]).n
     finally:
         env.close()
-    actor = SequenceAgentGroup(nn.Sequential(nn.Flatten(1), nn.Linear(obs_dim, 8)),
-                               RecurrentGRU(8, 8), nn.Linear(8, action_dim))
-    critic = SequenceValue(nn.Sequential(nn.Flatten(1), nn.Linear(state_dim, 8)),
-                            RecurrentGRU(8, 8), nn.Linear(8, 1))
-    learner = MAPPOLearner(actor, critic, torch.optim.Adam(actor.parameters(), lr=.001),
-                           torch.optim.Adam(critic.parameters(), lr=.001), burn_in=1)
-    trainer = SequenceMAPPOTrainer(learner, ParallelCollector(factory, max_steps=3),
-                                   sequence_length=2, batch_sequences=2, ppo_epochs=1,
-                                   workdir=tmp_path)
+    actor = SequenceAgentGroup(
+        nn.Sequential(nn.Flatten(1), nn.Linear(obs_dim, 8)),
+        RecurrentGRU(8, 8),
+        nn.Linear(8, action_dim),
+    )
+    critic = SequenceValue(
+        nn.Sequential(nn.Flatten(1), nn.Linear(state_dim, 8)), RecurrentGRU(8, 8), nn.Linear(8, 1)
+    )
+    learner = MAPPOLearner(
+        actor,
+        critic,
+        torch.optim.Adam(actor.parameters(), lr=0.001),
+        torch.optim.Adam(critic.parameters(), lr=0.001),
+        burn_in=1,
+    )
+    trainer = SequenceMAPPOTrainer(
+        learner,
+        ParallelCollector(factory, max_steps=3),
+        sequence_length=2,
+        batch_sequences=2,
+        ppo_epochs=1,
+        workdir=tmp_path,
+    )
     trainer.run(1, train_episodes=2, eval_episodes=2, checkpoint_interval=1)
     assert trainer.env_steps == 6 and learner.actor_updates == 2

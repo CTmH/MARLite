@@ -39,11 +39,15 @@ class FixedGraph:
     uses_global_state = False
 
     def __init__(self, n_agents, edges, self_loops=False):
-        self.adjacency = torch.eye(n_agents, dtype=torch.float32) if self_loops else torch.zeros(n_agents, n_agents)
+        self.adjacency = (
+            torch.eye(n_agents, dtype=torch.float32)
+            if self_loops
+            else torch.zeros(n_agents, n_agents)
+        )
         for sender, receiver in edges:
             if not 0 <= sender < n_agents or not 0 <= receiver < n_agents:
                 raise ValueError("Fixed edge references an unknown slot")
-            self.adjacency[receiver, sender] = 1.
+            self.adjacency[receiver, sender] = 1.0
 
     def reset(self, seed=None):
         pass
@@ -83,7 +87,11 @@ class StateBuilderContext:
     def __call__(self, observations, state, alive, timestep):
         # Constructors may use legacy global CPU RNGs. Isolate them per episode
         # without changing any GPU random stream or the caller's training RNG.
-        numpy_state, python_state, torch_state = np.random.get_state(), random.getstate(), torch.get_rng_state()
+        numpy_state, python_state, torch_state = (
+            np.random.get_state(),
+            random.getstate(),
+            torch.get_rng_state(),
+        )
         np.random.set_state(self.numpy_rng.get_state())
         random.setstate(self.python_rng.getstate())
         torch.set_rng_state(self.torch_rng.get_state())

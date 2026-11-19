@@ -2,6 +2,7 @@ import unittest
 import torch
 from marlite.algorithm.model.gnn import GCNModel, GATModel
 
+
 class TestGCNModel(unittest.TestCase):
     def setUp(self):
         self.input_dim = 16
@@ -25,6 +26,7 @@ class TestGCNModel(unittest.TestCase):
             _ = self.model(self.inputs, self.edge_index)
         except Exception as e:
             self.fail(f"Forward pass failed with exception: {e}")
+
 
 class TestGATModel(unittest.TestCase):
     def setUp(self):
@@ -50,5 +52,6 @@ class TestGATModel(unittest.TestCase):
         except Exception as e:
             self.fail(f"Forward pass failed with exception: {e}")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()

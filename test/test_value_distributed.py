@@ -21,7 +21,9 @@ def test_value_objectives_match_single_with_uneven_and_empty_ranks(tmp_path):
         first = learner.update(episodes, sources[:3])
         second = learner.update(episodes, sources[:1])
         expected[algorithm] = (deepcopy(learner.state_dict()), first, second)
-    run_torchrun(tmp_path, '''
+    run_torchrun(
+        tmp_path,
+        """
 import os
 from pathlib import Path
 import torch
@@ -59,7 +61,8 @@ try:
         torch.save(results, root / "result.pt")
 finally:
     dist.destroy_process_group()
-''')
+""",
+    )
     actual = torch.load(tmp_path / "result.pt", weights_only=True)
     for algorithm, (weights, first, second) in expected.items():
         current, one, two = actual[algorithm]

@@ -2,6 +2,7 @@ import unittest
 import torch
 from marlite.algorithm.model.matrix_gnn import MatrixGCNModel
 
+
 class TestMatrixGCNModel(unittest.TestCase):
     def setUp(self):
         self.input_dim = 32
@@ -12,7 +13,7 @@ class TestMatrixGCNModel(unittest.TestCase):
             input_dim=self.input_dim,
             hidden_dim=self.hidden_dim,
             output_dim=self.output_dim,
-            num_layers=self.num_layers
+            num_layers=self.num_layers,
         )
 
         # Create dummy data
@@ -28,8 +29,11 @@ class TestMatrixGCNModel(unittest.TestCase):
         """Test that the model produces output with correct shape."""
         output = self.model(self.x, self.weight_adj_matrix)
         expected_shape = (self.batch_size, self.n_agents, self.output_dim)
-        self.assertEqual(output.shape, expected_shape,
-                        f"Expected output shape {expected_shape}, got {output.shape}")
+        self.assertEqual(
+            output.shape,
+            expected_shape,
+            f"Expected output shape {expected_shape}, got {output.shape}",
+        )
 
     def test_model_forward_pass(self):
         """Ensure no errors during forward pass."""
@@ -45,13 +49,13 @@ class TestMatrixGCNModel(unittest.TestCase):
             input_dim=self.input_dim,
             hidden_dim=self.hidden_dim,
             output_dim=self.output_dim,
-            num_layers=1
+            num_layers=1,
         )
         model_2layer = MatrixGCNModel(
             input_dim=self.input_dim,
             hidden_dim=self.hidden_dim,
             output_dim=self.output_dim,
-            num_layers=2
+            num_layers=2,
         )
 
         # Set same weights for fair comparison
@@ -88,5 +92,6 @@ class TestMatrixGCNModel(unittest.TestCase):
         diff = torch.norm(output1 - output2).item()
         self.assertGreater(diff, 1e-6, "Different adjacency matrices produce too similar results")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()

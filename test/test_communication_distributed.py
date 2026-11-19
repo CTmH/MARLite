@@ -21,7 +21,9 @@ def test_communication_ssl_matches_global_batches_and_resume(tmp_path):
             first = learner.update(episodes, sources[:3])
             second = learner.update(episodes, sources[:1])
             expected[(algorithm, mixer)] = (deepcopy(learner.state_dict()), first, second)
-    run_torchrun(tmp_path, '''
+    run_torchrun(
+        tmp_path,
+        """
 import os
 from pathlib import Path
 from copy import deepcopy
@@ -52,7 +54,9 @@ try:
         torch.save(results, Path(os.environ["TEST_RUN_DIR"]) / "result.pt")
 finally:
     dist.destroy_process_group()
-''', timeout=150)
+""",
+        timeout=150,
+    )
     actual = torch.load(tmp_path / "result.pt", weights_only=True)
 
     def assert_close_tree(first, second):

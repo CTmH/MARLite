@@ -8,7 +8,12 @@ import torch
 from marlite.data import Episode, SequenceSlice, collate_sequences, partition_episode
 from marlite.data.recurrent import reconstruct_state
 from marlite.algorithm.temporal import (
-    CausalAttention, FrameEncoder, RecurrentGRU, detach_state, reset_state, select_state,
+    CausalAttention,
+    FrameEncoder,
+    RecurrentGRU,
+    detach_state,
+    reset_state,
+    select_state,
 )
 
 
@@ -82,8 +87,10 @@ def test_partition_and_collate_keep_all_learning_positions():
     for row, source in enumerate(slices):
         start = int(batch.frame_start[row])
         length = int(batch.filled[row].sum())
-        torch.testing.assert_close(batch.frames["observations"][row, :length + 1],
-                                   ep.frames["observations"][start:start + length + 1])
+        torch.testing.assert_close(
+            batch.frames["observations"][row, : length + 1],
+            ep.frames["observations"][start : start + length + 1],
+        )
         assert not batch.trace_mask[row, length - 1]
     assert batch.to("cpu").sources == tuple(slices)
     other = copy.deepcopy(ep)
@@ -148,8 +155,7 @@ def test_reconstruction_detaches_warmup_and_reaches_all_learning_steps():
     reset = torch.zeros_like(valid)
     initial = model.initial_state(1, 2, "cpu", x.dtype)
     cached = model.forward_sequence(x[:, :2], initial).state
-    reconstructed = reconstruct_state(model, x, valid, reset, 5,
-                                      burn_in=3, cached_state=cached)
+    reconstructed = reconstruct_state(model, x, valid, reset, 5, burn_in=3, cached_state=cached)
     exact = reconstruct_state(model, x, valid, reset, 5, strategy="prefix_recompute")
     torch.testing.assert_close(reconstructed["h"], exact["h"])
     assert not reconstructed["h"].requires_grad
@@ -186,16 +192,18 @@ def test_window_encoder_preserves_finite_history():
     torch.testing.assert_close(result.features[:, -1], x[:, -2:].sum(1))
     changed = x.clone()
     changed[:, :3] += 100
-    torch.testing.assert_close(model.forward_sequence(changed, state).features[:, -1],
-                               result.features[:, -1])
+    torch.testing.assert_close(
+        model.forward_sequence(changed, state).features[:, -1], result.features[:, -1]
+    )
 
 
 @pytest.mark.parametrize("kind", ["logits", "q_values"])
 def test_composed_agent_group_sequence_matches_steps_and_has_gradients(kind):
     from marlite.algorithm.sequence_agent_group import DecisionInput, SequenceAgentGroup
 
-    model = SequenceAgentGroup(torch.nn.Linear(3, 8), RecurrentGRU(8, 8),
-                               torch.nn.Linear(8, 4), kind)
+    model = SequenceAgentGroup(
+        torch.nn.Linear(3, 8), RecurrentGRU(8, 8), torch.nn.Linear(8, 4), kind
+    )
     x = torch.randn(2, 5, 2, 3)
     alive = torch.ones(2, 5, 2, dtype=torch.bool)
     reset = torch.zeros_like(alive)
@@ -217,15 +225,18 @@ def test_composed_agent_group_sequence_matches_steps_and_has_gradients(kind):
 def test_sequence_policy_rejects_batch_dependent_or_random_layers():
     from marlite.algorithm.sequence_agent_group import SequenceAgentGroup
 
-    for frame in (torch.nn.BatchNorm1d(3), torch.nn.Dropout(.1)):
+    for frame in (torch.nn.BatchNorm1d(3), torch.nn.Dropout(0.1)):
         with pytest.raises(ValueError):
             SequenceAgentGroup(frame, RecurrentGRU(3, 8), torch.nn.Linear(8, 4))
 
 
 def test_recurrent_snapshots_are_not_duplicated_in_training_windows():
     ep = valid_episode()
-    ep.frames["actor_state.cache"] = torch.randn(ep.length + 1, 2, 128, 64)
+    ep.state_snapshots = {
+        "steps": torch.tensor([0]),
+        "actor_state.cache": torch.randn(1, 2, 128, 64),
+    }
     ep.validate()
     batch = collate_sequences({0: ep}, [SequenceSlice(0, 2, 3)])
     assert "actor_state.cache" not in batch.frames
-    assert "actor_state.cache" in ep.frames
+    assert "actor_state.cache" in ep.state_snapshots

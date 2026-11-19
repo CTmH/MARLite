@@ -20,4 +20,3 @@ class QueryPredictionHead(nn.Module):
         if logits.shape != (*queries.shape[:-1], 1):
             raise ValueError("Query predictor must output one scalar per query")
         return logits.squeeze(-1)
-

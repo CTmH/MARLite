@@ -20,12 +20,11 @@ class SMACWrapper(BaseParallelWrapper):
     to return flattened per-agent states stacked in possible_agents order.
     Missing agents are represented by zero rows.
     """
+
     # Keep backend-specific exception knowledge out of generic rollout workers.
     recoverable_errors = SC2_RECOVERABLE_ERRORS
 
-    def __init__(
-        self, env, env_factory: Callable | None = None, reset_retries: int = 0
-    ):
+    def __init__(self, env, env_factory: Callable | None = None, reset_retries: int = 0):
         super().__init__(env)
         if reset_retries < 0:
             raise ValueError("reset_retries must be nonnegative")

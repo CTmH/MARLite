@@ -357,3 +357,59 @@ wrappers, superseded model wrappers, YAML examples and associated tests only aft
 these dependencies have replacements. Pooled/masked model adapters need coverage
 for their mask/output conventions. Sparse recurrent-state snapshots, server GPU
 parity, native environments and measured sequence performance remain R9 work.
+
+## R8 retirement and R9 sequence execution (current, 2026-11-19)
+
+The legacy trainer/worker/WorkerGroup, rollout, replaybuffer, configuration
+processor, analyzer, AgentGroup and critic hierarchies are removed. Their old
+YAML examples and API-only tests are retired. Primitive graph/group builders,
+label constructors, probability/optimization math and relevant tests remain,
+using the unified registry. No compatibility shim or second training stack is
+kept. Historical claims above describe earlier migration boundaries.
+
+Opponent controllers are independent episode-seeded components. Native wrappers
+expose their transformed observation spaces. PadAgentView supports heterogeneous
+flat views/actions with explicit validity; RoutedFrames/Temporal/Head preserve
+private role weights and state. Inactive private branches retain grad=None.
+A previously hidden collector bug that resurrected unborn slots at a timeout was
+fixed and covered with heterogeneous active subsets. Topology primitives now
+handle isolated/empty controlled-node populations without NumPy vectorize errors.
+
+OptimizerSchedules binds an ordinary Torch scheduler to successful optimizer
+updates or explicit held-out validation. It supports teacher and all offline
+stages, independent auxiliary heads, complete state restoration and strict
+constructor configuration. Final-test/read-only evaluation never steps schedules.
+Environment failures use bounded fresh-simulator retries with isolated jitter;
+partial episodes are discarded, seeds retained and programming errors surfaced.
+
+Episode schema 3 stores sparse CPU recurrent snapshots separately from frames.
+The collector defaults to an interval of 32 frames. Cached warmup starts from the
+nearest preceding snapshot, adding at most one interval to the requested prefix.
+Snapshots never enter GPU batches. An example of T+1=201,N=100,C=128,H=128 FP32
+attention state plus validity costs 1,319,846,400 bytes per-frame versus 45,964,800
+bytes with interval 32 (state only; observations/transition storage are additional).
+
+GRU sequence execution fuses intervals with unchanged live slots, splitting at
+life/reset boundaries. Dead slots do not force every timestep through Python.
+CausalAttention computes all query timesteps in one call, with a bounded causal
+band and life-segment mask. Cached embeddings remain pre-attention features;
+this is a single temporal attention block without positional embeddings, not a
+full Transformer. Existing positional pooled encoders remain available through
+WindowEncoder. Fused mask memory scales with B*N*heads*T*(context+T); use bounded
+training chunks. Step/sequence outputs, state, gradients and causality are tested.
+
+Local full-repository regression: **598 passed, 4 skipped**, 33.64 s. The skips
+are the three opt-in native simulator modules and a two-GPU reference test.
+All source/tests pass Ruff E9/F and the common 100-column formatter. This replaces
+selected-suite acceptance with actual whole-repository acceptance after cleanup.
+
+Local CPU performance (4,32,32,64 inputs, two threads, live/dead/reset slots,
+three timed forward+backward repetitions after two warmups): GRU 8.16 -> 4.69 ms
+(1.74x); causal attention 44.42 -> 5.64 ms (7.87x). These are small synthetic
+measurements, not environment training throughput or a hardware-general promise.
+Reproduce with `python -m test.acceptance.sequence_performance`.
+
+Server-native tests, single-vs-two/three GPU parity, GPU memory/time measurements
+and remaining native dependency issues are still pending at this commit. The
+server has unrelated running research jobs; acceptance uses an isolated worktree,
+small batches and bounded runs without modifying their environment or outputs.

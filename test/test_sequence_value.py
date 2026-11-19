@@ -8,60 +8,119 @@ from torch import nn
 
 from marlite.algorithm.sequence_agent_group import SequenceAgentGroup, PolicyOutput
 from marlite.algorithm.sequence_mixers import (
-    MonotonicMixing, DuplexTransformation, JointAdvantageWeights,
-    SequenceQMixer, SequenceDuplexMixer, CounterfactualJoint, SequenceCounterfactualMixer,
+    MonotonicMixing,
+    DuplexTransformation,
+    JointAdvantageWeights,
+    SequenceQMixer,
+    SequenceDuplexMixer,
+    CounterfactualJoint,
+    SequenceCounterfactualMixer,
 )
 from marlite.algorithm.sequence_value import TeamSequenceEncoder, SequenceValue
 from marlite.algorithm.temporal import FrameEncoder, RecurrentGRU
 from marlite.collection.parallel import ParallelCollector
 from marlite.data import partition_episode, collate_sequences, SequenceSlice
 from marlite.data.replay import EpisodeReplay
-from marlite.learning.value import ValueLearner, QMIXObjective, QPLEXObjective, QTRANObjective, nstep_targets
+from marlite.learning.value import (
+    ValueLearner,
+    QMIXObjective,
+    QPLEXObjective,
+    QTRANObjective,
+    nstep_targets,
+)
 from test.test_sequence_mappo import TinyParallel, assert_tree_equal
 
 
-def make_value_learner(algorithm, *, recurrent=True, n_steps=3, target_mode="hard", target_interval=2,
-                       state_strategy="zero_burnin", obs_dim=3, state_dim=3,
-                       action_dim=3, n_agents=2):
+def make_value_learner(
+    algorithm,
+    *,
+    recurrent=True,
+    n_steps=3,
+    target_mode="hard",
+    target_interval=2,
+    state_strategy="zero_burnin",
+    obs_dim=3,
+    state_dim=3,
+    action_dim=3,
+    n_agents=2,
+):
     torch.manual_seed(21)
     temporal = RecurrentGRU if recurrent else FrameEncoder
-    actor = SequenceAgentGroup(nn.Linear(obs_dim, 8), temporal(8, 8), nn.Linear(8, action_dim), "q_values")
+    actor = SequenceAgentGroup(
+        nn.Linear(obs_dim, 8), temporal(8, 8), nn.Linear(8, action_dim), "q_values"
+    )
     state_encoder = TeamSequenceEncoder(nn.Linear(state_dim, 8), temporal(8, 8))
     if algorithm == "qmix":
-        mixing = MonotonicMixing(n_agents, 4, nn.Linear(8, n_agents * 4), nn.Linear(8, 4), nn.Linear(8, 4), nn.Linear(8, 1))
+        mixing = MonotonicMixing(
+            n_agents,
+            4,
+            nn.Linear(8, n_agents * 4),
+            nn.Linear(8, 4),
+            nn.Linear(8, 4),
+            nn.Linear(8, 1),
+        )
         critic = SequenceQMixer(state_encoder, mixing)
         objective = QMIXObjective()
     elif algorithm == "qplex":
-        transform = DuplexTransformation(n_agents, 4, [nn.Linear(8, 4) for _ in range(2)],
-                                           [nn.Linear(8, n_agents * 4) for _ in range(2)], nn.Linear(8, 1),
-                                           head_weight=nn.Linear(8, 2), regularization=.01)
-        attention = JointAdvantageWeights([nn.Linear(8, 1) for _ in range(2)],
-                                          [nn.Linear(8, n_agents) for _ in range(2)],
-                                          [nn.Linear(8 + n_agents * action_dim, n_agents) for _ in range(2)])
-        critic = SequenceDuplexMixer(state_encoder, transform, attention, nn.Linear(8, n_agents),
-                                     nn.Linear(8, n_agents), action_dim=action_dim, n_agents=n_agents)
+        transform = DuplexTransformation(
+            n_agents,
+            4,
+            [nn.Linear(8, 4) for _ in range(2)],
+            [nn.Linear(8, n_agents * 4) for _ in range(2)],
+            nn.Linear(8, 1),
+            head_weight=nn.Linear(8, 2),
+            regularization=0.01,
+        )
+        attention = JointAdvantageWeights(
+            [nn.Linear(8, 1) for _ in range(2)],
+            [nn.Linear(8, n_agents) for _ in range(2)],
+            [nn.Linear(8 + n_agents * action_dim, n_agents) for _ in range(2)],
+        )
+        critic = SequenceDuplexMixer(
+            state_encoder,
+            transform,
+            attention,
+            nn.Linear(8, n_agents),
+            nn.Linear(8, n_agents),
+            action_dim=action_dim,
+            n_agents=n_agents,
+        )
         objective = QPLEXObjective()
     else:
-        core = CounterfactualJoint(nn.Linear(8 + action_dim, 8), nn.Linear(8, 8),
-                                   nn.Linear(8, action_dim), action_dim)
+        core = CounterfactualJoint(
+            nn.Linear(8 + action_dim, 8), nn.Linear(8, 8), nn.Linear(8, action_dim), action_dim
+        )
         critic = SequenceCounterfactualMixer(core)
         value = SequenceValue(nn.Linear(state_dim, 8), temporal(8, 8), nn.Linear(8, 1))
-        objective = QTRANObjective(value, lambda_opt=.3, lambda_nopt=.7)
-    return ValueLearner(actor, critic, objective, torch.optim.Adam(actor.parameters(), lr=.001),
-                         torch.optim.Adam(critic.parameters(), lr=.001),
-                         objective_optimizer=(torch.optim.Adam(objective.parameters(), lr=.001)
-                                              if objective.value_network is not None else None),
-                         n_steps=n_steps, burn_in=2, target_mode=target_mode,
-                         target_interval=target_interval, state_strategy=state_strategy)
+        objective = QTRANObjective(value, lambda_opt=0.3, lambda_nopt=0.7)
+    return ValueLearner(
+        actor,
+        critic,
+        objective,
+        torch.optim.Adam(actor.parameters(), lr=0.001),
+        torch.optim.Adam(critic.parameters(), lr=0.001),
+        objective_optimizer=(
+            torch.optim.Adam(objective.parameters(), lr=0.001)
+            if objective.value_network is not None
+            else None
+        ),
+        n_steps=n_steps,
+        burn_in=2,
+        target_mode=target_mode,
+        target_interval=target_interval,
+        state_strategy=state_strategy,
+    )
 
 
-def collect_values(learner, death=True, max_steps=4, epsilon=.5):
+def collect_values(learner, death=True, max_steps=4, epsilon=0.5):
     collector = ParallelCollector(lambda: TinyParallel(death=death, mask=True), max_steps=max_steps)
-    return {i: collector.collect_episode(learner.actor, seed=50 + i, epsilon=epsilon, policy_version=i)
-            for i in range(2)}
+    return {
+        i: collector.collect_episode(learner.actor, seed=50 + i, epsilon=epsilon, policy_version=i)
+        for i in range(2)
+    }
 
 
-@pytest.mark.parametrize("gamma", [0., .9, 1.])
+@pytest.mark.parametrize("gamma", [0.0, 0.9, 1.0])
 @pytest.mark.parametrize("horizon", [1, 3, 8])
 @pytest.mark.parametrize("terminated", [False, True])
 def test_nstep_matches_independent_scalar_endpoints(gamma, horizon, terminated):
@@ -77,14 +136,16 @@ def test_nstep_matches_independent_scalar_endpoints(gamma, horizon, terminated):
         for col in range(min(2, ep.length - begin)):
             position = begin + col
             steps = min(horizon, ep.length - position)
-            expected = sum(gamma ** k * float(ep.transitions["rewards"][position + k].sum())
-                           for k in range(steps))
+            expected = sum(
+                gamma**k * float(ep.transitions["rewards"][position + k].sum())
+                for k in range(steps)
+            )
             end = col + steps
             should_bootstrap = not bool(ep.transitions["terminated"][position + steps - 1])
-            expected += gamma ** steps * float(joint[row, end]) * should_bootstrap
+            expected += gamma**steps * float(joint[row, end]) * should_bootstrap
             assert target[row, col] == pytest.approx(expected)
             assert endpoint[row, col] == end
-            assert discount[row, col] == pytest.approx(gamma ** steps * should_bootstrap)
+            assert discount[row, col] == pytest.approx(gamma**steps * should_bootstrap)
 
 
 def test_nstep_rejects_missing_future_and_ignores_terminal_nan():
@@ -92,12 +153,12 @@ def test_nstep_rejects_missing_future_and_ignores_terminal_nan():
     episodes = collect_values(learner, death=False)
     batch = collate_sequences(episodes, [SequenceSlice(0, 0, 1)])
     with pytest.raises(ValueError, match="future tail"):
-        nstep_targets(batch, torch.ones(1, 2), .9, 3)
+        nstep_targets(batch, torch.ones(1, 2), 0.9, 3)
     terminal = collect_values(learner, death=False, max_steps=8)
     ep = terminal[0]
     batch = collate_sequences(terminal, [SequenceSlice(0, ep.length - 1, 1)])
-    values = torch.tensor([[0., float("nan")]])
-    target, _, discount = nstep_targets(batch, values, .9, 1)
+    values = torch.tensor([[0.0, float("nan")]])
+    target, _, discount = nstep_targets(batch, values, 0.9, 1)
     assert torch.isfinite(target).all() and not discount.any()
 
 
@@ -141,7 +202,7 @@ def test_qmix_monotonicity_and_masked_units():
     state = torch.randn(3, 8)
     mixing(q, state).sum().backward()
     assert (q.grad >= 0).all()
-    increased = q.detach() + torch.tensor([1., 0.])
+    increased = q.detach() + torch.tensor([1.0, 0.0])
     assert (mixing(increased, state) >= mixing(q.detach(), state)).all()
 
 
@@ -150,25 +211,40 @@ def test_qplex_decomposition_igm_and_detached_advantage():
     episodes = collect_values(learner, death=False)
     batch = collate_sequences(episodes, [SequenceSlice(0, 0, 2)])
     b, t, n = batch.frames["alive"].shape
-    q = torch.tensor([[[[3., 1., 90.], [1., 4., 90.]]]]).expand(b, t, -1, -1).clone().requires_grad_()
+    q = (
+        torch.tensor([[[[3.0, 1.0, 90.0], [1.0, 4.0, 90.0]]]])
+        .expand(b, t, -1, -1)
+        .clone()
+        .requires_grad_()
+    )
     policy = PolicyOutput(q, torch.zeros(b, t, n, 8), {}, "q_values")
     alive, available = batch.frames["alive"], batch.frames["available_actions"]
     greedy = torch.tensor([[[0, 1]]]).expand(b, t, -1)
     state = learner.critic.initial_state(b, "cpu", torch.float32)
     valid = alive.any(-1)
     reset = torch.zeros_like(valid)
+
     def mix(actions):
-        return learner.critic.forward_sequence(policy, batch.frames["states"], actions, alive,
-                                                available, state, valid, reset)
+        return learner.critic.forward_sequence(
+            policy, batch.frames["states"], actions, alive, available, state, valid, reset
+        )
+
     best = mix(greedy)
     assert not best.diagnostics["advantage"].any()
-    torch.testing.assert_close(best.values, best.diagnostics["value"] + best.diagnostics["advantage"])
+    torch.testing.assert_close(
+        best.values, best.diagnostics["value"] + best.diagnostics["advantage"]
+    )
     for a in (0, 1):
         for c in (0, 1):
             other = mix(torch.tensor([[[a, c]]]).expand(b, t, -1))
             assert (best.values >= other.values - 1e-6).all()
-    assert not best.diagnostics["advantage"].requires_grad or torch.autograd.grad(
-        best.diagnostics["advantage"].sum(), q, allow_unused=True, retain_graph=True)[0] is None
+    assert (
+        not best.diagnostics["advantage"].requires_grad
+        or torch.autograd.grad(
+            best.diagnostics["advantage"].sum(), q, allow_unused=True, retain_graph=True
+        )[0]
+        is None
+    )
 
 
 def test_counterfactual_excludes_own_action_and_dead_observation():
@@ -184,8 +260,9 @@ def test_counterfactual_excludes_own_action_and_dead_observation():
     live = torch.tensor([[True, False]]).expand(4, -1)
     x = features.clone()
     x[:, 1] += 1000
-    torch.testing.assert_close(core(features, actions, live)["q_per_action"],
-                               core(x, actions, live)["q_per_action"])
+    torch.testing.assert_close(
+        core(features, actions, live)["q_per_action"], core(x, actions, live)["q_per_action"]
+    )
 
 
 def test_replay_eviction_sampling_and_roundtrip():
@@ -208,9 +285,15 @@ def make_value_trainer(algorithm, workdir=None, **kwargs):
 
     learner = make_value_learner(algorithm)
     return SequenceValueTrainer(
-        learner, ParallelCollector(lambda: TinyParallel(mask=True, death=True), max_steps=4),
-        EpisodeReplay(capacity=3), workdir=workdir, sequence_length=2,
-        batch_sequences=3, updates_per_iteration=2, epsilon_decay_steps=20, **kwargs,
+        learner,
+        ParallelCollector(lambda: TinyParallel(mask=True, death=True), max_steps=4),
+        EpisodeReplay(capacity=3),
+        workdir=workdir,
+        sequence_length=2,
+        batch_sequences=3,
+        updates_per_iteration=2,
+        epsilon_decay_steps=20,
+        **kwargs,
     )
 
 
@@ -236,11 +319,11 @@ def test_value_training_lifecycle_checkpoint_and_validation_protocol(algorithm, 
     assert_tree_equal(expected_replay, restored.replay.state_dict())
     assert original.env_steps == restored.env_steps
     assert len(restored.replay.episodes) == 3
-    assert actual_metrics["epsilon"] < 1.
+    assert actual_metrics["epsilon"] < 1.0
 
 
 def test_opt_in_rollback_restores_weights_without_undoing_optimizer_steps():
-    trainer = make_value_trainer("qtran", rollback_interval=1, validation_replay_ratio=.5)
+    trainer = make_value_trainer("qtran", rollback_interval=1, validation_replay_ratio=0.5)
     trainer.train_iteration(2)
     trainer.evaluate(2)
     assert len(trainer.replay.episodes) == 3
@@ -262,7 +345,7 @@ def test_opt_in_rollback_restores_weights_without_undoing_optimizer_steps():
 
 def test_ema_target_refresh_and_disabled_qtran_constraints():
     learner = make_value_learner("qtran", target_mode="ema", target_interval=1)
-    learner.objective.lambda_opt = learner.objective.lambda_nopt = 0.
+    learner.objective.lambda_opt = learner.objective.lambda_nopt = 0.0
     episodes = collect_values(learner)
     sources = partition_episode(0, episodes[0], 2)
     before_target = deepcopy(learner.target_actor.state_dict())
@@ -271,7 +354,9 @@ def test_ema_target_refresh_and_disabled_qtran_constraints():
     assert learner.objective_updates == 0 and not learner.objective_optimizer.state
     assert_tree_equal(before_value, learner.objective.state_dict())
     for key, value in learner.target_actor.state_dict().items():
-        expected = torch.lerp(before_target[key], learner.actor.state_dict()[key], learner.target_tau)
+        expected = torch.lerp(
+            before_target[key], learner.actor.state_dict()[key], learner.target_tau
+        )
         torch.testing.assert_close(value, expected)
 
 
@@ -282,7 +367,7 @@ def test_qtran_constraint_weights_match_a_hand_computed_counterexample():
     class ConstantJoint(nn.Module):
         def __init__(self):
             super().__init__()
-            self.constant = nn.Parameter(torch.tensor(3.))
+            self.constant = nn.Parameter(torch.tensor(3.0))
 
         def forward(self, features, actions, alive_mask=None):
             return {"q_per_action": self.constant.expand(*actions.shape, 3)}
@@ -291,16 +376,19 @@ def test_qtran_constraint_weights_match_a_hand_computed_counterexample():
     episodes = collect_values(learner, death=False, max_steps=1)
     episodes[0].transitions["actions"][0] = torch.tensor([1, 0])
     batch = collate_sequences(episodes, [SequenceSlice(0, 0, 1)])
-    q = torch.tensor([[[[1., 0., 99.], [0., 2., 99.]],
-                        [[0., 0., 0.], [0., 0., 0.]]]], requires_grad=True)
+    q = torch.tensor(
+        [[[[1.0, 0.0, 99.0], [0.0, 2.0, 99.0]], [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]]],
+        requires_grad=True,
+    )
     policy = PolicyOutput(q, torch.zeros(1, 2, 2, 8), {}, "q_values")
-    cf = torch.full((1, 2, 2, 3), 3., requires_grad=True)
-    joint = JointOutput(torch.tensor([[3., 0.]]), {}, {"counterfactual": cf})
+    cf = torch.full((1, 2, 2, 3), 3.0, requires_grad=True)
+    joint = JointOutput(torch.tensor([[3.0, 0.0]]), {}, {"counterfactual": cf})
     value = torch.ones(1, 1, requires_grad=True)
     core = ConstantJoint()
-    objective = QTRANObjective(nn.Identity(), lambda_opt=.3, lambda_nopt=.7)
-    terms = objective.terms(policy, joint, SimpleNamespace(core=core), batch,
-                            torch.zeros(1, 1), value)
+    objective = QTRANObjective(nn.Identity(), lambda_opt=0.3, lambda_nopt=0.7)
+    terms = objective.terms(
+        policy, joint, SimpleNamespace(core=core), batch, torch.zeros(1, 1), value
+    )
     # Feasible greedy utilities sum to 3; joint=3 and V=1 -> optimal error=1.
     # Sampled utilities are both zero; each counterfactual minimum is -2.
     assert terms["optimality_loss"].total == 1
@@ -332,11 +420,18 @@ def test_value_algorithms_train_on_real_mpe2(algorithm, tmp_path):
         action_dim = env.action_space(env.possible_agents[0]).n
     finally:
         env.close()
-    learner = make_value_learner(algorithm, obs_dim=obs_dim, state_dim=state_dim,
-                                  action_dim=action_dim, n_steps=3)
-    trainer = SequenceValueTrainer(learner, ParallelCollector(factory, max_steps=3),
-                                   EpisodeReplay(4), sequence_length=2, batch_sequences=3,
-                                   updates_per_iteration=2, workdir=tmp_path)
+    learner = make_value_learner(
+        algorithm, obs_dim=obs_dim, state_dim=state_dim, action_dim=action_dim, n_steps=3
+    )
+    trainer = SequenceValueTrainer(
+        learner,
+        ParallelCollector(factory, max_steps=3),
+        EpisodeReplay(4),
+        sequence_length=2,
+        batch_sequences=3,
+        updates_per_iteration=2,
+        workdir=tmp_path,
+    )
     trainer.run(1, train_episodes=2, eval_episodes=2, checkpoint_interval=1)
     assert trainer.env_steps == 6 and learner.actor_updates == 2
     assert len(trainer.replay.episodes) == 2

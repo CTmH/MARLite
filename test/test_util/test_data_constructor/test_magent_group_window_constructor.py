@@ -213,7 +213,7 @@ class TestMagentGroupWindowConstructor(unittest.TestCase):
         alive_mask[:, :, 1] = False
         alive_mask[:, :, 3] = False
         # Remove dead agents from state (their presence pixels persist otherwise)
-        states[:, :, 6, 6, :] = 0   # agent 1
+        states[:, :, 6, 6, :] = 0  # agent 1
         states[:, :, 16, 16, :] = 0  # agent 3
 
         constructor = MagentGroupWindowConstructor(
@@ -269,7 +269,6 @@ class TestMagentGroupWindowConstructor(unittest.TestCase):
         self.assertTrue(np.any(result[0, 0] != 0), "Should have agent content")
         self.assertTrue(np.any(result[0, 0] == 0), "Should have OOB zero padding")
 
-
     def test_parallel_vs_sequential_consistency(self):
         """Ensure n_workers=0 and n_workers=2 produce identical window crops."""
         for channel_first in (False, True):
@@ -293,12 +292,8 @@ class TestMagentGroupWindowConstructor(unittest.TestCase):
                 n_workers=2,
             )
 
-            result_seq, mask_seq = constructor_seq.process(
-                obs, states, grouping, alive_mask
-            )
-            result_par, mask_par = constructor_par.process(
-                obs, states, grouping, alive_mask
-            )
+            result_seq, mask_seq = constructor_seq.process(obs, states, grouping, alive_mask)
+            result_par, mask_par = constructor_par.process(obs, states, grouping, alive_mask)
 
             np.testing.assert_array_equal(result_seq, result_par)
             np.testing.assert_array_equal(mask_seq, mask_par)

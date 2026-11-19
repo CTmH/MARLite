@@ -46,12 +46,10 @@ class Scheduler(ABC):
         if step < 0:
             raise ValueError("step must be non-negative")
 
-        progress = min(
-            max((step - self.ramp_start_step) / self.ramp_steps, 0.0), 1.0
+        progress = min(max((step - self.ramp_start_step) / self.ramp_steps, 0.0), 1.0)
+        return self.start_value + (self.end_value - self.start_value) * self._transform_progress(
+            progress
         )
-        return self.start_value + (
-            self.end_value - self.start_value
-        ) * self._transform_progress(progress)
 
     @abstractmethod
     def _transform_progress(self, progress: float) -> float:
@@ -85,9 +83,7 @@ class LogarithmicScheduler(Scheduler):
     def _transform_progress(self, progress: float) -> float:
         if self.curve_rate == 0:
             return progress
-        return math.expm1(self.curve_rate * progress) / math.expm1(
-            self.curve_rate
-        )
+        return math.expm1(self.curve_rate * progress) / math.expm1(self.curve_rate)
 
 
 class FixedScheduler(Scheduler):

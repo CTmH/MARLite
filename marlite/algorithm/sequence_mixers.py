@@ -43,8 +43,18 @@ class DuplexTransformation(nn.Module):
     consume [state, detached feasible maximum Q_i], never the sampled action Q.
     """
 
-    def __init__(self, n_agents, embed_dim, selectors, keys, bias, *,
-                 head_weight=None, nonlinear=False, regularization=0.):
+    def __init__(
+        self,
+        n_agents,
+        embed_dim,
+        selectors,
+        keys,
+        bias,
+        *,
+        head_weight=None,
+        nonlinear=False,
+        regularization=0.0,
+    ):
         super().__init__()
         if not selectors or len(selectors) != len(keys):
             raise ValueError("Transformation needs equal nonempty selector/key lists")
@@ -57,21 +67,28 @@ class DuplexTransformation(nn.Module):
 
     def forward(self, maximum_q, state):
         n = state.shape[0]
-        key_input = (torch.cat((state[:, None].expand(-1, self.n_agents, -1),
-                                maximum_q.detach()[..., None]), -1) if self.nonlinear else state)
+        key_input = (
+            torch.cat(
+                (state[:, None].expand(-1, self.n_agents, -1), maximum_q.detach()[..., None]), -1
+            )
+            if self.nonlinear
+            else state
+        )
         weights, penalties = [], []
         for selector, key in zip(self.selectors, self.keys):
             query = selector(state)
             encoded = key(key_input).reshape(n, self.n_agents, self.embed_dim)
             logits = torch.bmm(query[:, None], encoded.transpose(1, 2)).squeeze(1)
-            weights.append((logits / self.embed_dim ** .5).softmax(-1))
+            weights.append((logits / self.embed_dim**0.5).softmax(-1))
             penalties.append(logits.square().mean(-1))
         attention = torch.stack(weights, 1)
         if self.head_weight is not None:
             attention = attention * (self.head_weight(state).abs() + 1e-10)[..., None]
-        return (attention.sum(1) + 1e-10,
-                self.bias(state).reshape(n, 1).expand(-1, self.n_agents),
-                self.regularization * torch.stack(penalties, 1).sum(1))
+        return (
+            attention.sum(1) + 1e-10,
+            self.bias(state).reshape(n, 1).expand(-1, self.n_agents),
+            self.regularization * torch.stack(penalties, 1).sum(1),
+        )
 
 
 class JointAdvantageWeights(nn.Module):
@@ -82,13 +99,20 @@ class JointAdvantageWeights(nn.Module):
         if not keys or not len(keys) == len(agent_gates) == len(action_gates):
             raise ValueError("Joint attention needs matching nonempty head lists")
         self.keys = nn.ModuleList(keys)
-        self.agent_gates, self.action_gates = nn.ModuleList(agent_gates), nn.ModuleList(action_gates)
+        self.agent_gates, self.action_gates = (
+            nn.ModuleList(agent_gates),
+            nn.ModuleList(action_gates),
+        )
 
     def forward(self, state, joint_action):
         data = torch.cat((state, joint_action), -1)
-        return torch.stack([(key(state).abs() + 1e-10) * gate(state).sigmoid()
-                            * action(data).sigmoid() for key, gate, action in
-                            zip(self.keys, self.agent_gates, self.action_gates)], 0).sum(0)
+        return torch.stack(
+            [
+                (key(state).abs() + 1e-10) * gate(state).sigmoid() * action(data).sigmoid()
+                for key, gate, action in zip(self.keys, self.agent_gates, self.action_gates)
+            ],
+            0,
+        ).sum(0)
 
 
 class SequenceQMixer(nn.Module):
@@ -104,18 +128,33 @@ class SequenceQMixer(nn.Module):
     def encode_sequence(self, states, initial_state, valid, reset):
         return self.state_encoder.encode_sequence(states, initial_state, valid, reset)
 
-    def forward_sequence(self, policy, states, actions, alive, available, initial_state, valid, reset):
+    def forward_sequence(
+        self, policy, states, actions, alive, available, initial_state, valid, reset
+    ):
         encoded = self.encode_sequence(states, initial_state, valid, reset)
         selected = policy.values.gather(-1, actions.unsqueeze(-1)).squeeze(-1)
         chosen = selected.masked_fill(~alive, 0)
-        return JointOutput(self.mixing(chosen, encoded.features).masked_fill(~valid, 0), encoded.state)
+        return JointOutput(
+            self.mixing(chosen, encoded.features).masked_fill(~valid, 0), encoded.state
+        )
 
 
 class SequenceDuplexMixer(nn.Module):
     """QPLEX joint value from full per-agent Q tables and actual joint actions."""
 
-    def __init__(self, state_encoder, transformation, joint_attention, value_weight, value_bias,
-                 *, action_dim, n_agents, weighted_head=True, minus_one=True):
+    def __init__(
+        self,
+        state_encoder,
+        transformation,
+        joint_attention,
+        value_weight,
+        value_bias,
+        *,
+        action_dim,
+        n_agents,
+        weighted_head=True,
+        minus_one=True,
+    ):
         super().__init__()
         self.state_encoder = state_encoder
         self.transformation, self.joint_attention = transformation, joint_attention
@@ -129,7 +168,9 @@ class SequenceDuplexMixer(nn.Module):
     def encode_sequence(self, states, initial_state, valid, reset):
         return self.state_encoder.encode_sequence(states, initial_state, valid, reset)
 
-    def forward_sequence(self, policy, states, actions, alive, available, initial_state, valid, reset):
+    def forward_sequence(
+        self, policy, states, actions, alive, available, initial_state, valid, reset
+    ):
         encoded = self.encode_sequence(states, initial_state, valid, reset)
         leading = alive.shape[:-1]
         flat_state = encoded.features.flatten(0, 1)
@@ -143,7 +184,10 @@ class SequenceDuplexMixer(nn.Module):
         transformed = weights * chosen + bias
         transformed_max = weights * maximum + bias
         if self.weighted_head:
-            head_w, head_b = self.value_weight(flat_state).abs() + 1e-10, self.value_bias(flat_state)
+            head_w, head_b = (
+                self.value_weight(flat_state).abs() + 1e-10,
+                self.value_bias(flat_state),
+            )
             transformed = head_w * transformed + head_b
             transformed_max = head_w * transformed_max + head_b
         transformed = transformed.masked_fill(~live, 0)
@@ -153,9 +197,15 @@ class SequenceDuplexMixer(nn.Module):
         attention = self.joint_attention(flat_state, onehot) - float(self.minus_one)
         value = transformed.sum(-1)
         advantage = (attention * local_advantage).sum(-1)
-        return JointOutput((value + advantage).reshape(leading).masked_fill(~valid, 0), encoded.state,
-                           {"attention_penalty": regularizer.reshape(leading),
-                            "value": value.reshape(leading), "advantage": advantage.reshape(leading)})
+        return JointOutput(
+            (value + advantage).reshape(leading).masked_fill(~valid, 0),
+            encoded.state,
+            {
+                "attention_penalty": regularizer.reshape(leading),
+                "value": value.reshape(leading),
+                "advantage": advantage.reshape(leading),
+            },
+        )
 
 
 class CounterfactualJoint(nn.Module):
@@ -191,9 +241,15 @@ class SequenceCounterfactualMixer(nn.Module):
         # No centralized recurrent state: histories already live in policy features.
         return JointOutput(states, {})
 
-    def forward_sequence(self, policy, states, actions, alive, available, initial_state, valid, reset):
-        cf = self.core(policy.features.flatten(0, 1), actions.flatten(0, 1),
-                       alive_mask=alive.flatten(0, 1))["q_per_action"]
+    def forward_sequence(
+        self, policy, states, actions, alive, available, initial_state, valid, reset
+    ):
+        cf = self.core(
+            policy.features.flatten(0, 1), actions.flatten(0, 1), alive_mask=alive.flatten(0, 1)
+        )["q_per_action"]
         joint = joint_q_from_counterfactual(cf, actions.flatten(0, 1), alive.flatten(0, 1))
-        return JointOutput(joint.reshape(valid.shape).masked_fill(~valid, 0), {},
-                           {"counterfactual": cf.reshape(*alive.shape, -1)})
+        return JointOutput(
+            joint.reshape(valid.shape).masked_fill(~valid, 0),
+            {},
+            {"counterfactual": cf.reshape(*alive.shape, -1)},
+        )

@@ -21,10 +21,7 @@ class MessagePacket:
     def encode(self):
         fields = (self.sender, self.step, self.group_version, self.x, self.y)
         limits = (65535, 65535, 65535, 255, 255)
-        if any(
-            type(v) is not int or not 0 <= v <= limit
-            for v, limit in zip(fields, limits)
-        ):
+        if any(type(v) is not int or not 0 <= v <= limit for v, limit in zip(fields, limits)):
             raise ValueError("Message header exceeds version-1 field limits")
         if not isinstance(self.payload, bytes) or not self.payload:
             raise ValueError("Message payload must be nonempty bytes")

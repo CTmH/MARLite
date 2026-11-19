@@ -1,19 +1,20 @@
-"""Available-action reductions and QTRAN-alt constraints shared by workers."""
+"""Available-action reductions and QTRAN-alt constraints for sequence learners."""
 
 import torch
 
 
-def last_action_mask(batch, key, device):
-    mask = batch.get(key)
-    return mask[:, -1].to(device=device, dtype=torch.bool) if isinstance(mask, torch.Tensor) else None
-
-
 def masked_action_values(q_values, available=None, alive=None):
     """Exclude illegal actions; dead agents have a finite zero-valued no-op."""
-    alive = (torch.ones_like(q_values[..., 0], dtype=torch.bool) if alive is None
-             else alive.to(device=q_values.device, dtype=torch.bool))
-    available = (torch.ones_like(q_values, dtype=torch.bool) if available is None
-                 else available.to(device=q_values.device, dtype=torch.bool))
+    alive = (
+        torch.ones_like(q_values[..., 0], dtype=torch.bool)
+        if alive is None
+        else alive.to(device=q_values.device, dtype=torch.bool)
+    )
+    available = (
+        torch.ones_like(q_values, dtype=torch.bool)
+        if available is None
+        else available.to(device=q_values.device, dtype=torch.bool)
+    )
     if available.shape != q_values.shape or alive.shape != q_values.shape[:-1]:
         raise ValueError("Action/alive mask shapes must match the Q-value table")
     if (alive & ~available.any(-1)).any():
@@ -21,7 +22,7 @@ def masked_action_values(q_values, available=None, alive=None):
     available = available & alive.unsqueeze(-1)
     available = available.clone()
     available[..., 0] |= ~alive
-    safe_q = torch.where(alive.unsqueeze(-1), q_values, 0.)
+    safe_q = torch.where(alive.unsqueeze(-1), q_values, 0.0)
     return safe_q.masked_fill(~available, -torch.inf)
 
 
@@ -32,8 +33,17 @@ def joint_q_from_counterfactual(q_per_action, actions, alive):
     return (selected * alive).sum(-1) / alive.sum(-1).clamp_min(1)
 
 
-def qtran_constraint_terms(q_values, enc_out, actions, q_counterfactual, value,
-                           critic, alive, available=None, mask_optimal_samples=True):
+def qtran_constraint_terms(
+    q_values,
+    enc_out,
+    actions,
+    q_counterfactual,
+    value,
+    critic,
+    alive,
+    available=None,
+    mask_optimal_samples=True,
+):
     """QTRAN-alt optimality and counterfactual non-optimality constraints.
 
     The optimal constraint always uses the complete feasible greedy joint action,
@@ -55,7 +65,9 @@ def qtran_constraint_terms(q_values, enc_out, actions, q_counterfactual, value,
     safe_actions = actions.masked_fill(~alive, 0)
     chosen_q = q_values.gather(-1, safe_actions.unsqueeze(-1)).squeeze(-1) * alive
     other_q = chosen_q.sum(-1, keepdim=True) - chosen_q
-    differences = feasible + other_q.unsqueeze(-1) - q_counterfactual.detach() + state_value[:, None, None]
+    differences = (
+        feasible + other_q.unsqueeze(-1) - q_counterfactual.detach() + state_value[:, None, None]
+    )
     differences = differences.masked_fill(~torch.isfinite(feasible), torch.inf)
     minimum = differences.min(-1).values
     active = alive
@@ -64,13 +76,3 @@ def qtran_constraint_terms(q_values, enc_out, actions, q_counterfactual, value,
         active = active & ~optimal_sample.unsqueeze(-1)
     nonoptimal_sum = (minimum.square() * active).sum()
     return optimal_sum, active_sample.sum(), nonoptimal_sum, active.sum()
-
-
-def qtran_constraints(q_values, enc_out, actions, q_counterfactual, value,
-                      critic, alive, available=None, mask_optimal_samples=True):
-    """Scalar legacy entry point; sequence learners reduce the underlying sums globally."""
-    optimal, optimal_count, nonoptimal, nonoptimal_count = qtran_constraint_terms(
-        q_values, enc_out, actions, q_counterfactual, value,
-        critic, alive, available, mask_optimal_samples,
-    )
-    return optimal / optimal_count.clamp_min(1), nonoptimal / nonoptimal_count.clamp_min(1)

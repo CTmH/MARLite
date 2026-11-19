@@ -17,6 +17,7 @@ from marlite.learning.distillation import (
     ActionDistillationObjective,
 )
 from marlite.learning.mappo import MAPPOLearner
+from marlite.learning.schedules import OptimizerSchedules, ScheduleBinding
 from marlite.learning.value import ValueLearner
 from marlite.training.mappo import SequenceMAPPOTrainer
 from marlite.training.value import SequenceValueTrainer
@@ -94,6 +95,28 @@ def optimizer(registry, spec, module, dimensions, *, lr=0.0005, path="optimizer"
     if remaining:
         parameters.append({"params": list(remaining.values())})
     return registry.build(spec, dimensions, path=path, injected={"params": parameters})
+
+
+def schedules(registry, specifications, optimizers, dimensions, *, path="schedulers"):
+    """Attach ordinary Torch schedulers; Python owns optimizer/event wiring."""
+    specifications = _mapping(specifications, path, set(optimizers))
+    bindings = {}
+    for role, specification in specifications.items():
+        entry = _mapping(specification, path + "." + role, {"scheduler", "event", "metric"})
+        if optimizers[role] is None:
+            raise ConfigurationError(f"{path}.{role}: optimizer is absent")
+        if "scheduler" not in entry:
+            raise ConfigurationError(f"{path}.{role}: scheduler specification is required")
+        scheduler = registry.build(
+            entry.pop("scheduler"),
+            dimensions,
+            path=path + "." + role + ".scheduler",
+            injected={"optimizer": optimizers[role]},
+        )
+        bindings[role] = _construct(
+            ScheduleBinding, {"scheduler": scheduler, **entry}, path + "." + role
+        )
+    return OptimizerSchedules(bindings)
 
 
 class Experiment:
@@ -195,6 +218,7 @@ def build_experiment(
         "objective",
         "auxiliary",
         "optimizers",
+        "schedulers",
         "communication_context",
         "collector",
         "learner",
@@ -283,7 +307,11 @@ def build_experiment(
         if context_spec
         else (AllTogether() if recipe == "c04" else None)
     )
-    collector_options = _mapping(config.get("collector", {}), "collector", {"max_steps", "device"})
+    collector_options = _mapping(
+        config.get("collector", {}),
+        "collector",
+        {"max_steps", "device", "state_snapshot_interval", "retry"},
+    )
     collector = ParallelCollector(factory, context_provider=context, **collector_options)
     evaluation_collector = None
     if "evaluation_environment" in config:
@@ -347,6 +375,7 @@ def build_experiment(
                 "learner",
                 "trainer",
                 "optimizers",
+                "schedulers",
                 "run",
                 "online_distillation",
             },
@@ -413,6 +442,16 @@ def build_experiment(
                     ),
                 },
                 "teacher.learner",
+            )
+            teacher_learner.schedules = schedules(
+                registry,
+                teacher_config.get("schedulers", {}),
+                {
+                    "actor": teacher_learner.actor_optimizer,
+                    "critic": teacher_learner.critic_optimizer,
+                },
+                dimensions,
+                path="teacher.schedulers",
             )
             teacher_trainer = _construct(
                 SequenceMAPPOTrainer,
@@ -530,6 +569,17 @@ def build_experiment(
             },
             "learner",
         )
+    learner.schedules = schedules(
+        registry,
+        config.get("schedulers", {}),
+        {
+            "actor": learner.actor_optimizer,
+            "critic": learner.critic_optimizer,
+            "objective": getattr(learner, "objective_optimizer", None),
+            "auxiliary": None if learner.auxiliary is None else learner.auxiliary.optimizer,
+        },
+        dimensions,
+    )
     trainer_options = _mapping(config.get("trainer", {}), "trainer")
     if trainer_options.keys() & {"learner", "collector", "evaluation_collector", "workdir", "seed"}:
         raise ConfigurationError("Trainer wiring/workdir/seed belongs to the Python recipe")
@@ -558,9 +608,11 @@ def build_experiment(
                 "policy_aux_weight",
                 "initialize_from_teacher",
                 "optimizers",
+                "schedulers",
                 "probe_objective",
             },
         )
+        offline_schedules = offline.pop("schedulers", {})
         stage_optimizers = _mapping(
             offline.pop("optimizers", {}), "offline.optimizers", {"codec", "policy", "probe"}
         )
@@ -607,6 +659,13 @@ def build_experiment(
             student_relation=student_relation,
         )
         trainer = _construct(SequenceDistillationTrainer, arguments, "trainer")
+        trainer.stage_schedules = schedules(
+            registry,
+            offline_schedules,
+            trainer.stage_optimizers,
+            dimensions,
+            path="offline.schedulers",
+        )
     elif recipe == "mappo":
         trainer = _construct(SequenceMAPPOTrainer, arguments, "trainer")
     else:

@@ -54,5 +54,5 @@ See [configuration and recipes](docs/sequence_configuration.md),
 
 The examples demonstrate composition; they are not tuned paper configurations.
 Run the rewritten sequence tests with one pytest process when validating actual
-multi-process execution. GPU/environment acceptance and legacy-code cleanup are
-tracked separately in the migration record.
+multi-process execution. Native simulator and multi-GPU acceptance are tracked separately in the
+migration record. Legacy training/configuration hierarchies have been removed.

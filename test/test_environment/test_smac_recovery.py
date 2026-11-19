@@ -2,9 +2,13 @@ import numpy as np
 import pytest
 from gymnasium.spaces import Box
 from types import SimpleNamespace
-from smac_pettingzoo.env.smacv2 import SC2EpisodeInterrupted
+from marlite.environment.smac_wrapper import SC2_RECOVERABLE_ERRORS
 
-from marlite.environment import EnvConfig
+SC2EpisodeInterrupted = SC2_RECOVERABLE_ERRORS[0]
+
+import sys
+from marlite.configuration.environment import EnvironmentFactory
+from marlite.configuration.catalog import default_registry
 from marlite.environment.smac_wrapper import SMACWrapper
 
 
@@ -56,15 +60,14 @@ def test_smac_wrapper_stops_after_bounded_retries():
 def test_env_config_supplies_smac_recreation_factory(monkeypatch):
     environments = [FakeSC2Env(fail_reset=True), FakeSC2Env()]
     factory = iter(environments).__next__
-    module = SimpleNamespace(smacv2=SimpleNamespace(parallel_env=factory))
-    monkeypatch.setattr(
-        "marlite.environment.env_config.importlib.import_module",
-        lambda name: module,
-    )
-
-    wrapper = EnvConfig(
-        "fake", "smacv2", wrapper={"type": "smac", "reset_retries": 2}
-    ).create_env()
+    monkeypatch.setitem(sys.modules, "smac_recovery_fake", SimpleNamespace(parallel_env=factory))
+    wrapper = EnvironmentFactory(
+        {
+            "module": "smac_recovery_fake",
+            "wrappers": [{"type": "SMACWrapper", "params": {"reset_retries": 2}}],
+        },
+        default_registry(),
+    )()
     wrapper.reset(seed=13)
 
     assert environments[0].closed

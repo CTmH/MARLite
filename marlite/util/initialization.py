@@ -28,8 +28,14 @@ _METHODS = {
     "constant": (nn.init.constant_, {"value"}),
 }
 _PROJECTIONS = (
-    nn.Linear, GraphLinear, nn.Conv1d, nn.Conv2d, nn.Conv3d,
-    nn.ConvTranspose1d, nn.ConvTranspose2d, nn.ConvTranspose3d,
+    nn.Linear,
+    GraphLinear,
+    nn.Conv1d,
+    nn.Conv2d,
+    nn.Conv3d,
+    nn.ConvTranspose1d,
+    nn.ConvTranspose2d,
+    nn.ConvTranspose3d,
 )
 _CONTROLS = {"bias", "input", "recurrent", "forget_bias", "output_slices"}
 
@@ -47,7 +53,11 @@ def _validate_rule(rule):
     for name in _METHODS[scheme][1] | {"bias", "forget_bias"}:
         if name in rule and name not in {"mode", "nonlinearity"}:
             value = rule[name]
-            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+            ):
                 raise ValueError(f"{name} must be a finite number")
     if scheme == "constant" and "value" not in rule:
         raise ValueError("constant initialization requires value")
@@ -69,7 +79,13 @@ def _fill(tensor, rule):
     if isinstance(tensor, UninitializedParameter):
         raise ValueError("Explicit initialization requires materialized parameters")
     scheme = rule["scheme"]
-    if scheme in {"orthogonal", "xavier_uniform", "xavier_normal", "kaiming_uniform", "kaiming_normal"}:
+    if scheme in {
+        "orthogonal",
+        "xavier_uniform",
+        "xavier_normal",
+        "kaiming_uniform",
+        "kaiming_normal",
+    }:
         if tensor.ndim < 2:
             raise ValueError(f"{scheme} requires a tensor with at least two dimensions")
     method, names = _METHODS[scheme]
@@ -81,6 +97,7 @@ def _fill(tensor, rule):
 
 def _initialize_module(module, rule, seen):
     """Return whether this module has a supported parameter layout."""
+
     def weight(parameter, settings=rule, chunks=1):
         if parameter is None or id(parameter) in seen:
             return
@@ -232,7 +249,9 @@ def initialize_model(model: nn.Module, config: Mapping | None) -> None:
         else:
             touched = set()
             if not _initialize_module(module, rule, touched):
-                raise ValueError(f"Unsupported initialization module: {name!r}; select a direct parameter")
+                raise ValueError(
+                    f"Unsupported initialization module: {name!r}; select a direct parameter"
+                )
             targets = touched
             if targets & overridden:
                 raise ValueError(f"Overlapping/shared initialization overrides: {name!r}")

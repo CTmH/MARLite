@@ -23,7 +23,7 @@ class MAgentLabelPropagationGroupBuilder(GroupBuilder):
         n_groups: Optional[int] = None,
         update_interval: int = 1,
         channel_first: bool = False,
-        dtype: str = 'int16',
+        dtype: str = "int16",
     ):
         super().__init__(dtype=dtype)
         self.binary_agent_id_dim = binary_agent_id_dim
@@ -58,7 +58,7 @@ class MAgentLabelPropagationGroupBuilder(GroupBuilder):
         unique_groups = np.unique(labels)
         centroids = {}
         for g in unique_groups:
-            mask = (labels == g)
+            mask = labels == g
             centroids[g] = coords[mask].mean(axis=0)
 
         current_labels = labels.copy()
@@ -66,7 +66,7 @@ class MAgentLabelPropagationGroupBuilder(GroupBuilder):
 
         while current_n > n_groups:
             # Find the two groups with closest centroids
-            min_dist = float('inf')
+            min_dist = float("inf")
             merge_a, merge_b = -1, -1
             group_ids = sorted(centroids.keys())
             for i in range(len(group_ids)):
@@ -79,7 +79,7 @@ class MAgentLabelPropagationGroupBuilder(GroupBuilder):
 
             # Merge group b into group a
             current_labels[current_labels == merge_b] = merge_a
-            mask_a = (current_labels == merge_a)
+            mask_a = current_labels == merge_a
             centroids[merge_a] = coords[mask_a].mean(axis=0)
             del centroids[merge_b]
             current_n -= 1
@@ -102,9 +102,9 @@ class MAgentLabelPropagationGroupBuilder(GroupBuilder):
         n_groups: Optional[int] = None,
     ):
         binary_agent_id = sample_state[:, :, binary_agent_id_dim]
-        agent_positions = np.apply_along_axis(
-            binary_to_decimal, -1, binary_agent_id
-        ).astype(np.int64)
+        agent_positions = np.apply_along_axis(binary_to_decimal, -1, binary_agent_id).astype(
+            np.int64
+        )
         agent_presence = sample_state[:, :, agent_presence_dim]
         agent_presence = agent_presence.astype(np.int64)
         agent_presence = agent_presence.sum(axis=-1)
@@ -159,10 +159,7 @@ class MAgentLabelPropagationGroupBuilder(GroupBuilder):
 
         if not self.training:
             self.step_counter += 1
-            if (
-                self.step_counter % self.update_interval != 0
-                and self.cached_labels is not None
-            ):
+            if self.step_counter % self.update_interval != 0 and self.cached_labels is not None:
                 return torch.from_numpy(deepcopy(self.cached_labels).astype(self.dtype))
 
         results = []
@@ -268,10 +265,7 @@ class MAgentVecLPGroupBuilder(GroupBuilder):
 
         if not self.training:
             self.step_counter += 1
-            if (
-                self.step_counter % self.update_interval != 0
-                and self.cached_labels is not None
-            ):
+            if self.step_counter % self.update_interval != 0 and self.cached_labels is not None:
                 # ── Return cached labels with dead-agent correction ──────
                 # state:  (bs, N_all, F)   includes BOTH ally + enemy teams
                 # result: (bs, n_cand)      only selected-team agents
@@ -280,12 +274,14 @@ class MAgentVecLPGroupBuilder(GroupBuilder):
                 # guarantee equal True counts per row at compile time.
                 # Here every row has exactly n_cand True entries, so the
                 # reshape(bs, -1) → (bs, n_cand) is safe and restores shape.
-                result = deepcopy(self.cached_labels)                   # (bs, n_cand)
-                teams = states[:, :, self.team_dim]                     # (bs, N_all)
-                hps   = states[:, :, self.hp_dim]                       # (bs, N_all)
-                cand_mask = np.isin(teams, self.selected_teams)         # (bs, N_all) bool
-                cand_hps  = hps[cand_mask].reshape(bs, -1)              # hps[cand_mask]: flat (bs*n_cand,) → reshape → (bs, n_cand)
-                result[cand_hps <= 0] = -1                              # dead → -1, alive unchanged
+                result = deepcopy(self.cached_labels)  # (bs, n_cand)
+                teams = states[:, :, self.team_dim]  # (bs, N_all)
+                hps = states[:, :, self.hp_dim]  # (bs, N_all)
+                cand_mask = np.isin(teams, self.selected_teams)  # (bs, N_all) bool
+                cand_hps = hps[cand_mask].reshape(
+                    bs, -1
+                )  # hps[cand_mask]: flat (bs*n_cand,) → reshape → (bs, n_cand)
+                result[cand_hps <= 0] = -1  # dead → -1, alive unchanged
                 return torch.from_numpy(result)
             self.cached_labels = None
 
@@ -345,7 +341,7 @@ class MagentKMeansGroupBuilder(GroupBuilder):
         valid_node_list: Union[List[int], None] = None,
         update_interval: int = 1,
         channel_first: bool = False,
-        dtype: str = 'int16',
+        dtype: str = "int16",
     ):
         super().__init__(dtype=dtype)
         self.binary_agent_id_dim = binary_agent_id_dim
@@ -373,9 +369,7 @@ class MagentKMeansGroupBuilder(GroupBuilder):
         rng = np.random.default_rng(seed)
         idx = rng.choice(coords.shape[0], n_clusters, replace=False)
         init = coords[idx].astype(np.float64)
-        _, labels = kmeans2(
-            coords.astype(np.float64), init, iter=100, minit="matrix"
-        )
+        _, labels = kmeans2(coords.astype(np.float64), init, iter=100, minit="matrix")
         return labels.astype(np.int64)
 
     @staticmethod
@@ -389,16 +383,14 @@ class MagentKMeansGroupBuilder(GroupBuilder):
         seed=None,
     ):
         binary_agent_id = sample_state[:, :, binary_agent_id_dim]
-        agent_positions = np.apply_along_axis(
-            binary_to_decimal, -1, binary_agent_id
-        ).astype(np.int64)
+        agent_positions = np.apply_along_axis(binary_to_decimal, -1, binary_agent_id).astype(
+            np.int64
+        )
         agent_presence = sample_state[:, :, agent_presence_dim]
         agent_presence = agent_presence.astype(np.int64)
         agent_presence = agent_presence.sum(axis=-1)
         agent_positions = (
-            agent_positions * agent_presence
-            + agent_presence
-            - np.ones_like(agent_presence)
+            agent_positions * agent_presence + agent_presence - np.ones_like(agent_presence)
         )
 
         valid_elements = {
@@ -420,13 +412,9 @@ class MagentKMeansGroupBuilder(GroupBuilder):
         if n_alive == 0:
             return np.full(n, -1, dtype=np.int64)
 
-        n_clusters = MagentKMeansGroupBuilder._compute_n_clusters(
-            n_alive, n_groups, min_group_size
-        )
+        n_clusters = MagentKMeansGroupBuilder._compute_n_clusters(n_alive, n_groups, min_group_size)
 
-        cluster_labels = MagentKMeansGroupBuilder._kmeans_cluster(
-            coords, n_clusters, seed
-        )
+        cluster_labels = MagentKMeansGroupBuilder._kmeans_cluster(coords, n_clusters, seed)
 
         full_labels = np.full(n, -1, dtype=np.int64)
         for i, node_id in enumerate(sorted_ids):
@@ -444,10 +432,7 @@ class MagentKMeansGroupBuilder(GroupBuilder):
 
         if not self.training:
             self.step_counter += 1
-            if (
-                self.step_counter % self.update_interval != 0
-                and self.cached_labels is not None
-            ):
+            if self.step_counter % self.update_interval != 0 and self.cached_labels is not None:
                 return torch.from_numpy(deepcopy(self.cached_labels).astype(self.dtype))
 
         # default_rng() without a seed ignores the experiment's NumPy seed.
@@ -490,7 +475,7 @@ class MagentVecKMeansGroupBuilder(GroupBuilder):
         min_group_size: int = 1,
         update_interval: int = 1,
         n_workers: int = 0,
-        dtype: str = 'int16',
+        dtype: str = "int16",
     ):
         super().__init__(dtype=dtype)
         self.coord_dims = coord_dims
@@ -532,14 +517,10 @@ class MagentVecKMeansGroupBuilder(GroupBuilder):
         if n_alive == 0:
             return np.full(n_candidates, -1, dtype=np.int64)
 
-        n_clusters = MagentKMeansGroupBuilder._compute_n_clusters(
-            n_alive, n_groups, min_group_size
-        )
+        n_clusters = MagentKMeansGroupBuilder._compute_n_clusters(n_alive, n_groups, min_group_size)
 
         valid_coords = candidate_coords[valid_mask]
-        cluster_labels = MagentKMeansGroupBuilder._kmeans_cluster(
-            valid_coords, n_clusters, seed
-        )
+        cluster_labels = MagentKMeansGroupBuilder._kmeans_cluster(valid_coords, n_clusters, seed)
 
         full_labels = np.full(n_candidates, -1, dtype=np.int64)
         full_labels[valid_local_ids] = cluster_labels
@@ -551,10 +532,7 @@ class MagentVecKMeansGroupBuilder(GroupBuilder):
 
         if not self.training:
             self.step_counter += 1
-            if (
-                self.step_counter % self.update_interval != 0
-                and self.cached_labels is not None
-            ):
+            if self.step_counter % self.update_interval != 0 and self.cached_labels is not None:
                 # ── Return cached labels with dead-agent correction ──────
                 # state:  (bs, N_all, F)   includes BOTH ally + enemy teams
                 # result: (bs, n_cand)      only selected-team agents
@@ -563,12 +541,14 @@ class MagentVecKMeansGroupBuilder(GroupBuilder):
                 # guarantee equal True counts per row at compile time.
                 # Here every row has exactly n_cand True entries, so the
                 # reshape(bs, -1) → (bs, n_cand) is safe and restores shape.
-                result = deepcopy(self.cached_labels)                   # (bs, n_cand)
-                teams = states[:, :, self.team_dim]                     # (bs, N_all)
-                hps   = states[:, :, self.hp_dim]                       # (bs, N_all)
-                cand_mask = np.isin(teams, self.selected_teams)         # (bs, N_all) bool
-                cand_hps  = hps[cand_mask].reshape(bs, -1)              # hps[cand_mask]: flat (bs*n_cand,) → reshape → (bs, n_cand)
-                result[cand_hps <= 0] = -1                              # dead → -1, alive unchanged
+                result = deepcopy(self.cached_labels)  # (bs, n_cand)
+                teams = states[:, :, self.team_dim]  # (bs, N_all)
+                hps = states[:, :, self.hp_dim]  # (bs, N_all)
+                cand_mask = np.isin(teams, self.selected_teams)  # (bs, N_all) bool
+                cand_hps = hps[cand_mask].reshape(
+                    bs, -1
+                )  # hps[cand_mask]: flat (bs*n_cand,) → reshape → (bs, n_cand)
+                result[cand_hps <= 0] = -1  # dead → -1, alive unchanged
                 return torch.from_numpy(result)
             self.cached_labels = None
 
