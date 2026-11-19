@@ -153,3 +153,26 @@ def test_frozen_policy_controller_owns_and_resets_recurrent_state():
     assert controller.state is None
     assert first == [controller.actions(obs, availability, list(obs)) for _ in range(3)]
     assert not any(p.requires_grad for p in policy.parameters())
+
+
+def test_sumo_wrapper_does_not_require_live_agents_before_first_reset():
+    native = HeterogeneousEnv()
+    del native.agents
+    wrapper = SUMOWrapper(native)
+    assert wrapper.agents == []
+    wrapper.reset(seed=4)
+    assert len(wrapper.agents) == 3
+
+
+def test_padding_obeys_action_masks_delivered_in_infos():
+    class InfoMaskEnv(HeterogeneousEnv):
+        def reset(self, seed=None, options=None):
+            observations, infos = super().reset(seed, options)
+            infos["a"] = {"action_mask": [False, True]}
+            return observations, infos
+
+    wrapper = PadAgentView(InfoMaskEnv())
+    observations, _ = wrapper.reset(seed=1)
+    assert observations["a"]["action_mask"].tolist() == [0, 1, 0]
+    with pytest.raises(ValueError, match="unavailable"):
+        wrapper.step({a: 0 for a in wrapper.agents})

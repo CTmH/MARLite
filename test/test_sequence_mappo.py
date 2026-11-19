@@ -283,3 +283,25 @@ def test_real_mpe2_short_training(tmp_path):
     )
     trainer.run(1, train_episodes=2, eval_episodes=2, checkpoint_interval=1)
     assert trainer.env_steps == 6 and learner.actor_updates == 2
+
+
+def test_collector_uses_current_info_masks_when_observations_are_plain_arrays():
+    class InfoMaskEnv(TinyParallel):
+        def infos(self):
+            return {a: {"action_mask": [False, True, False]} for a in self.agents}
+
+        def reset(self, seed=None):
+            obs, _ = super().reset(seed)
+            return obs, self.infos()
+
+        def step(self, actions):
+            assert all(action == 1 for action in actions.values())
+            obs, rewards, terms, truncs, _ = super().step(actions)
+            return obs, rewards, terms, truncs, self.infos()
+
+    trainer = make_trainer(factory=InfoMaskEnv)
+    episode = trainer.collector.collect_episode(
+        trainer.learner.actor, trainer.learner.critic, seed=7
+    )
+    assert episode.transitions["actions"].eq(1).all()
+    assert not episode.frames["available_actions"][..., 0].any()

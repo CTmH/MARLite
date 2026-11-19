@@ -8,24 +8,32 @@ if os.environ.get("MARLITE_NATIVE_SMAC") != "1":
 
 from marlite.configuration.catalog import default_registry
 from marlite.configuration.environment import EnvironmentFactory
+from marlite.util.env_util import current_action_mask
 import numpy as np
 
 
 def test_native_smac_observations_legal_actions_and_state():
     factory = EnvironmentFactory(
         {
-            "module": "smac_pettingzoo.smacv1_pettingzoo_v1",
-            "params": {"map_name": os.environ.get("MARLITE_SMAC_MAP", "2s3z")},
+            "module": "smac_pettingzoo.smacv2_pettingzoo_v1",
+            "params": {"map_name": os.environ.get("MARLITE_SMAC_MAP", "10gen_terran_5_vs_5")},
             "wrappers": [{"type": "SMACWrapper"}],
         },
         default_registry(),
     )
     env = factory()
     try:
-        observation, _ = env.reset(seed=42)
+        observation, infos = env.reset(seed=42)
         assert env.state().shape[0] == len(env.possible_agents)
         for _ in range(3):
-            actions = {a: int(np.flatnonzero(observation[a]["action_mask"])[0]) for a in env.agents}
-            observation, _, _, _, _ = env.step(actions)
+            actions = {
+                a: int(
+                    np.flatnonzero(
+                        current_action_mask(observation[a], infos.get(a), env.action_space(a).n)
+                    )[0]
+                )
+                for a in env.agents
+            }
+            observation, _, _, _, infos = env.step(actions)
     finally:
         env.close()

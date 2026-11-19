@@ -34,3 +34,22 @@ def precompute_manhattan_offsets(dist: int):
             if abs(dx) + abs(dy) <= dist and (dx != 0 or dy != 0):
                 offsets.append((dx, dy))
     return np.array(offsets, dtype=int)
+
+
+def current_action_mask(observation, info, action_count):
+    """Read the current mask from a view or its info (e.g. SMAC).
+
+    A wrapper-provided observation mask takes precedence: padding adapters may
+    expand its width while retaining the native info dictionary for diagnostics.
+    """
+    from collections.abc import Mapping
+
+    mask = observation.get("action_mask") if isinstance(observation, Mapping) else None
+    if mask is None and isinstance(info, Mapping):
+        mask = info.get("action_mask")
+    if mask is None:
+        return np.ones(action_count, dtype=bool)
+    mask = np.asarray(mask, dtype=bool)
+    if mask.shape != (action_count,):
+        raise ValueError("Action mask width must match the agent's discrete action space")
+    return mask

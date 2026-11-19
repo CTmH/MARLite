@@ -10,7 +10,7 @@ class SUMOWrapper(BaseParallelWrapper):
 
     def __init__(self, env):
         super().__init__(env)
-        self.agents = self.env.agents
+        self.agents = getattr(self.env, "agents", [])
         self.possible_agents = self.env.possible_agents
         self._state_matrix = np.array([]).reshape(0, 0)  # Cache for the state matrix
 

@@ -137,3 +137,72 @@ def test_native_opponent_wrapper_spaces_and_seeded_controller(family, wrapper_ty
         assert not wrapper.agents
     finally:
         wrapper.close()
+
+
+@pytest.mark.parametrize("history", ["gru", "pooled_attention"])
+def test_c04_native_short_teacher_offline_online_and_checkpoint(tmp_path, history):
+    import torch
+    import yaml
+    from copy import deepcopy
+    from pathlib import Path
+    from marlite.configuration.recipe import build_experiment
+    from test.test_sequence_mappo import assert_tree_equal
+
+    config = yaml.safe_load(
+        (Path(__file__).parents[1] / "examples/sequence/c04_magent2.yaml").read_text()
+    )
+    config["environment"]["params"]["max_cycles"] = 4
+    config["collector"]["max_steps"] = 4
+    config["communication_context"]["params"]["builder"]["params"]["n_workers"] = 0
+    run = {"iterations": 1, "train_episodes": 2, "eval_episodes": 1, "eval_interval": 1}
+    config["run"] = run
+    config["teacher"]["run"] = dict(run)
+    config["teacher"]["online_distillation"]["enabled"] = True
+    for options in (config["trainer"], config["teacher"]["trainer"]):
+        options.update(sequence_length=2, batch_sequences=3, ppo_epochs=1)
+    config["offline"].update(
+        train_episodes=2,
+        validation_episodes=1,
+        codec_updates=1,
+        policy_updates=1,
+        probe_updates=1,
+        offline_batch_sequences=2,
+    )
+    if history == "pooled_attention":
+        config["actor"]["params"]["temporal"] = {
+            "type": "WindowEncoder",
+            "params": {
+                "input_dim": 32,
+                "hidden_dim": 32,
+                "window_length": 4,
+                "model": {
+                    "type": "SimpleResAttSeqEnc",
+                    "params": {
+                        "input_dim": 32,
+                        "output_dim": 32,
+                        "embed_dim": 32,
+                        "num_heads": 4,
+                        "max_seq_len": 4,
+                        "dropout": 0.0,
+                    },
+                },
+            },
+        }
+    device = os.environ.get("MARLITE_ACCEPTANCE_DEVICE", "cpu")
+    experiment = build_experiment(config, workdir=tmp_path / "run", device=device)
+    experiment.run()
+    trainer = experiment.trainer
+    assert trainer.phase == "online" and trainer.offline_counters == {
+        "probe": 1,
+        "codec": 1,
+        "policy": 1,
+    }
+    assert trainer.learner.updates > 0
+    checkpoint = tmp_path / "resume.pt"
+    trainer.save_checkpoint(checkpoint)
+    metrics = trainer.train_iteration(2)
+    expected = deepcopy(trainer.learner.state_dict())
+    trainer.load_checkpoint(checkpoint)
+    assert metrics == trainer.train_iteration(2)
+    assert_tree_equal(expected, trainer.learner.state_dict())
+    assert all(torch.isfinite(p).all() for p in trainer.learner.actor.parameters())

@@ -10,6 +10,7 @@ from marlite.algorithm.sequence_agent_group import DecisionInput
 from marlite.data import Episode
 from marlite.environment.errors import RetryPolicy, recoverable_errors
 from marlite.util.action_distribution import masked_categorical
+from marlite.util.env_util import current_action_mask
 from marlite.util.value_learning import masked_action_values
 
 
@@ -147,10 +148,10 @@ class ParallelCollector:
                     raise ValueError("Missing real observation for a surviving agent")
                 if isinstance(raw, dict):
                     obs_values.append(raw["observation"])
-                    masks.append(raw.get("action_mask", np.ones(action_dim, dtype=bool)))
+                    masks.append(current_action_mask(raw, infos.get(agent), action_dim))
                 else:
                     obs_values.append(zero if raw is None else raw)
-                    masks.append(np.ones(action_dim, dtype=bool))
+                    masks.append(current_action_mask(raw, infos.get(agent), action_dim))
             obs = torch.as_tensor(np.stack(obs_values), dtype=torch.float32)
             active = torch.tensor([alive[a] for a in agents], dtype=torch.bool)
             reset = torch.tensor(

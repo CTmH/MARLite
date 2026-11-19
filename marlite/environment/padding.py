@@ -3,6 +3,7 @@
 import numpy as np
 from gymnasium import spaces
 from pettingzoo.utils import BaseParallelWrapper
+from marlite.util.env_util import current_action_mask
 
 
 class PadAgentView(BaseParallelWrapper):
@@ -56,10 +57,10 @@ class PadAgentView(BaseParallelWrapper):
     def action_space(self, agent):
         return self.action_spaces[agent]
 
-    def _pad(self, observations):
+    def _pad(self, observations, infos):
         padded = {}
         for agent, value in observations.items():
-            dynamic = value.get("action_mask") if isinstance(value, dict) else None
+            dynamic = current_action_mask(value, infos.get(agent), self.actions[agent])
             array = np.asarray(
                 value["observation"] if isinstance(value, dict) else value, dtype=np.float32
             ).reshape(-1)
@@ -85,7 +86,7 @@ class PadAgentView(BaseParallelWrapper):
     def reset(self, seed=None, options=None):
         observations, infos = self.env.reset(seed=seed, options=options)
         self._last_masks = {}
-        return self._pad(observations), infos
+        return self._pad(observations, infos), infos
 
     def step(self, actions):
         if set(actions) != set(self.env.agents):
@@ -94,4 +95,4 @@ class PadAgentView(BaseParallelWrapper):
             if not 0 <= action < self.actions[agent] or not self._last_masks[agent][action]:
                 raise ValueError("Padded or unavailable action cannot reach the native environment")
         observations, rewards, terminated, truncated, infos = self.env.step(actions)
-        return self._pad(observations), rewards, terminated, truncated, infos
+        return self._pad(observations, infos), rewards, terminated, truncated, infos
