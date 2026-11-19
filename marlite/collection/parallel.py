@@ -6,6 +6,7 @@ import torch
 from marlite.algorithm.sequence_agent_group import DecisionInput
 from marlite.data import Episode
 from marlite.util.action_distribution import masked_categorical
+from marlite.util.value_learning import masked_action_values
 
 
 def _snapshot(state):
@@ -26,23 +27,27 @@ class ParallelCollector:
         self.env_factory, self.max_steps, self.device = env_factory, max_steps, torch.device(device)
 
     @torch.no_grad()
-    def collect_episode(self, actor, critic, *, seed, policy_version=0, stochastic=True):
-        if actor.output_kind != "logits":
-            raise ValueError("PPO collection requires a logits policy")
+    def collect_episode(self, actor, critic=None, *, seed, policy_version=0, stochastic=True, epsilon=0.):
+        if not 0 <= epsilon <= 1:
+            raise ValueError("epsilon must be in [0,1]")
+        if actor.output_kind == "logits" and critic is None:
+            raise ValueError("PPO collection requires a value model")
         actor_device = next(actor.parameters()).device
-        critic_device = next(critic.parameters()).device
-        actor_mode, critic_mode = actor.training, critic.training
+        critic_device = next(critic.parameters()).device if critic is not None else None
+        actor_mode, critic_mode = actor.training, critic.training if critic is not None else None
         env = self.env_factory()
         try:
             actor.eval().to(self.device)
-            critic.eval().to(self.device)
-            return self._collect(env, actor, critic, seed, policy_version, stochastic)
+            if critic is not None:
+                critic.eval().to(self.device)
+            return self._collect(env, actor, critic, seed, policy_version, stochastic, epsilon)
         finally:
             env.close()
             actor.to(actor_device).train(actor_mode)
-            critic.to(critic_device).train(critic_mode)
+            if critic is not None:
+                critic.to(critic_device).train(critic_mode)
 
-    def _collect(self, env, actor, critic, seed, policy_version, stochastic):
+    def _collect(self, env, actor, critic, seed, policy_version, stochastic, epsilon):
         observations, infos = env.reset(seed=seed)
         agents = tuple(env.possible_agents)
         if not agents or not observations:
@@ -61,7 +66,7 @@ class ParallelCollector:
             rng.manual_seed(seed)
         frames, transitions = {}, {}
         actor_state = actor.initial_state(1, len(agents), self.device, torch.float32)
-        critic_state = critic.initial_state(1, self.device, torch.float32)
+        critic_state = critic.initial_state(1, self.device, torch.float32) if critic is not None else {}
         alive = {a: a in env.agents for a in agents}
         previous_alive = {a: False for a in agents}
         dead = {a: False for a in agents}
@@ -98,23 +103,37 @@ class ParallelCollector:
                                 ("agent_reset", reset), ("available_actions", available),
                                 ("states", state)):
                 append(frames, name, value)
-            for name, value in _snapshot(actor_state).items():
-                append(frames, "actor_state." + name, value)
+            if actor.output_kind == "logits":
+                # Off-policy targets reconstruct their own states; no behavior cache is needed.
+                for name, value in _snapshot(actor_state).items():
+                    append(frames, "actor_state." + name, value)
             for name, value in _snapshot(critic_state).items():
                 append(frames, "critic_state." + name, value)
             team_valid = active.any().reshape(1).to(self.device)
             team_reset = torch.tensor([timestep == 0], device=self.device)
-            value = critic.step(state[None].to(self.device), critic_state, team_valid, team_reset)
-            append(frames, "old_value", value.values[0])
+            if critic is not None:
+                value = critic.step(state[None].to(self.device), critic_state, team_valid, team_reset)
+                append(frames, "old_value", value.values[0])
             if episode_end:
                 break  # No fictitious action or communication at the bootstrap frame.
             inputs = DecisionInput(obs[None].to(self.device), active[None].to(self.device),
                                    reset[None].to(self.device))
             output = actor.step(inputs, actor_state)
-            dist = masked_categorical(output.values[0], available.to(self.device), active.to(self.device))
-            actions = (torch.multinomial(dist.probs.cpu(), 1, generator=rng).squeeze(-1)
-                       if stochastic else dist.probs.argmax(-1).cpu())
-            log_prob = dist.log_prob(actions.to(self.device)).cpu().masked_fill(~active, 0)
+            log_prob = None
+            if actor.output_kind == "logits":
+                dist = masked_categorical(output.values[0], available.to(self.device), active.to(self.device))
+                actions = (torch.multinomial(dist.probs.cpu(), 1, generator=rng).squeeze(-1)
+                           if stochastic else dist.probs.argmax(-1).cpu())
+                log_prob = dist.log_prob(actions.to(self.device)).cpu().masked_fill(~active, 0)
+            else:
+                feasible = masked_action_values(output.values[0], available.to(self.device), active.to(self.device))
+                actions = feasible.argmax(-1).cpu()
+                if stochastic and epsilon:
+                    safe_available = available | ~active[:, None]
+                    random_actions = torch.multinomial(safe_available.float(), 1, generator=rng).squeeze(-1)
+                    explore = torch.rand(len(agents), generator=rng) < epsilon
+                    actions = torch.where(explore, random_actions, actions)
+                actions = actions.masked_fill(~active, 0)
             selected = {a: int(actions[i]) for i, a in enumerate(agents) if alive[a]}
             next_obs, reward, terms, truncs, infos = env.step(selected)
             for a in agents:
@@ -136,12 +155,14 @@ class ParallelCollector:
                                                   for a in agents]),
                 "terminated": torch.tensor(terminal),
                 "truncated": torch.tensor(episode_end and not terminal),
-                "old_log_prob": log_prob,
             }
+            if log_prob is not None:
+                entries["old_log_prob"] = log_prob
             for name, datum in entries.items():
                 append(transitions, name, datum)
             previous_alive, alive = alive, survivor
-            actor_state, critic_state = output.state, value.state
+            actor_state = output.state
+            critic_state = value.state if critic is not None else {}
             observations, last_state = next_obs, state
         return Episode(agents, {k: torch.stack(v) for k, v in frames.items()},
                        {k: torch.stack(v) for k, v in transitions.items()},

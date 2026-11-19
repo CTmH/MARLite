@@ -32,8 +32,8 @@ def joint_q_from_counterfactual(q_per_action, actions, alive):
     return (selected * alive).sum(-1) / alive.sum(-1).clamp_min(1)
 
 
-def qtran_constraints(q_values, enc_out, actions, q_counterfactual, value,
-                      critic, alive, available=None, mask_optimal_samples=True):
+def qtran_constraint_terms(q_values, enc_out, actions, q_counterfactual, value,
+                           critic, alive, available=None, mask_optimal_samples=True):
     """QTRAN-alt optimality and counterfactual non-optimality constraints.
 
     The optimal constraint always uses the complete feasible greedy joint action,
@@ -50,7 +50,7 @@ def qtran_constraints(q_values, enc_out, actions, q_counterfactual, value,
     state_value = value.reshape(-1)
     optimal_error = greedy_q.sum(-1) - greedy_joint + state_value
     active_sample = alive.any(-1)
-    optimal_loss = (optimal_error.square() * active_sample).sum() / active_sample.sum().clamp_min(1)
+    optimal_sum = (optimal_error.square() * active_sample).sum()
 
     safe_actions = actions.masked_fill(~alive, 0)
     chosen_q = q_values.gather(-1, safe_actions.unsqueeze(-1)).squeeze(-1) * alive
@@ -62,5 +62,15 @@ def qtran_constraints(q_values, enc_out, actions, q_counterfactual, value,
     if mask_optimal_samples:
         optimal_sample = ((safe_actions == greedy_actions) | ~alive).all(-1)
         active = active & ~optimal_sample.unsqueeze(-1)
-    nonoptimal_loss = (minimum.square() * active).sum() / active.sum().clamp_min(1)
-    return optimal_loss, nonoptimal_loss
+    nonoptimal_sum = (minimum.square() * active).sum()
+    return optimal_sum, active_sample.sum(), nonoptimal_sum, active.sum()
+
+
+def qtran_constraints(q_values, enc_out, actions, q_counterfactual, value,
+                      critic, alive, available=None, mask_optimal_samples=True):
+    """Scalar legacy entry point; sequence learners reduce the underlying sums globally."""
+    optimal, optimal_count, nonoptimal, nonoptimal_count = qtran_constraint_terms(
+        q_values, enc_out, actions, q_counterfactual, value,
+        critic, alive, available, mask_optimal_samples,
+    )
+    return optimal / optimal_count.clamp_min(1), nonoptimal / nonoptimal_count.clamp_min(1)

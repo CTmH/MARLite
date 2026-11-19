@@ -220,3 +220,12 @@ def test_sequence_policy_rejects_batch_dependent_or_random_layers():
     for frame in (torch.nn.BatchNorm1d(3), torch.nn.Dropout(.1)):
         with pytest.raises(ValueError):
             SequenceAgentGroup(frame, RecurrentGRU(3, 8), torch.nn.Linear(8, 4))
+
+
+def test_recurrent_snapshots_are_not_duplicated_in_training_windows():
+    ep = valid_episode()
+    ep.frames["actor_state.cache"] = torch.randn(ep.length + 1, 2, 128, 64)
+    ep.validate()
+    batch = collate_sequences({0: ep}, [SequenceSlice(0, 2, 3)])
+    assert "actor_state.cache" not in batch.frames
+    assert "actor_state.cache" in ep.frames

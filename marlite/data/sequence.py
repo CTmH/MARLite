@@ -62,15 +62,18 @@ def partition_episode(episode_id, episode, length=32, burn_in=8, future=0):
 def collate_sequences(episodes: dict[int, Episode], sources):
     """Right-pad segments; distinguish warmup, learning, and bootstrap tail.
 
-    Agent slots and feature specifications must match within a batch. Fields
-    with ragged communication data must be tensorized by their producer.
+    Episodes must be validated at collection/store boundaries, not rescanned
+    in full for every minibatch. Recurrent-state snapshots are read separately
+    for initialization and never copied into each GPU training window.
+    Agent slots/specifications must match. Ragged communication data must be
+    tensorized by its producer.
     """
     sources = tuple(sources)
     if not sources:
         raise ValueError("Cannot collate an empty sequence batch")
     segments = []
     for source in sources:
-        episode = episodes[source.episode_id].validate()
+        episode = episodes[source.episode_id]
         source.validate(episode)
         begin = max(0, source.start - source.burn_in)
         learn_end = min(episode.length, source.start + source.length)
@@ -88,7 +91,9 @@ def collate_sequences(episodes: dict[int, Episode], sources):
             ):
                 raise ValueError("A batch requires matching field specifications")
     size = max(end - begin for _, begin, _, end in segments)
-    frames = {k: v.new_zeros(len(sources), size + 1, *v.shape[1:]) for k, v in first.frames.items()}
+    frames = {k: v.new_zeros(len(sources), size + 1, *v.shape[1:])
+              for k, v in first.frames.items()
+              if not k.startswith(("actor_state.", "critic_state."))}
     transitions = {k: v.new_zeros(len(sources), size, *v.shape[1:]) for k, v in first.transitions.items()}
     filled = torch.zeros(len(sources), size, dtype=torch.bool)
     learning, bootstrap, trace = (torch.zeros_like(filled) for _ in range(3))

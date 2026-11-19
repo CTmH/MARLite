@@ -13,6 +13,8 @@ class ExecutionBackend:
 
     def __init__(self, device="cpu"):
         self.device = torch.device(device)
+        if self.device.type == "cuda" and self.device.index is None:
+            self.device = torch.device("cuda", torch.cuda.current_device())
 
     @property
     def distributed(self):

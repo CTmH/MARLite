@@ -15,7 +15,7 @@ The legacy trainers remain runnable only while the new pipeline is being built.
 | R2 | Explicit state, step/sequence protocol, GRU and causal attention | Implemented: local composed AgentGroup, window wrapper, GRU and causal reference |
 | R3 | Shared multi-timestep MAPPO learner, fixed GAE, independent evaluation | Implemented; local API, CPU and real MPE2 short training validated |
 | R4 | torchrun and one explicit gradient reducer | CPU two-rank path validated; server GPU acceptance pending |
-| R5 | QMIX, QPLEX, QTRAN sequence learners | Pending |
+| R5 | QMIX, QPLEX, QTRAN sequence learners | Implemented; CPU, Gloo and real MPE2 short workflows validated |
 | R6 | Graph, messages, consensus, SSL and gradient mixers | Pending |
 | R7 | C04 offline/online phases and all paper variants | Pending |
 | R8 | New YAML, CLI, analyzer, examples; remove old hierarchy | Pending |
@@ -137,3 +137,44 @@ and two torchrun CPU configurations. A first torchrun attempt timed out before
 launching ranks because the local address resolved to an IPv6 reverse-DNS name;
 explicit IPv4 rendezvous resolves it. Tests clean the entire process group on
 failure. GPU, off-policy, communication/SSL and C04 migration remain pending.
+
+
+## Value-learning migration (R5)
+
+`ValueLearner` executes a shared update with separate QMIXObjective,
+QPLEXObjective and QTRANObjective. Mixers compose TeamSequenceEncoder with
+monotonic mixing, duplex transformation/joint attention, or counterfactual agent
+features. QTRAN retains a separately optimized required V network. n-step targets
+use real final-frame endpoints; online and target reconstruct their own states.
+Hard/EMA refreshes advance only after an actual valid learning update.
+
+Both trainers now inherit one shallow TrainingLifecycle for collection,
+evaluation, logging and checkpoints. They contain different iteration policies,
+not different GPU math. SequenceValueTrainer adds episode replay, environment-step
+based epsilon decay, default held-out validation, explicit optional weight-only
+rollback/target reanchoring and opt-in validation replay. Final-test evaluation
+has a separate random stream and is never added to replay. Replay and rollback
+weights are embedded in full checkpoints so expiring mmap files cannot invalidate
+resume. Evicted runtime files are released only after every rank finishes reading.
+
+EpisodeReplay supports uniform or explicitly named reward_weighted chunk sampling.
+The latter is neither TD-error PER nor importance-corrected sampling. n-step
+returns remain uncorrected off-policy returns, as in the old implementation.
+
+New tests independently calculate n-step sums/endpoints and a QTRAN counterexample,
+check QMIX monotonicity, QPLEX decomposition/IGM and detached advantages, illegal
+Q masking, counterfactual action independence, target timing, disabled losses,
+optimizer ownership, replay eviction, opt-in policies and exact resume. All three
+algorithms execute real MPE2 short workflows. torchrun/Gloo tests compare global
+updates against single-process updates with uneven and empty ranks, including
+QTRAN replay/rollback continuation. Server GPU acceptance remains R9 work.
+
+State checkpoints are read directly for warmup, never duplicated into training
+windows or copied wholesale to GPU. Off-policy collection does not save behavior
+hidden state. PPO still records per-frame state; sparse attention-cache recording
+must be addressed before large-context scalability acceptance at R9.
+
+R5 regression: 149 passed, 1 skipped (local CPU, 2026-11-19), including
+three real MPE2 value-learning workflows and real two-rank torchrun/Gloo tests.
+The skipped case belongs to existing optional distributed coverage; no server
+GPU claim is made. Full migration and old-code removal remain in progress.

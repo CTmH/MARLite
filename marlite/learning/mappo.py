@@ -10,6 +10,7 @@ from marlite.data import collate_sequences, SequenceSlice
 from marlite.util.action_distribution import masked_categorical
 from marlite.util.return_estimation import generalized_advantage_estimation
 from .backend import ExecutionBackend
+from .sequence import initial_states, validate_optimizer_ownership
 
 
 def prepare_ppo_targets(episodes, gamma=.99, gae_lambda=.95, normalize=True,
@@ -63,6 +64,7 @@ class MAPPOLearner:
             raise ValueError("MAPPO requires a categorical logits actor")
         if {id(p) for p in actor.parameters()} & {id(p) for p in critic.parameters()}:
             raise ValueError("Actor and critic optimizers must own disjoint parameters")
+        validate_optimizer_ownership(((actor, actor_optimizer), (critic, critic_optimizer)))
         self.actor, self.critic = actor, critic
         self.actor_optimizer, self.critic_optimizer = actor_optimizer, critic_optimizer
         self.backend = backend or ExecutionBackend(next(actor.parameters()).device)
@@ -76,41 +78,11 @@ class MAPPOLearner:
         self.backend.synchronize(self.critic)
 
     def _initial_states(self, episodes, sources, *, critic=False):
-        model = self.critic if critic else self.actor
-        prefix = "critic_state." if critic else "actor_state."
-        states = []
-        device = self.backend.device
-        for source in sources:
-            episode = episodes[source.episode_id]
-            start = source.start
-            begin = 0 if self.state_strategy == "prefix_recompute" else max(0, start - self.burn_in)
-            state = (model.initial_state(1, device, torch.float32) if critic else
-                     model.initial_state(1, len(episode.agent_ids), device, torch.float32))
-            if self.state_strategy == "cached_burnin":
-                for key, initial in state.items():
-                    name = prefix + key
-                    if name not in episode.frames:
-                        raise ValueError(f"Missing behavior recurrent state: {name}")
-                    value = episode.frames[name][begin:begin + 1].to(device)
-                    if value.shape != initial.shape or value.dtype != initial.dtype:
-                        raise ValueError(f"Invalid behavior state specification: {name}")
-                    state[key] = value
-            if begin < start:
-                with torch.no_grad():
-                    alive = episode.frames["alive"][begin:start][None].to(device)
-                    if critic:
-                        reset = torch.zeros(1, start - begin, device=device, dtype=torch.bool)
-                        reset[:, 0] = begin == 0
-                        state = model.forward_sequence(
-                            episode.frames["states"][begin:start][None].to(device),
-                            state, alive.any(-1), reset).state
-                    else:
-                        inputs = DecisionInput(
-                            episode.frames["observations"][begin:start][None].to(device), alive,
-                            episode.frames["agent_reset"][begin:start][None].to(device))
-                        state = model.forward_sequence(inputs, state).state
-            states.append(state)
-        return {key: torch.cat([s[key].detach() for s in states], 0) for key in states[0]}
+        return initial_states(
+            self.critic if critic else self.actor, episodes, sources,
+            device=self.backend.device, strategy=self.state_strategy, burn_in=self.burn_in,
+            team=critic, cache_prefix="critic_state." if critic else "actor_state.",
+        )
 
     def losses(self, episodes, sources):
         empty = not sources
@@ -189,7 +161,8 @@ class MAPPOLearner:
             torch.nn.utils.clip_grad_norm_(self.critic.parameters(), self.max_grad_norm)
             self.critic_optimizer.step()
             self.critic_updates += 1
-        self.updates += 1
+        if metrics["agent_steps"] or (self.vf_coef and metrics["team_steps"]):
+            self.updates += 1
         return metrics
 
     def state_dict(self):

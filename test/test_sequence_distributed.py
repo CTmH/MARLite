@@ -1,16 +1,12 @@
 """Actual torchrun/Gloo training, including empty-rank and uneven-mask batches."""
 
-import os
-from pathlib import Path
-import subprocess
-import signal
-import sys
 
 import pytest
 import torch
 import torch.distributed as dist
 
 from test.test_sequence_mappo import TinyParallel, make_trainer
+from test.sequence_test_tools import run_torchrun
 
 
 @pytest.mark.skipif(not dist.is_gloo_available(), reason="Gloo unavailable")
@@ -20,8 +16,7 @@ def test_torchrun_matches_single_global_batches(tmp_path, batch_sequences):
     trainer.batch_sequences = batch_sequences
     trainer.run(1, train_episodes=2, eval_episodes=2, checkpoint_interval=None)
     expected = trainer.learner.state_dict()
-    script = tmp_path / "distributed_run.py"
-    script.write_text('''
+    code = '''
 import os
 from pathlib import Path
 import torch
@@ -68,28 +63,8 @@ try:
         assert not list((root / "run" / "rollouts").glob("round_*"))
 finally:
     dist.destroy_process_group()
-''', encoding="utf-8")
-    root = Path(__file__).resolve().parents[1]
-    env = dict(os.environ, PYTHONPATH=str(root), OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1",
-               TEST_RUN_DIR=str(tmp_path), TEST_BATCH_SEQUENCES=str(batch_sequences),
-               PYTHONDONTWRITEBYTECODE="1")
-    command = [sys.executable, "-m", "torch.distributed.run", "--rdzv-backend=c10d",
-               "--rdzv-endpoint=127.0.0.1:0", "--local-addr=127.0.0.1",
-               "--nnodes=1", "--nproc-per-node=2", str(script)]
-    process = subprocess.Popen(command, cwd=root, env=env, stdout=subprocess.PIPE,
-                               stderr=subprocess.STDOUT, text=True, start_new_session=True)
-    try:
-        output, _ = process.communicate(timeout=75)
-    except subprocess.TimeoutExpired:
-        # Kill the launcher AND ranks, never leave blocked Gloo processes behind.
-        os.killpg(process.pid, signal.SIGTERM)
-        try:
-            output, _ = process.communicate(timeout=10)
-        except subprocess.TimeoutExpired:
-            os.killpg(process.pid, signal.SIGKILL)
-            output, _ = process.communicate()
-        pytest.fail("torchrun timed out:\n" + output)
-    assert process.returncode == 0, output
+'''
+    run_torchrun(tmp_path, code, TEST_BATCH_SEQUENCES=str(batch_sequences))
     actual = torch.load(tmp_path / "result.pt", weights_only=True)
     for component in ("actor", "critic"):
         for name, tensor in expected[component].items():

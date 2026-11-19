@@ -16,6 +16,7 @@ TRAIN_STREAM = 3
 WORKER_STREAM = 4
 ROLLOUT_STREAM = 5
 EVALUATION_STREAM = 6
+FINAL_TEST_STREAM = 7
 
 
 def derive_seed(seed, *coordinates):
