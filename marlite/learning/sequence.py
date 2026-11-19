@@ -3,6 +3,7 @@
 import torch
 
 from marlite.algorithm.sequence_agent_group import DecisionInput
+from marlite.communication.context import frame_context
 
 
 def initial_states(model, episodes, sources, *, device, strategy, burn_in,
@@ -40,8 +41,9 @@ def initial_states(model, episodes, sources, *, device, strategy, burn_in,
                 else:
                     inputs = DecisionInput(
                         episode.frames["observations"][begin:start][None].to(device), alive,
-                        episode.frames["agent_reset"][begin:start][None].to(device))
-                    state = model.forward_sequence(inputs, state).state
+                        episode.frames["agent_reset"][begin:start][None].to(device),
+                        frame_context(episode.frames, start=begin, stop=start, batched=False, device=device))
+                    state = model.encode_sequence(inputs, state).state
         states.append(state)
     return {key: torch.cat([s[key].detach() for s in states], 0) for key in states[0]}
 

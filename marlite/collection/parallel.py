@@ -1,5 +1,7 @@
 """Collect complete ParallelEnv episodes under one immutable policy version."""
 
+from copy import deepcopy
+
 import numpy as np
 import torch
 
@@ -21,10 +23,11 @@ class ParallelCollector:
     once at this boundary; observation dictionaries may contain action_mask.
     """
 
-    def __init__(self, env_factory, max_steps=200, device="cpu"):
+    def __init__(self, env_factory, max_steps=200, device="cpu", context_provider=None):
         if type(max_steps) is not int or max_steps < 1:
             raise ValueError("max_steps must be positive")
         self.env_factory, self.max_steps, self.device = env_factory, max_steps, torch.device(device)
+        self.context_provider = context_provider
 
     @torch.no_grad()
     def collect_episode(self, actor, critic=None, *, seed, policy_version=0, stochastic=True, epsilon=0.):
@@ -49,6 +52,9 @@ class ParallelCollector:
 
     def _collect(self, env, actor, critic, seed, policy_version, stochastic, epsilon):
         observations, infos = env.reset(seed=seed)
+        provider = deepcopy(self.context_provider)
+        if provider is not None and hasattr(provider, "reset"):
+            provider.reset()
         agents = tuple(env.possible_agents)
         if not agents or not observations:
             raise ValueError("Reset must expose at least one observation")
@@ -99,6 +105,14 @@ class ParallelCollector:
                 if not terminal or last_state is None:
                     raise
                 state = last_state
+            context = {} if provider is None else provider(obs, state, active, timestep)
+            context = {key: torch.as_tensor(value).detach().cpu() for key, value in context.items()}
+            sampled = actor.sample_context(active, rng)
+            if context.keys() & sampled.keys():
+                raise ValueError("External and sampled communication fields conflict")
+            context.update(sampled)
+            for name, datum in context.items():
+                append(frames, "context." + name, datum)
             for name, value in (("observations", obs), ("alive", active),
                                 ("agent_reset", reset), ("available_actions", available),
                                 ("states", state)):
@@ -117,8 +131,12 @@ class ParallelCollector:
             if episode_end:
                 break  # No fictitious action or communication at the bootstrap frame.
             inputs = DecisionInput(obs[None].to(self.device), active[None].to(self.device),
-                                   reset[None].to(self.device))
+                                   reset[None].to(self.device),
+                                   {key: value[None].to(self.device) for key, value in context.items()})
             output = actor.step(inputs, actor_state)
+            for name, datum in output.diagnostics.items():
+                if name.startswith("record."):
+                    append(transitions, "behavior." + name.removeprefix("record."), datum[0])
             log_prob = None
             if actor.output_kind == "logits":
                 dist = masked_categorical(output.values[0], available.to(self.device), active.to(self.device))
@@ -166,4 +184,5 @@ class ParallelCollector:
             observations, last_state = next_obs, state
         return Episode(agents, {k: torch.stack(v) for k, v in frames.items()},
                        {k: torch.stack(v) for k, v in transitions.items()},
-                       policy_version=policy_version, seed=seed).validate()
+                       policy_version=policy_version, seed=seed,
+                       metadata={"privileged_communication": bool(getattr(provider, "uses_global_state", False))}).validate()

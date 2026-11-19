@@ -9,7 +9,7 @@ import sys
 import pytest
 
 
-def run_torchrun(directory, code, **variables):
+def run_torchrun(directory, code, *, timeout=75, **variables):
     script = directory / "distributed_run.py"
     script.write_text(code, encoding="utf-8")
     root = Path(__file__).resolve().parents[1]
@@ -21,7 +21,7 @@ def run_torchrun(directory, code, **variables):
     process = subprocess.Popen(command, cwd=root, env=env, stdout=subprocess.PIPE,
                                stderr=subprocess.STDOUT, text=True, start_new_session=True)
     try:
-        output, _ = process.communicate(timeout=75)
+        output, _ = process.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
         os.killpg(process.pid, signal.SIGTERM)
         try:

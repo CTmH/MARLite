@@ -12,12 +12,19 @@ import torch.distributed as dist
 from torch import nn
 
 
-def distributed_mean(value, distributed=False):
-    """Average detached statistics without adding collectives to autograd."""
+def distributed_mean(value, distributed=False, reduction="mean"):
+    """Reduce detached statistics without adding collectives to autograd.
+
+    Sequence learners already divide local sums by GLOBAL label counts and
+    therefore request SUM. Historical callers retain mean reduction.
+    """
+    if reduction not in ("mean", "sum"):
+        raise ValueError("Distributed reduction must be mean or sum")
     result = value.detach().clone()
     if distributed:
         dist.all_reduce(result)
-        result.div_(dist.get_world_size())
+        if reduction == "mean":
+            result.div_(dist.get_world_size())
     return result
 
 
@@ -86,7 +93,7 @@ class LossMixer(nn.Module):
 class WeightedSumLoss(LossMixer):
     """Positive weighted sum, valid for signed policy-gradient objectives."""
 
-    def forward(self, losses, parameters=None, distributed=False):
+    def forward(self, losses, parameters=None, distributed=False, distributed_reduction="mean"):
         return self._reduce(self._loss_vector(losses))
 
 
@@ -101,7 +108,7 @@ class _GradientLoss(WeightedSumLoss):
             raise ValueError("eps must be finite and positive")
         self.eps = eps
 
-    def _shared_gradients(self, losses, parameters, distributed):
+    def _shared_gradients(self, losses, parameters, distributed, reduction="mean"):
         if parameters is None:
             raise ValueError("gradient mixers require candidate shared parameters")
         parameters = tuple(dict.fromkeys(p for p in parameters if p.requires_grad))
@@ -125,7 +132,7 @@ class _GradientLoss(WeightedSumLoss):
                 ]
             )
             local.append(flat)
-            averaged.append(distributed_mean(flat, distributed))
+            averaged.append(distributed_mean(flat, distributed, reduction))
             # All ranks must use the same shared subset, even for rank-local branches.
             presence.append(distributed_mean(flags.float(), distributed) > 0)
         shared = presence[0] & presence[1]
@@ -166,11 +173,11 @@ class EMAGradNormLoss(_GradientLoss):
         self.register_buffer("initialized", torch.tensor(False))
         self.register_buffer("effective_ssl_weight", self.weights[1].clone())
 
-    def forward(self, losses, parameters=None, distributed=False):
+    def forward(self, losses, parameters=None, distributed=False, distributed_reduction="mean"):
         values = self._loss_vector(losses)
         weight = self.weights[1].detach().clone()
         if torch.is_grad_enabled() and self.training and self.weights.prod() > 0:
-            _, _, gradients = self._shared_gradients(losses, parameters, distributed)
+            _, _, gradients = self._shared_gradients(losses, parameters, distributed, distributed_reduction)
             if gradients:
                 norms = torch.stack([g.norm() for g in gradients])
                 if torch.isfinite(norms).all() and (norms > self.eps).all():
@@ -201,12 +208,12 @@ class PCGradLoss(_GradientLoss):
     projection; the worker's normal gradient reduction still handles private heads.
     """
 
-    def forward(self, losses, parameters=None, distributed=False):
+    def forward(self, losses, parameters=None, distributed=False, distributed_reduction="mean"):
         values = self._loss_vector(losses)
         result = self._reduce(values)
         if not torch.is_grad_enabled() or not self.training or self.weights.prod() == 0:
             return result
-        shared, local, averaged = self._shared_gradients(losses, parameters, distributed)
+        shared, local, averaged = self._shared_gradients(losses, parameters, distributed, distributed_reduction)
         if not shared:
             return result
         scale = self.weights / (2 if self.reduction == "mean" else 1)
@@ -219,6 +226,10 @@ class PCGradLoss(_GradientLoss):
             - conflict / second.square().sum().clamp_min(self.eps) * second
             - conflict / first.square().sum().clamp_min(self.eps) * first
         )
+        # A SUM reducer must receive one world-size fraction of the projected
+        # shared gradient per rank. Private heads still use normal reduction.
+        if distributed and distributed_reduction == "sum":
+            projected = projected / dist.get_world_size()
         correction = projected - sum(g * w for g, w in zip(local, scale))
         for parameter, delta in zip(shared, correction.split([p.numel() for p in shared])):
             # Zero forward value avoids cancellation with a large parameter dot product.

@@ -44,7 +44,7 @@ class PITLoss(LossMixer):
         )  # Small positive value for numerical stability
         self.register_buffer("step", torch.zeros(1, dtype=torch.long))
 
-    def forward(self, losses, parameters=None, distributed=False) -> torch.Tensor:
+    def forward(self, losses, parameters=None, distributed=False, distributed_reduction="mean") -> torch.Tensor:
         """
         Compute the PIT loss for multiple tasks.
 
@@ -59,7 +59,7 @@ class PITLoss(LossMixer):
         tensors saved for backward. Distributed workers share global loss statistics.
         """
         losses = self._loss_vector(losses)
-        current = distributed_mean(losses, distributed)
+        current = distributed_mean(losses, distributed, distributed_reduction)
         mean = self.moving_mean.detach().clone() if self.step.item() else current
         std = (self.moving_var.detach().clone() + self.eps).sqrt().clamp_min(self.min_std)
         # Same CDF derivative on every rank; the normal worker reduction then
@@ -267,41 +267,23 @@ class ChamferDistanceLoss(ReconstructionLoss):
             loss: Chamfer Distance loss (scalar tensor when reduction='mean' or 'sum',
                   or (B,) tensor when reduction='none')
         """
-        B, N, D = pred_set.shape
-
-        # Compute pairwise distances
-        dist_matrix = self._pairwise_distance(
-            pred_set, target_set
-        )  # Removed mask parameter
-
-        # Compute min distances in both directions
-        min_dist_pred_to_target = dist_matrix.min(dim=2).values  # (B, N)
-        min_dist_target_to_pred = dist_matrix.min(dim=1).values  # (B, N)
-
-        # Apply mask if provided
-        if mask is not None:
-            valid_pred = mask.float()
-            valid_target = mask.float()
-            min_dist_pred_to_target = min_dist_pred_to_target * valid_pred
-            min_dist_target_to_pred = min_dist_target_to_pred * valid_target
-
-            # Normalize by number of valid points per set
-            num_valid_pred = valid_pred.sum(dim=1, keepdim=True).clamp_min(1)
-            num_valid_target = valid_target.sum(dim=1, keepdim=True).clamp_min(1)
-
-            forward_loss = min_dist_pred_to_target.sum(dim=1) / num_valid_pred.squeeze()
-            backward_loss = (
-                min_dist_target_to_pred.sum(dim=1) / num_valid_target.squeeze()
-            )
-
-            loss_per_batch = forward_loss + backward_loss
-        else:
-            # Normalize by number of points
-            num_points = torch.tensor(N, dtype=torch.float32, device=pred_set.device)
-            forward_loss = min_dist_pred_to_target.sum(dim=1) / num_points
-            backward_loss = min_dist_target_to_pred.sum(dim=1) / num_points
-
-            loss_per_batch = forward_loss + backward_loss
+        if pred_set.ndim != 3 or pred_set.shape != target_set.shape:
+            raise ValueError("Chamfer sets must have matching B,N,D shapes")
+        if mask is None:
+            mask = torch.ones(pred_set.shape[:2], dtype=torch.bool, device=pred_set.device)
+        if mask.dtype != torch.bool or mask.shape != pred_set.shape[:2]:
+            raise ValueError("Chamfer validity must be bool B,N")
+        pred_set = pred_set.masked_fill(~mask[..., None], 0)
+        target_set = target_set.masked_fill(~mask[..., None], 0)
+        distances = self._pairwise_distance(pred_set, target_set)
+        # A padded point must never be selected as the nearest neighbour of a
+        # real point. Masking only AFTER min() would give an optimistically low
+        # loss. Empty sets have zero weight and zero gradient.
+        forward = distances.masked_fill(~mask[:, None, :], torch.inf).min(2).values
+        backward = distances.masked_fill(~mask[:, :, None], torch.inf).min(1).values
+        count = mask.sum(1).clamp_min(1)
+        loss_per_batch = (forward.masked_fill(~mask, 0).sum(1)
+                          + backward.masked_fill(~mask, 0).sum(1)) / count
 
         # Apply reduction
         if self.reduction == "none":

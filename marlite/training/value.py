@@ -7,6 +7,7 @@ import math
 import torch
 
 from .lifecycle import TrainingLifecycle
+from .metrics import summarize_updates
 
 
 def _weights(module):
@@ -91,14 +92,7 @@ class SequenceValueTrainer(TrainingLifecycle):
         self.iterations += 1
         self.policy_version += 1
         self._at_boundary = True
-        result = {}
-        for key in metrics[0]:
-            if key.endswith("_count") or key == "team_steps":
-                result[key] = sum(m[key] for m in metrics)
-            else:
-                count_key = key + "_count"
-                count = sum(m[count_key] for m in metrics)
-                result[key] = sum(m[key] * m[count_key] for m in metrics) / max(count, 1)
+        result = summarize_updates(metrics, default_count="team_steps")
         result.update(epsilon=epsilon, rollback_applied=rollback,
                       replay_episodes=len(self.replay.episodes))
         return result

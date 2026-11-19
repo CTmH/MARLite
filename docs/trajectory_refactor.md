@@ -16,7 +16,7 @@ The legacy trainers remain runnable only while the new pipeline is being built.
 | R3 | Shared multi-timestep MAPPO learner, fixed GAE, independent evaluation | Implemented; local API, CPU and real MPE2 short training validated |
 | R4 | torchrun and one explicit gradient reducer | CPU two-rank path validated; server GPU acceptance pending |
 | R5 | QMIX, QPLEX, QTRAN sequence learners | Implemented; CPU, Gloo and real MPE2 short workflows validated |
-| R6 | Graph, messages, consensus, SSL and gradient mixers | Pending |
+| R6 | Graph, messages, consensus, SSL and gradient mixers | Implemented; CPU and two-rank Gloo verified; GPU acceptance remains R9 |
 | R7 | C04 offline/online phases and all paper variants | Pending |
 | R8 | New YAML, CLI, analyzer, examples; remove old hierarchy | Pending |
 | R9 | Multi-environment, resume and performance acceptance | Pending |
@@ -178,3 +178,54 @@ R5 regression: 149 passed, 1 skipped (local CPU, 2026-11-19), including
 three real MPE2 value-learning workflows and real two-rank torchrun/Gloo tests.
 The skipped case belongs to existing optional distributed coverage; no server
 GPU claim is made. Full migration and old-code removal remain in progress.
+
+
+## Communication and representation migration (R6)
+
+SequenceAgentGroup composes optional message extraction, independent message
+recurrence, communication, local/received joins and action readout. There is no
+communication-specific PPO/TD implementation. GraphCommunication handles recorded
+availability or differentiable G2ANet weights; dense graph and installed PyG
+models are adapters. SetCommunication supports masked mean/max/attention pooling.
+GaussianConsensus retains AE, mean of samples, precision product and diagonal
+information-proportional CI rules. The CI rule does not guarantee calibration
+of arbitrary learned latent beliefs. Dual-path policies carry `message.*` state
+alongside local state; prefix reconstruction restores both independently.
+
+Environment-side context providers tensorize fixed/dynamic groups or adjacency
+at EVERY frame. Privileged topology construction is identified in episode
+metadata. Global state does not automatically enter the actor. Actual learned
+adjacency is recorded per transition for graph reconstruction labels. Policy
+sampling noise is collected once and replayed, keeping PPO's behavior ratio
+consistent. Auxiliary Monte Carlo noise is separate, keyed by update/episode/
+frame and independent of rank partitions and overlapping chunk order.
+
+AuxiliaryLearning composes a standalone head objective, optimizer, optional task
+mixer and successful-update warmup counter with either learner. Reconstruction
+supports deterministic or variational agent/group representations, group or
+live-member population weighting, agent/group KL, MSE/BCE and unreduced custom
+set losses. Target constructors flatten B*T into singleton histories so their
+last-frame interfaces label every learning step. Mask direction and retained
+time axes are explicit; environment labels remain training-only. Existing MAgent
+semantic features are tested through the adapter. The policy's RL gate and
+message/fusion detach switches remain independent from SSL.
+
+Weighted sum, PIT, EMA norm balancing and PCGrad reuse existing numerical cores.
+New learners supply local sums/global counts and request SUM gradients. PIT uses
+global loss values before its CDF; gradient mixers measure global task gradients
+before nonlinear balancing/projection. PCGrad contributes one world-size fraction
+of projected shared gradients per rank while private heads use the ordinary
+reducer. Zero-weight auxiliary heads retain grad=None and optimizer momentum does
+not advance. Full checkpoints contain auxiliary heads/optimizers/mixer buffers
+and counters. Logs aggregate each loss by its own valid count, including when SSL
+starts partway through an iteration.
+
+During migration the retained Chamfer core was corrected to exclude padded
+points BEFORE nearest-neighbour search. A hand-calculated counterexample covers
+this and all-empty sets; padding must not artificially lower reconstruction loss.
+
+R6 regression: 222 passed, 1 skipped (local CPU, 2026-11-19), including real MPE2
+communication/VAE short training and actual two-rank tests for all four algorithms
+with all four task mixers, uneven/empty ranks and exact checkpoint continuation.
+The skipped reference case is optional; server GPU tests remain outstanding.
+C04 staged training, YAML/CLI replacement and old-code cleanup are not complete.

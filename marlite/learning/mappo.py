@@ -7,6 +7,7 @@ import torch
 
 from marlite.algorithm.sequence_agent_group import DecisionInput
 from marlite.data import collate_sequences, SequenceSlice
+from marlite.communication.context import frame_context
 from marlite.util.action_distribution import masked_categorical
 from marlite.util.return_estimation import generalized_advantage_estimation
 from .backend import ExecutionBackend
@@ -51,7 +52,7 @@ class MAPPOLearner:
 
     def __init__(self, actor, critic, actor_optimizer, critic_optimizer, *,
                  backend=None, clip_epsilon=.2, entropy_coef=.01, vf_coef=.5,
-                 max_grad_norm=5., burn_in=8, state_strategy="cached_burnin"):
+                 max_grad_norm=5., burn_in=8, state_strategy="cached_burnin", auxiliary=None):
         for name, value in (("clip_epsilon", clip_epsilon), ("entropy_coef", entropy_coef),
                             ("vf_coef", vf_coef), ("max_grad_norm", max_grad_norm)):
             if not math.isfinite(value) or value < 0:
@@ -66,6 +67,7 @@ class MAPPOLearner:
             raise ValueError("Actor and critic optimizers must own disjoint parameters")
         validate_optimizer_ownership(((actor, actor_optimizer), (critic, critic_optimizer)))
         self.actor, self.critic = actor, critic
+        self.auxiliary = auxiliary
         self.actor_optimizer, self.critic_optimizer = actor_optimizer, critic_optimizer
         self.backend = backend or ExecutionBackend(next(actor.parameters()).device)
         self.clip_epsilon, self.entropy_coef, self.vf_coef = clip_epsilon, entropy_coef, vf_coef
@@ -76,6 +78,8 @@ class MAPPOLearner:
         self.critic.to(self.backend.device)
         self.backend.synchronize(self.actor)
         self.backend.synchronize(self.critic)
+        if auxiliary is not None:
+            auxiliary.initialize(self.backend, (actor, critic))
 
     def _initial_states(self, episodes, sources, *, critic=False):
         return initial_states(
@@ -85,6 +89,11 @@ class MAPPOLearner:
         )
 
     def losses(self, episodes, sources):
+        """Inspect PPO without advancing auxiliary statistics or drawing VAE noise."""
+        policy, critic, metrics, _ = self._losses(episodes, sources)
+        return policy, critic, metrics
+
+    def _losses(self, episodes, sources, *, include_auxiliary=False):
         empty = not sources
         if empty:
             if not self.backend.distributed:
@@ -105,7 +114,7 @@ class MAPPOLearner:
         alive = batch.frames["alive"][:, :-1]
         output = self.actor.forward_sequence(DecisionInput(
             batch.frames["observations"][:, :-1], alive,
-            batch.frames["agent_reset"][:, :-1]), actor_state)
+            batch.frames["agent_reset"][:, :-1], frame_context(batch.frames, stop=-1)), actor_state)
         team_alive = alive.any(-1) & batch.filled
         team_reset = torch.zeros_like(batch.filled)
         team_reset[:, 0] = torch.tensor([s.start == 0 for s in sources], device=self.backend.device)
@@ -138,21 +147,34 @@ class MAPPOLearner:
                 "clip_fraction": self.backend.sum(((ratio - 1).abs() > self.clip_epsilon)[actor_mask].float().sum()) / actor_count.clamp_min(1),
                 "agent_steps": actor_count, "team_steps": value_count,
             }
-        return policy_loss, critic_loss, {k: float(v) for k, v in stats.items()}
+        metrics = {k: float(v) for k, v in stats.items()}
+        auxiliary_loss = None
+        if include_auxiliary and self.auxiliary is not None:
+            auxiliary_loss, auxiliary_metrics = self.auxiliary.losses(output, batch, self.backend)
+            metrics.update(auxiliary_metrics)
+        return policy_loss, critic_loss, metrics, auxiliary_loss
 
     def update(self, episodes, sources):
         self.actor.train()
         self.critic.train()
         self.actor_optimizer.zero_grad(set_to_none=True)
         self.critic_optimizer.zero_grad(set_to_none=True)
-        policy_loss, critic_loss, metrics = self.losses(episodes, sources)
+        if self.auxiliary is not None:
+            self.auxiliary.zero_grad()
+        policy_loss, critic_loss, metrics, auxiliary_loss = self._losses(
+            episodes, sources, include_auxiliary=True)
         if not torch.isfinite(policy_loss) or not torch.isfinite(critic_loss):
             raise RuntimeError("Nonfinite PPO loss")
+        if self.auxiliary is not None:
+            parameters = tuple(self.actor.parameters()) + tuple(self.auxiliary.objective.parameters())
+            policy_loss = self.auxiliary.combine(policy_loss, auxiliary_loss, parameters, self.backend)
         policy_loss.backward()
         if self.vf_coef:
             critic_loss.backward()
         self.backend.reduce_gradients(self.actor.parameters())
         self.backend.reduce_gradients(self.critic.parameters())
+        if self.auxiliary is not None:
+            self.auxiliary.step(self.backend, self.max_grad_norm, bool(metrics["agent_steps"]))
         if metrics["agent_steps"]:
             torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.max_grad_norm)
             self.actor_optimizer.step()
@@ -172,9 +194,14 @@ class MAPPOLearner:
             "critic_optimizer": self.critic_optimizer.state_dict(),
             "actor_updates": self.actor_updates, "critic_updates": self.critic_updates,
             "updates": self.updates,
+            "auxiliary": None if self.auxiliary is None else self.auxiliary.state_dict(),
         }
 
     def load_state_dict(self, state):
+        if (self.auxiliary is None) != (state["auxiliary"] is None):
+            raise ValueError("Checkpoint auxiliary composition differs from this learner")
+        if self.auxiliary is not None:
+            self.auxiliary.load_state_dict(state["auxiliary"])
         for name in ("actor", "critic", "actor_optimizer", "critic_optimizer"):
             getattr(self, name).load_state_dict(state[name])
         for name in ("actor_updates", "critic_updates", "updates"):

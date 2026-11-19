@@ -9,6 +9,7 @@ from torch import nn
 
 from marlite.algorithm.sequence_agent_group import DecisionInput
 from marlite.data import SequenceSlice, collate_sequences
+from marlite.communication.context import frame_context
 from marlite.util.value_learning import masked_action_values, qtran_constraint_terms
 from .backend import ExecutionBackend
 from .sequence import initial_states, validate_optimizer_ownership
@@ -125,7 +126,7 @@ class ValueLearner:
     def __init__(self, actor, critic, objective, actor_optimizer, critic_optimizer, *,
                  objective_optimizer=None, backend=None, gamma=.99, n_steps=1,
                  reward_aggregation="sum", burn_in=32, state_strategy="zero_burnin",
-                 target_mode="hard", target_interval=200, target_tau=.005, max_grad_norm=5.):
+                 target_mode="hard", target_interval=200, target_tau=.005, max_grad_norm=5., auxiliary=None):
         if actor.output_kind != "q_values":
             raise ValueError("Value learners require individual Q values")
         if not 0 <= gamma <= 1 or type(n_steps) is not int or n_steps < 1:
@@ -147,6 +148,7 @@ class ValueLearner:
         validate_optimizer_ownership(((actor, actor_optimizer), (critic, critic_optimizer),
                                       (objective, objective_optimizer)))
         self.actor, self.critic, self.objective = actor, critic, objective
+        self.auxiliary = auxiliary
         self.actor_optimizer, self.critic_optimizer = actor_optimizer, critic_optimizer
         self.objective_optimizer = objective_optimizer
         self.backend = backend or ExecutionBackend(next(actor.parameters()).device)
@@ -161,6 +163,8 @@ class ValueLearner:
         for module in modules:
             module.to(self.backend.device)
             self.backend.synchronize(module)
+        if auxiliary is not None:
+            auxiliary.initialize(self.backend, modules)
         self.target_actor = deepcopy(actor).requires_grad_(False).eval()
         self.target_critic = deepcopy(critic).requires_grad_(False).eval()
         self.updates = self.actor_updates = self.critic_updates = self.objective_updates = 0
@@ -174,6 +178,11 @@ class ValueLearner:
                               strategy=self.state_strategy, burn_in=self.burn_in, team=team)
 
     def losses(self, episodes, sources):
+        """Inspect TD/constraint objectives without updating auxiliary state."""
+        loss, metrics, _ = self._losses(episodes, sources)
+        return loss, metrics
+
+    def _losses(self, episodes, sources, *, include_auxiliary=False):
         empty = not sources
         if empty:
             if not self.backend.distributed:
@@ -187,7 +196,8 @@ class ValueLearner:
             batch.loss_mask.zero_()
         valid_frames = torch.cat((batch.filled[:, :1], batch.filled), 1)
         alive = batch.frames["alive"] & valid_frames[..., None]
-        inputs = DecisionInput(batch.frames["observations"], alive, batch.frames["agent_reset"])
+        inputs = DecisionInput(batch.frames["observations"], alive, batch.frames["agent_reset"],
+                               frame_context(batch.frames))
         available, states = batch.frames["available_actions"], batch.frames["states"]
         team_valid = valid_frames & alive.any(-1)
         reset = torch.zeros_like(valid_frames)
@@ -221,7 +231,11 @@ class ValueLearner:
             metrics[name] = float(self.backend.sum(term.total) / count.clamp_min(1))
             metrics[name + "_count"] = float(count)
         metrics["team_steps"] = metrics["td_loss_count"]
-        return total, metrics
+        auxiliary_loss = None
+        if include_auxiliary and self.auxiliary is not None:
+            auxiliary_loss, auxiliary_metrics = self.auxiliary.losses(online, batch, self.backend)
+            metrics.update(auxiliary_metrics)
+        return total, metrics, auxiliary_loss
 
     def update(self, episodes, sources):
         modules = [self.actor, self.critic, self.objective]
@@ -230,12 +244,20 @@ class ValueLearner:
             module.train()
             if optimizer is not None:
                 optimizer.zero_grad(set_to_none=True)
-        loss, metrics = self.losses(episodes, sources)
+        if self.auxiliary is not None:
+            self.auxiliary.zero_grad()
+        loss, metrics, auxiliary_loss = self._losses(episodes, sources, include_auxiliary=True)
         if not torch.isfinite(loss):
             raise RuntimeError("Nonfinite value-learning objective")
+        if self.auxiliary is not None:
+            parameters = tuple(p for module in modules for p in module.parameters())
+            parameters += tuple(self.auxiliary.objective.parameters())
+            loss = self.auxiliary.combine(loss, auxiliary_loss, parameters, self.backend)
         loss.backward()
         for module in modules:
             self.backend.reduce_gradients(module.parameters())
+        if self.auxiliary is not None:
+            self.auxiliary.step(self.backend, self.max_grad_norm, bool(metrics["team_steps"]))
         counters = ("actor_updates", "critic_updates", "objective_updates")
         for module, optimizer, counter in zip(modules, optimizers, counters):
             if optimizer is not None and metrics["team_steps"] and any(p.grad is not None for p in module.parameters()):
@@ -264,11 +286,16 @@ class ValueLearner:
                    "actor_optimizer", "critic_optimizer")}
         result["objective_optimizer"] = (None if self.objective_optimizer is None else
                                           self.objective_optimizer.state_dict())
+        result["auxiliary"] = None if self.auxiliary is None else self.auxiliary.state_dict()
         result["counters"] = {name: getattr(self, name) for name in
                               ("updates", "actor_updates", "critic_updates", "objective_updates")}
         return result
 
     def load_state_dict(self, state):
+        if (self.auxiliary is None) != (state["auxiliary"] is None):
+            raise ValueError("Checkpoint auxiliary composition differs from this learner")
+        if self.auxiliary is not None:
+            self.auxiliary.load_state_dict(state["auxiliary"])
         for name in ("actor", "critic", "objective", "target_actor", "target_critic",
                      "actor_optimizer", "critic_optimizer", "objective_optimizer"):
             obj = getattr(self, name)

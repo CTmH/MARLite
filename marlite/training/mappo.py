@@ -7,6 +7,7 @@ import torch
 from marlite.data import partition_episode
 from marlite.learning.mappo import prepare_ppo_targets
 from .lifecycle import TrainingLifecycle
+from .metrics import summarize_updates
 
 
 class SequenceMAPPOTrainer(TrainingLifecycle):
@@ -56,16 +57,8 @@ class SequenceMAPPOTrainer(TrainingLifecycle):
         self.iterations += 1
         self.policy_version += 1
         self._at_boundary = True
-        # Loss means are weighted by the population each objective normalizes.
-        result = {}
-        for key in updates[0]:
-            denominator = "team_steps" if key == "critic_loss" else "agent_steps"
-            if key in ("agent_steps", "team_steps"):
-                result[key] = sum(m[key] for m in updates)
-            else:
-                total = sum(m[denominator] for m in updates)
-                result[key] = sum(m[key] * m[denominator] for m in updates) / max(total, 1)
-        return result
+        return summarize_updates(updates, default_count="agent_steps",
+                                 count_overrides={"critic_loss": "team_steps"})
 
     def _spec(self):
         return {
