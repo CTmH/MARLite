@@ -140,14 +140,21 @@ class SequenceAgentGroup(nn.Module):
             messages = messages.masked_fill(~inputs.alive[..., None], 0)
         return TemporalOutput(local.features, next_state), messages
 
-    def _output(self, local, state, inputs, messages):
-        alive = inputs.alive
+    def decode_actions(self, local, messages, alive, context=None, *, state=None):
+        """Read actions from already encoded local features and sender messages.
+
+        Offline codec training reuses frozen local features but reruns the frozen
+        teacher's aggregation/readout WITH autograd. This explicit boundary lets
+        message gradients flow without rebuilding or training the local encoder.
+        """
+        context = {} if context is None else context
+        state = {} if state is None else state
         diagnostics = {"local_features": local}
         encoded = local
         if self.communication is not None:
             diagnostics["message_features"] = messages
             sent = messages.detach() if self.detach_messages else messages
-            received = self.communication(sent, alive, inputs.context, queries=local)
+            received = self.communication(sent, alive, context, queries=local)
             diagnostics.update(received.diagnostics)
             fused = received.features * self.rl_gate
             if self.detach_fusion:
@@ -169,7 +176,7 @@ class SequenceAgentGroup(nn.Module):
 
     def step(self, inputs: DecisionInput, recurrent_state):
         result, messages = self._features(inputs, recurrent_state, sequence=False, for_action=True)
-        return self._output(result.features, result.state, inputs, messages)
+        return self.decode_actions(result.features, messages, inputs.alive, inputs.context, state=result.state)
 
     def encode_sequence(self, inputs: DecisionInput, initial_state):
         """Reconstruct both temporal branches without communication/actions."""
@@ -178,7 +185,7 @@ class SequenceAgentGroup(nn.Module):
 
     def forward_sequence(self, inputs: DecisionInput, initial_state):
         result, messages = self._features(inputs, initial_state, sequence=True, for_action=True)
-        return self._output(result.features, result.state, inputs, messages)
+        return self.decode_actions(result.features, messages, inputs.alive, inputs.context, state=result.state)
 
     def forward(self, inputs: DecisionInput, initial_state):
         return self.forward_sequence(inputs, initial_state)

@@ -233,7 +233,8 @@ class ValueLearner:
         metrics["team_steps"] = metrics["td_loss_count"]
         auxiliary_loss = None
         if include_auxiliary and self.auxiliary is not None:
-            auxiliary_loss, auxiliary_metrics = self.auxiliary.losses(online, batch, self.backend)
+            auxiliary_loss, auxiliary_metrics = self.auxiliary.losses(
+                online, batch, self.backend, episodes=episodes, sources=sources)
             metrics.update(auxiliary_metrics)
         return total, metrics, auxiliary_loss
 

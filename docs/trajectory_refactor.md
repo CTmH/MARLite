@@ -17,7 +17,7 @@ The legacy trainers remain runnable only while the new pipeline is being built.
 | R4 | torchrun and one explicit gradient reducer | CPU two-rank path validated; server GPU acceptance pending |
 | R5 | QMIX, QPLEX, QTRAN sequence learners | Implemented; CPU, Gloo and real MPE2 short workflows validated |
 | R6 | Graph, messages, consensus, SSL and gradient mixers | Implemented; CPU and two-rank Gloo verified; GPU acceptance remains R9 |
-| R7 | C04 offline/online phases and all paper variants | Pending |
+| R7 | C04 offline/online phases and all paper variants | Staged Python API implemented; CPU/Gloo verified; recipe configuration follows at R8 |
 | R8 | New YAML, CLI, analyzer, examples; remove old hierarchy | Pending |
 | R9 | Multi-environment, resume and performance acceptance | Pending |
 
@@ -229,3 +229,57 @@ communication/VAE short training and actual two-rank tests for all four algorith
 with all four task mixers, uneven/empty ranks and exact checkpoint continuation.
 The skipped reference case is optional; server GPU tests remain outstanding.
 C04 staged training, YAML/CLI replacement and old-code cleanup are not complete.
+
+
+## C04 staged migration (R7)
+
+GroupSetCommunication composes two-level set fusion with individual attention
+queries. QuantizedCommunication adds a local scalar codec without exposing group
+IDs or partner features to the sender encoder. AgentGroup.decode_actions is an
+explicit readout boundary: frozen local features can be reused while message
+replacement reruns the frozen teacher's aggregation/readout with autograd.
+The hard codec now uses hard.detach()+(soft-soft.detach()) so its forward values
+are exactly the transmitted integers, including rounding boundaries. Tests
+require exact equality with decoding the recorded codes, without a threshold.
+
+FrozenPolicyReference independently reconstructs complete teacher histories and
+keeps a bounded CPU cache of local features/logits. It never borrows student state
+or caches a differentiable aggregation result. The Trainer owns one immutable
+teacher; the online objective merely references it. Optional online KL decays by
+successful online updates and is independent of the optional query head. Query
+heads are standalone Algorithm modules; training labels/queries remain outside
+the actor. Per-frame CPU sampling makes queries and progressive sender replacement
+invariant to batch order and distributed partitions.
+
+SequenceDistillationTrainer adds shallow phase control to SequenceMAPPOTrainer:
+optional teacher-context probe fitting, codec fitting through the frozen teacher,
+student policy fitting with local encoder/codec frozen, then ordinary MAPPO.
+The two main offline stages share the same recorded teacher episodes. Validation
+episodes use a separate seed stream. All/one/half/all sender replacement schedules,
+optional stage-specific auxiliary weights, skipped offline training and optional
+online distillation are explicit switches. Offline query weights override the
+online query coefficient rather than multiplying it implicitly.
+
+Checkpoints can be saved after each offline minibatch, not only online iterations.
+They embed teacher/critic weights, training/validation episodes, phase/counters,
+probe, all phase optimizers, sampler RNG and validation measurements. Derived
+teacher caches are cleared on restore. Online actor/critic/auxiliary state remains
+owned by the shared learner. Completed probes remain frozen after restoration.
+No algorithm-specific distributed worker is introduced.
+
+Received-code interventions can replace all senders or only selected senders,
+keeping local history queries unchanged. Collection records the actual codes and
+configured message-byte budget. Payload pack/unpack remains exact; configured
+header bytes describe the simulation protocol, not physical radio traffic.
+
+R7 regression: 244 passed, 1 skipped (local CPU, 2026-11-19). New coverage includes
+complete real-MPE2 short C04 training, independent module freezing, optional
+components, before/after offline validation, per-phase and online exact resume,
+and complete two-rank Gloo workflows with uneven/empty online partitions. Single
+and distributed results compare identifiable parameters, optimizer states and
+actual policy outputs. Attention's shared key-projection bias is a softmax-null
+direction: tiny FP32 residual gradients can yield different Adam drift there;
+only that functionally irrelevant parameter slice is excluded from numerical
+weight equality, with its invariance separately tested. Same-topology resume
+remains bitwise tested. Server GPU acceptance, YAML/CLI migration, experiment
+recipes and removal of legacy code/tests remain outstanding.

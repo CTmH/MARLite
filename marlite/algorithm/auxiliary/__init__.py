@@ -1,3 +1,5 @@
 from marlite.algorithm.auxiliary.relation_prediction import RelationPredictionHead
 
-__all__ = ["RelationPredictionHead"]
+from marlite.algorithm.auxiliary.query_prediction import QueryPredictionHead
+
+__all__ = ["RelationPredictionHead", "QueryPredictionHead"]

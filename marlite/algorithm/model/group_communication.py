@@ -32,7 +32,10 @@ class ScalarMessageCodec(nn.Module):
         if soft.shape != (*features.shape[:-1], self.message_dim):
             raise ValueError("Codec encoder must preserve leading axes and output message_dim codes")
         hard = soft.round()
-        quantized = soft + (hard - soft).detach()
+        # Exact integer forward values, including at rounding boundaries. The
+        # algebraically equivalent soft+(hard-soft).detach() can lose an ULP and
+        # disagree with decoding the actually transmitted integer on some GPUs.
+        quantized = hard.detach() + (soft - soft.detach())
         return self._decode_levels(quantized), hard.to(torch.uint8)
 
     def _decode_levels(self, codes):

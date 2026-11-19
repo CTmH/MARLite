@@ -165,7 +165,7 @@ class ReconstructionObjective(nn.Module):
         self.group_kl, self.agent_kl, self.group_weighting = group_kl, agent_kl, group_weighting
         self.noise_seed = noise_seed
 
-    def forward(self, output, batch, update=0):
+    def forward(self, output, batch, update=0, **context):
         length = batch.loss_mask.shape[1]
         diagnostics = output.diagnostics
         source = (diagnostics["local_state_estimates"] if self.source == "features" else
@@ -272,11 +272,11 @@ class AuxiliaryLearning:
         if self.optimizer is not None:
             self.optimizer.zero_grad(set_to_none=True)
 
-    def losses(self, output, batch, backend):
+    def losses(self, output, batch, backend, **context):
         metrics = {}
         if self.updates < self.start_update:
             return None, metrics
-        terms = self.objective(output, batch, self.updates)
+        terms = self.objective(output, batch, self.updates, **context)
         total = None
         for name, term in terms.items():
             if not math.isfinite(term.weight) or term.weight < 0:

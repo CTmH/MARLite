@@ -150,7 +150,8 @@ class MAPPOLearner:
         metrics = {k: float(v) for k, v in stats.items()}
         auxiliary_loss = None
         if include_auxiliary and self.auxiliary is not None:
-            auxiliary_loss, auxiliary_metrics = self.auxiliary.losses(output, batch, self.backend)
+            auxiliary_loss, auxiliary_metrics = self.auxiliary.losses(
+                output, batch, self.backend, episodes=episodes, sources=sources)
             metrics.update(auxiliary_metrics)
         return policy_loss, critic_loss, metrics, auxiliary_loss
 
