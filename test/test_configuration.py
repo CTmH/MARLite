@@ -367,3 +367,51 @@ def test_communication_rl_gate_is_a_configurable_persistent_parameter():
         registry.build(
             {"type": "Linear", "params": {"in_features": float("nan"), "out_features": 3}}
         )
+
+
+@pytest.mark.parametrize("initialize_from_teacher", [False, True])
+def test_teacher_transfer_respects_student_initialization(
+    environment_module, tmp_path, initialize_from_teacher
+):
+    config = minimal_config(environment_module, "c04")
+    config["offline"].update(offline_enabled=False, initialize_from_teacher=initialize_from_teacher)
+    experiment = build_experiment(config, workdir=tmp_path / "run")
+    student = experiment.trainer.learner.actor
+    before = deepcopy(student.action_head.state_dict())
+    experiment.run(run_options={"iterations": 0})
+    teacher = experiment.teacher_trainer.learner.actor
+    reference = experiment.trainer.reference.actor
+    assert experiment.teacher_trainer.learner.actor_updates > 0
+    assert_tree_equal(teacher.state_dict(), reference.state_dict())
+    expected = teacher.action_head.state_dict() if initialize_from_teacher else before
+    assert_tree_equal(expected, student.action_head.state_dict())
+
+
+def test_c04_can_load_a_frozen_teacher_from_yaml_checkpoint(environment_module, tmp_path):
+    from marlite.configuration import defaults
+
+    config = minimal_config(environment_module, "c04")
+    teacher_run = build_experiment(config, workdir=tmp_path / "teacher")
+    teacher_run.teacher_trainer.run(**teacher_run.teacher_run)
+    state = teacher_run.teacher_trainer.learner.actor.state_dict()
+    checkpoint = tmp_path / "trained_actor.pt"
+    torch.save({"learner": {"actor": state}}, checkpoint)
+
+    def raw_teacher():
+        model = defaults.actor(teacher_run.environment_spec, 8, quantized=True, heads=2)
+        model.communication = model.communication.aggregation
+        return model
+
+    registry = default_registry()
+    registry.register("RawTeacher", raw_teacher)
+    config["teacher"]["source"] = "checkpoint"
+    config["teacher"]["actor"] = {
+        "type": "RawTeacher",
+        "checkpoint": {"path": str(checkpoint), "key": ["learner", "actor"]},
+    }
+    experiment = build_experiment(config, registry=registry, workdir=tmp_path / "student")
+    assert experiment.teacher_trainer is None
+    experiment.run()
+    assert experiment.trainer.phase == "online"
+    assert experiment.trainer.learner.actor_updates > 0
+    assert_tree_equal(state, experiment.trainer.reference.actor.state_dict())

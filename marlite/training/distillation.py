@@ -134,7 +134,8 @@ class SequenceDistillationTrainer(SequenceMAPPOTrainer):
         backend.synchronize(reference.actor)
         backend.synchronize(teacher_critic)
         self.reference.clear()
-        if initialize_from_teacher:
+        self.initialize_from_teacher = initialize_from_teacher
+        if self.initialize_from_teacher:
             if learner.updates:
                 raise ValueError("Teacher initialization requires a fresh student learner")
             self._initialize_student()
@@ -201,7 +202,8 @@ class SequenceDistillationTrainer(SequenceMAPPOTrainer):
         self.reference.actor.load_state_dict(actor_state, strict=True)
         self.teacher_critic.load_state_dict(critic_state, strict=True)
         self.reference.clear()
-        self._initialize_student()
+        if self.initialize_from_teacher:
+            self._initialize_student()
 
     def _initialize_student(self):
         teacher, student = self.reference.actor, self.learner.actor
@@ -468,6 +470,7 @@ class SequenceDistillationTrainer(SequenceMAPPOTrainer):
         result = super()._spec()
         result["offline"] = {
             "enabled": self.offline_enabled,
+            "initialize_from_teacher": self.initialize_from_teacher,
             "train_episodes": self.offline_train_episodes,
             "validation_episodes": self.offline_validation_episodes,
             "batch_sequences": self.offline_batch_sequences,
