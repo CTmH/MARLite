@@ -13,8 +13,8 @@ The legacy trainers remain runnable only while the new pipeline is being built.
 | R0 | Migration inventory and mathematical reference tests | Inventory recorded; existing reference tests retained |
 | R1 | CPU tensor Episode, T+1 frames, continuous sequence slicing | Implemented; see test/test_sequence_contract.py |
 | R2 | Explicit state, step/sequence protocol, GRU and causal attention | Implemented: local composed AgentGroup, window wrapper, GRU and causal reference |
-| R3 | Shared multi-timestep MAPPO learner, fixed GAE, independent evaluation | Pending |
-| R4 | torchrun and one explicit gradient reducer | Pending |
+| R3 | Shared multi-timestep MAPPO learner, fixed GAE, independent evaluation | Implemented; local API, CPU and real MPE2 short training validated |
+| R4 | torchrun and one explicit gradient reducer | CPU two-rank path validated; server GPU acceptance pending |
 | R5 | QMIX, QPLEX, QTRAN sequence learners | Pending |
 | R6 | Graph, messages, consensus, SSL and gradient mixers | Pending |
 | R7 | C04 offline/online phases and all paper variants | Pending |
@@ -107,10 +107,19 @@ Final acceptance includes 1-vs-2/3-device gradient parity with uneven masks,
 checkpoint continuation, all paper switches, environment adapters, and measured
 time/memory. No long research training is part of this refactoring task.
 
-The implemented R1/R2 modules are not yet selected by the existing CLI or Trainer.
-R3 must connect the new contract to collection and PPO before it is usable as a
-replacement training pipeline. Do not interpret foundation tests as evidence of
-end-to-end training or multi-GPU support.
+The replacement pipeline is executable through SequenceMAPPOTrainer's Python
+API, not yet through the old CLI/YAML. Do not send new configs to the old
+TrainerConfig. YAML/CLI replacement is R8. All-rank checkpoints must be called
+collectively. Pure on-policy data is removed after every completed distributed
+iteration; final inference does not sample a fictitious action.
+
+New tests are independent of old trainer fixtures. test_sequence_mappo covers
+collection, fixed labels, exact/cached replay, death/respawn, frozen value updates,
+independent evaluation, exact continuation and real MPE2. test_sequence_distributed
+runs torchrun with two CPU/Gloo ranks, including empty/uneven partitions, unused
+parameters, full checkpoint continuation and single/global-batch comparison.
+macOS tests force IPv4 loopback rendezvous to avoid broken IPv6 reverse DNS.
+This is not yet GPU validation or a completed migration of the remaining methods.
 
 ## Foundation validation (2026-11-19)
 
@@ -119,3 +128,12 @@ test_value_learning, test_loss_mixer, and test_mappo_minibatches on local CPU.
 There are 21 new contract tests. The legacy multiprocessing tests require both
 repository and parent directory on PYTHONPATH under pytest importlib mode.
 No server, GPU, full environment training, or new learner integration was tested.
+
+
+## Sequence MAPPO validation (2026-11-19)
+
+33 passed across the three new sequence suites, including a real MPE2 environment
+and two torchrun CPU configurations. A first torchrun attempt timed out before
+launching ranks because the local address resolved to an IPv6 reverse-DNS name;
+explicit IPv4 rendezvous resolves it. Tests clean the entire process group on
+failure. GPU, off-policy, communication/SSL and C04 migration remain pending.

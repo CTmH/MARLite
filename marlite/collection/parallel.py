@@ -1,0 +1,148 @@
+"""Collect complete ParallelEnv episodes under one immutable policy version."""
+
+import numpy as np
+import torch
+
+from marlite.algorithm.sequence_agent_group import DecisionInput
+from marlite.data import Episode
+from marlite.util.action_distribution import masked_categorical
+
+
+def _snapshot(state):
+    # Clone: some recurrent implementations can return views of earlier state.
+    return {key: value[0].detach().cpu().clone() for key, value in state.items()}
+
+
+class ParallelCollector:
+    """Synchronous collection reference used by both training and evaluation.
+
+    The factory owns simulator construction/wrapping. Tensor conversion happens
+    once at this boundary; observation dictionaries may contain action_mask.
+    """
+
+    def __init__(self, env_factory, max_steps=200, device="cpu"):
+        if type(max_steps) is not int or max_steps < 1:
+            raise ValueError("max_steps must be positive")
+        self.env_factory, self.max_steps, self.device = env_factory, max_steps, torch.device(device)
+
+    @torch.no_grad()
+    def collect_episode(self, actor, critic, *, seed, policy_version=0, stochastic=True):
+        if actor.output_kind != "logits":
+            raise ValueError("PPO collection requires a logits policy")
+        actor_device = next(actor.parameters()).device
+        critic_device = next(critic.parameters()).device
+        actor_mode, critic_mode = actor.training, critic.training
+        env = self.env_factory()
+        try:
+            actor.eval().to(self.device)
+            critic.eval().to(self.device)
+            return self._collect(env, actor, critic, seed, policy_version, stochastic)
+        finally:
+            env.close()
+            actor.to(actor_device).train(actor_mode)
+            critic.to(critic_device).train(critic_mode)
+
+    def _collect(self, env, actor, critic, seed, policy_version, stochastic):
+        observations, infos = env.reset(seed=seed)
+        agents = tuple(env.possible_agents)
+        if not agents or not observations:
+            raise ValueError("Reset must expose at least one observation")
+        sizes = [int(env.action_space(a).n) for a in agents]
+        if len(set(sizes)) != 1:
+            raise ValueError("Current collector requires one shared discrete action dimension")
+        action_dim = sizes[0]
+        sample = next(iter(observations.values()))
+        sample = sample["observation"] if isinstance(sample, dict) else sample
+        zero = np.zeros_like(sample, dtype=np.float32)
+        rng = torch.Generator(device="cpu")
+        if seed is None:
+            rng.seed()
+        else:
+            rng.manual_seed(seed)
+        frames, transitions = {}, {}
+        actor_state = actor.initial_state(1, len(agents), self.device, torch.float32)
+        critic_state = critic.initial_state(1, self.device, torch.float32)
+        alive = {a: a in env.agents for a in agents}
+        previous_alive = {a: False for a in agents}
+        dead = {a: False for a in agents}
+        last_state = None
+        terminal = False
+        episode_end = False
+
+        def append(target, name, value):
+            target.setdefault(name, []).append(value.detach().cpu().clone())
+
+        for timestep in range(self.max_steps + 1):
+            obs_values, masks = [], []
+            for agent in agents:
+                raw = observations.get(agent)
+                if alive[agent] and raw is None:
+                    raise ValueError("Missing real observation for a surviving agent")
+                if isinstance(raw, dict):
+                    obs_values.append(raw["observation"])
+                    masks.append(raw.get("action_mask", np.ones(action_dim, dtype=bool)))
+                else:
+                    obs_values.append(zero if raw is None else raw)
+                    masks.append(np.ones(action_dim, dtype=bool))
+            obs = torch.as_tensor(np.stack(obs_values), dtype=torch.float32)
+            active = torch.tensor([alive[a] for a in agents], dtype=torch.bool)
+            reset = torch.tensor([alive[a] and not previous_alive[a] for a in agents], dtype=torch.bool)
+            available = torch.as_tensor(np.stack(masks), dtype=torch.bool)
+            try:
+                state = torch.as_tensor(np.asarray(env.state()), dtype=torch.float32)
+            except Exception:
+                if not terminal or last_state is None:
+                    raise
+                state = last_state
+            for name, value in (("observations", obs), ("alive", active),
+                                ("agent_reset", reset), ("available_actions", available),
+                                ("states", state)):
+                append(frames, name, value)
+            for name, value in _snapshot(actor_state).items():
+                append(frames, "actor_state." + name, value)
+            for name, value in _snapshot(critic_state).items():
+                append(frames, "critic_state." + name, value)
+            team_valid = active.any().reshape(1).to(self.device)
+            team_reset = torch.tensor([timestep == 0], device=self.device)
+            value = critic.step(state[None].to(self.device), critic_state, team_valid, team_reset)
+            append(frames, "old_value", value.values[0])
+            if episode_end:
+                break  # No fictitious action or communication at the bootstrap frame.
+            inputs = DecisionInput(obs[None].to(self.device), active[None].to(self.device),
+                                   reset[None].to(self.device))
+            output = actor.step(inputs, actor_state)
+            dist = masked_categorical(output.values[0], available.to(self.device), active.to(self.device))
+            actions = (torch.multinomial(dist.probs.cpu(), 1, generator=rng).squeeze(-1)
+                       if stochastic else dist.probs.argmax(-1).cpu())
+            log_prob = dist.log_prob(actions.to(self.device)).cpu().masked_fill(~active, 0)
+            selected = {a: int(actions[i]) for i, a in enumerate(agents) if alive[a]}
+            next_obs, reward, terms, truncs, infos = env.step(selected)
+            for a in agents:
+                dead[a] = bool(terms.get(a, dead[a]))
+                # A reappearing slot is a new life, not a permanently dead unit.
+                if a in env.agents and a in next_obs and not terms.get(a, False):
+                    dead[a] = False
+            terminal = all(dead.values())
+            episode_end = (terminal or not env.agents or timestep + 1 >= self.max_steps
+                           or all(dead[a] or truncs.get(a, False) for a in agents))
+            survivor = {a: not dead[a] and (episode_end or a in env.agents) for a in agents}
+            if not terminal and any(survivor[a] and a not in next_obs for a in agents):
+                raise ValueError("Missing final observation; refusing a stale bootstrap")
+            entries = {
+                "actions": actions,
+                "rewards": torch.tensor([reward.get(a, 0.) for a in agents], dtype=torch.float32),
+                "agent_terminated": torch.tensor([dead[a] for a in agents]),
+                "agent_truncated": torch.tensor([bool(truncs.get(a, False) or (episode_end and not terminal))
+                                                  for a in agents]),
+                "terminated": torch.tensor(terminal),
+                "truncated": torch.tensor(episode_end and not terminal),
+                "old_log_prob": log_prob,
+            }
+            for name, datum in entries.items():
+                append(transitions, name, datum)
+            previous_alive, alive = alive, survivor
+            actor_state, critic_state = output.state, value.state
+            observations, last_state = next_obs, state
+        return Episode(agents, {k: torch.stack(v) for k, v in frames.items()},
+                       {k: torch.stack(v) for k, v in transitions.items()},
+                       policy_version=policy_version, seed=seed).validate()

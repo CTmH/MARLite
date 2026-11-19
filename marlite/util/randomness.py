@@ -56,11 +56,13 @@ def configure_randomness(seed=None, deterministic=False, stream=MODEL_STREAM):
 
 
 @contextmanager
-def preserve_rng_state():
+def preserve_rng_state(cuda_devices=None):
     """Run an optional diagnostic without consuming training random draws."""
     python_state, numpy_state = random.getstate(), np.random.get_state()
     mps_state = torch.mps.get_rng_state() if torch.backends.mps.is_available() else None
-    devices = list(range(torch.cuda.device_count())) if torch.cuda.is_initialized() else []
+    devices = []
+    if torch.cuda.is_initialized():
+        devices = list(range(torch.cuda.device_count())) if cuda_devices is None else list(cuda_devices)
     try:
         with torch.random.fork_rng(devices=devices):
             yield
