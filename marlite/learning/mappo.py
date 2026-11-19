@@ -143,7 +143,9 @@ class MAPPOLearner:
             raise ValueError("Freeze full-episode PPO targets before updating")
         actor_state = self._initial_states(episodes, sources)
         critic_state = self._initial_states(episodes, sources, critic=True)
-        alive = batch.frames["alive"][:, :-1]
+        # A short chunk includes a real bootstrap frame but no action at it.
+        # Exclude it from policy replay when other chunks make the batch longer.
+        alive = batch.frames["alive"][:, :-1] & batch.filled[..., None]
         output = self.actor.forward_sequence(
             DecisionInput(
                 batch.frames["observations"][:, :-1],

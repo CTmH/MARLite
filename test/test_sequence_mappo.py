@@ -305,3 +305,9 @@ def test_collector_uses_current_info_masks_when_observations_are_plain_arrays():
     )
     assert episode.transitions["actions"].eq(1).all()
     assert not episode.frames["available_actions"][..., 0].any()
+    # Ragged T=3 chunks (2+1) expose a live bootstrap frame in a padded row.
+    # Its dummy action zero is illegal, but it is not a learning transition.
+    trainer.collector.max_steps = 3
+    trainer.sequence_length = 2
+    result = trainer.train_iteration(1)
+    assert all(torch.isfinite(torch.tensor(v)) for v in result.values())
