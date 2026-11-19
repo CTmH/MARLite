@@ -63,8 +63,10 @@ def main():
                         rows.append(result.features)
                         state = result.state
                     output = torch.stack(rows, 1)
+                    del rows, state, result
                 output.square().mean().backward()
                 sync()
+                del output, inputs
                 if repeat >= 2:
                     times.append(1000 * (time.perf_counter() - begin))
             paths[path] = {

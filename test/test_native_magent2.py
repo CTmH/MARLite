@@ -112,7 +112,7 @@ def test_native_opponent_wrapper_spaces_and_seeded_controller(family, wrapper_ty
     from marlite.environment.controllers import RandomController
 
     native = importlib.import_module("magent2.environments." + family).parallel_env(
-        map_size=20, max_cycles=3
+        map_size=46 if family == "battlefield_v5" else 20, max_cycles=3
     )
     wrapper = default_registry().build(
         {
