@@ -240,6 +240,10 @@ class ParallelCollector:
                 # A reappearing slot is a new life, not a permanently dead unit.
                 if a in env.agents and a in next_obs and not terms.get(a, False):
                     dead[a] = False
+                # With no agents left, only explicitly truncated survivors
+                # have a continuation value. Disappearance alone ends a life.
+                if not env.agents and alive[a] and not truncs.get(a, False):
+                    dead[a] = True
             # Unborn/inactive possible slots are not surviving agents. Consider
             # only the previous/current live population when recognizing death.
             relevant = [a for a in agents if alive[a] or a in env.agents]

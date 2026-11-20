@@ -1,0 +1,30 @@
+{
+  "torch": "2.15.0+rocm10.0",
+  "hip": "7.15.26333",
+  "phase": "online",
+  "world_size": 2,
+  "map": {
+    "map_size": 15,
+    "n_pursuers": 4,
+    "n_evaders": 8,
+    "wall_density": 0.0,
+    "minimap_mode": true,
+    "extra_features": true,
+    "max_cycles": 20
+  },
+  "episodes_per_iteration": 8,
+  "environment_steps": 160,
+  "learner_updates": 4,
+  "per_rank": [
+    {
+      "device": "AMD Radeon RX 7900 XT",
+      "seconds": 3.23319936900225,
+      "peak_allocated_bytes": 125816832
+    },
+    {
+      "device": "AMD Radeon RX 7900 XT",
+      "seconds": 3.233024604000093,
+      "peak_allocated_bytes": 125824000
+    }
+  ]
+}

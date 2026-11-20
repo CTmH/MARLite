@@ -1,0 +1,79 @@
+{
+  "world_size": 1,
+  "device": "cuda:0",
+  "torch": "2.15.0+rocm10.0",
+  "hip": "7.15.26333",
+  "same_topology_resume": "exact",
+  "recipes": {
+    "mappo": {
+      "updates": 4,
+      "actor_finite": true,
+      "gradient_groups": 4,
+      "iteration_by_rank": [
+        {
+          "seconds": 0.04769517500244547,
+          "peak_allocated_bytes": 83949568
+        }
+      ]
+    },
+    "qmix": {
+      "updates": {
+        "updates": 4,
+        "actor_updates": 4,
+        "critic_updates": 4,
+        "objective_updates": 0
+      },
+      "actor_finite": true,
+      "gradient_groups": 6,
+      "iteration_by_rank": [
+        {
+          "seconds": 0.04280557300080545,
+          "peak_allocated_bytes": 84037120
+        }
+      ]
+    },
+    "qplex": {
+      "updates": {
+        "updates": 4,
+        "actor_updates": 4,
+        "critic_updates": 4,
+        "objective_updates": 0
+      },
+      "actor_finite": true,
+      "gradient_groups": 6,
+      "iteration_by_rank": [
+        {
+          "seconds": 0.052353876002598554,
+          "peak_allocated_bytes": 84119040
+        }
+      ]
+    },
+    "qtran": {
+      "updates": {
+        "updates": 4,
+        "actor_updates": 4,
+        "critic_updates": 4,
+        "objective_updates": 4
+      },
+      "actor_finite": true,
+      "gradient_groups": 6,
+      "iteration_by_rank": [
+        {
+          "seconds": 0.05765729599806946,
+          "peak_allocated_bytes": 84104704
+        }
+      ]
+    },
+    "qmpd": {
+      "updates": 4,
+      "actor_finite": true,
+      "gradient_groups": 12,
+      "iteration_by_rank": [
+        {
+          "seconds": 0.14857391699479194,
+          "peak_allocated_bytes": 84329984
+        }
+      ]
+    }
+  }
+}

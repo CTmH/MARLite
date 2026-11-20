@@ -9,6 +9,7 @@ from copy import deepcopy
 import json
 from pathlib import Path
 import sys
+from time import perf_counter
 from types import SimpleNamespace
 
 import torch
@@ -31,6 +32,36 @@ def cpu_tree(value):
     return value
 
 
+def measure_iteration(trainer, backend):
+    backend.barrier()
+    device = backend.device
+    if device.type == "cuda":
+        torch.cuda.synchronize(device)
+        torch.cuda.reset_peak_memory_stats(device)
+    start = perf_counter()
+    metrics = trainer.train_iteration(2)
+    if device.type == "cuda":
+        torch.cuda.synchronize(device)
+    elapsed = perf_counter() - start
+    peak = torch.cuda.max_memory_allocated(device) if device.type == "cuda" else None
+    per_rank = backend.gather_objects({"seconds": elapsed, "peak_allocated_bytes": peak})
+    return metrics, per_rank
+
+
+def gradient_error(actual, expected):
+    assert len(actual) == len(expected)
+    worst = 0.0
+    for actual_group, expected_group in zip(actual, expected, strict=True):
+        assert len(actual_group) == len(expected_group)
+        for gradient, reference in zip(actual_group, expected_group, strict=True):
+            if gradient is None or reference is None:
+                assert gradient is reference
+                continue
+            torch.testing.assert_close(gradient, reference, rtol=1e-4, atol=1e-5)
+            worst = max(worst, float((gradient - reference).abs().max()))
+    return worst
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--workdir", type=Path, required=True)
@@ -40,6 +71,16 @@ def main():
     backend = initialize_backend(args.device, timeout_seconds=120)
     sys.modules["acceptance_tiny_env"] = SimpleNamespace(parallel_env=TinyParallel)
     results = {}
+    capture = None
+    reduce_gradients = backend.reduce_gradients
+
+    def record_gradients(parameters):
+        parameters = tuple(dict.fromkeys(parameters))
+        reduce_gradients(parameters)
+        if backend.rank == 0 and capture is not None:
+            capture.append(tuple(cpu_tree(parameter.grad) for parameter in parameters))
+
+    backend.reduce_gradients = record_gradients
     try:
         for recipe in ("mappo", "qmix", "qplex", "qtran", "qmpd"):
             config = minimal_config("acceptance_tiny_env", recipe)
@@ -48,11 +89,13 @@ def main():
                 for role in ("actor", "critic")
             }
             experiment = build_experiment(config, backend=backend, workdir=args.workdir / recipe)
+            capture = []
             experiment.run()
+            gradients, capture = capture, None
             trainer = experiment.trainer
             snapshot = args.workdir / recipe / "acceptance.pt"
             trainer.save_checkpoint(snapshot)
-            expected_metrics = trainer.train_iteration(2)
+            expected_metrics, per_rank = measure_iteration(trainer, backend)
             expected = deepcopy(trainer.learner.state_dict())
             trainer.load_checkpoint(snapshot)
             assert expected_metrics == trainer.train_iteration(2), recipe
@@ -74,6 +117,8 @@ def main():
                 results[recipe] = {
                     "learner": cpu_tree(trainer.learner.state_dict()),
                     "output": output.cpu(),
+                    "gradients": gradients,
+                    "iteration_by_rank": per_rank,
                 }
         if backend.rank == 0:
             args.workdir.mkdir(parents=True, exist_ok=True)
@@ -91,9 +136,14 @@ def main():
                 evidence = {
                     "updates": result["learner"].get("updates", result["learner"].get("counters")),
                     "actor_finite": bool(torch.isfinite(result["output"]).all()),
+                    "gradient_groups": len(result["gradients"]),
+                    "iteration_by_rank": result["iteration_by_rank"],
                 }
                 if reference is not None:
                     other = reference[recipe]
+                    evidence["gradient_max_abs_error"] = gradient_error(
+                        result["gradients"], other["gradients"]
+                    )
                     torch.testing.assert_close(
                         result["output"], other["output"], rtol=1e-4, atol=1e-5
                     )

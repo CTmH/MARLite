@@ -608,6 +608,7 @@ def build_experiment(
                 "codec_updates",
                 "policy_updates",
                 "offline_batch_sequences",
+                "checkpoint_interval",
                 "replacement",
                 "replacement_steps",
                 "probe_updates",
@@ -682,4 +683,9 @@ def build_experiment(
         trainer = _construct(SequenceValueTrainer, arguments | {"replay": replay}, "trainer")
     _mapping(config.get("run", {}), "run")
     trainer.configuration = {key: value for key, value in config.items() if key != "run"}
+    if recipe == "qmpd" and "offline" in config:
+        # Checkpoint cadence can change when resuming without changing training.
+        offline_spec = trainer.configuration["offline"].copy()
+        offline_spec.pop("checkpoint_interval", None)
+        trainer.configuration["offline"] = offline_spec
     return Experiment(config, trainer, environment_spec, registry, teacher_trainer, teacher_run)

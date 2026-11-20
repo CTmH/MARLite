@@ -49,6 +49,7 @@ teacher:
     weight: 0.1
     decay_updates: 1000
 offline:
+  checkpoint_interval: 100
   train_episodes: 32
   validation_episodes: 16
   codec_updates: 600

@@ -167,6 +167,7 @@ def test_qmpd_native_short_teacher_offline_online_and_checkpoint(tmp_path, histo
         policy_updates=1,
         probe_updates=1,
         offline_batch_sequences=2,
+        checkpoint_interval=1,
     )
     if history == "pooled_attention":
         config["actor"]["params"]["temporal"] = {
@@ -192,6 +193,17 @@ def test_qmpd_native_short_teacher_offline_online_and_checkpoint(tmp_path, histo
     experiment = build_experiment(config, workdir=tmp_path / "run", device=device)
     experiment.run()
     trainer = experiment.trainer
+    offline_checkpoint = trainer.workdir / "checkpoints" / "offline_2.pt"
+    interrupted = torch.load(offline_checkpoint, weights_only=True)
+    assert interrupted["extra"]["offline_counters"] == {"probe": 1, "codec": 1, "policy": 0}
+    resumed = build_experiment(config, workdir=tmp_path / "resumed", device=device)
+    resumed.run(resume=offline_checkpoint)
+    reference = torch.load(trainer.workdir / "checkpoints" / "final.pt", weights_only=True)
+    actual = torch.load(resumed.trainer.workdir / "checkpoints" / "final.pt", weights_only=True)
+    for key in ("learner", "extra", "counters", "sampler_rng"):
+        assert_tree_equal(reference[key], actual[key])
+    assert not (resumed.trainer.workdir / "teacher" / "events.jsonl").exists()
+
     assert trainer.phase == "online" and trainer.offline_counters == {
         "probe": 1,
         "codec": 1,

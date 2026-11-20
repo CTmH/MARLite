@@ -49,8 +49,9 @@ more compute. Sparse state tensors stay on CPU, outside minibatch frames.
 
 True termination stops bootstrap and the advantage trace. A time/collection limit
 stops the trace but allows bootstrap from actual surviving-agent observations.
-Termination takes precedence when both flags are set. Individual death does not
-end the team's return. New lives reset their own state; unborn slots remain dead.
+Termination takes precedence when both flags are set. An empty agent list ends
+the episode; previously active agents are terminal unless explicitly truncated.
+Individual death does not end the team's return. New lives reset their own state; unborn slots remain dead.
 An auto-reset observation must never replace the final frame. Missing real final
 data raises instead of silently reusing stale observations.
 

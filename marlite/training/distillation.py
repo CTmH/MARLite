@@ -68,6 +68,7 @@ class SequenceDistillationTrainer(SequenceMAPPOTrainer):
         codec_updates=600,
         policy_updates=200,
         offline_batch_sequences=32,
+        checkpoint_interval=None,
         replacement="all",
         replacement_steps=None,
         probe_objective=None,
@@ -139,7 +140,13 @@ class SequenceDistillationTrainer(SequenceMAPPOTrainer):
             if learner.updates:
                 raise ValueError("Teacher initialization requires a fresh student learner")
             self._initialize_student()
+        if checkpoint_interval is not None and (
+            type(checkpoint_interval) is not int or checkpoint_interval < 1
+        ):
+            raise ValueError("Offline checkpoint_interval must be a positive integer or null")
         self.offline_enabled = offline_enabled
+        self.offline_checkpoint_interval = checkpoint_interval
+        self._offline_log_needs_rewind = False
         self.offline_train_episodes, self.offline_validation_episodes = (
             train_episodes,
             validation_episodes,
@@ -366,6 +373,34 @@ class SequenceDistillationTrainer(SequenceMAPPOTrainer):
         )
         return metrics
 
+    def _rewind_offline_log(self):
+        """Discard log rows newer than the restored checkpoint before appending."""
+        backend = self.learner.backend
+        error = None
+        if backend.rank == 0 and self.workdir is not None:
+            path = self.workdir / "offline_events.jsonl"
+            if path.exists():
+                try:
+                    rows = path.read_text(encoding="utf-8").splitlines(keepends=True)
+                    kept = []
+                    for row in rows:
+                        # An interrupted write can leave an unterminated last row.
+                        if not row.endswith("\n"):
+                            break
+                        event = json.loads(row)
+                        if event["update"] <= self.offline_counters[event["stage"]]:
+                            kept.append(row)
+                    if kept != rows:
+                        temporary = path.with_suffix(".jsonl.tmp")
+                        temporary.write_text("".join(kept), encoding="utf-8")
+                        temporary.replace(path)
+                except Exception as exc:
+                    error = repr(exc)
+        error = backend.broadcast_object(error)
+        if error is not None:
+            raise RuntimeError("Offline log recovery failed: " + error)
+        self._offline_log_needs_rewind = False
+
     def run_offline(self, *, max_updates=None, checkpoint_interval=None):
         """Run/resume offline stages; optional bounds permit interactive inspection."""
         if not self._at_boundary:
@@ -378,6 +413,8 @@ class SequenceDistillationTrainer(SequenceMAPPOTrainer):
                 raise ValueError(f"{name} has an invalid update count")
         if self.phase == "online" or max_updates == 0:
             return self.offline_metrics
+        if self._offline_log_needs_rewind:
+            self._rewind_offline_log()
         if not self.offline_train:
             self._at_boundary = False
             self.offline_train = self._collect_teacher(
@@ -465,7 +502,7 @@ class SequenceDistillationTrainer(SequenceMAPPOTrainer):
         return self.offline_metrics
 
     def train_iteration(self, n_episodes=8):
-        self.run_offline()
+        self.run_offline(checkpoint_interval=self.offline_checkpoint_interval)
         return super().train_iteration(n_episodes)
 
     def _spec(self):
@@ -513,6 +550,7 @@ class SequenceDistillationTrainer(SequenceMAPPOTrainer):
         self.reference.clear()
         self.phase = state["phase"]
         self.offline_counters = dict(state["offline_counters"])
+        self._offline_log_needs_rewind = self.phase != "online"
         self.offline_rng.set_state(state["offline_rng"])
         self.offline_metrics = state["offline_metrics"]
         if (self.probe_objective is None) != (state["probe"] is None):

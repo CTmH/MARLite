@@ -119,9 +119,34 @@ def test_collection_death_timeout_and_actual_final_frame():
     terminal = trainer.collect(1)[0]
     assert terminal.transitions["terminated"][-1]
     assert not terminal.return_masks()[0][-1]
-    broken = make_trainer(factory=lambda: TinyParallel(missing_final=True))
+
+    class MissingTruncationObservation(TinyParallel):
+        def step(self, actions):
+            obs, rewards, terms, truncs, infos = super().step(actions)
+            if not self.agents and not any(terms.values()):
+                truncs = dict.fromkeys(truncs, True)
+            return obs, rewards, terms, truncs, infos
+
+    broken = make_trainer(factory=lambda: MissingTruncationObservation(missing_final=True))
     with pytest.raises(ValueError, match="final observation"):
         broken.collect(1)
+
+
+@pytest.mark.parametrize("explicit_truncation", [False, True])
+def test_empty_agent_list_without_truncation_is_terminal(explicit_truncation):
+    class ClearAgents(TinyParallel):
+        def step(self, actions):
+            obs, rewards, terms, truncs, infos = super().step(actions)
+            self.agents = []
+            if not explicit_truncation:
+                return {}, rewards, {}, {}, infos
+            return obs, rewards, terms, dict.fromkeys(truncs, True), infos
+
+    episode = make_trainer(factory=ClearAgents).collect(1)[0]
+    assert episode.length == 1
+    assert episode.transitions["terminated"].tolist() == [not explicit_truncation]
+    assert episode.transitions["truncated"].tolist() == [explicit_truncation]
+    assert episode.return_masks()[0].tolist() == [explicit_truncation]
 
 
 @pytest.mark.parametrize("recurrent", [False, True])

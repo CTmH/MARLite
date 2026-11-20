@@ -140,3 +140,79 @@ finally:
                 torch.testing.assert_close(value, other_value, rtol=3e-5, atol=3e-6)
             else:
                 torch.testing.assert_close(parameter, other, rtol=3e-5, atol=3e-6)
+
+
+def test_qmpd_cli_resumes_interrupted_offline_training(tmp_path):
+    from test.test_sequence_mappo import assert_tree_equal
+
+    settings = mpe_config("qmpd")
+    settings["offline"].update(codec_updates=3, policy_updates=2, checkpoint_interval=1)
+    config = tmp_path / "config.yaml"
+    config.write_text(yaml.safe_dump(settings), encoding="utf-8")
+    root = Path(__file__).parents[1]
+    device = os.environ.get("MARLITE_ACCEPTANCE_DEVICE", "cpu")
+
+    def command(workdir, *options, interrupt=False):
+        invocation = ["-m", "marlite"]
+        if interrupt:
+            # Stop at a known checkpoint boundary without a race with a fast machine.
+            invocation = [
+                "-c",
+                """
+from pathlib import Path
+from marlite.cli import main
+from marlite.training.distillation import SequenceDistillationTrainer
+
+save = SequenceDistillationTrainer.save_checkpoint
+
+def interrupt_after_save(self, path):
+    save(self, path)
+    if Path(path).name == "offline_1.pt":
+        raise SystemExit(73)
+
+SequenceDistillationTrainer.save_checkpoint = interrupt_after_save
+main()
+""",
+            ]
+        result = subprocess.run(
+            [
+                sys.executable,
+                *invocation,
+                "train",
+                "--config",
+                str(config),
+                "--workdir",
+                str(workdir),
+                "--device",
+                device,
+                *options,
+            ],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert result.returncode == (73 if interrupt else 0), result.stdout + result.stderr
+
+    interrupted = tmp_path / "interrupted"
+    reference = tmp_path / "uninterrupted"
+    command(interrupted, interrupt=True)
+    checkpoint = interrupted / "checkpoints/offline_1.pt"
+    state = torch.load(checkpoint, weights_only=True)
+    assert state["counters"]["iterations"] == 0
+    assert state["extra"]["offline_counters"] == {"probe": 0, "codec": 1, "policy": 0}
+    log = interrupted / "offline_events.jsonl"
+    # An interrupted process can log an update before its next checkpoint is saved.
+    with log.open("a", encoding="utf-8") as stream:
+        stream.write('{"stage":"codec","update":2,"training":{}}\n')
+
+    command(interrupted, "--resume", str(checkpoint))
+    command(reference)
+    resumed, uninterrupted = [
+        torch.load(run / "checkpoints/final.pt", weights_only=True)
+        for run in (interrupted, reference)
+    ]
+    for key in ("learner", "extra", "counters", "sampler_rng"):
+        assert_tree_equal(resumed[key], uninterrupted[key])
+    assert log.read_text() == (reference / log.name).read_text()
+    assert len((interrupted / "teacher/events.jsonl").read_text().splitlines()) == 1

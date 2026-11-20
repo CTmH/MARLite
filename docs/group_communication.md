@@ -69,10 +69,29 @@ reused as online momentum.
 
 ## Checkpoints and diagnostics
 
-`run_offline(max_updates=..., checkpoint_interval=...)` permits interactive phase
-inspection. Offline checkpoints contain teacher/critic, both datasets, probe,
-phase counters, optimizers, sampler RNG and validation measurements. Derived caches
-are rebuilt. Same-topology restoration is tested at offline and online boundaries.
+Set `offline.checkpoint_interval` to a positive number of offline updates to
+save during ordinary CLI training. This counts updates across probe, codec and
+policy stages. A null value (the default) disables periodic offline saves.
+Online checkpoints still use `run.checkpoint_interval`.
+
+```yaml
+offline:
+  checkpoint_interval: 100
+```
+
+Resume with the same config and device topology:
+
+```sh
+marlite train --config examples/sequence/qmpd_mpe2.yaml --device cuda \
+  --workdir results/qmpd --resume results/qmpd/checkpoints/offline_100.pt
+```
+
+The checkpoint includes the frozen teacher, offline datasets, phase optimizers,
+progress and sampling state. The resumed run continues after the saved update
+and reuses the teacher and data. It discards offline log entries newer than the
+checkpoint. The checkpoint interval may change between runs. For interactive
+phase inspection, the Python API also provides `run_offline(max_updates=...,
+checkpoint_interval=...)`.
 
 Received integer codes can be supplied in execution context as `received_codes`;
 `replace_senders` selects which sends to replace. This changes received information

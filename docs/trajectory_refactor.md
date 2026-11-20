@@ -55,8 +55,10 @@ maps with different agent counts in a fixed-N mixer batch.
 `agent_reset` marks a new life before processing the frame. The final frame must
 be the actual environment final observation; Episode cannot infer whether a
 producer accidentally supplied an auto-reset observation. Environment adapters
-must test that invariant. Team boundaries are explicit, not inferred from empty
-env.agents. Termination dominates truncation. A timeout bootstraps but stops GAE.
+must test that invariant. The collector honors explicit termination and truncation. If the simulator
+clears all active agents, disappearance counts as termination for agents
+without an explicit truncation. Truncated survivors use the real final frame
+for bootstrap; the GAE trace stops at the boundary.
 
 SequenceSlice specifies the first learning transition, learning length, preceding
 burn-in, and future target tail. No sequence crosses episodes. Learning targets
@@ -453,3 +455,50 @@ on one GPU, then `torchrun --standalone --nproc-per-node=2 -m test.acceptance.le
 with the single-GPU result passed as `--reference`. Repeat with three ranks.
 Use `python -m test.acceptance.sequence_performance --device cuda --output perf.json`
 for the encoder benchmark.
+
+## Supplemental acceptance (2026-11-21)
+
+The collector now treats an empty active-agent list as terminal for agents
+without an explicit truncation. Explicitly truncated survivors still require
+their real final observations for bootstrap.
+
+QMPD now saves checkpoints during ordinary training at
+`offline.checkpoint_interval` updates across the offline stages. A CLI test
+stops just after the first codec checkpoint and resumes in the same workdir.
+The final learner, optimizer, offline state, sampling state and logs exactly
+match uninterrupted training. The test also checks that a log entry newer
+than the checkpoint is discarded and teacher training is run only once.
+
+An isolated server run used PyTorch `2.15.0+rocm10.0` on two RX 7900 XT cards
+and one RX 7900 XTX. The single-process and torchrun comparisons exercise
+MAPPO, QMIX, QPLEX, QTRAN and QMPD. Across 34 groups of reduced gradients
+recorded before clipping, the maximum absolute difference from one GPU
+was 2.38e-7 on two GPUs and 4.77e-7 on three. The maximum policy output
+difference was 2.98e-8, and the maximum identifiable actor/critic parameter
+difference was 1.54e-6. Checkpoint continuation on each topology was exact.
+
+The local suite passed 607 tests with four opt-in or hardware skips. On the
+server, the MPE2 CLI interruption test passed on GPU. The Linux run also passed
+45 simulator and collection tests, including native MAgent2, SMACv2 and SUMO.
+Both native QMPD variants (GRU and SimpleResAttSeqEnc) reproduced the
+uninterrupted learner and offline state when restored after the probe and codec
+updates. The server reused the existing simulator dependencies.
+
+Raw reports include time and peak tensor memory per rank for a complete
+iteration of the synthetic acceptance workload.
+[One GPU](acceptance/2026-11-21/gpu1.json),
+[two GPUs](acceptance/2026-11-21/gpu2.json),
+[three GPUs](acceptance/2026-11-21/gpu3.json).
+
+One measured online QMPD iteration on the native 15×15 MAgent2
+complementary-pursuit map with four pursuers and eight evaders collected
+eight episodes capped at 20 steps and ran four learner updates. The wall times
+include simulator collection and learner communication. Peak memory is PyTorch
+tensor allocation on the busiest rank. Each row is a single measurement after
+one warm-up online iteration.
+
+| GPUs | Iteration wall time | Peak allocation | Raw report |
+| ---: | ---: | ---: | --- |
+| 1 | 5.01 s | 150.5 MiB | [MAgent2 on one GPU](acceptance/2026-11-21/magent2-1.json) |
+| 2 | 3.23 s | 120.0 MiB | [MAgent2 on two GPUs](acceptance/2026-11-21/magent2-2.json) |
+| 3 | 2.83 s | 112.0 MiB | [MAgent2 on three GPUs](acceptance/2026-11-21/magent2-3.json) |
