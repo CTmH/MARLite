@@ -3,7 +3,7 @@
 Baseline: `7a54e00`; branch: `codex/trajectory-refactor`.
 
 The sequence stack supersedes the legacy training, configuration and analysis
-interfaces. Historical YAML and checkpoints can be used on the C04 branch.
+interfaces. Historical YAML and checkpoints can be used on their original branch.
 
 ## Acceptance gates
 
@@ -16,7 +16,7 @@ interfaces. Historical YAML and checkpoints can be used on the C04 branch.
 | R4 | torchrun and one explicit gradient reducer | CPU/Gloo and ROCm single-, two- and three-device updates validated |
 | R5 | QMIX, QPLEX, QTRAN sequence learners | Implemented; CPU, Gloo and real MPE2 short workflows validated |
 | R6 | Graph, messages, consensus, SSL and gradient mixers | Composition and losses tested on CPU, including two-rank Gloo with all four task mixers |
-| R7 | C04 offline/online phases and all paper variants | Staged recipe, optional objectives and sender replacement verified; native C04 training exercised on ROCm |
+| R7 | QMPD offline/online phases and all paper variants | Staged recipe, optional objectives and sender replacement verified; native QMPD training exercised on ROCm |
 | R8 | New YAML, CLI, analyzer, examples; remove old hierarchy | CLI, registry, analyzer and examples validated; legacy source and test fixtures removed |
 | R9 | Multi-environment, resume and performance acceptance | Native MAgent2, SMACv2 and SUMO, GPU parity/resume and encoder benchmarks passed |
 
@@ -36,7 +36,7 @@ interfaces. Historical YAML and checkpoints can be used on the C04 branch.
 | SSLGroupConsensusQMIX | Above + AE/VAE reconstruction and KL objectives |
 | SSLGroupConsensusMAPPO | MAPPO learner + consensus + SSL objectives |
 | VAEGraphQMIX | QMIX learner + graph + VAE objectives |
-| DistilledGroupCommunicationMAPPO | Teacher/student AgentGroups + staged C04 recipe |
+| DistilledGroupCommunicationMAPPO | Teacher/student AgentGroups + staged QMPD recipe |
 
 Current reference tests are the sequence contract, MAPPO, value, communication,
 auxiliary, distillation and distributed suites under `test/`. Freeze RNG/noise
@@ -81,7 +81,7 @@ for teacher or behavior state for target. Warmup runs without autograd.
 
 Trainer owns stages; learners own algorithm models/optimizers. Communication
 components do not duplicate PPO or TD. QPLEX needs full action Q; QTRAN's V is
-mandatory. SSL retains gate/detach semantics and four mixers. C04 codec injection
+mandatory. SSL retains gate/detach semantics and four mixers. QMPD codec injection
 must backpropagate through the frozen teacher, unlike teacher reference targets.
 Only frozen feature caches can survive an optimizer step.
 
@@ -137,7 +137,7 @@ No server, GPU, full environment training, or new learner integration was tested
 and two torchrun CPU configurations. A first torchrun attempt timed out before
 launching ranks because the local address resolved to an IPv6 reverse-DNS name;
 explicit IPv4 rendezvous resolves it. Tests clean the entire process group on
-failure. GPU, off-policy, communication/SSL and C04 migration remain pending.
+failure. GPU, off-policy, communication/SSL and QMPD migration remain pending.
 
 
 ## Value-learning migration (R5)
@@ -229,10 +229,10 @@ R6 regression: 222 passed, 1 skipped (local CPU, 2026-11-19), including real MPE
 communication/VAE short training and actual two-rank tests for all four algorithms
 with all four task mixers, uneven/empty ranks and exact checkpoint continuation.
 The skipped reference case is optional; server GPU tests remain outstanding.
-C04 staged training, YAML/CLI replacement and old-code cleanup are not complete.
+QMPD staged training, YAML/CLI replacement and old-code cleanup are not complete.
 
 
-## C04 staged migration (R7)
+## QMPD staged migration (R7)
 
 GroupSetCommunication composes two-level set fusion with individual attention
 queries. QuantizedCommunication adds a local scalar codec without exposing group
@@ -274,7 +274,7 @@ configured message-byte budget. Payload pack/unpack remains exact; configured
 header bytes describe the simulation protocol, not physical radio traffic.
 
 R7 regression: 244 passed, 1 skipped (local CPU, 2026-11-19). New coverage includes
-complete real-MPE2 short C04 training, independent module freezing, optional
+complete real-MPE2 short QMPD training, independent module freezing, optional
 components, before/after offline validation, per-phase and online exact resume,
 and complete two-rank Gloo workflows with uneven/empty online partitions. Single
 and distributed results compare identifiable parameters, optimizer states and
@@ -303,7 +303,7 @@ CNN, state-based groups and task-specific optional relation queries. This exampl
 still requires server-native acceptance; it is not counted as locally verified.
 
 The installed `marlite`, `python -m marlite`, and source-checkout main.py share
-train/validate/analyze commands. C04 may train its teacher with the same standard
+train/validate/analyze commands. QMPD may train its teacher with the same standard
 MAPPO recipe before transferring an independent frozen copy. Teacher fitting never
 runs during construction/validation. Offline phase optimizers, probe architecture,
 policy parameter groups, neural components and the RL gate are configurable.
@@ -414,18 +414,18 @@ tests** at `bb901b2`, with four MPS-specific tests and three opt-in simulator
 modules skipped. The simulator modules were run separately.
 
 On Linux/ROCm, the opt-in native suite passed **32 tests** at `bb901b2`. The suite exercises
-MAgent2's native rules and wrappers, including end-to-end C04 on small
+MAgent2's native rules and wrappers, including end-to-end QMPD on small
 complementary pursuit with GRU and SimpleResAttSeqEnc. It also exercises MAPPO
 and QPLEX collection and an optimizer update on SMACv2 5v5 and a SUMO 4×4 grid.
-The C04 tests verify teacher training, offline probe/codec/policy stages,
+The QMPD tests verify teacher training, offline probe/codec/policy stages,
 online updating and exact continuation. Separate CPU/Gloo tests exercise
 optional auxiliary loss, optional online distillation, simultaneous/progressive
 replacement and bypassing offline training. At `24a4ccd`, five targeted
-server cases passed, including both native C04 runs and tests for loading a
+server cases passed, including both native QMPD runs and tests for loading a
 teacher checkpoint and honoring the student initialization switch.
 
 The one-, two- and three-GPU comparison at `bb901b2` uses the same batches for MAPPO, QMIX,
-QPLEX, QTRAN and C04, including uneven live-agent counts and empty rank slices.
+QPLEX, QTRAN and QMPD, including uneven live-agent counts and empty rank slices.
 It compares trained parameters and outputs across topologies and checks exact
 same-topology checkpoint continuation. Maximum absolute differences were
 2.98e-8 for policy outputs and 1.54e-6 for identifiable actor/critic parameters.
@@ -443,7 +443,11 @@ by PyTorch. The comparison measures sequence encoder kernels on this workload.
 | Causal attention | 46.69 → 6.01 ms (7.76×) | 54.32 → 3.53 ms (15.40×) | 189.28 → 103.53 MiB |
 
 The measured size and rollout limits are those of acceptance workloads.
-Reports are archived in [docs/acceptance/2026-11-19](acceptance/2026-11-19/).
+The original reports are archived as [one GPU](acceptance/2026-11-19/gpu1.json),
+[two GPUs](acceptance/2026-11-19/gpu2.json), [three GPUs](acceptance/2026-11-19/gpu3.json),
+[GPU profiling](acceptance/2026-11-19/gpu_performance.json) and
+[CPU profiling](acceptance/2026-11-19/cpu_performance.json). They retain the
+recipe identifiers used by the tested commits.
 Reproduce the multi-device comparison with `python -m test.acceptance.learner_parity`
 on one GPU, then `torchrun --standalone --nproc-per-node=2 -m test.acceptance.learner_parity`
 with the single-GPU result passed as `--reference`. Repeat with three ranks.

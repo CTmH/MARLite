@@ -1,12 +1,12 @@
 # Complementary pursuit environment
 
-`examples/sequence/c04_magent2.yaml` uses complementary pursuit from the pinned
+`examples/sequence/qmpd_magent2.yaml` uses complementary pursuit from the pinned
 CTmH/MAgent2 fork, including native A/B attack rules and optional training-only
 relation-query labels. Use the appropriate `cpu`, `mps`, `cuda` or `rocm` extra.
 
 ```sh
-python -m marlite validate --config examples/sequence/c04_magent2.yaml --device cpu
-python -m marlite train --config examples/sequence/c04_magent2.yaml --workdir results/c04 --device cuda
+python -m marlite validate --config examples/sequence/qmpd_magent2.yaml --device cpu
+python -m marlite train --config examples/sequence/qmpd_magent2.yaml --workdir results/qmpd --device cuda
 MARLITE_NATIVE_MAGENT2=1 python -m pytest test/test_native_magent2.py
 ```
 

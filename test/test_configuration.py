@@ -36,12 +36,12 @@ def minimal_config(module, recipe="mappo"):
         "trainer": {"sequence_length": 2, "batch_sequences": 3},
         "run": {"iterations": 1, "train_episodes": 2, "eval_episodes": 2, "checkpoint_interval": 1},
     }
-    if recipe in ("mappo", "c04"):
+    if recipe in ("mappo", "qmpd"):
         config["trainer"]["ppo_epochs"] = 1
     else:
         config["trainer"]["updates_per_iteration"] = 2
         config["replay"] = {"capacity": 4}
-    if recipe == "c04":
+    if recipe == "qmpd":
         config["teacher"] = {
             "source": "train",
             "trainer": {"sequence_length": 2, "batch_sequences": 3, "ppo_epochs": 1},
@@ -127,14 +127,14 @@ def test_unconstrained_hypernetwork_can_express_negative_slope():
     torch.testing.assert_close(network(x, condition), torch.tensor([[[3.0], [7.0]]]))
 
 
-@pytest.mark.parametrize("recipe", ["mappo", "qmix", "qplex", "qtran", "c04"])
+@pytest.mark.parametrize("recipe", ["mappo", "qmix", "qplex", "qtran", "qmpd"])
 def test_new_recipes_train_and_resume(environment_module, recipe, tmp_path):
     config = minimal_config(environment_module, recipe)
     experiment = build_experiment(config, workdir=tmp_path / "run")
     experiment.run()
     checkpoint = tmp_path / "run" / "checkpoints" / "iteration_1.pt"
     assert checkpoint.exists()
-    if recipe == "c04":
+    if recipe == "qmpd":
         assert experiment.teacher_trainer.iterations == 1
         assert experiment.trainer.phase == "online"
         assert all(p.grad is None for p in experiment.trainer.reference.actor.parameters())
@@ -191,7 +191,7 @@ def test_custom_network_and_optimizer_parameter_groups(environment_module):
     ],
 )
 def test_recipe_rejects_unknown_or_python_owned_controls(environment_module, patch, pattern):
-    config = minimal_config(environment_module, "c04" if "offline" in patch else "mappo")
+    config = minimal_config(environment_module, "qmpd" if "offline" in patch else "mappo")
     config.update(patch)
     with pytest.raises(ConfigurationError, match=pattern):
         build_experiment(config)
@@ -222,7 +222,7 @@ def test_value_free_analysis_exports_real_episodes_and_does_not_train(environmen
     from marlite.data import Episode
     from marlite.learning.mappo import prepare_ppo_targets
 
-    config = minimal_config(environment_module, "c04")
+    config = minimal_config(environment_module, "qmpd")
     trained = build_experiment(config, workdir=tmp_path / "train")
     trained.run()
     path = tmp_path / "train" / "checkpoints" / "final.pt"
@@ -293,12 +293,12 @@ def test_all_mpe2_examples_execute_short_workflows(path, tmp_path):
     config["environment"]["params"]["max_cycles"] = 3
     config["collector"]["max_steps"] = 3
     config["trainer"].update(sequence_length=2, batch_sequences=2)
-    if config["recipe"] in ("mappo", "c04"):
+    if config["recipe"] in ("mappo", "qmpd"):
         config["trainer"]["ppo_epochs"] = 1
     else:
         config["trainer"]["updates_per_iteration"] = 1
     config["run"] = {"iterations": 1, "train_episodes": 2, "eval_episodes": 2}
-    if config["recipe"] == "c04":
+    if config["recipe"] == "qmpd":
         config["teacher"]["run"] = {"iterations": 1, "train_episodes": 2, "eval_interval": None}
         config["teacher"]["trainer"].update(ppo_epochs=1, sequence_length=2, batch_sequences=2)
         config["offline"].update(
@@ -339,7 +339,7 @@ def test_spatial_decoder_does_not_depend_on_rank_batch_partition():
 
 
 def test_invalid_online_run_is_rejected_before_teacher_training(environment_module, tmp_path):
-    experiment = build_experiment(minimal_config(environment_module, "c04"), workdir=tmp_path)
+    experiment = build_experiment(minimal_config(environment_module, "qmpd"), workdir=tmp_path)
     with pytest.raises(ConfigurationError, match="run.iterations"):
         experiment.run(run_options={"iterations": -1})
     assert experiment.teacher_trainer.iterations == 0
@@ -373,7 +373,7 @@ def test_communication_rl_gate_is_a_configurable_persistent_parameter():
 def test_teacher_transfer_respects_student_initialization(
     environment_module, tmp_path, initialize_from_teacher
 ):
-    config = minimal_config(environment_module, "c04")
+    config = minimal_config(environment_module, "qmpd")
     config["offline"].update(offline_enabled=False, initialize_from_teacher=initialize_from_teacher)
     experiment = build_experiment(config, workdir=tmp_path / "run")
     student = experiment.trainer.learner.actor
@@ -387,10 +387,10 @@ def test_teacher_transfer_respects_student_initialization(
     assert_tree_equal(expected, student.action_head.state_dict())
 
 
-def test_c04_can_load_a_frozen_teacher_from_yaml_checkpoint(environment_module, tmp_path):
+def test_qmpd_can_load_a_frozen_teacher_from_yaml_checkpoint(environment_module, tmp_path):
     from marlite.configuration import defaults
 
-    config = minimal_config(environment_module, "c04")
+    config = minimal_config(environment_module, "qmpd")
     teacher_run = build_experiment(config, workdir=tmp_path / "teacher")
     teacher_run.teacher_trainer.run(**teacher_run.teacher_run)
     state = teacher_run.teacher_trainer.learner.actor.state_dict()

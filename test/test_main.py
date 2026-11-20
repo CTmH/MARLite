@@ -25,7 +25,7 @@ def mpe_config(recipe):
 
 def test_package_cli_train_resume_and_actor_only_analyze(tmp_path):
     config = tmp_path / "config.yaml"
-    config.write_text(yaml.safe_dump(mpe_config("c04")), encoding="utf-8")
+    config.write_text(yaml.safe_dump(mpe_config("qmpd")), encoding="utf-8")
     workdir = tmp_path / "run"
     root = Path(__file__).parents[1]
     env = dict(
@@ -88,7 +88,7 @@ def test_package_cli_train_resume_and_actor_only_analyze(tmp_path):
 @pytest.mark.skipif(not dist.is_gloo_available(), reason="Gloo unavailable")
 def test_recipe_torchrun_training_matches_single_process(tmp_path):
     expected = {}
-    for recipe in ("mappo", "qmix", "qplex", "qtran", "c04"):
+    for recipe in ("mappo", "qmix", "qplex", "qtran", "qmpd"):
         experiment = build_experiment(mpe_config(recipe), workdir=tmp_path / ("single_" + recipe))
         experiment.run()
         expected[recipe] = experiment.trainer.learner.actor.state_dict()
@@ -110,7 +110,7 @@ backend = initialize_backend("cpu", timeout_seconds=60)
 root = Path(os.environ["TEST_RUN_DIR"])
 results = {}
 try:
-    for recipe in ("mappo", "qmix", "qplex", "qtran", "c04"):
+    for recipe in ("mappo", "qmix", "qplex", "qtran", "qmpd"):
         config = load_config(root / (recipe + ".yaml"))
         experiment = build_experiment(config, backend=backend, workdir=root / recipe)
         experiment.run()

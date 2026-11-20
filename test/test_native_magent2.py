@@ -140,7 +140,7 @@ def test_native_opponent_wrapper_spaces_and_seeded_controller(family, wrapper_ty
 
 
 @pytest.mark.parametrize("history", ["gru", "pooled_attention"])
-def test_c04_native_short_teacher_offline_online_and_checkpoint(tmp_path, history):
+def test_qmpd_native_short_teacher_offline_online_and_checkpoint(tmp_path, history):
     import torch
     import yaml
     from copy import deepcopy
@@ -149,7 +149,7 @@ def test_c04_native_short_teacher_offline_online_and_checkpoint(tmp_path, histor
     from test.test_sequence_mappo import assert_tree_equal
 
     config = yaml.safe_load(
-        (Path(__file__).parents[1] / "examples/sequence/c04_magent2.yaml").read_text()
+        (Path(__file__).parents[1] / "examples/sequence/qmpd_magent2.yaml").read_text()
     )
     config["environment"]["params"]["max_cycles"] = 4
     config["collector"]["max_steps"] = 4

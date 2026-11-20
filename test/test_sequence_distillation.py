@@ -1,4 +1,4 @@
-"""C04 components preserve local-only encoding and frozen-teacher gradients."""
+"""QMPD components preserve local-only encoding and frozen-teacher gradients."""
 
 from copy import deepcopy
 
@@ -240,7 +240,7 @@ def distillation_trainer(
 
 
 @pytest.mark.parametrize("relation,replacement", [(False, "all"), (True, "progressive")])
-def test_complete_c04_stages_and_offline_boundary_resume(tmp_path, relation, replacement):
+def test_complete_qmpd_stages_and_offline_boundary_resume(tmp_path, relation, replacement):
     trainer = distillation_trainer(tmp_path / "run", relation=relation, replacement=replacement)
     teacher = deepcopy(trainer.reference.actor.state_dict())
     local = deepcopy(trainer.learner.actor.frame_encoder.state_dict())
@@ -285,7 +285,7 @@ def test_complete_c04_stages_and_offline_boundary_resume(tmp_path, relation, rep
     assert_tree_equal(trainer.learner.state_dict(), resumed.learner.state_dict())
 
 
-def test_c04_offline_disabled_collects_no_teacher_training_data(tmp_path):
+def test_qmpd_offline_disabled_collects_no_teacher_training_data(tmp_path):
     trainer = distillation_trainer(tmp_path, offline_enabled=False)
     trainer.run(1, train_episodes=2, eval_episodes=2, checkpoint_interval=1)
     assert trainer.phase == "online" and not trainer.offline_train
@@ -359,7 +359,7 @@ def test_received_code_interventions_replace_only_selected_senders():
     )
 
 
-def test_c04_complete_short_workflow_on_real_mpe2(tmp_path):
+def test_qmpd_complete_short_workflow_on_real_mpe2(tmp_path):
     import numpy as np
     from marlite.training.distillation import SequenceDistillationTrainer
 

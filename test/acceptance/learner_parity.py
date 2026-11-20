@@ -41,7 +41,7 @@ def main():
     sys.modules["acceptance_tiny_env"] = SimpleNamespace(parallel_env=TinyParallel)
     results = {}
     try:
-        for recipe in ("mappo", "qmix", "qplex", "qtran", "c04"):
+        for recipe in ("mappo", "qmix", "qplex", "qtran", "qmpd"):
             config = minimal_config("acceptance_tiny_env", recipe)
             config["schedulers"] = {
                 role: {"scheduler": {"type": "StepLR", "params": {"step_size": 1, "gamma": 0.9}}}
@@ -63,7 +63,7 @@ def main():
             reset = torch.zeros_like(valid)
             reset[:, 0] = True
             context = (
-                {"groups": torch.zeros_like(valid, dtype=torch.long)} if recipe == "c04" else {}
+                {"groups": torch.zeros_like(valid, dtype=torch.long)} if recipe == "qmpd" else {}
             )
             with torch.no_grad():
                 output = actor(

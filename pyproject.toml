@@ -36,15 +36,15 @@ develop = [
 ]
 
 cuda = [
-    "torch>=2.8.0",
+    "torch==2.15.0+cu132",
 ]
 
 rocm = [
-    "torch>=2.8.0",
+    "torch==2.15.0+rocm10.0",
 ]
 
 mps = [
-    "torch>=2.8.0",
+    "torch==2.15.0",
 ]
 
 cpu = [
@@ -80,7 +80,7 @@ magent2 = { git = "https://github.com/CTmH/MAgent2.git", rev = "209021e17e5d4503
 dm_env = { git = "https://github.com/CTmH/dm_env.git" }
 sumo-rl = { git = "https://github.com/LucasAlegre/sumo-rl.git" }
 torch = [
-    { index = "pytorch-cu130", extra = "cuda" },
+    { index = "pytorch-cu132", extra = "cuda" },
     { index = "pytorch-rocm", extra = "rocm" },
     { index = "pypi", extra = "mps" },
     { index = "pytorch-cpu", extra = "cpu" },
@@ -93,13 +93,13 @@ url = "https://pypi.org/simple"
 default = true
 
 [[tool.uv.index]]
-name = "pytorch-cu130"
-url = "https://download.pytorch.org/whl/cu130"
+name = "pytorch-cu132"
+url = "https://download.pytorch.org/whl/cu132"
 default = false
 
 [[tool.uv.index]]
 name = "pytorch-rocm"
-url = "https://download.pytorch.org/whl/rocm7.14"
+url = "https://download.pytorch.org/whl/rocm10.0"
 default = false
 
 [[tool.uv.index]]

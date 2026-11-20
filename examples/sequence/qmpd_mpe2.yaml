@@ -1,6 +1,6 @@
 # Sequence API v3. Small examples, not tuned paper settings.
 version: 3
-recipe: c04
+recipe: qmpd
 seed: 42
 environment:
   module: mpe2.simple_spread_v3

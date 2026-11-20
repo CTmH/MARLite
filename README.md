@@ -2,7 +2,7 @@
 
 A research-oriented MARL library with explicit tensor trajectories, recurrent state
 and composed communication modules. The sequence API replaces the old trainer
-hierarchy; historical C04 experiments remain on their original Git branch.
+hierarchy; historical experiments remain on their original Git branch.
 Old YAML, imports and checkpoints are intentionally incompatible.
 
 ## Run an experiment
@@ -42,17 +42,34 @@ on machines with broken IPv6 resolution use an explicit IPv4 rendezvous endpoint
   state and returning every learning timestep. GRU chunks use the fused path.
 - MAPPO, QMIX, QPLEX and QTRAN share execution/lifecycle utilities. Communication
   and auxiliary objectives are injected components, not extra PPO/TD subclasses.
-- The `c04` recipe optionally trains a raw-message teacher, then runs codec and
+- The `qmpd` recipe optionally trains a raw-message teacher, then runs codec and
   student-policy offline distillation followed by MAPPO. Online distillation and
   auxiliary prediction are independently optional.
 - Checkpoints include optimizers, targets, auxiliary mixers, recurrent replay
-  settings, RNG streams and replay/offline data. C04 also saves phase boundaries.
+  settings, RNG streams and replay/offline data. QMPD also saves phase boundaries.
 
 See [configuration and recipes](docs/sequence_configuration.md),
-[C04 training](docs/group_communication.md), and the detailed
+[QMPD training](docs/group_communication.md), and the detailed
 [migration/acceptance record](docs/trajectory_refactor.md).
 
 The examples demonstrate composition; they are not tuned paper configurations.
 Run the rewritten sequence tests with one pytest process when validating actual
 multi-process execution. Native simulator and multi-GPU acceptance are tracked separately in the
 migration record. Legacy training/configuration hierarchies have been removed.
+
+## Documentation
+
+Start with the [quickstart](docs/quickstart.md), the
+[YAML reference](docs/sequence_configuration.md), or the
+[custom component guide](docs/custom_components.md).
+
+Build or preview the Zensical site from the repository root. The tool environment
+is separate from the MARLite training environment.
+
+```sh
+uvx --with-requirements requirements-docs.txt zensical build --strict
+uvx --with-requirements requirements-docs.txt zensical serve
+```
+
+The generated HTML is in `site/`. The preview listens on
+[localhost:8000](http://localhost:8000) by default.

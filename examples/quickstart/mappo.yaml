@@ -1,0 +1,23 @@
+version: 3
+recipe: mappo
+seed: 42
+environment:
+  module: mpe2.simple_spread_v3
+  params:
+    N: 3
+    max_cycles: 8
+    continuous_actions: false
+defaults:
+  hidden_dim: 16
+collector:
+  max_steps: 8
+trainer:
+  sequence_length: 4
+  batch_sequences: 4
+  ppo_epochs: 1
+run:
+  iterations: 2
+  train_episodes: 2
+  eval_episodes: 2
+  eval_interval: 1
+  checkpoint_interval: 1

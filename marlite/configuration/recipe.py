@@ -30,7 +30,7 @@ from .registry import ConfigurationError
 from . import defaults
 
 
-RECIPES = ("mappo", "qmix", "qplex", "qtran", "c04")
+RECIPES = ("mappo", "qmix", "qplex", "qtran", "qmpd")
 
 
 def _mapping(value, path, allowed=None):
@@ -203,7 +203,14 @@ def _probe_environment(factory, backend, seed):
 def build_experiment(
     config, *, workdir=None, device="cpu", registry=None, backend=None, policy_only=False
 ):
-    """Build one local/torchrun learner. No training begins in this function."""
+    """Build an experiment from a version-3 configuration mapping.
+
+    Pass an extended registry to make custom components available. The device
+    selects the learner device and workdir selects the run output directory.
+    Environment probing resolves model dimensions during construction. Call
+    Experiment.run to start training. With policy_only enabled, the function
+    returns a PolicyEvaluator for loading and evaluating actor weights.
+    """
     allowed = {
         "version",
         "recipe",
@@ -253,8 +260,8 @@ def build_experiment(
         )
     registry = registry or default_registry()
     recipe = config["recipe"]
-    if recipe != "c04" and config.keys() & {"teacher", "offline"}:
-        raise ConfigurationError("Teacher/offline settings belong only to the c04 recipe")
+    if recipe != "qmpd" and config.keys() & {"teacher", "offline"}:
+        raise ConfigurationError("Teacher/offline settings belong only to the qmpd recipe")
     backend = backend or initialize_backend(device)
     configure_randomness(config.get("seed", 42), config.get("deterministic", False))
     factory = EnvironmentFactory(config.get("environment"), registry)
@@ -296,8 +303,8 @@ def build_experiment(
         lambda: defaults.actor(
             environment_spec,
             hidden,
-            output_kind="logits" if recipe in ("mappo", "c04") else "q_values",
-            quantized=recipe == "c04",
+            output_kind="logits" if recipe in ("mappo", "qmpd") else "q_values",
+            quantized=recipe == "qmpd",
             heads=heads,
         ),
     )
@@ -305,7 +312,7 @@ def build_experiment(
     context = (
         registry.build(context_spec, dimensions, path="communication_context")
         if context_spec
-        else (AllTogether() if recipe == "c04" else None)
+        else (AllTogether() if recipe == "qmpd" else None)
     )
     collector_options = _mapping(
         config.get("collector", {}),
@@ -332,7 +339,7 @@ def build_experiment(
         return PolicyEvaluator(
             config, actor, evaluation_collector or collector, environment_spec, backend
         )
-    if recipe in ("mappo", "c04"):
+    if recipe in ("mappo", "qmpd"):
         critic = component("critic", lambda: defaults.value(environment_spec, hidden))
         objective = None
         if "objective" in config or "replay" in config:
@@ -362,9 +369,9 @@ def build_experiment(
     )
     teacher_trainer = reference = teacher_critic = student_relation = None
     teacher_run = None
-    if recipe == "c04":
+    if recipe == "qmpd":
         if not isinstance(actor.communication, QuantizedCommunication):
-            raise ConfigurationError("c04 requires a quantized group communication actor")
+            raise ConfigurationError("qmpd requires a quantized group communication actor")
         teacher_config = _mapping(
             config.get("teacher", {}),
             "teacher",
@@ -549,7 +556,7 @@ def build_experiment(
     }
     if learner_options.keys() & reserved:
         raise ConfigurationError("Learner model/optimizer wiring belongs to the Python recipe")
-    if recipe in ("mappo", "c04"):
+    if recipe in ("mappo", "qmpd"):
         learner = _construct(MAPPOLearner, common | learner_options, "learner")
     else:
         learner = _construct(
@@ -590,7 +597,7 @@ def build_experiment(
         "workdir": workdir,
         "seed": config.get("seed", 42),
     }
-    if recipe == "c04":
+    if recipe == "qmpd":
         offline = _mapping(
             config.get("offline", {}),
             "offline",

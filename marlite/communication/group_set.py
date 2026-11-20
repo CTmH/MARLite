@@ -1,4 +1,4 @@
-"""C04 group attention and scalar codecs as ordinary communication components."""
+"""QMPD group attention and scalar codecs as ordinary communication components."""
 
 import torch
 from torch import nn

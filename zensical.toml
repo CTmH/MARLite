@@ -1,0 +1,33 @@
+[project]
+site_name = "MARLite"
+site_description = "Multi-agent reinforcement learning and communication experiments"
+repo_url = "https://github.com/CTmH/MARLite"
+docs_dir = "docs"
+site_dir = "site"
+nav = [
+    { "Home" = "index.md" },
+    { "Quickstart" = "quickstart.md" },
+    { "YAML configuration" = "sequence_configuration.md" },
+    { "Custom components" = "custom_components.md" },
+    { "API reference" = "api.md" },
+    { "Guides" = [
+        "multistep_returns.md",
+        "initialization_and_seeding.md",
+        "env_recovery.md",
+        "group_communication.md",
+        "qmpd_environment.md",
+        "trajectory_refactor.md",
+    ] },
+]
+
+[project.markdown_extensions."pymdownx.snippets"]
+base_path = ["."]
+check_paths = true
+
+[project.plugins.mkdocstrings.handlers.python]
+paths = ["."]
+
+[project.plugins.mkdocstrings.handlers.python.options]
+allow_inspection = false
+docstring_style = "google"
+show_source = false

@@ -39,15 +39,25 @@ class TemporalOutput:
 
 
 class TemporalEncoder(nn.Module):
-    """Small sequence protocol shared by policy and value encoders."""
+    """Temporal feature encoder with caller-owned state.
 
-    def initial_state(self, batch_size, n_agents, device, dtype):
+    B is the batch size, T the time length, N the agent slots and D the input
+    width. Step inputs have shape (B, N, D) and sequence inputs have shape
+    (B, T, N, D). The boolean masks match the leading axes. True valid entries
+    are live inputs and true reset entries start a new recurrent life before
+    processing that frame.
+    """
+
+    def initial_state(self, batch_size, n_agents, device, dtype) -> RecurrentState:
+        """Return initial state for a fresh batch, with a leading batch axis."""
         return {}
 
-    def step(self, inputs, state, valid=None, reset=None):
+    def step(self, inputs, state, valid=None, reset=None) -> TemporalOutput:
+        """Encode one frame and return its features and the next state."""
         raise NotImplementedError
 
-    def forward_sequence(self, inputs, initial_state, valid=None, reset=None):
+    def forward_sequence(self, inputs, initial_state, valid=None, reset=None) -> TemporalOutput:
+        """Encode every time step and return all features and the final state."""
         valid, reset = self._masks(inputs, valid, reset)
         state, outputs = initial_state, []
         for t in range(inputs.shape[1]):

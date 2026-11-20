@@ -1,4 +1,4 @@
-"""C04 teacher references and task losses, independent of PPO's update formula."""
+"""QMPD teacher references and task losses, independent of PPO's update formula."""
 
 from collections import OrderedDict
 import hashlib

@@ -30,8 +30,14 @@ TRANSITION_FIELDS = {
 class Episode:
     """One environment episode with stable slots and T+1 decision frames.
 
-    Additional tensor fields (states, old_value, old_log_prob, comm.*) use the
-    same frame/transition time axes. Action-space objects belong in metadata.
+    Stored tensors are detached and on the CPU. For T transitions, N agent
+    slots and A actions, observations begin with (T+1, N), available actions
+    have shape (T+1, N, A), and rewards and selected actions have shape (T, N).
+    The last frame is the real post-transition observation. Slot order follows
+    agent_ids. A true agent_reset starts a new recurrent life for that slot.
+
+    Optional frame and transition fields use their respective time axes.
+    Sparse recurrent state snapshots are stored separately from frames.
     """
 
     agent_ids: tuple[str, ...]
@@ -47,6 +53,7 @@ class Episode:
         return self.transitions["actions"].shape[0]
 
     def validate(self):
+        """Check the tensor, action and boundary contracts, then return this episode."""
         if not self.agent_ids or len(set(self.agent_ids)) != len(self.agent_ids):
             raise ValueError("agent_ids must be nonempty and unique")
         for fields, required in (

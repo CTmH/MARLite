@@ -1,4 +1,4 @@
-"""C04 stages: frozen probe, codec distillation, policy distillation, MAPPO."""
+"""QMPD stages: frozen probe, codec distillation, policy distillation, MAPPO."""
 
 from contextlib import contextmanager
 import json
@@ -83,9 +83,9 @@ class SequenceDistillationTrainer(SequenceMAPPOTrainer):
     ):
         super().__init__(learner, collector, **kwargs)
         if not isinstance(learner.actor.communication, QuantizedCommunication):
-            raise ValueError("C04 student requires QuantizedCommunication")
+            raise ValueError("QMPD student requires QuantizedCommunication")
         if not isinstance(reference.actor.communication, GroupSetCommunication):
-            raise ValueError("C04 teacher must exchange raw group features")
+            raise ValueError("QMPD teacher must exchange raw group features")
         if offline_enabled and not initialize_from_teacher:
             raise ValueError(
                 "Frozen offline local features require initialization from the teacher"
@@ -234,7 +234,9 @@ class SequenceDistillationTrainer(SequenceMAPPOTrainer):
             or teacher.message_projection is not None
             or student.message_projection is not None
         ):
-            raise ValueError("C04 scalar codec consumes the frozen local history features directly")
+            raise ValueError(
+                "QMPD scalar codec consumes the frozen local history features directly"
+            )
 
     def _stage_parameters(self):
         actor = self.learner.actor

@@ -2,24 +2,52 @@
 
 YAML selects a recipe and component constructor arguments. Python owns stage
 order, model/optimizer ownership, graph connections and loss definitions. There
-are five recipes: `mappo`, `qmix`, `qplex`, `qtran`, `c04`. Communication variants
+are five recipes: `mappo`, `qmix`, `qplex`, `qtran`, `qmpd`. Communication variants
 are compositions of those recipes rather than additional trainer names.
 
-## Component specifications
+## Configuration keys
 
-```yaml
-version: 3
-recipe: mappo
-seed: 42
-environment:
-  module: mpe2.simple_spread_v3
-  params: {N: 3, max_cycles: 25, continuous_actions: false}
-defaults: {hidden_dim: 32, mixing_dim: 16, heads: 4, learning_rate: 0.0005}
-collector: {max_steps: 25}
-learner: {burn_in: 8, state_strategy: cached_burnin}
-trainer: {sequence_length: 16, batch_sequences: 16, ppo_epochs: 4}
-run: {iterations: 100, train_episodes: 8, eval_episodes: 16, checkpoint_interval: 10}
-```
+The [quickstart](quickstart.md#example-configuration) is a complete version-3
+configuration. The following keys control which components run and how they
+are trained.
+
+| Key | Role |
+| --- | --- |
+| `version`, `recipe` | Required. Set `version: 3` and choose one of the five recipes. MAPPO and QMPD use logits and a centralized value model. QMIX, QPLEX, and QTRAN use individual action values, a joint value model, and replay. |
+| `environment` | Required. Name the Python module exposing `parallel_env` and pass constructor `params`. Add `wrappers` in application order. |
+| `evaluation_environment` | Optional alternate environment with the same trained slot, observation, state, and action specification during training. |
+| `seed`, `deterministic` | Defaults are `42` and `false`. A null seed leaves the experiment unseeded. |
+| `defaults`, `dimensions` | Set fallbacks for built-in models or define positive integer dimensions for custom constructors. |
+| `actor`, `critic`, `objective` | Optional component specifications. `objective` selects a value-learning objective and is only valid for off-policy recipes. |
+| `communication_context` | Optional provider of per-frame group or graph data for a communication-enabled actor. QMPD defaults to `AllTogether`. |
+| `collector`, `learner`, `trainer` | Configure the environment rollout, optimizer updates, and training loop, respectively. |
+| `replay` | Off-policy only. `capacity` counts complete episodes. `sampling` is `uniform` or `reward_weighted`. |
+| `optimizers`, `schedulers`, `auxiliary` | Configure optimization and optional auxiliary learning. |
+| `teacher`, `offline` | QMPD only. See the [QMPD guide](group_communication.md) for the teacher sources and stage switches. |
+| `run` | Supply `iterations` for training. Set `train_episodes`, `eval_episodes`, and the evaluation and checkpoint intervals. |
+
+## Time and batch settings
+
+| Setting | Meaning |
+| --- | --- |
+| `collector.max_steps` | Cap on environment steps per episode. Default: 200. |
+| `collector.device` | Collection device. Default: `cpu`. The CLI's `--device` controls the learner. |
+| `collector.state_snapshot_interval` | Interval for caching recurrent state on the CPU. Default: 32 environment steps. |
+| `trainer.sequence_length` | Number of learning transitions in each full chunk. Default: 32. |
+| `trainer.batch_sequences` | Maximum number of chunks in a training batch across all learners. Default: 32. |
+| `trainer.ppo_epochs` | MAPPO and QMPD. Passes over the collected on-policy chunks. Default: 4. |
+| `trainer.updates_per_iteration` | QMIX, QPLEX, and QTRAN. Replay updates after collection. Default: 4. |
+| `learner.burn_in`, `learner.state_strategy` | Choose how to reconstruct recurrent state before the learning window. |
+| `learner.n_steps` | Off-policy return horizon. Default: 1. |
+
+For on-policy learning, configure `gamma` and `gae_lambda` under `trainer`.
+For value learning, configure `gamma` under `learner`. See [multistep
+returns](multistep_returns.md) for truncation, bootstrapping and state replay.
+`run.eval_interval: null` disables periodic validation and
+`run.checkpoint_interval: null` disables periodic snapshots. A completed
+run with a work directory still saves a final checkpoint.
+
+## Component specifications
 
 Any actor/critic/objective can be replaced with a `type` and `params` specification.
 Nested specs construct ordinary Python modules/objects; lists and plain mappings
@@ -110,7 +138,7 @@ test data is never inserted into replay.
 | SSLGroupConsensusQMIX | ssl_group_consensus_qmix.yaml |
 | SSLGroupConsensusMAPPO | ssl_group_consensus_mappo.yaml |
 | VAEGraphQMIX | vae_graph_qmix.yaml |
-| DistilledGroupCommunicationMAPPO | c04_mpe2.yaml, c04_magent2.yaml |
+| DistilledGroupCommunicationMAPPO | qmpd_mpe2.yaml, qmpd_magent2.yaml |
 | Dual-path encoders | dual_path_message_qmix.yaml |
 | Pooled attention history | attention_history_mappo.yaml |
 
@@ -172,3 +200,6 @@ wrapped model's mask keyword, True convention and output convention explicitly.
 For example, `ResAttMaskedProbEnc` accepts `alive_mask=True` and returns one
 concatenated tensor, not a tuple. `WindowEncoder(use_padding_mask: false)` adapts
 plain CNN/sequential history models; these remain finite-window encoders.
+
+For an end-to-end example of choosing a Python component from YAML, see
+[Add a custom component](custom_components.md).

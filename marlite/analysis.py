@@ -80,7 +80,7 @@ class PolicyEvaluator:
             "qmix": "sequence_qmix",
             "qplex": "sequence_qplex",
             "qtran": "sequence_qtran",
-            "c04": "sequence_distilled_group_mappo",
+            "qmpd": "sequence_distilled_group_mappo",
         }[self.config["recipe"]]
         if state.get("schema_version") != 2 or state.get("algorithm") != expected:
             raise ValueError("Checkpoint algorithm differs from the evaluation recipe")

@@ -7,7 +7,7 @@ hardware or library versions.
 
 Models are synchronized once at construction in torchrun. Episode seeds derive
 from the experiment seed, stream, round and episode index. Training collection,
-validation, final testing and C04 offline data use separate streams. Checkpoints
+validation, final testing and QMPD offline data use separate streams. Checkpoints
 save sampling RNGs, round counters and per-rank random state. Exact continuation
 requires the same device topology/configuration. A null experiment seed still
 shares one sampler order across ranks. Simulator seed support must be tested;

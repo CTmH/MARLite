@@ -10,6 +10,13 @@ from .episode import Episode
 
 @dataclass(frozen=True)
 class SequenceSlice:
+    """Select a learning window within one replay episode.
+
+    Start and length count learning transitions. Burn-in extends the window
+    before start and future adds transitions for targets after the learning
+    window. Both extensions are clipped at the episode boundary.
+    """
+
     episode_id: int
     start: int
     length: int
@@ -27,6 +34,14 @@ class SequenceSlice:
 
 @dataclass
 class SequenceBatch:
+    """Right-padded windows with separate data and learning masks.
+
+    Frames and transitions start with (B, T+1) and (B, T) respectively.
+    Filled marks real transitions, and loss_mask selects the learning
+    transitions among them. Bootstrap and trace masks indicate whether a
+    target can use the next value and whether the trace can continue.
+    """
+
     frames: dict[str, Tensor]
     transitions: dict[str, Tensor]
     filled: Tensor

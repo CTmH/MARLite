@@ -1,7 +1,14 @@
-# Distilled group communication, sequence API
+# Quantized Messaging via Policy Distillation (QMPD)
 
-Use the `c04` recipe with either `examples/sequence/c04_mpe2.yaml` or the native
-fork environment in `examples/sequence/c04_magent2.yaml`. See
+The formal method name follows the manuscript's English title, *Fixed-Length
+Quantized Message Exchange Between Agents via Policy Distillation*. In MARLite,
+QMPD names the quantized communication method and `qmpd` selects its training
+recipe. Older run configurations and full checkpoints contain their original
+recipe identifier. Use the corresponding historical checkout to resume them
+exactly.
+
+Use the `qmpd` recipe with either `examples/sequence/qmpd_mpe2.yaml` or the native
+fork environment in `examples/sequence/qmpd_magent2.yaml`. See
 [configuration](sequence_configuration.md) for CLI, component and optimizer syntax.
 These are interface examples, not paper hyperparameters.
 

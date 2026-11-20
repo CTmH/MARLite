@@ -1,0 +1,3 @@
+# Used by uvx in a separate environment from MARLite.
+zensical==0.1.2
+mkdocstrings-python==2.0.11

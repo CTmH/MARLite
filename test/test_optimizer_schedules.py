@@ -18,7 +18,7 @@ def scheduler_config():
     return {"scheduler": {"type": "StepLR", "params": {"step_size": 1, "gamma": 0.5}}}
 
 
-@pytest.mark.parametrize("algorithm", ["mappo", "qmix", "qplex", "qtran", "c04"])
+@pytest.mark.parametrize("algorithm", ["mappo", "qmix", "qplex", "qtran", "qmpd"])
 def test_all_recipes_schedule_actual_updates_and_resume(monkeypatch, tmp_path, algorithm):
     monkeypatch.setitem(
         sys.modules, "schedule_test_env", SimpleNamespace(parallel_env=TinyParallel)
@@ -27,7 +27,7 @@ def test_all_recipes_schedule_actual_updates_and_resume(monkeypatch, tmp_path, a
     config["schedulers"] = {"actor": scheduler_config(), "critic": scheduler_config()}
     if algorithm == "qtran":
         config["schedulers"]["objective"] = scheduler_config()
-    if algorithm == "c04":
+    if algorithm == "qmpd":
         config["teacher"]["schedulers"] = {"actor": scheduler_config()}
         config["offline"]["schedulers"] = {
             "codec": scheduler_config(),
@@ -36,14 +36,14 @@ def test_all_recipes_schedule_actual_updates_and_resume(monkeypatch, tmp_path, a
     experiment = build_experiment(config, workdir=tmp_path / "initial")
     trainer = experiment.trainer
     initial_lr = trainer.learner.actor_optimizer.param_groups[0]["lr"]
-    if algorithm == "c04":
+    if algorithm == "qmpd":
         experiment.teacher_trainer.train_iteration(2)
         assert experiment.teacher_trainer.learner.schedules.updates["actor"] > 0
     trainer.train_iteration(2)
     count = trainer.learner.actor_updates
     assert count > 0
     assert trainer.learner.actor_optimizer.param_groups[0]["lr"] == initial_lr * 0.5**count
-    if algorithm == "c04":
+    if algorithm == "qmpd":
         assert trainer.stage_schedules.updates == {"codec": 1, "policy": 1}
     checkpoint = tmp_path / "resume.pt"
     trainer.save_checkpoint(checkpoint)
@@ -53,7 +53,7 @@ def test_all_recipes_schedule_actual_updates_and_resume(monkeypatch, tmp_path, a
     restored.load_checkpoint(checkpoint)
     assert expected_metrics == restored.train_iteration(2)
     assert_tree_equal(expected, restored.learner.state_dict())
-    if algorithm == "c04":
+    if algorithm == "qmpd":
         assert_tree_equal(
             trainer.stage_schedules.state_dict(), restored.stage_schedules.state_dict()
         )

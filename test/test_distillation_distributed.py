@@ -1,4 +1,4 @@
-"""The complete C04 stages use the same learner/rank reduction path as MAPPO."""
+"""The complete QMPD stages use the same learner/rank reduction path as MAPPO."""
 
 from copy import deepcopy
 
@@ -11,7 +11,7 @@ from test.test_sequence_distillation import distillation_trainer, distillation_p
 
 
 @pytest.mark.skipif(not dist.is_gloo_available(), reason="Gloo unavailable")
-def test_c04_stages_match_single_and_resume_in_two_ranks(tmp_path):
+def test_qmpd_stages_match_single_and_resume_in_two_ranks(tmp_path):
     cases = [
         dict(relation=False, replacement="all"),
         dict(relation=True, replacement="progressive"),

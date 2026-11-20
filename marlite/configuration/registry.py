@@ -28,6 +28,7 @@ class Registry:
         self._factories = {}
 
     def register(self, name, factory, *, replace=False):
+        """Expose a Python constructor under the name used by YAML component specs."""
         if not isinstance(name, str) or not name:
             raise ValueError("A component name must be a nonempty string")
         if name in self._factories and not replace:
